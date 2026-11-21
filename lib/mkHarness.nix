@@ -1899,12 +1899,15 @@ let
 
   # What is eval-decidable is a Consumer that explicitly writes
   # `repoSlug = "";` (detected on the raw `defaults` arg) while selecting a
-  # non-fully-local backend pairing. A genuinely runtime-missing slug is
-  # caught instead by cmd/launcher/main.go's validate(); the two checks are
-  # complementary, not overlapping.
+  # non-fully-local backend pairing, or a fully-local one with an issueRoute
+  # set (the route names its Target repo through REPO_SLUG). A genuinely
+  # runtime-missing slug is caught instead by cmd/launcher/main.go's
+  # validate(); the two checks are complementary, not overlapping.
   repoSlugCoherenceOk =
-    if (defaults ? repoSlug) && defaults.repoSlug == "" && !fullyLocal then
-      throw "mkHarness: repoSlug is explicitly set to an empty string, but CODE_FORGE=${mergedDefaults.codeForge}/ISSUE_TRACKER=${mergedDefaults.issueTracker} is not fully-local (CODE_FORGE=local and ISSUE_TRACKER=local) -- either supply a real repoSlug or omit the key entirely so REPO_SLUG is supplied at dispatch runtime instead"
+    if
+      (defaults ? repoSlug) && defaults.repoSlug == "" && (!fullyLocal || mergedDefaults.issueRoute != "")
+    then
+      throw "mkHarness: repoSlug is explicitly set to an empty string, but REPO_SLUG is required here (CODE_FORGE=${mergedDefaults.codeForge}/ISSUE_TRACKER=${mergedDefaults.issueTracker} is not fully-local, or an ISSUE_ROUTE names its Target repo through REPO_SLUG even when fully-local) -- either supply a real repoSlug or omit the key entirely so REPO_SLUG is supplied at dispatch runtime instead"
     else
       true;
 

@@ -141,6 +141,10 @@ type config struct {
 	otherFamilyInProgressLabels []string
 }
 
+// issueRouted reports whether an ISSUE_ROUTE is set; the Box's route gate and
+// the required REPO_SLUG check both key off it.
+func (c config) issueRouted() bool { return c.IssueRoute != "" }
+
 // kind is c.dispatchKind, reading a nil one (doctor, reconcile, preview,
 // none of which dispatch) as the default kind.
 func (c config) kind() *dispatchkind.Descriptor {
@@ -411,8 +415,8 @@ func validate(c config) error {
 	if c.selfContained && c.kind().Prompts.SelfContainedBase == "" {
 		return fmt.Errorf("--self-contained is only valid for the research dispatch kind")
 	}
-	// internal/launcherchecks' repoRequirementExempt holds the REPO_SLUG/
-	// GH_TOKEN exemption logic.
+	// internal/launcherchecks' RequiredKnobChecks decide when REPO_SLUG and
+	// GH_TOKEN are required (repoRequirementExempt holds the shared exemption).
 	if err := doctor.RunRequiredFailFast(launcherRequiredKnobChecks(c)); err != nil {
 		return err
 	}
@@ -787,6 +791,7 @@ func dispatchConfig(c config, pwd string, it forge.IssueTracker, lw *localloop.W
 		TrackerAxisFiler:         trackerAxisFiler,
 		ForgeBackend:             forgeBackend,
 		FilerEnabled:             presence.filerEnabled,
+		IssueRouted:              c.issueRouted(),
 		WorkerProvisioned:        presence.workerProvisioned,
 		ScoutProvisioned:         presence.scoutProvisioned,
 		Policy:                   retryPolicy(c),

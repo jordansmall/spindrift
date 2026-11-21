@@ -106,3 +106,38 @@ func TestIssueRoute_QueueListsOnlyRoutedIssues(t *testing.T) {
 		})
 	}
 }
+
+// The Box gets only the presence of a route (ADR 0075, issue #7338), never
+// the route itself.
+func TestIssueRoute_DispatchConfigIssueRouted(t *testing.T) {
+	useDoc(t, nil)
+	for _, tc := range []struct {
+		route string
+		want  bool
+	}{{"", false}, {"label=orders-api", true}} {
+		c := minimalValidConfig()
+		c.IssueTracker = "local"
+		c.IssueRoute = tc.route
+		it := forge.NewFake()
+		cfg := dispatchConfig(c, "", it, testWired(it), forge.NewFake(), forge.Capabilities{})
+		if cfg.IssueRouted != tc.want {
+			t.Errorf("route %q: IssueRouted = %v, want %v", tc.route, cfg.IssueRouted, tc.want)
+		}
+	}
+}
+
+// See launcherchecks.repoSlugRequired for why a routed local run needs a slug.
+func TestIssueRoute_RoutedFullyLocalRequiresRepoSlug(t *testing.T) {
+	c := minimalValidLocalConfig()
+	c.IssueTracker = "local"
+	c.IssueRoute = "label=x"
+	c.GhToken, c.RepoSlug = "", ""
+	err := validate(c)
+	if err == nil || !strings.Contains(err.Error(), "repo-slug") {
+		t.Fatalf("validate(local/local, route, no slug) = %v, want a repo-slug failure", err)
+	}
+	c.RepoSlug = "acme/orders"
+	if err := validate(c); err != nil {
+		t.Errorf("validate(local/local, route, slug) = %v, want nil", err)
+	}
+}

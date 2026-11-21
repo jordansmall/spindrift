@@ -71,6 +71,7 @@ let
     CHORE_INPUT = "a records-scoped Chore has host-rendered input";
     SKILLS_FOUND = "the assembler found skills on disk (set by the assembler, not Gates())";
 
+    ISSUE_ROUTED = "an issue route is set (BOX_ISSUE_ROUTED); the fragment names the Target repo from REPO_SLUG, which the launcher requires under a route";
     ISSUE_TRACKER_GITHUB = "the tracker reads through the GitHub axis";
     ISSUE_TRACKER_FORGEJO = "the tracker reads through the Forgejo axis";
     ISSUE_TRACKER_REACHABLE = "the Box has an in-Box client for the tracker";

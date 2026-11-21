@@ -287,6 +287,19 @@ func TestBuildBoxEnvForwardsFilerEnabledWorkerProvisioned(t *testing.T) {
 	}
 }
 
+// ADR 0075 / issue #7338: ISSUE_ROUTE itself stays off the Box env, so the
+// Box learns only that a route is set, as "1" or absent.
+func TestBuildBoxEnvForwardsIssueRouted(t *testing.T) {
+	env := mustBuildBoxEnv(t, Config{IssueRouted: true}, "3", "T", 0, "", "")
+	if got := env["BOX_ISSUE_ROUTED"]; got != "1" {
+		t.Errorf("BOX_ISSUE_ROUTED: got %q, want %q", got, "1")
+	}
+	env = mustBuildBoxEnv(t, Config{}, "3", "T", 0, "", "")
+	if _, ok := env["BOX_ISSUE_ROUTED"]; ok {
+		t.Error("BOX_ISSUE_ROUTED should be absent when IssueRouted is false")
+	}
+}
+
 // Issue #3171: absence is the load-bearing half, because these vars carry
 // only an operator's explicit dispatch-time REVIEW_MODEL/REVIEW_EFFORT, so a
 // forwarded schema default or document value would silently override the

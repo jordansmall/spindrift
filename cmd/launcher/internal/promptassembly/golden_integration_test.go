@@ -334,6 +334,14 @@ func goldenCells() []goldenCell {
 			c.export("BOX_SIGNAL_CARRIER", "socket")
 			c.hostIssueVerbs()
 		}},
+		{name: "issue-route-set", mode: modeInitial, setup: func(c *cellInputs) {
+			c.export("REPO_SLUG", "acme/widgets")
+			c.export("BOX_ISSUE_ROUTED", "1")
+		}, check: func(t *testing.T, prompt string) {
+			if !strings.Contains(prompt, "# TARGET REPO") || !strings.Contains(prompt, "routed to `acme/widgets`") {
+				t.Error("routed prompt does not name the Target repo in its TARGET REPO section")
+			}
+		}},
 		{name: "orchestrator-filer-on", mode: modeInitial, review: true, setup: func(c *cellInputs) {
 			c.filerOn()
 		}},
