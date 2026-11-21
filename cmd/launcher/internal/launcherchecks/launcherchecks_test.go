@@ -100,7 +100,7 @@ func TestRequiredKnobChecks_RepoSlug(t *testing.T) {
 	if err == nil {
 		t.Fatal("repo-slug Probe() must fail when RepoSlug is empty")
 	}
-	want := "pass --repo-slug owner/repo or set forge.repoSlug (the target GitHub repository)"
+	want := "pass --repo-slug owner/repo or set forge.repoSlug (the target repository)"
 	if err.Error() != want {
 		t.Errorf("repo-slug Probe() error = %q, want %q", err.Error(), want)
 	}
@@ -238,6 +238,52 @@ func TestRequiredKnobChecks_RepoSlugGHToken_ExemptFullyLocal(t *testing.T) {
 	}
 	if _, err := checkByName(t, checks, "gh-token").Probe(); err != nil {
 		t.Errorf("gh-token Probe() unexpected error under FullyLocal: %v", err)
+	}
+}
+
+func TestRequiredKnobChecks_RepoSlug_RoutedFullyLocal(t *testing.T) {
+	d := minimalDeps()
+	d.Signals = func(codeForge, issueTracker string) Signals {
+		return Signals{FullyLocal: true}
+	}
+	cases := []struct {
+		name    string
+		routed  bool
+		slug    string
+		wantErr bool
+	}{
+		{name: "unrouted, no slug", routed: false, slug: "", wantErr: false},
+		{name: "routed, no slug", routed: true, slug: "", wantErr: true},
+		{name: "routed, slug", routed: true, slug: "o/r", wantErr: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := minimalValidConfig()
+			c.RepoSlug, c.GHToken, c.IssueRouted = tc.slug, "", tc.routed
+			checks := RequiredKnobChecks(c, d)
+			_, err := checkByName(t, checks, "repo-slug").Probe()
+			if (err != nil) != tc.wantErr {
+				t.Errorf("repo-slug Probe() err = %v, wantErr %v", err, tc.wantErr)
+			}
+			if _, err := checkByName(t, checks, "gh-token").Probe(); err != nil {
+				t.Errorf("gh-token Probe() = %v, want nil: a fully-local routed run needs no GH_TOKEN", err)
+			}
+		})
+	}
+}
+
+// A route is a work-prompt notion: a self-contained research run clones no
+// Target repo, so its exemption survives a set route.
+func TestRequiredKnobChecks_RepoSlug_RoutedSelfContainedResearch(t *testing.T) {
+	c := minimalValidConfig()
+	c.RepoSlug, c.GHToken, c.IssueRouted = "", "", true
+	c.ResearchDispatch, c.SelfContained = true, true
+	d := minimalDeps()
+	d.Signals = func(codeForge, issueTracker string) Signals {
+		return Signals{InBoxUnreachableTracker: true}
+	}
+	if _, err := checkByName(t, RequiredKnobChecks(c, d), "repo-slug").Probe(); err != nil {
+		t.Errorf("repo-slug Probe() = %v, want nil for a routed self-contained research run", err)
 	}
 }
 
