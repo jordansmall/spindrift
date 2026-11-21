@@ -31,6 +31,9 @@ type execConfig struct {
 	// whose events carry an empty parent_tool_use_id and would otherwise resolve
 	// to the implementor default (issue #2092).
 	topLevelRole string
+	// raw, when non-nil, receives a copy of the CLI's stdout for the shadow
+	// replay of the stream filter. Nil leaves the live path untouched.
+	raw *rawCopy
 }
 
 // exit is os.Exit, swapped by tests so the SIGTERM path can be observed.
@@ -66,6 +69,12 @@ func run(cfg execConfig, stdout io.Writer) (int, error) {
 	}
 	filter := d.NewStreamFilter(io.MultiWriter(stdout, logFile))
 	w := d.NewHeartbeatWriter(filter, cfg.issue, heartbeatFile, driverkit.RenderOptions{TopLevelRole: cfg.topLevelRole})
+	// The heartbeat writer forwards every byte to the filter unchanged, so the
+	// copy taken ahead of it is exactly the filter's input. It is shared across
+	// the devShell relaunch, like the log.
+	if cfg.raw != nil {
+		w = io.MultiWriter(cfg.raw, w)
+	}
 
 	var child atomic.Pointer[os.Process]
 	sigs := make(chan os.Signal, 1)
@@ -85,6 +94,8 @@ func run(cfg execConfig, stdout io.Writer) (int, error) {
 		if err := filter.Flush(); err != nil {
 			fmt.Fprintf(os.Stderr, "driver-exec: flush stream filter on SIGTERM: %v\n", err)
 		}
+		// exit skips mainRun's deferred cleanup.
+		cfg.raw.remove()
 		exit(exitSIGTERM)
 	}()
 
