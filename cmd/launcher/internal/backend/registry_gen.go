@@ -56,6 +56,7 @@ var Jira = Descriptor{
 	IssuesWearLabels:       true,
 	TrackerAxisRead:        "JIRA",
 	TrackerAxisWrite:       "GITHUB",
+	RouteKinds:             []string{"label", "component"},
 }
 
 // Forgejo is the descriptor for the "forgejo" backend.

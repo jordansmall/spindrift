@@ -54,6 +54,28 @@ func TestIssueRoute_LocalLabelAcceptedAndReachesShared(t *testing.T) {
 	}
 }
 
+func TestIssueRoute_JiraLabelAndComponentAccepted(t *testing.T) {
+	c := minimalValidConfig()
+	c.IssueTracker = "jira"
+	c.IssueRoute = "label=x,component=orders-api"
+	if err := validateIssueRoute(c); err != nil {
+		t.Fatalf("validateIssueRoute(jira, label+component) = %v, want nil", err)
+	}
+	want := forge.Route{{Kind: "label", Value: "x"}, {Kind: "component", Value: "orders-api"}}
+	if got := backendShared(c).Route; !reflect.DeepEqual(got, want) {
+		t.Errorf("backendShared(c).Route = %v, want %v", got, want)
+	}
+}
+
+func TestIssueRoute_JiraUndeclaredKindRejected(t *testing.T) {
+	c := minimalValidConfig()
+	c.IssueTracker = "jira"
+	c.IssueRoute = "assignee=x"
+	if err := validateIssueRoute(c); err == nil || !strings.Contains(err.Error(), "jira") {
+		t.Errorf("validateIssueRoute(jira, assignee=x) = %v, want an error naming jira", err)
+	}
+}
+
 func TestIssueRoute_UnsetIsNil(t *testing.T) {
 	c := minimalValidConfig()
 	if err := validateIssueRoute(c); err != nil {

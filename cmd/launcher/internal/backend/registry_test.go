@@ -211,17 +211,18 @@ func TestQuickstartBlocks(t *testing.T) {
 	}
 }
 
-// TestRouteKindsAreLocalLabelOnly pins ADR 0075 decision 1: only local
-// declares an Issue route kind (label); every other row declares none, since a
-// tracker that ignored the route would quietly list the whole Tracker scope.
-func TestRouteKindsAreLocalLabelOnly(t *testing.T) {
+// TestRouteKindsAreDeclaredPerRow pins ADR 0075 decision 1: local declares
+// label, jira declares label and component, and every other row declares none,
+// since a tracker that ignored the route would quietly list the whole Tracker
+// scope.
+func TestRouteKindsAreDeclaredPerRow(t *testing.T) {
+	declared := map[string][]string{
+		"local": {"label"},
+		"jira":  {"label", "component"},
+	}
 	for _, d := range Registry {
-		var want []string
-		if d.Name == "local" {
-			want = []string{"label"}
-		}
-		if !reflect.DeepEqual(d.RouteKinds, want) {
-			t.Errorf("%s.RouteKinds = %v, want %v", d.Name, d.RouteKinds, want)
+		if !reflect.DeepEqual(d.RouteKinds, declared[d.Name]) {
+			t.Errorf("%s.RouteKinds = %v, want %v", d.Name, d.RouteKinds, declared[d.Name])
 		}
 	}
 }

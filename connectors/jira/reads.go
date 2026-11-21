@@ -165,13 +165,32 @@ func rfc3339(jiraTime string) string {
 
 // jql is the open-issue query for the selectors: an issue matching the status
 // OR the label, never a resolved one even if it still carries a stale
-// dispatch label. Both selectors empty lists every open issue.
-func jql(project string, q tracker.Query) string {
-	return openJQL(project, q) + " order by created asc"
+// dispatch label. Both selectors empty lists every open issue; a route covers
+// only the open issues in it, and a route kind Jira cannot honour is an error.
+func jql(project string, q tracker.Query) (string, error) {
+	s, err := openJQL(project, q)
+	if err != nil {
+		return "", err
+	}
+	return s + " order by created asc", nil
+}
+
+// routeJQL renders the route as one parenthesised AND clause per selector, so
+// a quoted value can never widen the query past the project scope.
+func routeJQL(route []tracker.Selector) (string, error) {
+	terms, err := routeTerms(route)
+	if err != nil {
+		return "", err
+	}
+	var s string
+	for _, term := range terms {
+		s += fmt.Sprintf(" AND (%s = %q)", term.field, term.value)
+	}
+	return s, nil
 }
 
 // openJQL is jql without its ORDER BY, which a count does not need.
-func openJQL(project string, q tracker.Query) string {
+func openJQL(project string, q tracker.Query) (string, error) {
 	s := fmt.Sprintf("project = %q", project)
 	var sel []string
 	if q.Status != "" {
@@ -183,7 +202,11 @@ func openJQL(project string, q tracker.Query) string {
 	if len(sel) > 0 {
 		s += " AND (" + strings.Join(sel, " OR ") + ")"
 	}
-	return s + " AND statusCategory != Done"
+	r, err := routeJQL(q.Route)
+	if err != nil {
+		return "", err
+	}
+	return s + r + " AND statusCategory != Done", nil
 }
 
 type searchPayload struct {
@@ -199,7 +222,11 @@ func listIssues(t tracker.Target, q tracker.Query, limit int) ([]tracker.Issue, 
 	if limit < 1 {
 		return nil, fmt.Errorf("list issues: limit %d < 1", limit)
 	}
-	return search(t, jql(t.Repo, q), limit)
+	query, err := jql(t.Repo, q)
+	if err != nil {
+		return nil, err
+	}
+	return search(t, query, limit)
 }
 
 // labeledPage returns one page of issues in state carrying label, newest
@@ -208,7 +235,7 @@ func listIssues(t tracker.Target, q tracker.Query, limit int) ([]tracker.Issue, 
 // closed as not planned must not be refiled. One call is one HTTP request, so
 // the cursor is Jira's own (cloud nextPageToken, server startAt) and no row is
 // lost to truncating a page that continues; core walks the pages.
-func labeledPage(t tracker.Target, label, state, cursor string, limit int) ([]tracker.Issue, string, error) {
+func labeledPage(t tracker.Target, label string, route []tracker.Selector, state, cursor string, limit int) ([]tracker.Issue, string, error) {
 	if limit < 1 {
 		return nil, "", fmt.Errorf("list labeled issues: limit %d < 1", limit)
 	}
@@ -221,10 +248,13 @@ func labeledPage(t tracker.Target, label, state, cursor string, limit int) ([]tr
 	default:
 		return nil, "", fmt.Errorf("list labeled issues: unsupported issue state %q", state)
 	}
-	jql := fmt.Sprintf("project = %q AND labels = %q AND statusCategory %s Done order by created desc", t.Repo, label, category)
+	routed, err := routeJQL(route)
+	if err != nil {
+		return nil, "", fmt.Errorf("list labeled issues: %w", err)
+	}
+	jql := fmt.Sprintf("project = %q AND labels = %q%s AND statusCategory %s Done order by created desc", t.Repo, label, routed, category)
 	var raw []rawIssue
 	var next string
-	var err error
 	switch t.Dialect {
 	case "cloud":
 		raw, next, err = cloudPage(t, jql, limit, cursor)

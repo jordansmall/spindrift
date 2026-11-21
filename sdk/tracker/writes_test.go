@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -125,6 +126,21 @@ func TestFileIssue(t *testing.T) {
 	got := call(t, m, "tracker.fileIssue", `{`+target+`,"title":"T","body":"B","labels":["l"],"dedupMarker":"<!-- m -->","issueType":"Task"}`)
 	if want := `{"url":"https://x/browse/ENG-9"}`; got != want {
 		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
+func TestFileIssueRoute(t *testing.T) {
+	w := fakeWriter(t)
+	var got IssueRequest
+	w.FileIssue = func(_ Target, r IssueRequest) (string, error) { got = r; return "u", nil }
+	_, m := writeHandlers(w)
+	call(t, m, "tracker.fileIssue", `{`+target+`,"route":[{"kind":"component","value":"api"}]}`)
+	if want := []Selector{{Kind: "component", Value: "api"}}; !reflect.DeepEqual(got.Route, want) {
+		t.Errorf("Route = %v, want %v", got.Route, want)
+	}
+	b, err := json.Marshal(IssueRequest{Title: "T"})
+	if err != nil || strings.Contains(string(b), "route") {
+		t.Errorf("unrouted IssueRequest = %s (%v), want no route key", b, err)
 	}
 }
 

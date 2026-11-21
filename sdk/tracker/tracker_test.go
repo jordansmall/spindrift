@@ -181,9 +181,9 @@ func TestLabeledCapabilityAndWireShape(t *testing.T) {
 
 func TestLabeledPageCursorAndPrecedence(t *testing.T) {
 	r := fakeReader(t)
-	r.LabeledPage = func(tg Target, label, state, cursor string, limit int) ([]Issue, string, error) {
-		if tg != wantTarget || label != "bug" || state != "open" || limit != 2 {
-			t.Errorf("LabeledPage(%v, %q, %q, %q, %d)", tg, label, state, cursor, limit)
+	r.LabeledPage = func(tg Target, label string, route []Selector, state, cursor string, limit int) ([]Issue, string, error) {
+		if tg != wantTarget || label != "bug" || route != nil || state != "open" || limit != 2 {
+			t.Errorf("LabeledPage(%v, %q, %v, %q, %q, %d)", tg, label, route, state, cursor, limit)
 		}
 		if cursor == "" {
 			return []Issue{{Number: "1"}}, "c2", nil
@@ -205,6 +205,32 @@ func TestLabeledPageCursorAndPrecedence(t *testing.T) {
 	}
 	if got, want := call(t, m, "tracker.labeled", base+`,"cursor":"c2"}`), `{"issues":[{"number":"2",`+issue+`}]}`; got != want {
 		t.Errorf("last page = %s, want %s", got, want)
+	}
+}
+
+func TestLabeledRoute(t *testing.T) {
+	route := []Selector{{Kind: "component", Value: "api"}, {Kind: "label", Value: "repo-a"}}
+	const params = `{` + target + `,"label":"bug","state":"open","limit":2,"route":[{"kind":"component","value":"api"},{"kind":"label","value":"repo-a"}]}`
+
+	r := fakeReader(t)
+	r.LabeledPage = func(_ Target, _ string, got []Selector, _, _ string, _ int) ([]Issue, string, error) {
+		if !reflect.DeepEqual(got, route) {
+			t.Errorf("LabeledPage route = %v, want %v", got, route)
+		}
+		return nil, "", nil
+	}
+	_, m := handlers(r)
+	call(t, m, "tracker.labeled", params)
+
+	// Labeled cannot narrow, so a routed scan would list the whole scope.
+	r = fakeReader(t)
+	r.Labeled = func(Target, string, string, int) ([]Issue, error) {
+		t.Error("Labeled called with a route")
+		return nil, nil
+	}
+	_, m = handlers(r)
+	if _, err := m["tracker.labeled"](json.RawMessage(params)); err == nil {
+		t.Error("Labeled accepted a non-empty route")
 	}
 }
 

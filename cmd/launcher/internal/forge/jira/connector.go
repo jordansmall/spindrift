@@ -94,6 +94,7 @@ func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (for
 		Statuses:      wl.Statuses,
 		Resolutions:   wl.Resolutions,
 		StatusOnly:    wl.StatusOnly,
+		Route:         s.Route,
 	}, connectortracker.Target{
 		API:     strings.TrimRight(k.JiraBaseURL, "/"),
 		Repo:    k.JiraProjectKey,

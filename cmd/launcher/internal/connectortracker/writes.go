@@ -248,10 +248,14 @@ func (l filerLayer) Unwrap() forge.IssueTracker { return l.IssueTracker }
 // PostIssue splits the dedup marker off body so the Connector stores it apart
 // from the description, and returns the new issue's URL.
 func (l filerLayer) PostIssue(title, body string, labels []string) (string, error) {
+	route, err := l.r.routeParam()
+	if err != nil {
+		return "", err
+	}
 	desc, marker := dedupmarker.Split(body)
 	p := fileIssueParams{l.r.target, issueRequest{
 		Title: title, Body: desc, Labels: append([]string{}, labels...),
-		DedupMarker: marker, IssueType: l.r.lifecycle.IssueType,
+		DedupMarker: marker, IssueType: l.r.lifecycle.IssueType, Route: route,
 	}}
 	var res struct {
 		URL string `json:"url"`
