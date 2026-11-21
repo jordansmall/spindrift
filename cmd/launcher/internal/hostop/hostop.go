@@ -238,10 +238,12 @@ type ShadowDivergence struct {
 // (sampled calls dropped rather than delay the native path). The Sandbox*
 // fields are the run's Connector sandbox, shared by every Connector the run
 // hosts, so run-wide totals when the summary is written; only the host-side
-// read shadow sets them, and only when a sandbox started.
+// read shadow sets them, and only when a sandbox started. Replayed is set only
+// by a replay of an archived Pass log, never by a live shadow.
 type ShadowSummary struct {
 	Driver               string `json:"driver"`
 	Loaded               bool   `json:"loaded"`
+	Replayed             bool   `json:"replayed,omitempty"`
 	Error                string `json:"error,omitempty"`
 	Compared             int    `json:"compared"`
 	Diverged             int    `json:"diverged"`
