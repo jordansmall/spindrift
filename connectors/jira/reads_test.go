@@ -322,6 +322,8 @@ func TestListLimitMustBePositive(t *testing.T) {
 
 func TestJQLSelectors(t *testing.T) {
 	const tail = ` AND statusCategory != Done order by created asc`
+	// escape would break out of project = "ENG" if the value were spliced raw.
+	const escape = `orders" OR project = "OTHER`
 	for _, c := range []struct {
 		q    tracker.Query
 		want string
@@ -330,10 +332,67 @@ func TestJQLSelectors(t *testing.T) {
 		{tracker.Query{Status: "To Do"}, `project = "ENG" AND (status = "To Do")` + tail},
 		{tracker.Query{Label: "ready", Status: "To Do"}, `project = "ENG" AND (status = "To Do" OR labels = "ready")` + tail},
 		{tracker.Query{}, `project = "ENG"` + tail},
+		{tracker.Query{Label: "ready", Route: []tracker.Selector{{Kind: "label", Value: "team-a"}}},
+			`project = "ENG" AND (labels = "ready") AND (labels = "team-a")` + tail},
+		{tracker.Query{Label: "ready", Route: []tracker.Selector{{Kind: "component", Value: "Orders"}}},
+			`project = "ENG" AND (labels = "ready") AND (component = "Orders")` + tail},
+		{tracker.Query{Label: "ready", Route: []tracker.Selector{{Kind: "component", Value: "Orders"}, {Kind: "label", Value: "team-a"}}},
+			`project = "ENG" AND (labels = "ready") AND (component = "Orders") AND (labels = "team-a")` + tail},
+		{tracker.Query{Route: []tracker.Selector{{Kind: "component", Value: "Orders"}}},
+			`project = "ENG" AND (component = "Orders")` + tail},
+		{tracker.Query{Label: "ready", Route: []tracker.Selector{{Kind: "component", Value: escape}}},
+			`project = "ENG" AND (labels = "ready") AND (component = "orders\" OR project = \"OTHER")` + tail},
+		{tracker.Query{Label: "ready", Route: []tracker.Selector{{Kind: "label", Value: escape}}},
+			`project = "ENG" AND (labels = "ready") AND (labels = "orders\" OR project = \"OTHER")` + tail},
 	} {
-		if got := jql("ENG", c.q); got != c.want {
-			t.Errorf("jql(%+v) = %s, want %s", c.q, got, c.want)
+		got, err := jql("ENG", c.q)
+		if err != nil || got != c.want {
+			t.Errorf("jql(%+v) = %s, %v, want %s", c.q, got, err, c.want)
 		}
+	}
+}
+
+// mustOpenJQL is the count query for q against project ENG.
+func mustOpenJQL(t *testing.T, q tracker.Query) string {
+	t.Helper()
+	s, err := openJQL("ENG", q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+var badRoute = []tracker.Selector{{Kind: "team", Value: "x"}}
+
+func TestUnknownRouteKindErrorsWithoutRequest(t *testing.T) {
+	got := script(t, func(connector.Request, *url.URL) (int, string) { return 200, "{}" })
+	q := tracker.Query{Label: "ready", Route: badRoute}
+	if _, err := listIssues(cloud, q, 5); err == nil || !strings.Contains(err.Error(), `"team"`) {
+		t.Errorf("listIssues err = %v", err)
+	}
+	if _, err := count(cloud, q, 0, false); err == nil || !strings.Contains(err.Error(), `"team"`) {
+		t.Errorf("count err = %v", err)
+	}
+	if _, _, err := labeledPage(cloud, "x", badRoute, "open", "", 5); err == nil || !strings.Contains(err.Error(), `"team"`) {
+		t.Errorf("labeledPage err = %v", err)
+	}
+	if _, err := fileIssue(cloud, tracker.IssueRequest{Title: "t", IssueType: "Bug", Route: badRoute}); err == nil || !strings.Contains(err.Error(), `"team"`) {
+		t.Errorf("fileIssue err = %v", err)
+	}
+	if len(*got) != 0 {
+		t.Errorf("requests = %v, want none", *got)
+	}
+}
+
+func TestListIssuesSendsRouteClauses(t *testing.T) {
+	got := script(t, func(connector.Request, *url.URL) (int, string) { return 200, `{"isLast":true,"issues":[]}` })
+	q := tracker.Query{Label: "ready", Route: []tracker.Selector{{Kind: "component", Value: `a" OR project = "B`}}}
+	if _, err := listIssues(cloud, q, 5); err != nil {
+		t.Fatal(err)
+	}
+	const want = `project = "ENG" AND (labels = "ready") AND (component = "a\" OR project = \"B") AND statusCategory != Done order by created asc`
+	if len(*got) != 1 || mustQuery(t, (*got)[0]).Get("jql") != want {
+		t.Fatalf("requests = %v, want one with jql %s", *got, want)
 	}
 }
 
@@ -508,5 +567,20 @@ func TestLabeledUnknownDialectErrors(t *testing.T) {
 	tgt := tracker.Target{API: site, Repo: "ENG", Dialect: "datacenter"}
 	if _, _, err := labeledPage(tgt, "x", nil, "open", "", 5); err == nil || !strings.Contains(err.Error(), `list labeled issues: unknown Jira dialect "datacenter"`) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestLabeledCarriesRouteClauses(t *testing.T) {
+	route := []tracker.Selector{{Kind: "component", Value: `a" OR project = "B`}, {Kind: "label", Value: "team-a"}}
+	const clauses = ` AND (component = "a\" OR project = \"B") AND (labels = "team-a")`
+	for _, c := range []struct{ state, category string }{{"open", "!="}, {"closed", "="}} {
+		got := script(t, func(connector.Request, *url.URL) (int, string) { return 200, `{"isLast":true,"issues":[]}` })
+		if _, _, err := labeledPage(cloud, "x", route, c.state, "", 5); err != nil {
+			t.Fatal(err)
+		}
+		want := `project = "ENG" AND labels = "x"` + clauses + ` AND statusCategory ` + c.category + ` Done order by created desc`
+		if len(*got) != 1 || mustQuery(t, (*got)[0]).Get("jql") != want {
+			t.Errorf("%s: requests = %v, want one with jql %s", c.state, *got, want)
+		}
 	}
 }
