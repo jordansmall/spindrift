@@ -4,11 +4,13 @@
 # degrades to 0 on empty or malformed input because these rows have no
 # env-schema default to fall back on.
 
-# These rows stay out of lib/env-schema.nix on purpose: they are per-dispatch
+# Most rows stay out of lib/env-schema.nix on purpose: they are per-dispatch
 # facts and nix-precomputed gate values the launcher forwards into the Box,
-# not knobs an operator sets. AgentsPromptFiles has no row because lib/image.nix
-# keeps AGENTS_PROMPT_FILES an unexported bash local, so os.Getenv in a
-# separate process cannot see it.
+# not knobs an operator sets. A few (ISSUE_TRACKER, CODE_FORGE, BASE_BRANCH,
+# REPO_SLUG) read schema knobs that already reach the Box, because
+# EnvFromEnviron reads every Env field from here. AgentsPromptFiles has no
+# row because lib/image.nix keeps AGENTS_PROMPT_FILES an unexported bash
+# local, so os.Getenv in a separate process cannot see it.
 
 # Fields that are not env reads stay CLI flags on assembleprompt_cmd.go per
 # issue #2979: the *SkillBaked probes box resolves with
@@ -24,6 +26,16 @@
     field = "FilerEnabled";
     env = "BOX_FILER_ENABLED";
     kind = "presence";
+  }
+  {
+    field = "IssueRouted";
+    env = "BOX_ISSUE_ROUTED";
+    kind = "presence";
+  }
+  {
+    field = "RepoSlug";
+    env = "REPO_SLUG";
+    kind = "string";
   }
   {
     field = "SignalIssueRead";

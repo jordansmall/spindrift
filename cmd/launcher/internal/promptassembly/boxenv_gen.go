@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-// EnvFromEnviron reads Env's 47 Box-env-sourced fields directly from the
+// EnvFromEnviron reads Env's 49 Box-env-sourced fields directly from the
 // process environment (lib/promptassembly-boxenv.nix, issue #2979): fields
 // driver-exec/assembleprompt_cmd.go previously populated from a
 // hand-declared CLI flag that agent/entrypoint.sh forwarded 1:1 from the
@@ -22,6 +22,8 @@ func EnvFromEnviron() Env {
 	return Env{
 		AgentsJSONTemplate:   os.Getenv("AGENTS_JSON_TEMPLATE"),
 		FilerEnabled:         os.Getenv("BOX_FILER_ENABLED") != "",
+		IssueRouted:          os.Getenv("BOX_ISSUE_ROUTED") != "",
+		RepoSlug:             os.Getenv("REPO_SLUG"),
 		SignalIssueRead:      os.Getenv("BOX_SIGNAL_ISSUE_READ") != "",
 		SignalIssueSearch:    os.Getenv("BOX_SIGNAL_ISSUE_SEARCH") != "",
 		WorkerProvisioned:    os.Getenv("BOX_WORKER_PROVISIONED") != "",
@@ -76,6 +78,8 @@ func EnvFromEnviron() Env {
 var BoxEnvVarNames = []string{
 	"AGENTS_JSON_TEMPLATE",
 	"BOX_FILER_ENABLED",
+	"BOX_ISSUE_ROUTED",
+	"REPO_SLUG",
 	"BOX_SIGNAL_ISSUE_READ",
 	"BOX_SIGNAL_ISSUE_SEARCH",
 	"BOX_WORKER_PROVISIONED",
@@ -125,10 +129,9 @@ var BoxEnvVarNames = []string{
 
 // boxenvAtoi parses an int-kind Box env var, degrading to 0 on empty or
 // malformed input. Unlike inputdoc's knobResolver.PositiveInt, which falls
-// back to a per-key schema default, these 47 rows are
-// deliberately outside lib/env-schema.nix (see
-// lib/promptassembly-boxenv.nix's header) and so have no schema default
-// to degrade to.
+// back to a per-key schema default, int-kind rows have no schema default
+// to degrade to: most Box env rows are per-dispatch facts outside
+// lib/env-schema.nix (see lib/promptassembly-boxenv.nix's header).
 func boxenvAtoi(s string) int {
 	n, err := strconv.Atoi(s)
 	if err != nil {
