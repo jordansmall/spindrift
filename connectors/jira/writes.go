@@ -166,15 +166,35 @@ func fileIssue(t tracker.Target, r tracker.IssueRequest) (string, error) {
 	if r.IssueType == "" {
 		return "", errors.New("jira: no issue type to file under")
 	}
-	req := map[string]any{
-		"fields": map[string]any{
-			"project":     map[string]string{"key": t.Repo},
-			"summary":     r.Title,
-			"issuetype":   map[string]string{"name": r.IssueType},
-			"description": toWikiMarkup(r.Body),
-			"labels":      append([]string{}, r.Labels...),
-		},
+	labels := append([]string{}, r.Labels...)
+	var components []map[string]string
+	terms, err := routeTerms(r.Route)
+	if err != nil {
+		return "", err
 	}
+	for _, term := range terms {
+		switch term.kind {
+		case "component":
+			components = append(components, map[string]string{"name": term.value})
+		case "label":
+			if !slices.Contains(labels, term.value) {
+				labels = append(labels, term.value)
+			}
+		default:
+			return "", fmt.Errorf("jira: cannot file under route selector kind %q", term.kind)
+		}
+	}
+	fields := map[string]any{
+		"project":     map[string]string{"key": t.Repo},
+		"summary":     r.Title,
+		"issuetype":   map[string]string{"name": r.IssueType},
+		"description": toWikiMarkup(r.Body),
+		"labels":      labels,
+	}
+	if len(components) > 0 {
+		fields["components"] = components
+	}
+	req := map[string]any{"fields": fields}
 	if r.DedupMarker != "" {
 		req["properties"] = []map[string]any{{"key": dedupPropertyKey, "value": map[string]string{"marker": r.DedupMarker}}}
 	}

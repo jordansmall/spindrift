@@ -16,6 +16,7 @@ func init() {
 	// concept, so Minimized=false is the faithful report, not a gap.
 	tracker.Register(tracker.Reader{
 		IDs:         tracker.ProjectKeyIDs,
+		Routes:      true,
 		ListIssues:  listIssues,
 		Issue:       issue,
 		Comments:    comments,
