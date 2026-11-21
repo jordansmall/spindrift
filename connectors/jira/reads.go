@@ -3,11 +3,14 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/url"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"spindrift.dev/sdk/connector"
 	"spindrift.dev/sdk/tracker"
@@ -75,7 +78,7 @@ func do(t tracker.Target, method, path string, body, out any) error {
 		return err
 	}
 	if resp.Status < 200 || resp.Status > 299 {
-		return fmt.Errorf("%s %s: status %d", method, path, resp.Status)
+		return fmt.Errorf("%s %s: status %d%s", method, path, resp.Status, jiraReason(resp.Body))
 	}
 	// A write answers 204 with no body and passes a nil out; a read that
 	// answers 200 empty must still fail to decode.
@@ -86,6 +89,44 @@ func do(t tracker.Target, method, path string, body, out any) error {
 		return fmt.Errorf("%s %s: decode: %w", method, path, err)
 	}
 	return nil
+}
+
+// maxReason caps the Jira text echoed into an error, which lands on one stderr
+// or halt-event line; the body is remote-controlled and otherwise unbounded.
+const maxReason = 512
+
+// jiraReason renders Jira's own refusal ({"errorMessages":[...],"errors":
+// {field:msg}}) as ": a; b" for an error tail, and "" for any other body, so an
+// unknown Component in JQL reaches the operator instead of a bare status.
+func jiraReason(body []byte) string {
+	var e struct {
+		ErrorMessages []string          `json:"errorMessages"`
+		Errors        map[string]string `json:"errors"`
+	}
+	if json.Unmarshal(body, &e) != nil {
+		return ""
+	}
+	msgs := slices.Clone(e.ErrorMessages)
+	for _, f := range slices.Sorted(maps.Keys(e.Errors)) {
+		msgs = append(msgs, f+": "+e.Errors[f])
+	}
+	if len(msgs) == 0 {
+		return ""
+	}
+	reason := strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.In(r, unicode.Zl, unicode.Zp, unicode.Cf) {
+			return ' '
+		}
+		return r
+	}, strings.Join(msgs, "; "))
+	if len(reason) > maxReason {
+		cut := maxReason
+		for !utf8.RuneStart(reason[cut]) {
+			cut--
+		}
+		reason = reason[:cut] + "…"
+	}
+	return ": " + reason
 }
 
 type rawIssue struct {
