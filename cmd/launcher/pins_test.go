@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -23,13 +24,13 @@ const lifecycleKit = "internal/runner/runnertest/contract"
 func TestNoGhExecOutsideForge(t *testing.T) {
 	// Go runs each test with the working directory set to the package
 	// directory, cmd/launcher, so this walk starts there.
-	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+	err := walkOwnSource(".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		// The forge package is where gh calls are allowed.
 		if strings.HasPrefix(filepath.ToSlash(path), "internal/forge") {
-			if info.IsDir() {
+			if d.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
@@ -39,12 +40,12 @@ func TestNoGhExecOutsideForge(t *testing.T) {
 		// token (issue #1047), the same carve-out ADR 0027 makes for the
 		// pre-CLI wizard.
 		if strings.HasPrefix(filepath.ToSlash(path), "quickstart") {
-			if info.IsDir() {
+			if d.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if info.IsDir() || !strings.HasSuffix(path, ".go") {
+		if d.IsDir() || !strings.HasSuffix(path, ".go") {
 			return nil
 		}
 		if strings.HasSuffix(path, "_test.go") {
@@ -74,7 +75,7 @@ func TestNoRunnerExecOutsidePackage(t *testing.T) {
 		`exec.Command("docker"`,
 		`exec.Command("nerdctl"`,
 	}
-	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+	err := walkOwnSource(".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -98,12 +99,12 @@ func TestNoRunnerExecOutsidePackage(t *testing.T) {
 		if slices.ContainsFunc(exempt, func(p string) bool {
 			return strings.HasPrefix(filepath.ToSlash(path), p)
 		}) {
-			if info.IsDir() {
+			if d.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if info.IsDir() || !strings.HasSuffix(path, ".go") {
+		if d.IsDir() || !strings.HasSuffix(path, ".go") {
 			return nil
 		}
 		if strings.HasSuffix(path, "_test.go") {
@@ -129,18 +130,18 @@ func TestNoRunnerExecOutsidePackage(t *testing.T) {
 // All outcome parsing must stay behind the outcome seam, so no file outside
 // internal/outcome may carry the SPINDRIFT_OUTCOME prefix literal.
 func TestNoOutcomeParsingOutsidePackage(t *testing.T) {
-	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+	err := walkOwnSource(".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		// The outcome package is where the parsing lives.
 		if strings.HasPrefix(filepath.ToSlash(path), "internal/outcome") {
-			if info.IsDir() {
+			if d.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if info.IsDir() || !strings.HasSuffix(path, ".go") {
+		if d.IsDir() || !strings.HasSuffix(path, ".go") {
 			return nil
 		}
 		if strings.HasSuffix(path, "_test.go") {
@@ -173,12 +174,12 @@ func TestNoBoxConstructionOutsideDispatchPackage(t *testing.T) {
 		`os.Create(`,
 		`.ClassifyTransient(`,
 	}
-	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+	err := walkOwnSource(".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if strings.HasPrefix(filepath.ToSlash(path), "internal/dispatch") {
-			if info.IsDir() {
+			if d.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
@@ -194,12 +195,12 @@ func TestNoBoxConstructionOutsideDispatchPackage(t *testing.T) {
 		if strings.HasPrefix(filepath.ToSlash(path), "driver-exec") ||
 			strings.HasPrefix(filepath.ToSlash(path), conformanceKit) ||
 			strings.HasPrefix(filepath.ToSlash(path), lifecycleKit) {
-			if info.IsDir() {
+			if d.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if info.IsDir() || !strings.HasSuffix(path, ".go") {
+		if d.IsDir() || !strings.HasSuffix(path, ".go") {
 			return nil
 		}
 		if strings.HasSuffix(path, "_test.go") {
@@ -275,17 +276,17 @@ func TestOsExitOnlyInMain(t *testing.T) {
 // file outside internal/forge may carry a raw state literal.
 func TestNoPRIssueStateLiteralOutsideForge(t *testing.T) {
 	forbidden := []string{`"OPEN"`, `"MERGED"`, `"CLOSED"`}
-	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+	err := walkOwnSource(".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if strings.HasPrefix(filepath.ToSlash(path), "internal/forge") {
-			if info.IsDir() {
+			if d.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if info.IsDir() || !strings.HasSuffix(path, ".go") {
+		if d.IsDir() || !strings.HasSuffix(path, ".go") {
 			return nil
 		}
 		if strings.HasSuffix(path, "_test.go") {
@@ -313,17 +314,17 @@ func TestNoPRIssueStateLiteralOutsideForge(t *testing.T) {
 // itself.
 func TestNoBranchPrefixConcatOutsideForge(t *testing.T) {
 	forbidden := []string{"branchPrefix + ", "BranchPrefix + "}
-	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+	err := walkOwnSource(".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if strings.HasPrefix(filepath.ToSlash(path), "internal/forge") {
-			if info.IsDir() {
+			if d.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if info.IsDir() || !strings.HasSuffix(path, ".go") {
+		if d.IsDir() || !strings.HasSuffix(path, ".go") {
 			return nil
 		}
 		if strings.HasSuffix(path, "_test.go") {
@@ -361,17 +362,17 @@ func TestNoMergeGateOutsideSettlePackage(t *testing.T) {
 		"func mergeGuardHit(",
 		"func postUsageComment(",
 	}
-	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+	err := walkOwnSource(".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if strings.HasPrefix(filepath.ToSlash(path), "internal/settle") {
-			if info.IsDir() {
+			if d.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if info.IsDir() || !strings.HasSuffix(path, ".go") {
+		if d.IsDir() || !strings.HasSuffix(path, ".go") {
 			return nil
 		}
 		if strings.HasSuffix(path, "_test.go") {
@@ -401,11 +402,11 @@ func TestNoMergeGateOutsideSettlePackage(t *testing.T) {
 func TestTestOnlyKitsNotImportedByRuntime(t *testing.T) {
 	for _, kit := range []string{conformanceKit, lifecycleKit} {
 		needle := "/" + kit + `"`
-		err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+		err := walkOwnSource(".", func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
-			if info.IsDir() {
+			if d.IsDir() {
 				if filepath.ToSlash(path) == kit {
 					return filepath.SkipDir
 				}

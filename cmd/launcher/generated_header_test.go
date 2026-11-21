@@ -6,7 +6,6 @@ import (
 	"go/token"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -19,7 +18,7 @@ import (
 // are hand-written tests that merely pin a sibling generated file's output,
 // not generated files themselves, and never claim to be one.
 func TestGeneratedFilesAreRecognizedByAstIsGenerated(t *testing.T) {
-	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
+	err := walkOwnSource(".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

@@ -111,7 +111,7 @@ func TestCoreDoesNotCompareBackendNames(t *testing.T) {
 	}
 
 	scanned := map[string]bool{}
-	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
+	err := walkOwnSource(".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

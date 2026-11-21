@@ -97,7 +97,7 @@ func stringConst(e ast.Expr) (string, bool) {
 // so the core stays blind to which Digests exist.
 func TestTuningNamedOnlyByItsPackageBundleAndGeneratedCode(t *testing.T) {
 	settleFiles, tuningFiles := 0, 0
-	err := filepath.WalkDir(".", func(p string, d fs.DirEntry, err error) error {
+	err := walkOwnSource(".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

@@ -266,7 +266,7 @@ func TestRunnerFamilyGuard(t *testing.T) {
 		}
 	}
 	scanned := 0
-	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
+	err := walkOwnSource(".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
