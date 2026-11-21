@@ -10,9 +10,9 @@
 # bare name resolved to connectors/<name>, never a cwd-relative directory.
 # The override flags follow the user's args, or precede the first `--`/`-c`/
 # `--command`: nix hands everything after those to the program, so a trailing
-# override would reach `bash -c` as its $0 and positionals. The scan matches
-# any word equal to one of those, an option's value included (`--option foo
-# -c`), so such a value splits from its option.
+# override would reach it as arguments. The scan matches any word equal to one
+# of those, an option's value included (`--option foo -c`), splitting it from
+# its option.
 set -euo pipefail
 
 if [ "$#" -lt 2 ]; then

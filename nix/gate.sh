@@ -50,11 +50,10 @@ echo "gate: $workers eval workers" >&2
 # content-addressed (no references) makes nix reuse it. Only top-level -source
 # entries: hashing every invalid path is too slow. A daemon client cannot
 # --load-db, hence the writable-DB guard.
-#
-# The guard also passes for a host user, whose concurrent GC could delete a path
-# --load-db just re-registered. Serialised against GC rather than restricted to a
-# Box, which has no reliable signal (#6163, ADR 0042): a shared gc.lock is held
-# across listing and registration and dropped before eval.
+# A host user also passes the guard, and its concurrent GC could delete a path
+# just re-registered. A Box has no reliable signal to restrict this to (#6163,
+# ADR 0042), so a shared gc.lock is held across listing and registration and
+# dropped before eval.
 register_stale_sources() {
   local store=${NIX_STORE_DIR:-/nix/store} state=${NIX_STATE_DIR:-/nix/var/nix}
   [ -w "$state/db/db.sqlite" ] || return 0
