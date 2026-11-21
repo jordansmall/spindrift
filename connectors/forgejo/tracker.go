@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"slices"
 	"strconv"
+	"strings"
 
 	"spindrift.dev/sdk/forge"
 	"spindrift.dev/sdk/tracker"
@@ -72,8 +73,12 @@ func listIssues(t tracker.Target, q tracker.Query, limit int) ([]tracker.Issue, 
 		return nil, fmt.Errorf("list issues: limit %d < 1", limit)
 	}
 	v := url.Values{"state": {"open"}, "type": {"issues"}}
-	if q.Label != "" {
-		v.Set("labels", q.Label)
+	required, err := tracker.RouteLabels(q.Label, q.Route)
+	if err != nil {
+		return nil, err
+	}
+	if len(required) > 0 {
+		v.Set("labels", strings.Join(required, ","))
 	}
 	raw, err := pageUntilEmpty(t.API, issuePath(t, "/issues"), v, rawIssue.key)
 	if err != nil {
@@ -84,8 +89,8 @@ func listIssues(t tracker.Target, q tracker.Query, limit int) ([]tracker.Issue, 
 	for _, r := range raw {
 		i := r.issue()
 		// Forgejo silently drops an unresolved labels= filter and returns every
-		// open issue (#3952), so the label is re-checked here.
-		if q.Label != "" && !slices.Contains(i.Labels, q.Label) {
+		// open issue (#3952), so every label is re-checked here.
+		if !hasAll(i, required) {
 			continue
 		}
 		issues = append(issues, i)

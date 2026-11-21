@@ -157,3 +157,63 @@ func TestNativeDepsAndBlocks(t *testing.T) {
 		t.Fatalf("blocks = %#v, %v", b, err)
 	}
 }
+
+var orders = []tracker.Selector{{Kind: "label", Value: "orders-api"}}
+
+// A route label joins the query label in the native labels filter, and an
+// issue missing one is dropped even when Forgejo answers it, as it does when
+// it cannot resolve a name.
+func TestListIssuesRouteIsAndedAndRechecked(t *testing.T) {
+	got := stub(t, map[string]connector.Response{
+		issueList(1, "labels=go%2Corders-api&"): ok(`[
+			{"number":1,"labels":[{"name":"go"},{"name":"orders-api"}]},
+			{"number":2,"labels":[{"name":"go"}]},
+			{"number":3,"labels":[{"name":"orders-api"}]}]`),
+		issueList(2, "labels=go%2Corders-api&"): ok(`[]`),
+	})
+	issues, err := listIssues(ttgt, tracker.Query{Label: "go", Route: orders}, 10)
+	if err != nil || len(issues) != 1 || issues[0].Number != "1" {
+		t.Fatalf("issues = %#v, %v; want only issue 1", issues, err)
+	}
+	if len(*got) != 2 {
+		t.Fatalf("requests = %d, want 2", len(*got))
+	}
+}
+
+func TestListIssuesRouteAloneFiltersByRoute(t *testing.T) {
+	stub(t, map[string]connector.Response{
+		issueList(1, "labels=orders-api&"): ok(`[{"number":1,"labels":[{"name":"orders-api"}]},{"number":2}]`),
+		issueList(2, "labels=orders-api&"): ok(`[]`),
+	})
+	issues, err := listIssues(ttgt, tracker.Query{Route: orders}, 10)
+	if err != nil || len(issues) != 1 || issues[0].Number != "1" {
+		t.Fatalf("issues = %#v, %v; want only issue 1", issues, err)
+	}
+}
+
+func TestListIssuesRefusesAnUnexpressibleRoute(t *testing.T) {
+	for name, route := range map[string][]tracker.Selector{
+		"non-label kind": {{Kind: "project", Value: "orders"}},
+		"comma label":    {{Kind: "label", Value: "a,b"}},
+		"empty label":    {{Kind: "label"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := stub(t, nil)
+			if _, err := listIssues(ttgt, tracker.Query{Label: "go", Route: route}, 10); err == nil {
+				t.Fatal("want an error, not the whole scope")
+			}
+			if len(*got) != 0 {
+				t.Fatalf("requests = %v, want none", *got)
+			}
+		})
+	}
+}
+
+func TestRouteRefusesACommaInTheQueryLabel(t *testing.T) {
+	if _, err := tracker.RouteLabels("a,b", orders); err == nil {
+		t.Fatal("want an error")
+	}
+	if got, err := tracker.RouteLabels("a,b", nil); err != nil || len(got) != 1 {
+		t.Fatalf("unrouted = %v, %v; want the label passed as before", got, err)
+	}
+}
