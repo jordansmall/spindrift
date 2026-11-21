@@ -172,6 +172,10 @@ func issueComment(t tracker.Target, number string, r tracker.CommentRequest) err
 // property, so the dedup marker goes back into the body as its last line.
 // IssueType is ignored.
 func fileIssue(t tracker.Target, r tracker.IssueRequest) (string, error) {
+	labels, err := tracker.StampRouteLabels(r.Labels, r.Route)
+	if err != nil {
+		return "", err
+	}
 	body := r.Body
 	if r.DedupMarker != "" {
 		if body == "" {
@@ -184,7 +188,7 @@ func fileIssue(t tracker.Target, r tracker.IssueRequest) (string, error) {
 		Title  string   `json:"title"`
 		Body   string   `json:"body"`
 		Labels []string `json:"labels"`
-	}{r.Title, body, append([]string{}, r.Labels...)}
+	}{r.Title, body, labels}
 	var created struct {
 		HTMLURL string `json:"html_url"`
 	}

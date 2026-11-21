@@ -30,6 +30,8 @@ func init() {
 		Count:         count,
 		CountInterval: countInterval,
 		RemovedLabels: removedLabels,
+		// Routes: a label route joins the labels= filter and fileIssue stamps it.
+		Routes: true,
 	})
 	tracker.RegisterWrites(tracker.Writer{
 		Transition:  trackerTransition,

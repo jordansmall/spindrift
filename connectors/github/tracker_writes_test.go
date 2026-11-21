@@ -397,3 +397,14 @@ func TestCloseIssueRejectsBadNumber(t *testing.T) {
 		t.Errorf("err = %v, calls = %d, want an error and no calls", err, len(*got))
 	}
 }
+
+func TestFileIssueStampsTheRouteLabels(t *testing.T) {
+	got := stub(t, map[string]connector.Response{issuesURL: created(`{"html_url":"u"}`)})
+	route := []tracker.Selector{{Kind: "label", Value: "orders-api"}, {Kind: "label", Value: "a"}}
+	if _, err := fileIssue(tgt, tracker.IssueRequest{Title: "t", Labels: []string{"a"}, Route: route}); err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"title":"t","body":"","labels":["a","orders-api"]}`; (*got)[0].Body != want {
+		t.Errorf("body = %s, want %s", (*got)[0].Body, want)
+	}
+}
