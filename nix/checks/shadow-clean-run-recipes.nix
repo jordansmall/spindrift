@@ -5,15 +5,21 @@
 #
 # Cases pin: a run still in flight is skipped, not counted dirty (an unended
 # Pass whose Dispatch's primary `issue-<n>.log` has no `dispatch_settled` for
-# claude; a live file-name pid for github); a finished run with a missing
+# opencode; a live file-name pid for github); a finished run with a missing
 # summary is dirty, a killed `-fix-N` satellite included, since only the
 # primary log is ever settled; and a stamp-less log never sorts ahead of
-# stamped ones, which the claude cases run under en_US.UTF-8 to catch (the
+# stamped ones, which the opencode cases run under en_US.UTF-8 to catch (the
 # locale ignores the leading tab, so a plain `sort -r` puts the empty stamp
 # first; a malformed stamp sorts like a missing one but keeps its verdict).
 # Stamps carry mixed UTC offsets, so they order by instant, not text. Each
 # recipe's `finished=` toggle is also run set to 1, for logs fetched from CI,
 # which have all ended: then an unended Pass or missing summary counts dirty.
+#
+# The shadow recipe also reads each log's `shadow-replay` sidecar (issue #6872):
+# live and replayed summaries count together, a run counts once whichever
+# holds its summaries, and each non-empty set must be clean on its own. A log
+# stamped with another Driver stays skipped whatever sits beside it, and a
+# sidecar not opening with its log's own dispatch_start is ignored.
 #
 # The primary-mode recipe (issue #6998) counts a process clean only with an
 # audit file holding at least one decision entry (the sandbox totals line is
@@ -39,11 +45,11 @@
             /^```$/ { if (inb && index(body, m)) { printf "%s", body; exit } inb = 0; next }
             inb { body = body $0 "\n" }' "$docs"
         }
-        extract driver=claude > claude.sh
+        extract driver=opencode > opencode.sh
         extract backend=github > github.sh
         extract primary=github > primary.sh
         fail=0
-        for r in claude.sh github.sh primary.sh; do
+        for r in opencode.sh github.sh primary.sh; do
           if ! grep -q '^logs=\.spindrift/logs$' "$r"; then
             echo "FAIL: no recipe extracted into $r from docs/reference.md" >&2
             exit 1
@@ -64,14 +70,25 @@
         settled() { op "{\"op\":\"dispatch_settled\",\"dispatch_settled\":{\"outcome\":\"''${1:-complete}\"}}"; }
         noise() { echo 'not json at all'; echo '{"type":"assistant"}'; }
 
-        # claude log shapes: <file> <HH:MM:SS> ...
-        c_clean() { { started "$2" claude "$4"; noise; pass_start; summary claude 0; pass_usage; [ -z "$3" ] || settled; } > "$1"; }
-        c_missing() { { started "$2" claude "$3"; pass_start; pass_usage; no_outcome; } > "$1"; }
-        c_unended() { { started "$2" claude; pass_start; op '{"op":"pass_model","model":"m","effort":"high"}'; } > "$1"; }
-        c_killed() { { started "$2" claude; pass_start; settled failed; } > "$1"; }
-        c_stampless() { { noise; pass_start; pass_usage; no_outcome; } > "$1"; }
-        c_other() { { started "$2" opencode; pass_start; pass_usage; } > "$1"; }
-        c_badstamp() { { started "$2" claude; pass_start; summary claude 0; pass_usage; settled; } > "$1"; }
+        # opencode log shapes: <file> <HH:MM:SS> ...
+        log_clean() { { started "$2" opencode "$4"; noise; pass_start; summary opencode 0; pass_usage; [ -z "$3" ] || settled; } > "$1"; }
+        log_missing() { { started "$2" opencode "$3"; pass_start; pass_usage; no_outcome; } > "$1"; }
+        log_unended() { { started "$2" opencode; pass_start; op '{"op":"pass_model","model":"m","effort":"high"}'; } > "$1"; }
+        log_killed() { { started "$2" opencode; pass_start; settled failed; } > "$1"; }
+        log_stampless() { { noise; pass_start; pass_usage; no_outcome; } > "$1"; }
+        log_other() { { started "$2" claude; pass_start; pass_usage; } > "$1"; }
+        log_badstamp() { { started "$2" opencode; pass_start; summary opencode 0; pass_usage; settled; } > "$1"; }
+
+        # Two ended Passes and no live summary: a run only a replay can judge.
+        log_nolive() { { started "$2" opencode; pass_start; pass_usage; pass_start; pass_usage; settled; } > "$1"; }
+        # Sidecar beside a log: <log> <diverged>... one replayed summary each.
+        # It opens with the log's dispatch_start, as Replay writes it.
+        sidecar() {
+          s="''${1%.log}.shadow-replay.jsonl"
+          grep -m1 '"op":"dispatch_start"' "$1" > "$s" || true
+          shift
+          for dv in "$@"; do summary opencode "$dv" | sed 's/"driver":"opencode"/&,"replayed":true/' >> "$s"; done
+        }
 
         # github log shapes: <file> <summary diverged>
         g_clean() { summary github "''${2:-0}" > "$1"; noise >> "$1"; }
@@ -96,95 +113,152 @@
         fi
 
         d=$(mkcase c1)
-        c_clean "$d/issue-10.log" 10:00:00 settled
-        c_clean "$d/issue-10-fix-1.log" 11:00:00
-        c_clean "$d/issue-10-conflict-resolve.log" 12:00:00
-        c_other "$d/issue-11.log" 13:00:00
-        run claude-all-clean claude.sh 3 case-c1
+        log_clean "$d/issue-10.log" 10:00:00 settled
+        log_clean "$d/issue-10-fix-1.log" 11:00:00
+        log_clean "$d/issue-10-conflict-resolve.log" 12:00:00
+        log_other "$d/issue-11.log" 13:00:00
+        run opencode-all-clean opencode.sh 3 case-c1
 
         d=$(mkcase c2)
-        c_clean "$d/issue-1.log" 09:00:00 settled
-        c_missing "$d/issue-2.log" 10:00:00
-        c_clean "$d/issue-3.log" 11:00:00 settled
-        c_clean "$d/issue-4.log" 12:00:00 settled
-        run claude-dirty-ends-streak claude.sh 2 case-c2
+        log_clean "$d/issue-1.log" 09:00:00 settled
+        log_missing "$d/issue-2.log" 10:00:00
+        log_clean "$d/issue-3.log" 11:00:00 settled
+        log_clean "$d/issue-4.log" 12:00:00 settled
+        run opencode-dirty-ends-streak opencode.sh 2 case-c2
 
         d=$(mkcase c3)
-        c_clean "$d/issue-1.log" 09:00:00 settled
-        c_clean "$d/issue-2.log" 10:00:00 settled
-        c_unended "$d/issue-3.log" 11:00:00
-        run claude-in-flight-newest claude.sh 2 case-c3
+        log_clean "$d/issue-1.log" 09:00:00 settled
+        log_clean "$d/issue-2.log" 10:00:00 settled
+        log_unended "$d/issue-3.log" 11:00:00
+        run opencode-in-flight-newest opencode.sh 2 case-c3
 
         d=$(mkcase c4)
-        c_clean "$d/issue-1.log" 09:00:00 settled
-        c_clean "$d/issue-2.log" 10:00:00 settled
-        c_stampless "$d/issue-3.log"
-        run claude-stampless-dirty claude.sh 2 case-c4
+        log_clean "$d/issue-1.log" 09:00:00 settled
+        log_clean "$d/issue-2.log" 10:00:00 settled
+        log_stampless "$d/issue-3.log"
+        run opencode-stampless-dirty opencode.sh 2 case-c4
 
         d=$(mkcase c5)
-        c_clean "$d/issue-1.log" 09:00:00 settled
-        c_killed "$d/issue-2.log" 10:00:00
-        c_clean "$d/issue-3.log" 11:00:00 settled
-        c_clean "$d/issue-4.log" 12:00:00 settled
-        run claude-killed-mid-pass-ends-streak claude.sh 2 case-c5
+        log_clean "$d/issue-1.log" 09:00:00 settled
+        log_killed "$d/issue-2.log" 10:00:00
+        log_clean "$d/issue-3.log" 11:00:00 settled
+        log_clean "$d/issue-4.log" 12:00:00 settled
+        run opencode-killed-mid-pass-ends-streak opencode.sh 2 case-c5
 
         d=$(mkcase c6)
-        c_clean "$d/issue-1.log" 09:00:00 settled
-        c_clean "$d/issue-2.log" 10:00:00 settled
-        c_unended "$d/issue-2-fix-1.log" 10:30:00
-        c_clean "$d/issue-3.log" 11:00:00 settled
-        c_clean "$d/issue-4.log" 12:00:00 settled
-        run claude-killed-satellite-ends-streak claude.sh 2 case-c6
+        log_clean "$d/issue-1.log" 09:00:00 settled
+        log_clean "$d/issue-2.log" 10:00:00 settled
+        log_unended "$d/issue-2-fix-1.log" 10:30:00
+        log_clean "$d/issue-3.log" 11:00:00 settled
+        log_clean "$d/issue-4.log" 12:00:00 settled
+        run opencode-killed-satellite-ends-streak opencode.sh 2 case-c6
 
         d=$(mkcase c7)
-        c_clean "$d/issue-1.log" 09:00:00 settled
-        c_clean "$d/issue-2.log" 10:00:00 settled
-        c_unended "$d/issue-3.log" 11:00:00
-        c_unended "$d/issue-3-fix-1.log" 11:30:00
-        c_unended "$d/issue-3-conflict-resolve.log" 12:00:00
-        run claude-satellite-of-unsettled-primary-in-flight claude.sh 2 case-c7
+        log_clean "$d/issue-1.log" 09:00:00 settled
+        log_clean "$d/issue-2.log" 10:00:00 settled
+        log_unended "$d/issue-3.log" 11:00:00
+        log_unended "$d/issue-3-fix-1.log" 11:30:00
+        log_unended "$d/issue-3-conflict-resolve.log" 12:00:00
+        run opencode-satellite-of-unsettled-primary-in-flight opencode.sh 2 case-c7
 
         # Text order and time order disagree: 11:00+01:00 is 10:00Z, older than
         # the dirty 10:30Z run, so only a recipe ordering by instant counts 0.
         d=$(mkcase c8)
-        c_clean "$d/issue-1.log" 09:00:00 settled +01:00
-        c_clean "$d/issue-2.log" 11:00:00 settled +01:00
-        c_missing "$d/issue-3.log" 10:30:00 Z
-        run claude-mixed-offsets-time-order claude.sh 0 case-c8
+        log_clean "$d/issue-1.log" 09:00:00 settled +01:00
+        log_clean "$d/issue-2.log" 11:00:00 settled +01:00
+        log_missing "$d/issue-3.log" 10:30:00 Z
+        run opencode-mixed-offsets-time-order opencode.sh 0 case-c8
 
         # A primary that never settled (launcher SIGKILLed, artifact still
         # uploaded) is in flight on a live host but dirty in fetched logs.
         d=$(mkcase c9)
-        c_clean "$d/issue-1.log" 09:00:00 settled
-        c_clean "$d/issue-2.log" 10:00:00 settled
-        c_unended "$d/issue-3.log" 11:00:00
-        run claude-finished-unsettled-primary-dirty claude-finished.sh 0 case-c9
-        run claude-unsettled-primary-in-flight claude.sh 2 case-c9
+        log_clean "$d/issue-1.log" 09:00:00 settled
+        log_clean "$d/issue-2.log" 10:00:00 settled
+        log_unended "$d/issue-3.log" 11:00:00
+        run opencode-finished-unsettled-primary-dirty opencode-finished.sh 0 case-c9
+        run opencode-unsettled-primary-in-flight opencode.sh 2 case-c9
 
         d=$(mkcase c10)
-        c_clean "$d/issue-1.log" 09:00:00 settled
-        c_clean "$d/issue-2.log" 10:00:00 settled
-        c_unended "$d/issue-5-fix-1.log" 11:00:00
-        run claude-finished-satellite-without-primary-dirty claude-finished.sh 0 case-c10
-        run claude-satellite-without-primary-in-flight claude.sh 2 case-c10
+        log_clean "$d/issue-1.log" 09:00:00 settled
+        log_clean "$d/issue-2.log" 10:00:00 settled
+        log_unended "$d/issue-5-fix-1.log" 11:00:00
+        run opencode-finished-satellite-without-primary-dirty opencode-finished.sh 0 case-c10
+        run opencode-satellite-without-primary-in-flight opencode.sh 2 case-c10
 
         # A malformed stamp must not drop the log: it sorts last like a missing
         # one and keeps its clean verdict, so the count is 3, not 2.
         d=$(mkcase c11)
-        c_clean "$d/issue-1.log" 09:00:00 settled
-        c_clean "$d/issue-2.log" 10:00:00 settled
-        c_badstamp "$d/issue-3.log" xx
-        run claude-malformed-stamp-keeps-verdict claude.sh 3 case-c11
+        log_clean "$d/issue-1.log" 09:00:00 settled
+        log_clean "$d/issue-2.log" 10:00:00 settled
+        log_badstamp "$d/issue-3.log" xx
+        run opencode-malformed-stamp-keeps-verdict opencode.sh 3 case-c11
 
         # The settled lookup strips -fix-N from the base name, so a logs path
         # holding "-fix-" still finds the primary (killed, dirty) log.
         mkcase c12 >/dev/null
         mkdir -p case-c12/x-fix-y
-        c_clean case-c12/x-fix-y/issue-1.log 09:00:00 settled
-        c_clean case-c12/x-fix-y/issue-2.log 10:00:00 settled
-        c_killed case-c12/x-fix-y/issue-3.log 11:00:00
-        sed 's#^logs=.*#logs=case-c12/x-fix-y#' claude.sh > claude-fixdir.sh
-        run claude-fix-in-logs-path claude-fixdir.sh 0 .
+        log_clean case-c12/x-fix-y/issue-1.log 09:00:00 settled
+        log_clean case-c12/x-fix-y/issue-2.log 10:00:00 settled
+        log_killed case-c12/x-fix-y/issue-3.log 11:00:00
+        sed 's#^logs=.*#logs=case-c12/x-fix-y#' opencode.sh > opencode-fixdir.sh
+        run opencode-fix-in-logs-path opencode-fixdir.sh 0 .
+
+        # Replayed runs count with live ones, once each (issue #6872).
+        d=$(mkcase r1)
+        log_clean "$d/issue-1.log" 09:00:00 settled
+        log_clean "$d/issue-2.log" 10:00:00 settled
+        log_nolive "$d/issue-3.log" 11:00:00
+        sidecar "$d/issue-3.log" 0 0
+        run opencode-replay-only-counts opencode.sh 3 case-r1
+
+        d=$(mkcase r2)
+        log_clean "$d/issue-1.log" 09:00:00 settled
+        log_nolive "$d/issue-2.log" 10:00:00
+        sidecar "$d/issue-2.log" 0 3
+        log_clean "$d/issue-3.log" 11:00:00 settled
+        log_clean "$d/issue-4.log" 12:00:00 settled
+        run opencode-replay-divergence-ends-streak opencode.sh 2 case-r2
+
+        d=$(mkcase r3)
+        log_clean "$d/issue-1.log" 09:00:00 settled
+        sidecar "$d/issue-1.log" 0
+        log_clean "$d/issue-2.log" 10:00:00 settled
+        sidecar "$d/issue-2.log" 0
+        run opencode-live-and-replay-count-once opencode.sh 2 case-r3
+        log_clean "$d/issue-3.log" 11:00:00 settled
+        run opencode-live-and-replay-then-live-only opencode.sh 3 case-r3
+
+        d=$(mkcase r4)
+        log_clean "$d/issue-1.log" 09:00:00 settled
+        log_clean "$d/issue-2.log" 10:00:00 settled
+        log_clean "$d/issue-3.log" 11:00:00 settled
+        sidecar "$d/issue-3.log" 1
+        run opencode-clean-live-diverged-replay-dirty opencode.sh 0 case-r4
+
+        d=$(mkcase r5)
+        log_clean "$d/issue-1.log" 09:00:00 settled
+        log_clean "$d/issue-2.log" 10:00:00 settled
+        log_other "$d/issue-3.log" 11:00:00
+        sidecar "$d/issue-3.log" 0
+        run opencode-other-driver-skipped-despite-sidecar opencode.sh 2 case-r5
+
+        # One summary for two ended Passes in a finished run is a missing one.
+        d=$(mkcase r6)
+        log_clean "$d/issue-1.log" 09:00:00 settled
+        log_clean "$d/issue-2.log" 10:00:00 settled
+        log_nolive "$d/issue-3.log" 11:00:00
+        sidecar "$d/issue-3.log" 0
+        run opencode-short-replay-dirty opencode.sh 0 case-r6
+
+        # A re-dispatched issue's log is rewritten, but run A's sidecar stays:
+        # its diverged replay must not be credited to run B.
+        d=$(mkcase r7)
+        log_clean "$d/issue-1.log" 09:00:00 settled
+        log_clean "$d/issue-2.log" 10:00:00 settled
+        log_nolive "$d/issue-3.log" 11:00:00
+        sidecar "$d/issue-3.log" 1
+        log_clean "$d/issue-3.log" 12:00:00 settled
+        run opencode-stale-sidecar-ignored opencode.sh 3 case-r7
 
         stamp() { echo "shadow-github-$1-$2.log"; }
         dead_pid=999999999 # above Linux's pid_max (4194304), so never a live process
