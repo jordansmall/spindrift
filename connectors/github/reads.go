@@ -148,22 +148,44 @@ func pagesOf[B any](api, path string, size func(B) int, visit func(B) bool) erro
 	return fmt.Errorf("GET %s: more than %d pages", path, maxPages)
 }
 
+// labelsFilter is the labels= query value (with its leading "&") for label
+// ANDed with every route label, or "" for neither. See tracker.RouteLabels for
+// what a route refuses.
+func labelsFilter(label string, route []tracker.Selector) (string, error) {
+	all, err := tracker.RouteLabels(label, route)
+	if err != nil {
+		return "", err
+	}
+	if len(all) == 0 {
+		return "", nil
+	}
+	for i, l := range all {
+		all[i] = url.QueryEscape(l)
+	}
+	return "&labels=" + strings.Join(all, ","), nil
+}
+
 // listQuery selects the open issues q names, oldest first; count sizes the
 // same set through its own update-ordered countQuery.
-func listQuery(q tracker.Query) string {
+func listQuery(q tracker.Query) (string, error) {
 	s := "?state=open&sort=created&direction=asc&per_page=" + strconv.Itoa(pageSize)
-	if q.Label != "" {
-		s += "&labels=" + url.QueryEscape(q.Label)
+	f, err := labelsFilter(q.Label, q.Route)
+	if err != nil {
+		return "", err
 	}
-	return s
+	return s + f, nil
 }
 
 func listIssues(t tracker.Target, query tracker.Query, limit int) ([]tracker.Issue, error) {
 	if limit < 1 {
 		return nil, fmt.Errorf("list issues: limit %d < 1", limit)
 	}
+	q, err := listQuery(query)
+	if err != nil {
+		return nil, err
+	}
 	var out []tracker.Issue
-	err := pages(t.API, repoPath(t)+listQuery(query), func(raw []rawIssue) bool {
+	err = pages(t.API, repoPath(t)+q, func(raw []rawIssue) bool {
 		for _, r := range raw {
 			// The REST issues list includes pull requests; `gh issue list` does not.
 			if r.PullRequest != nil {
@@ -392,7 +414,7 @@ func commentsOf(t tracker.Target, number string) ([]tracker.Comment, error) {
 // ("" is page 1), so a walk must keep limit constant. next is set while the
 // raw page was full, so one call is one request; a page may hold fewer issues
 // because pull requests are skipped. Unlike the list reads, the body stays.
-func labeledPage(t tracker.Target, label, state, cursor string, limit int, _ []tracker.Selector) ([]tracker.Issue, string, error) {
+func labeledPage(t tracker.Target, label, state, cursor string, limit int, route []tracker.Selector) ([]tracker.Issue, string, error) {
 	if limit < 1 {
 		return nil, "", fmt.Errorf("list labeled issues: limit %d < 1", limit)
 	}
@@ -408,7 +430,11 @@ func labeledPage(t tracker.Target, label, state, cursor string, limit int, _ []t
 		page = n
 	}
 	perPage := min(limit, pageSize)
-	path := fmt.Sprintf("%s?state=%s&labels=%s&sort=created&direction=desc&per_page=%d&page=%d", repoPath(t), state, url.QueryEscape(label), perPage, page)
+	filter, err := labelsFilter(label, route)
+	if err != nil {
+		return nil, "", err
+	}
+	path := fmt.Sprintf("%s?state=%s%s&sort=created&direction=desc&per_page=%d&page=%d", repoPath(t), state, filter, perPage, page)
 	var raw []rawIssue
 	if err := call("GET", t.API, path, nil, &raw); err != nil {
 		return nil, "", err

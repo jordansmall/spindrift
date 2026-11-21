@@ -596,3 +596,95 @@ func TestLabeledRefusesBadInputWithoutRequest(t *testing.T) {
 		t.Errorf("sent %d requests", len(*got))
 	}
 }
+
+var routeOrders = []tracker.Selector{{Kind: "label", Value: "orders-api"}}
+
+// A route's labels join the native labels filter, ANDed with the query label,
+// on every list path; no route leaves the URL as it was.
+func TestRouteLabelsAreAndedIntoEveryListRequest(t *testing.T) {
+	resetCountCache(t)
+	q := tracker.Query{Label: "ready", Route: routeOrders}
+	got := stub(t, map[string]connector.Response{
+		listBase + "&labels=ready,orders-api&page=1":  ok(items(1, 1, false)),
+		countBase + "&labels=ready,orders-api&page=1": ok(items(1, 2, false)),
+		"https://api.github.com/repos/o/r/issues?state=open&labels=x+y,orders-api&sort=created&direction=desc&per_page=100&page=1": ok(items(1, 1, false)),
+	})
+	if l, err := listIssues(tgt, q, 10); err != nil || len(l) != 1 {
+		t.Fatalf("listIssues = %v, %v; want 1 routed issue", l, err)
+	}
+	if n, err := count(tgt, q, 10, false); err != nil || n != 2 {
+		t.Fatalf("count = %d, %v; want 2", n, err)
+	}
+	if l, _, err := labeledPage(tgt, "x y", "open", "", 100, routeOrders); err != nil || len(l) != 1 {
+		t.Fatalf("labeledPage = %v, %v; want 1 routed issue", l, err)
+	}
+	if len(*got) != 3 {
+		t.Fatalf("requests = %d, want 3", len(*got))
+	}
+
+	// With no query label the route alone is the filter.
+	got = stub(t, map[string]connector.Response{listBase + "&labels=orders-api&page=1": ok(items(1, 1, false))})
+	if _, err := listIssues(tgt, tracker.Query{Route: routeOrders}, 10); err != nil || len(*got) != 1 {
+		t.Fatalf("route-only listIssues: %d requests, %v", len(*got), err)
+	}
+}
+
+// A routed count and an unrouted one are different requests, so they never
+// share a cached validator.
+func TestRoutedCountKeepsItsOwnCacheEntry(t *testing.T) {
+	resetCountCache(t)
+	stubETag(t, `"e"`)
+	stub(t, map[string]connector.Response{
+		countBase + "&labels=ready&page=1":            ok(items(1, 3, false)),
+		countBase + "&labels=ready,orders-api&page=1": ok(items(1, 1, false)),
+	})
+	plain, routed := tracker.Query{Label: "ready"}, tracker.Query{Label: "ready", Route: routeOrders}
+	for _, c := range []struct {
+		q    tracker.Query
+		want int
+	}{{plain, 3}, {routed, 1}} {
+		if n, err := count(tgt, c.q, 10, false); err != nil || n != c.want {
+			t.Fatalf("count(%+v) = %d, %v; want %d", c.q, n, err, c.want)
+		}
+	}
+	if len(countCache) != 2 {
+		t.Errorf("countCache holds %d entries, want one per request", len(countCache))
+	}
+}
+
+// A selector the Connector cannot express as a native filter fails the read
+// before any request: ignoring it would list the whole scope.
+func TestRouteThatGitHubCannotFilterByFailsClosed(t *testing.T) {
+	for name, route := range map[string][]tracker.Selector{
+		"non-label kind": {{Kind: "project", Value: "orders"}},
+		"comma in value": {{Kind: "label", Value: "a,b"}},
+		"empty value":    {{Kind: "label", Value: ""}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			resetCountCache(t)
+			got := stub(t, nil)
+			q := tracker.Query{Label: "ready", Route: route}
+			if _, err := listIssues(tgt, q, 10); err == nil {
+				t.Error("listIssues: no error")
+			}
+			if _, err := count(tgt, q, 10, false); err == nil {
+				t.Error("count: no error")
+			}
+			if _, _, err := labeledPage(tgt, "ready", "open", "", 100, route); err == nil {
+				t.Error("labeledPage: no error")
+			}
+			if len(*got) != 0 {
+				t.Errorf("sent %d requests, want none", len(*got))
+			}
+		})
+	}
+}
+
+func TestRouteRefusesACommaInTheQueryLabel(t *testing.T) {
+	if _, err := labelsFilter("a,b", routeOrders); err == nil {
+		t.Fatal("want an error")
+	}
+	if got, err := labelsFilter("a,b", nil); err != nil || got != "&labels=a%2Cb" {
+		t.Fatalf("unrouted = %q, %v; want the label passed as before", got, err)
+	}
+}
