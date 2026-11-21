@@ -3,6 +3,7 @@ package settle
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"slices"
@@ -2436,5 +2437,60 @@ func TestFileIssueIntents_RealLocalTracker_StampsRouteLabel(t *testing.T) {
 	}
 	if !slices.Contains(iss.Labels, "orders-api") || !slices.Contains(iss.Labels, "agent-review-finding") {
 		t.Errorf("labels = %v, want the route and provenance labels", iss.Labels)
+	}
+}
+
+// Every finding class is stamped with the route: review (gate) and research
+// file through fileIssueIntentsDetailed, butler and tuning through
+// FileButlerFindings, and all four end in the one Filer relay PostIssue.
+func TestFindingClasses_StampRouteLabel(t *testing.T) {
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents:      []string{`{"title":"bug","body":"body"}`},
+	}
+	route := forge.Route{{Kind: forge.RouteKindLabel, Value: "orders-api"}}
+	butlerPlan := func(extra ...string) func([]Finding) func(Finding) Decoration {
+		return func([]Finding) func(Finding) Decoration {
+			return func(Finding) Decoration { return Decoration{ExtraLabels: extra} }
+		}
+	}
+	research := func(fc *forge.Fake) {
+		fc.VerdictLabels = researchVerdictLabels
+		fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-research-in-progress"}})
+		res := result
+		res.Resolved = outcome.Resolved{Found: true, Outcome: outcome.Outcome{Issue: "1", Status: "recommend"}}
+		NewResearchSettle(fc.AsIssueFiler(), researchVerdictLabels, "agent-research-finding").
+			Settle(dispatch.NewFake(), "1", 0, relayedVerdict(res))
+	}
+	classes := map[string]struct {
+		file func(fc *forge.Fake)
+		want []string
+	}{
+		"review": {func(fc *forge.Fake) {
+			fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+		}, []string{"agent-review-finding"}},
+		"research": {research, []string{"agent-research-finding"}},
+		"butler": {func(fc *forge.Fake) {
+			FileButlerFindings(StdoutProgress{}, fc.AsIssueFiler(), "1", result, 0, "agent-butler-finding", DedupPolicy{}, butlerPlan())
+		}, []string{"agent-butler-finding"}},
+		"tuning": {func(fc *forge.Fake) {
+			FileButlerFindings(StdoutProgress{}, fc.AsIssueFiler(), "1", result, 0, "agent-butler-finding", DedupPolicy{}, butlerPlan("agent-tuning-finding"))
+		}, []string{"agent-butler-finding", "agent-tuning-finding"}},
+	}
+	for name, c := range classes {
+		for _, routed := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/routed=%v", name, routed), func(t *testing.T) {
+				fc := forge.NewFake(researchLabels)
+				want := c.want
+				if routed {
+					fc.Route = route
+					want = append(slices.Clone(want), "orders-api")
+				}
+				c.file(fc)
+				if len(fc.PostIssueCalls) != 1 || !slices.Equal(fc.PostIssueCalls[0].Labels, want) {
+					t.Errorf("PostIssueCalls = %+v, want one call with labels %v", fc.PostIssueCalls, want)
+				}
+			})
+		}
 	}
 }
