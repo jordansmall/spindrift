@@ -280,7 +280,7 @@ func kindAxisViolations(path, line string) []string {
 // instead of drifting back in unnoticed.
 func TestKindAxesGuard(t *testing.T) {
 	settleFiles := 0
-	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
+	err := walkOwnSource(".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
