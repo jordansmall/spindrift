@@ -6,7 +6,8 @@ import (
 )
 
 // trackerGates computes the Issue-Tracker gate family: the tracker
-// read/write/filer descriptor gates and the PR-body ticket-reference gates.
+// read/write/filer descriptor gates, the PR-body ticket-reference gates, and
+// the issue-route gate (ADR 0075).
 // e.FilerEnabled is a plain Env field that nix resolves (issue #2533).
 func trackerGates(e Env) map[string]bool {
 	g := map[string]bool{}
@@ -23,6 +24,10 @@ func trackerGates(e Env) map[string]bool {
 	if trackerName == "" {
 		trackerName = defaultIssueTracker
 	}
+
+	// A routed tracker scope feeds many Target repos (ADR 0075); the fragment
+	// names REPO_SLUG (guaranteed by launcherchecks.repoSlugRequired).
+	g["ISSUE_ROUTED"] = e.IssueRouted
 
 	// At most one of these three fires; jira (itRead "JIRA") fires none, as no
 	// fragment row is keyed on a jira read gate.

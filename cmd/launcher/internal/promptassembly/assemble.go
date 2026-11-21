@@ -297,6 +297,7 @@ var setupVars = []string{
 	"BASE_BRANCH", "IN_PROGRESS_LABEL", "COMPLETE_LABEL",
 	"CHORE_NAME", "CHORE_CLASS_LIST", chorePromptVar,
 	"SKILLS_FOUND", "REVIEW_FANOUT_AGENT", forgeDisplayNameVar,
+	"REPO_SLUG",
 }
 
 // forgeDisplayNameVar is the ${FORGE_DISPLAY_NAME} substitution: the display
@@ -372,6 +373,7 @@ func assemblePromptBodiesMasked(e Env, reg Registry, mask bool) (promptBodies, e
 		"COMPLETE_LABEL":    e.CompleteLabel,
 		"RUN_NONCE":         e.RunNonce,
 		"DISPATCH_KEY":      e.DispatchKey,
+		"REPO_SLUG":         e.RepoSlug,
 	}
 
 	// Each var is an attributed body, so a fragment referencing an earlier

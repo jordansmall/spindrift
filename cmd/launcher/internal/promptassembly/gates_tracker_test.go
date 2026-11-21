@@ -533,3 +533,24 @@ func TestGatesPRBodyClosesMatchesBackend(t *testing.T) {
 		t.Error("github tracker on an empty CODE_FORGE: PR_BODY_CLOSES = false, want true")
 	}
 }
+
+// ISSUE_ROUTED follows the route (BOX_ISSUE_ROUTED) alone; REPO_SLUG is
+// guaranteed by launcherchecks.repoSlugRequired (ADR 0075).
+func TestGatesIssueRouted(t *testing.T) {
+	cases := []struct {
+		name   string
+		routed bool
+		want   bool
+	}{
+		{name: "unrouted", want: false},
+		{name: "routed", routed: true, want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Gates(Env{IssueRouted: tc.routed})["ISSUE_ROUTED"]
+			if got != tc.want {
+				t.Errorf("Gates(IssueRouted=%v)[ISSUE_ROUTED] = %v, want %v", tc.routed, got, tc.want)
+			}
+		})
+	}
+}
