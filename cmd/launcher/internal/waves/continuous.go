@@ -216,7 +216,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 
 	// mu also guards stale, dispatchedAny, claimed, and inflight below
 	// (#653): every refill call, whether from the bootstrap loop, a completing
-	// Box, or the grow listener, runs under this one lock, so they never
+	// Box, or the poll tick, runs under this one lock, so they never
 	// interleave.
 	var mu sync.Mutex
 	idle := sync.NewCond(&mu)
@@ -251,13 +251,13 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 	// launches before the watcher latches aborted (and is therefore in the
 	// snapshot) or never launches at all. len(inflight) is also the in-flight
 	// Box count: a plain sync.WaitGroup cannot coordinate safely here, since the
-	// grow listener can call refill, and so wg.Add, from a goroutine with no
+	// poll tick can call refill, and so wg.Add, from a goroutine with no
 	// causal link to any counted Box, risking the documented WaitGroup race.
 	// Reading and mutating inflight under mu makes "is anything still
 	// outstanding" and "am I about to add more" the same critical section.
 	inflight := make(map[string]bool)
 	// logged keys an issue number to the last skip line printed for it, so the
-	// re-walks on every completion, grow, and ~3m poll tick (#1637) do not
+	// re-walks on every completion and ~3m poll tick (#1637) do not
 	// reprint an unchanged blocked or deferred reason.
 	logged := make(map[string]string)
 	// claimSkips is logged's counterpart for claim-failure skip lines (#4892).
@@ -281,13 +281,12 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 	}
 
 	// observeStop is a non-blocking latch on cfg.Stop (#3520). Caller holds mu.
-	// refill calls it on every entry — bootstrap, completion-triggered, grow
-	// listener, and the ~3m poll tick all funnel through refill — so a stop
-	// closed at any point is picked up on the very next of those triggers. The
-	// dedicated watcher goroutine below calls the same helper — see its own
-	// comment for the promptness that buys. announce is false only
-	// for the final post-drain latch, where the drain is already over and a
-	// drain line would mislead.
+	// refill calls it on every entry — bootstrap, completion-triggered, and the
+	// ~3m poll tick all funnel through refill — so a stop closed at any point is
+	// picked up on the very next of those triggers. The dedicated watcher
+	// goroutine below calls the same helper — see its own comment for the
+	// promptness that buys. announce is false only for the final post-drain
+	// latch, where the drain is already over and a drain line would mislead.
 	observeStop := func(announce bool) {
 		if signalled || cfg.Stop == nil {
 			return
@@ -336,10 +335,10 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 	// runs reclaimInFlight, and every later call is a no-op. Folding the
 	// reclaim in here (rather than only in the watcher, mirroring the stop
 	// watcher's shape verbatim) closes a real race: relying solely on the
-	// watcher goroutine racing the shutdown joins below (close(pollDone)/
-	// <-pollExited) against its own select can lose
-	// that coin toss under scheduler pressure when nothing was ever
-	// in-flight, silently dropping the announcement. Caller holds mu.
+	// watcher goroutine racing the shutdown join below (close(pollDone)/
+	// <-pollExited) against its own select can lose that coin toss under
+	// scheduler pressure when nothing was ever in-flight, silently dropping
+	// the announcement. Caller holds mu.
 	observeAbort := func() {
 		if aborted || cfg.Abort == nil {
 			return
@@ -420,7 +419,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			fmt.Fprintf(os.Stderr, "continuous: re-discover: rate limited; retry %d/%d in %s\n", attempt, cfg.Policy.Max, backoff)
 			// mu is dropped across the sleep so the stop-watcher isn't blocked
 			// out of the drain line for the whole backoff (#3520 review). A
-			// whole other refill (completion, grow, or poll tick) may run to
+			// whole other refill (completion or poll tick) may run to
 			// completion in this window; that is safe because this one re-reads
 			// every input it decides on — the Discover above, claimed, and the
 			// stop/stale flags — after re-taking mu, so it cannot duplicate a
@@ -572,7 +571,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 				if n > 0 {
 					// Usually an event-driven refill missed and the slot sat idle
 					// until this tick, but a tick can also just win the race
-					// against a completion or grow trigger, so this is not proof
+					// against a completion trigger, so this is not proof
 					// of a miss.
 					fmt.Printf("    <- poll: launched %d issue(s)\n", n)
 				}
@@ -584,10 +583,10 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 
 	// stopWatchDone stops the watcher once this call is finished, whether or
 	// not cfg.Stop was ever closed; stopExited confirms it has exited before
-	// RunContinuous returns — the same shutdown shape as
-	// pollDone/pollExited above, so signalled has no writer left once this
-	// function reads it below (#3520). Only started when cfg.Stop != nil: a
-	// nil channel would block select forever, so there is nothing to watch.
+	// RunContinuous returns — the same shutdown shape as pollDone/pollExited
+	// above, so signalled has no writer left once this function reads it
+	// below (#3520). Only started when cfg.Stop != nil: a nil channel would
+	// block select forever, so there is nothing to watch.
 	var stopWatchDone, stopExited chan struct{}
 	if cfg.Stop != nil {
 		stopWatchDone = make(chan struct{})
@@ -597,7 +596,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			select {
 			case <-cfg.Stop:
 				// The promptness seam: refill's own observeStop call only fires
-				// on the next completion, grow, or ~3m poll tick. Without this
+				// on the next completion or ~3m poll tick. Without this
 				// watcher, a stop that arrives while the run is blocked in
 				// idle.Wait() below would print nothing until one of those next
 				// occurs.
