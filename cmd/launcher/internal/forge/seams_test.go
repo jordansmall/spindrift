@@ -465,8 +465,8 @@ func TestFake_ListIssues_UnmappedStateMatchesEveryOpenIssue(t *testing.T) {
 	}
 }
 
-// ListOpenIssues returns the full backlog the Console browses, so it ignores
-// dispatch labels entirely, unlike ListIssues which filters to one state.
+// ListOpenIssues returns the full backlog, so it ignores dispatch labels
+// entirely, unlike ListIssues which filters to one state.
 func TestFake_ListOpenIssues_AllStatesAscendingExcludesClosed(t *testing.T) {
 	f := forge.NewFake(testLabels)
 	f.SetIssue(forge.Issue{Number: "3", State: forge.IssueOpen, Labels: []string{"ready-for-agent"}})

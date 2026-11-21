@@ -208,9 +208,8 @@ func TestHostLogDirFor(t *testing.T) {
 	}
 }
 
-// Factory must expose the Driver it was constructed with so a Console drill-in
-// renders a Dispatch's logs without the Factory growing a second rendering
-// path (#648).
+// Factory must expose the Driver it was constructed with, so rendering a
+// Dispatch's logs needs no second rendering path on the Factory (#648).
 func TestFactory_Driver_ReturnsConfiguredDriver(t *testing.T) {
 	drv := fakeDriver{}
 	f, err := NewFactory(Config{}, tempLogDir(t), nil, drv, RealClock())

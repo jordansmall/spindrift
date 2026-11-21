@@ -70,7 +70,7 @@ type FreshnessChecker func() (applicable, fresh bool, message string)
 // for OriginClaimed, a mode continuous dispatch never uses (#662).
 func nextReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverlap func(string) (string, bool), issues []Issue, edges map[string][]string, sources Sources, depsOfFailed map[string]bool, logged map[string]string) (Issue, bool) {
 	// Drop dedup entries for issues no longer in the batch: keeps logged bounded
-	// across a long Console session, and lets an issue that leaves and returns
+	// across a long-lived session, and lets an issue that leaves and returns
 	// re-log its state afresh.
 	pruneAbsent(logged, issues)
 	// skip logs a non-dispatch outcome at most once per distinct line: refill

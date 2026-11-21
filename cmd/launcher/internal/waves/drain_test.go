@@ -646,8 +646,7 @@ func TestDrainMaxJobs_ClaimedIssue_FailedBlockerDoesNotCascade(t *testing.T) {
 
 // An issue in NewReadiness's failed set had its own DepsOf call error, which
 // in edges alone looks identical to confirmed zero blockers, so drain holds it
-// for a later invocation instead of dispatching or cascade-failing it (#1103,
-// mirroring the console's Queue.Discover hold in #752).
+// for a later invocation instead of dispatching or cascade-failing it (#1103).
 func TestDrainMaxJobs_HoldsDepsOfCheckFailedIssue(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"

@@ -178,9 +178,9 @@ func TestWired_ResolveParent_MemoizesPerIssue(t *testing.T) {
 }
 
 // SeedScopeOf pairs the sanitized parent with the rendered Integration branch
-// label in one forge.SeedScope that both the dispatch command path and the
-// Console consume (issue #2150), so the two cannot disagree about which
-// blocker landing gates a dependent.
+// label in one forge.SeedScope that both the selective dispatch path and the
+// waves blocker gate consume (issue #2150), so the two cannot disagree about
+// which blocker landing gates a dependent.
 func TestSeedScopeOf_PairsSanitizedParentWithIntegrationLabel(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "11", Parent: "Render Pipeline"})

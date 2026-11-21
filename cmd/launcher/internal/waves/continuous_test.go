@@ -1023,8 +1023,7 @@ func TestRunContinuous_TerminatedIssueSkipsFailedTransitionAndSettle(t *testing.
 
 // TestRunContinuous_FailedBoxCallsBoxFailedHook verifies that when a Box exits
 // non-zero with no termination in play, RunContinuous transitions the tracker
-// issue to Failed and calls Session.BoxFailed, the seam the Console uses to
-// move its queue row to a terminal state instead of stranding it at "running"
+// issue to Failed and calls Session.BoxFailed, the optional observer hook
 // (issue #705).
 func TestRunContinuous_FailedBoxCallsBoxFailedHook(t *testing.T) {
 	c := baseConfig()
