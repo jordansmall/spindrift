@@ -30,6 +30,12 @@
   # Issues carry applied labels though there is no registry (see
   # IssuesWearLabels in cmd/launcher/internal/backend/registry.go).
   issuesWearLabels = true;
+  # ADR 0075: the Jira Connector filters by label and by Component, and stamps
+  # both when it files.
+  routeKinds = [
+    "label"
+    "component"
+  ];
   # Build-time check of the merged defaults, run by lib/mkHarness.nix when this
   # row is the selected tracker (issue #2539): an unknown-key JIRA_STATUS_MAPPING
   # or an unmet JIRA_LIFECYCLE fails the build here, and stays dead config on
