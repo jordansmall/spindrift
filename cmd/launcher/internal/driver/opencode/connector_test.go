@@ -61,10 +61,7 @@ func TestConnectorResolveExitMatchesNative(t *testing.T) {
 	}
 	conn, native := driverkit.New(s), driverkit.New(opencode.Strategy)
 
-	logs, err := filepath.Glob(filepath.Join("testdata", "corpus", "*", "pass.jsonl"))
-	if err != nil || len(logs) == 0 {
-		t.Fatalf("no corpus log: %v", err)
-	}
+	logs := corpusLogs(t)
 	// Not JSON, so neutral to every resolver: neither an error nor progress.
 	line := func(n int) []byte { return append(bytes.Repeat([]byte("x"), n-1), '\n') }
 	var filler []byte
