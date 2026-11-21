@@ -39,10 +39,11 @@
         extract driver=opencode > opencode.sh
         extract backend=github > github.sh
         extract primary=github > primary.sh
+        sed 's/^driver=opencode$/driver=pi/' opencode.sh > pi.sh
         fail=0
-        for r in opencode.sh github.sh primary.sh; do
+        for r in opencode.sh pi.sh github.sh primary.sh; do
           if ! grep -q '^logs=\.spindrift/logs$' "$r"; then
-            echo "FAIL: no recipe extracted into $r from docs/reference.md" >&2
+            echo "FAIL: $r has no logs= line: no recipe extracted into it from docs/reference.md (pi.sh is sed-derived from opencode.sh)" >&2
             exit 1
           fi
           sed 's/^finished=$/finished=1/' "$r" > "''${r%.sh}-finished.sh"
@@ -69,6 +70,15 @@
         log_stampless() { { noise; pass_start; pass_usage; no_outcome; } > "$1"; }
         log_other() { { started "$2" claude; pass_start; pass_usage; } > "$1"; }
         log_badstamp() { { started "$2" opencode; pass_start; summary opencode 0; pass_usage; settled; } > "$1"; }
+
+        # pi log shapes: <file> <HH:MM:SS> <extra summary fields>, e.g.
+        # ',"diverged":0'. The filter fields ride on the summary as the
+        # launcher writes them; a replayed summary carries `filter_error`.
+        psummary() {
+          op "{\"op\":\"shadow_summary\",\"shadow_summary\":{\"driver\":\"pi\",\"loaded\":true,\"error\":\"\",\"compared\":5,\"diverged\":''${2:-0},\"forbidden\":0,\"skipped\":0$1}}"
+        }
+        log_pi() { { started "$2" pi; pass_start; psummary "$3" "$4"; pass_usage; settled; } > "$1"; }
+        pi_ok=',"filter_ran":true,"filter_bytes":900'
 
         # Two ended Passes and no live summary: a run only a replay can judge.
         log_nolive() { { started "$2" opencode; pass_start; pass_usage; pass_start; pass_usage; settled; } > "$1"; }
@@ -250,6 +260,50 @@
         sidecar "$d/issue-3.log" 1
         log_clean "$d/issue-3.log" 12:00:00 settled
         run opencode-stale-sidecar-ignored opencode.sh 3 case-r7
+
+        # pi runs a filter shadow beside the decode shadow (issue #6876): a
+        # filter divergence counts in `diverged`, a filter_error breaks the
+        # run, and a replayed summary's filter_error (replay has no raw
+        # stdout) is forgiven only beside a complete live set.
+        d=$(mkcase f1)
+        log_pi "$d/issue-1.log" 09:00:00 "$pi_ok"
+        log_pi "$d/issue-2.log" 10:00:00 "$pi_ok"
+        run pi-filter-clean pi.sh 2 case-f1
+
+        d=$(mkcase f2)
+        log_pi "$d/issue-1.log" 09:00:00 "$pi_ok"
+        log_pi "$d/issue-2.log" 10:00:00 ',"filter_ran":true,"filter_bytes":900,"filter_diverged":true' 1
+        log_pi "$d/issue-3.log" 11:00:00 "$pi_ok"
+        run pi-filter-diverged-ends-streak pi.sh 1 case-f2
+
+        d=$(mkcase f3)
+        log_pi "$d/issue-1.log" 09:00:00 "$pi_ok"
+        log_pi "$d/issue-2.log" 10:00:00 ',"filter_error":"no raw stdout copy"'
+        log_pi "$d/issue-3.log" 11:00:00 "$pi_ok"
+        run pi-filter-error-ends-streak pi.sh 1 case-f3
+
+        d=$(mkcase f4)
+        log_pi "$d/issue-1.log" 09:00:00 "$pi_ok"
+        log_pi "$d/issue-2.log" 10:00:00 "$pi_ok"
+        { grep -m1 '"op":"dispatch_start"' "$d/issue-2.log"
+          psummary ',"replayed":true,"filter_error":"no raw stdout copy"'; } > "$d/issue-2.shadow-replay.jsonl"
+        run pi-replayed-filter-error-not-held-against-run pi.sh 2 case-f4
+
+        d=$(mkcase f5)
+        log_pi "$d/issue-1.log" 09:00:00 "$pi_ok"
+        { started 10:00:00 pi; pass_start; pass_usage; settled; } > "$d/issue-2.log"
+        { grep -m1 '"op":"dispatch_start"' "$d/issue-2.log"
+          psummary ',"replayed":true,"filter_error":"no raw stdout copy"'; } > "$d/issue-2.shadow-replay.jsonl"
+        run pi-replay-only-run-is-dirty pi.sh 0 case-f5
+
+        # A regression guard on the recipe: encodeRegion now makes filter_diverged
+        # with diverged: 0 unreachable, so no summary the code emits looks like
+        # this, but the recipe must still end the streak on it.
+        d=$(mkcase f6)
+        log_pi "$d/issue-1.log" 09:00:00 "$pi_ok"
+        log_pi "$d/issue-2.log" 10:00:00 ',"filter_ran":true,"filter_bytes":900,"filter_diverged":true'
+        log_pi "$d/issue-3.log" 11:00:00 "$pi_ok"
+        run pi-filter-diverged-flag-alone-ends-streak pi.sh 1 case-f6
 
         stamp() { echo "shadow-github-$1-$2.log"; }
         dead_pid=999999999 # above Linux's pid_max (4194304), so never a live process

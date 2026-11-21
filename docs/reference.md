@@ -2337,9 +2337,9 @@ mean at runtime is issue #6751. The worked example is the fixture Connector in
   (issue #6799), and its Connector is always the claude Driver, so
   `spindrift.connectors.claude.shadow` and `.primary` fail evaluation.
   spindrift's own dogfood is a pinned exception to mimicking a new Consumer: it
-  shadows the Connectors in `nix/dogfood-shadow.nix` (opencode, issue #6874)
-  and runs those in `nix/dogfood-primary.nix` (none today) as primary, each
-  until cut-over.
+  shadows the Connectors in `nix/dogfood-shadow.nix` (opencode, issue #6874,
+  and pi, issue #6876) and runs those in `nix/dogfood-primary.nix` (none
+  today) as primary, each until cut-over.
 - **Row-owned knobs.** A row's `knobs` attrset has the shape of a core row's
   (ADR 0068), keyed by env-schema key with an env-schema entry as value. The
   knobs fold into `spindrift.envSchema` on top of lib/env-schema.nix. Only that
@@ -2915,10 +2915,10 @@ read with `ErrNoRoute`. A flake with no github row, one importing core's
 module directly, carries no github backend row, fails github reads the same
 way, has no such variable, and doctor prints no `connector-routes[github]` or
 `connector-routes-widened[github]` row. spindrift's own dogfood shadows the
-Connectors listed in `nix/dogfood-shadow.nix` (opencode, issue #6874) and runs
-those in `nix/dogfood-primary.nix` (none today) as primary, a pinned exception
-to mimicking a new Consumer; its accepted github Route table is baselined in
-`spindrift-connector-routes.json`.
+Connectors listed in `nix/dogfood-shadow.nix` (opencode, issue #6874, and pi,
+issue #6876) and runs those in `nix/dogfood-primary.nix` (none today) as
+primary, a pinned exception to mimicking a new Consumer; its accepted github
+Route table is baselined in `spindrift-connector-routes.json`.
 
 ##### Driver replay
 
@@ -2934,16 +2934,22 @@ compares it with the native Strategy on three things:
 - `resultEvent`: the result text, with the native `ReadResult` as the
   Connector's input.
 
+A Driver whose native Strategy filters its stdout (pi) gets a fourth check,
+`streamFilter`, after the three above: the stream filter sits on the live
+stdout path, which a replay cannot reach, so the shadow feeds the native and
+the Connector filter the Pass's raw stdout and compares the Connector's output
+with the Pass log. A Connector without a filter compares as passthrough.
+
 Records are `spindrift_op` lines on `driver-exec`'s stdout, so they land in the
 Pass log, `.spindrift/logs/issue-<n>.log`, with the other host ops, and CI
 uploads that directory as an artifact (see the `dispatch_start` stamp under
 [Stats](#stats)).
 
 **`shadow_divergence`**, one per mismatch, under `shadow_divergence`: `driver`,
-`check` (`events`, `resolveExit` or `resultEvent`), `line_no` and `line` (the
-Pass log line for `events`; for `resultEvent`, the result text, with `line_no`
-absent on both `resolveExit` and `resultEvent`),
-and `native` and `shadow`, each side's
+`check` (`events`, `resolveExit`, `resultEvent` or `streamFilter`), `line_no`
+and `line` (the Pass log line for `events`; for `resultEvent`, the result text,
+with `line_no` absent on both `resolveExit` and `resultEvent`; for
+`streamFilter`, see below), and `native` and `shadow`, each side's
 result, JSON-encoded. A Pass records at most 100 divergences, and each side is
 clipped to 8 KiB; the summary's `diverged` still counts every mismatch.
 
@@ -2958,6 +2964,32 @@ the sum over the summaries in its Pass logs. The Connector runs on wazero's
 interpreter, as in production; ADR 0073's interpreter-unless-measured
 decision means these cost fields are the measurement that decides whether a
 Connector needs the compiler.
+
+The filter check needs the raw stdout: `driver-exec` keeps a copy in `TMPDIR`,
+teed before the heartbeat writer, only for a shadowed Driver whose native
+Strategy filters (pi today), and removes it after the comparison, also when the
+run errors or `driver-exec` is terminated. After the decode, both filters read
+that copy and the Connector's output is compared with the Pass log. One
+`shadow_divergence` per Pass records a mismatch, with `check: "streamFilter"`:
+`line_no` is the first output line that differs, and `native` and `shadow` are
+each output from that line on, as JSON strings, with up to 1 KiB of the matched
+head of that line in front for context. A side that is not valid UTF-8, a clip
+cut mid-rune at the cap included, is recorded as an object
+`{"invalidUTF8": "<Go-quoted string>"}` instead of a plain string, so two
+outputs differing only in invalid bytes still differ. Each side is clipped to
+8 KiB, and the divergence counts in `diverged` and under the 100-record cap
+like any other. The `shadow_summary` adds these fields, all omitted when the
+filter did not run: `filter_ran`, `filter_bytes` (raw bytes fed),
+`filter_diverged`, `filter_error`, and `filter_native_ns_per_kib` and
+`filter_shadow_ns_per_kib`, the cost of filtering one KiB of raw stdout on each
+side. The filter runs inside the Pass's 2-minute budget, after the decode.
+
+Every error the filter check returns (no raw copy, a trap, a budget overrun
+during the filter) lands in `filter_error` and never fails the run. A Connector
+that fails to load, or whose decode fails or uses up the shared 2-minute
+budget, lands in `error` instead, and the filter check is then skipped, so the
+summary has no `filter_*` fields. A summary with a `filter_error` or with
+`filter_diverged` is not clean, and a filter divergence counts in `diverged`.
 
 Shadow mode never fails a run. A Connector that cannot be loaded gives a
 summary with `loaded: false` and an `error`. One that fails closed mid-run
@@ -2975,10 +3007,11 @@ gives a summary with that `error` and no replay. None of these runs is clean.
 
 A run is **clean** when its Pass logs hold one `shadow_summary` for the shadowed
 Driver per `pass_start` op, and every summary has `loaded: true`, no `error`,
-`compared` above zero and `diverged` zero. A Pass that never emitted a summary,
-such as one whose replay hit an early error, therefore makes the run not clean,
-as does a run where the shadow never ran. `pass_start` does not name its
-Driver, but a Box runs one Driver and its log's `dispatch_start` stamp does, so
+`compared` above zero and `diverged` zero, and a live summary has no
+`filter_error` and no `filter_diverged` either. A Pass that never emitted a
+summary, such as one whose replay hit an early error, therefore makes the run
+not clean, as does a run where the shadow never ran. `pass_start` does not name
+its Driver, but a Box runs one Driver and its log's `dispatch_start` stamp does, so
 the recipe skips a log whose stamp names another Driver (dogfood also runs
 opencode). A Pass has ended once its `pass_usage` op is in the log. A log with a
 Pass not yet ended is a run still in flight, and the recipe skips it, so a live
@@ -3047,7 +3080,11 @@ for f in "$logs"/issue-*.log; do
     | (if $passes == 0 or ($start.driver // $driver) != $driver then "skip"
        elif $ended < $passes and ($settled | not) then "skip"
        elif ($sets | length) > 0 and all($sets[]; length == $passes
-         and all(.[]; .loaded and (.error // "") == "" and .compared > 0 and .diverged == 0))
+         and all(.[]; .loaded and (.error // "") == ""
+           and ((.filter_error // "") == ""
+             or (.replayed == true and ($live | length) == $passes))
+           and (.filter_diverged // false | not)
+           and .compared > 0 and .diverged == 0))
        then "clean" else "dirty" end) as $verdict
     | "\(($start.started // "") | utc)\t\($verdict)"' "$f"
 done | LC_ALL=C sort -r | awk -F'\t' '
@@ -3066,12 +3103,17 @@ count.
 The recipe also reads each log's `.shadow-replay.jsonl` sidecar. A run is one
 log, so it counts once however many summaries it has; its live and replayed
 summaries are each checked against the clean rule, and a divergence in either
-breaks the count. Set `driver` to the shadowed Driver (`opencode` here). The
-two sets are judged separately: each non-empty set must be clean with one
-summary per Pass, so a complete clean replay does not fill the gaps in a
-partial live set, and such a run counts dirty. A sidecar counts only when it
-opens with its log's own `dispatch_start`; otherwise it is ignored, so replay
-again.
+breaks the count. Set `driver` to the shadowed Driver (`opencode` here, `pi`
+for pi). A pi run is clean only when its decode and its filter shadow both are:
+a filter divergence counts in `diverged`, a summary with `filter_diverged` is
+dirty too, and a live summary's `filter_error` breaks the count on its own. A
+replayed summary always carries a `filter_error` (replay has no raw stdout), so
+the recipe forgives it only beside a complete live set, which judges the
+filter; a pi run only a replay can judge counts dirty. The two sets are judged
+separately: each non-empty set must be clean with one summary per Pass, so a
+complete clean replay does not fill the gaps in a partial live set, and such a
+run counts dirty. A sidecar counts only when it opens with its log's own
+`dispatch_start`; otherwise it is ignored, so replay again.
 
 ###### Replaying archived Pass logs
 
@@ -3104,13 +3146,16 @@ Passes ended so far, which makes the run count dirty once it settles; run the
 verb again after it settles.
 
 Pass logs hold the CLI's output after the stream filter, so replay cannot
-prove a filter. pi's filter rests on its Conformance goldens and its live
-shadow runs. The archive also merges the CLI's and driver-exec's stderr into
-the stream, so replay keeps only JSON-object lines: a non-JSON stdout line that
-live compared is dropped and a JSON-shaped stderr line is compared, so a
-replay's `compared` can differ from live's for such a Pass. `gh run download
-<run-id>` without `-n agent-logs-<n>` nests the logs one directory down, and
-the verb then reports no Pass logs found; point it at the nested directory.
+shadow the filter: for a Driver whose native Strategy filters (pi), the raw
+stdout copy exists only during the live Pass, so a replay's summary carries a
+`filter_error` and no `filter_ran`. pi's filter is judged by its live shadow
+and its Conformance goldens. The archive also merges the CLI's and
+driver-exec's stderr into the stream, so replay keeps only JSON-object lines: a
+non-JSON stdout line that live compared is dropped and a JSON-shaped stderr
+line is compared, so a replay's `compared` can differ from live's for such a
+Pass. `gh run download <run-id>` without `-n agent-logs-<n>` nests the logs one
+directory down, and the verb then reports no Pass logs found; point it at the
+nested directory.
 
 ##### Backend read shadow
 
