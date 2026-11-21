@@ -177,12 +177,18 @@ type (
 		Number string `json:"number"`
 		commentRequest
 	}
+	// Selector mirrors the sdk's Selector: one Issue route term.
+	Selector struct {
+		Kind  string `json:"kind"`
+		Value string `json:"value"`
+	}
 	issueRequest struct {
-		Title       string   `json:"title"`
-		Body        string   `json:"body"`
-		Labels      []string `json:"labels"`
-		DedupMarker string   `json:"dedupMarker"`
-		IssueType   string   `json:"issueType"`
+		Title       string     `json:"title"`
+		Body        string     `json:"body"`
+		Labels      []string   `json:"labels"`
+		DedupMarker string     `json:"dedupMarker"`
+		IssueType   string     `json:"issueType"`
+		Route       []Selector `json:"route,omitempty"`
 	}
 	fileIssueParams struct {
 		Target Target `json:"target"`
