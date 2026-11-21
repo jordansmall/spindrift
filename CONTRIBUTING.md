@@ -321,6 +321,8 @@ and in the in-box `box` program; the only bash left is the generated shim that
 - **`connectors/`** — shipped Connector subflakes, each its own Go module built
   to a wasip1 reactor by its own `package.nix`. `connectors/claude` is the
   claude Driver's host half (`spindrift.dev/connector/claude`);
+  `connectors/opencode` is the opencode Driver's host half, registered beside
+  the native opencode Strategy, which stays authoritative;
   `connectors/github` is the github backend's tracker and forge read paths;
   `connectors/jira` is the jira backend's tracker read and write paths
   (transitions, label edits, label list and create); `connectors/forgejo` is

@@ -5,4 +5,5 @@
   ../connectors/forgejo
   ../connectors/github
   ../connectors/jira
+  ../connectors/opencode
 ]
