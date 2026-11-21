@@ -17,6 +17,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"spindrift.dev/launcher/internal/branchrecovery"
@@ -477,6 +478,7 @@ func (r seamRun) wantFirstRun(t *testing.T) {
 }
 
 func TestBoxSeamOutcomePresentRunsNoResume(t *testing.T) {
+	t.Parallel()
 	line := seamOutcomeLine("done", "first")
 	r := runBoxSeam(t, seamCase{
 		repo:       seamRepo(t),
@@ -493,6 +495,7 @@ func TestBoxSeamOutcomePresentRunsNoResume(t *testing.T) {
 }
 
 func TestBoxSeamMissingOutcomeIsNudgedOnce(t *testing.T) {
+	t.Parallel()
 	resumed := seamOutcomeLine("done", "after nudge")
 	r := runBoxSeam(t, seamCase{
 		repo:       seamRepo(t),
@@ -529,6 +532,7 @@ func unrecoveredOutcome(verdictClause string) string {
 }
 
 func TestBoxSeamUnrecoveredOutcomeIsBackstopped(t *testing.T) {
+	t.Parallel()
 	r := runBoxSeam(t, seamCase{repo: seamRepo(t), driverRuns: unrecoveredRuns()})
 	r.res.WantExit(t, 0)
 	r.wantFirstRun(t)
@@ -544,6 +548,7 @@ func TestBoxSeamUnrecoveredOutcomeIsBackstopped(t *testing.T) {
 
 // The reviewer's last verdict reaches the backstop through --run-state-file.
 func TestBoxSeamBackstopReadsRunStateFile(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "run-state.json")
 	if err := os.WriteFile(path, []byte(`{"last_verdict":"BLOCK"}`), 0o644); err != nil {
 		t.Fatal(err)
@@ -565,12 +570,14 @@ func TestBoxSeamBackstopReadsRunStateFile(t *testing.T) {
 // neither nudges it for a missing marker nor resumes it: one Driver run, and
 // the backstop (when the Driver reports nothing) settles it without recovery.
 func TestBoxSeamAdviseOnlyKindsNeverResume(t *testing.T) {
+	t.Parallel()
 	butler := map[string]string{
 		"DISPATCH_KIND": "butler", "DISPATCH_KEYING": "chore", "DISPATCH_ANNOUNCE_VERB": "sweeping",
 		"DISPATCH_KEY": "butler-bugs", "ISSUE_NUMBER": "", "ISSUE_TITLE": "", "CHORE_NAME": "bugs",
 		"CHORE_HEAD": "deadbeef", "CHORE_DIFF_RANGE": "", "CHORE_SLICE": "agent/entrypoint.sh",
 	}
 	t.Run("research with no outcome line is backstopped blocked without a resume", func(t *testing.T) {
+		t.Parallel()
 		r := runBoxSeam(t, seamCase{
 			repo:       seamRepo(t),
 			env:        seamResearchEnv,
@@ -590,6 +597,7 @@ func TestBoxSeamAdviseOnlyKindsNeverResume(t *testing.T) {
 		}
 	})
 	t.Run("read-only butler missing PR-intent gets no nudge", func(t *testing.T) {
+		t.Parallel()
 		line := "SPINDRIFT_OUTCOME issue=butler-bugs landing=none status=ready note=swept"
 		r := runBoxSeam(t, seamCase{
 			repo:       seamRepo(t),
@@ -611,6 +619,7 @@ func TestBoxSeamAdviseOnlyKindsNeverResume(t *testing.T) {
 }
 
 func TestBoxSeamPRIntentNudgeTaken(t *testing.T) {
+	t.Parallel()
 	first := seamOutcomeLine("ready", "done")
 	intent := "SPINDRIFT_PR_INTENT " + seamNonce + " " + base64.StdEncoding.EncodeToString([]byte("feat: x\n\nbody"))
 	repo := seamRepo(t)
@@ -649,6 +658,7 @@ func TestBoxSeamPRIntentNudgeTaken(t *testing.T) {
 }
 
 func TestBoxSeamPRIntentNudgeExhausted(t *testing.T) {
+	t.Parallel()
 	first := seamOutcomeLine("ready", "done")
 	repo := seamRepo(t)
 	r := runBoxSeam(t, seamCase{
@@ -819,6 +829,7 @@ func readonlyWorkEnv(extra map[string]string) map[string]string {
 // output: never regenerate to clear a mismatch, which is exactly the drift
 // these goldens exist to catch.
 func TestBoxSeamDriverInvocationGolden(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		kind string
 		env  map[string]string
@@ -867,6 +878,7 @@ func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.kind, func(t *testing.T) {
+			t.Parallel()
 			box := seamtest.Build(t, "./box")
 			root := t.TempDir()
 			workDir := filepath.Join(root, "work")
@@ -950,6 +962,15 @@ const seamForwarderPort = "27182"
 
 const seamRegistryUpstream = "cargo.mycorp.example"
 
+// seamForwarderListener holds the Forwarder port for the life of the test
+// binary: the port is fixed, so per-test listeners would collide under
+// t.Parallel. It never accepts; the gate's probe only needs the handshake the
+// kernel backlog completes. A port already held elsewhere would let the test
+// pass on someone else's listener, so a bind failure is an error.
+var seamForwarderListener = sync.OnceValues(func() (net.Listener, error) {
+	return net.Listen("tcp", "127.0.0.1:"+seamForwarderPort)
+})
+
 // seamRegistryRoute arms a Registry route for a box run over workDir and
 // returns the env that carries it. The gate wants the proxy's unix socket to
 // exist and the Forwarder port to answer; a listener on that port makes the
@@ -970,13 +991,9 @@ func seamRegistryRoute(t *testing.T, workDir string) map[string]string {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { us.Close() })
-	// The listener is what makes the gate's probe succeed; a port already held
-	// elsewhere would let the test pass on someone else's listener, so fail.
-	tl, err := net.Listen("tcp", "127.0.0.1:"+seamForwarderPort)
-	if err != nil {
+	if _, err := seamForwarderListener(); err != nil {
 		t.Fatalf("Forwarder port %s unavailable: %v", seamForwarderPort, err)
 	}
-	t.Cleanup(func() { tl.Close() })
 
 	seamOriginCommit(t, workDir, "chore: pin private registries", map[string]string{
 		".cargo/config.toml": "[registries.othercorp]\nindex = \"http://" + seamRegistryUpstream + "/other-index/\"\n",
@@ -1067,6 +1084,7 @@ func (c seamCase) boxArgs(t *testing.T, outbox string) []string {
 // work cell and requires the prompt it hands the orchestrator to equal the
 // pinned golden byte for byte: box, not bash, now produces it.
 func TestBoxSeamAssemblesTheGoldenPrompt(t *testing.T) {
+	t.Parallel()
 	r := runBoxSeam(t, seamCase{
 		repo: seamRepo(t),
 		env: map[string]string{
@@ -1119,6 +1137,7 @@ var seamResearchEnv = map[string]string{
 // Driver run: a read-only research prompt without SPINDRIFT_COMMENT would
 // lose the verdict.
 func TestBoxSeamValidatorRejectStopsBeforeTheDriver(t *testing.T) {
+	t.Parallel()
 	r := runBoxSeam(t, seamCase{
 		repo:       seamRepo(t),
 		relay:      true,
@@ -1145,6 +1164,7 @@ func TestBoxSeamValidatorRejectStopsBeforeTheDriver(t *testing.T) {
 // The same row accepts a prompt that carries the marker, however the prose
 // around it is worded.
 func TestBoxSeamValidatorPassesAMarkedResearchPrompt(t *testing.T) {
+	t.Parallel()
 	r := runBoxSeam(t, seamCase{
 		repo:  seamRepo(t),
 		relay: true,
@@ -1166,6 +1186,7 @@ func TestBoxSeamValidatorPassesAMarkedResearchPrompt(t *testing.T) {
 // A warn row is advisory: a read-only work prompt without SPINDRIFT_PR_INTENT
 // reaches the Driver, with the advisory in the Box log.
 func TestBoxSeamValidatorWarnsAndProceeds(t *testing.T) {
+	t.Parallel()
 	r := runBoxSeam(t, seamCase{
 		repo:       seamRepo(t),
 		relay:      true,
@@ -1184,6 +1205,7 @@ func TestBoxSeamValidatorWarnsAndProceeds(t *testing.T) {
 // box's flags are the only source of the Driver settings in the handoff the
 // orchestrator receives: the real binary carries each one through.
 func TestBoxSeamHandoffCarriesTheFlagSettings(t *testing.T) {
+	t.Parallel()
 	handoff := func(t *testing.T, extra ...string) promptassembly.Handoff {
 		t.Helper()
 		r := runBoxSeam(t, seamCase{
@@ -1200,6 +1222,7 @@ func TestBoxSeamHandoffCarriesTheFlagSettings(t *testing.T) {
 	}
 
 	t.Run("operator knobs", func(t *testing.T) {
+		t.Parallel()
 		h := handoff(t, "--model=claude-test-model", "--effort=high", "--max-budget-tokens=500000", "--max-budget-usd=4.44")
 		if h.Model != "claude-test-model" || h.Effort != "high" {
 			t.Errorf("model/effort = %q/%q", h.Model, h.Effort)
@@ -1210,6 +1233,7 @@ func TestBoxSeamHandoffCarriesTheFlagSettings(t *testing.T) {
 	})
 
 	t.Run("schema defaults and claude's argv shape", func(t *testing.T) {
+		t.Parallel()
 		h := handoff(t)
 		if h.DriverBin != "claude" || h.Driver != "claude" {
 			t.Errorf("driver = %q bin %q", h.Driver, h.DriverBin)
@@ -1327,6 +1351,7 @@ func (r seamRun) wantConflictPass(t *testing.T) seamtest.Snapshot {
 }
 
 func TestBoxSeamConflictUnresolvedAborts(t *testing.T) {
+	t.Parallel()
 	repo := seamConflictRepo(t)
 	head := seamRevParse(t, seamOriginPath(repo), "refs/heads/"+seamBranch)
 	r := runBoxSeam(t, seamCase{
@@ -1357,6 +1382,7 @@ func TestBoxSeamConflictUnresolvedAborts(t *testing.T) {
 }
 
 func TestBoxSeamConflictResolvedContinuesIntoTheMainRun(t *testing.T) {
+	t.Parallel()
 	repo := seamConflictRepo(t)
 	r := runBoxSeam(t, seamCase{
 		repo:     repo,
@@ -1392,6 +1418,7 @@ func TestBoxSeamConflictResolvedContinuesIntoTheMainRun(t *testing.T) {
 }
 
 func TestBoxSeamConflictResolveOnlyStopsBeforeTheMainRun(t *testing.T) {
+	t.Parallel()
 	repo := seamConflictRepo(t)
 	r := runBoxSeam(t, seamCase{
 		repo:       repo,
@@ -1561,6 +1588,7 @@ func assertSkillsPreamble(t *testing.T, r seamRun, want string) {
 }
 
 func TestBoxSeamLaysOutClaudeHome(t *testing.T) {
+	t.Parallel()
 	f := seamAgentFiles(t, "claude")
 	r := runBoxSeam(t, seamHomeCase(t, f, filepath.Join(t.TempDir(), "no-operator"), filepath.Join(".claude", "projects"), ""))
 	r.res.WantExit(t, 0)
@@ -1576,6 +1604,7 @@ func TestBoxSeamLaysOutClaudeHome(t *testing.T) {
 }
 
 func TestBoxSeamOperatorSkillOverridesHarnessSkill(t *testing.T) {
+	t.Parallel()
 	f := seamAgentFiles(t, "claude")
 	operator := t.TempDir()
 	for name, body := range map[string]string{"auto-format": "operator's own\n", "operator-only": "mine\n"} {
@@ -1601,6 +1630,7 @@ func TestBoxSeamOperatorSkillOverridesHarnessSkill(t *testing.T) {
 }
 
 func TestBoxSeamLaysOutOpencodeHome(t *testing.T) {
+	t.Parallel()
 	f := seamAgentFiles(t, "opencode")
 	agentsRel := filepath.Join(".config", "opencode", "agents")
 	r := runBoxSeam(t, seamHomeCase(t, f, filepath.Join(t.TempDir(), "no-operator"), "", agentsRel,
@@ -1642,6 +1672,7 @@ func TestBoxSeamLaysOutOpencodeHome(t *testing.T) {
 // nix fake, and pins the devshell pair the golden renders for the Driver
 // invocation: the probe's outcome decides it, never the flake alone.
 func TestBoxSeamDevshellPair(t *testing.T) {
+	t.Parallel()
 	probe := []string{"develop", ".#ci", "--command", "true"}
 	for _, c := range []struct {
 		name      string
@@ -1653,6 +1684,7 @@ func TestBoxSeamDevshellPair(t *testing.T) {
 		{"absent", nil, "false default", "==> no devShell in flake (or nix develop failed) — using baked toolchain"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			repo := seamRepo(t)
 			seamOriginCommit(t, repo, "chore: add flake", map[string]string{"flake.nix": "{}"})
 			r := runBoxSeam(t, seamCase{
@@ -1684,6 +1716,7 @@ func TestBoxSeamDevshellPair(t *testing.T) {
 // pass exited clean or not, and a clean repo stays quiet. The scan only needs
 // the manifest to parse, so the endpoint need not exist.
 func TestBoxSeamLockfileScanWarnsAtSettle(t *testing.T) {
+	t.Parallel()
 	const warning = "==> WARNING: cargo lockfile Cargo.lock still names the registry proxy Forwarder URL 127.0.0.1:" +
 		seamForwarderPort + " — this will ship in the PR (issue #3199)"
 	cases := []struct {
@@ -1698,6 +1731,7 @@ func TestBoxSeamLockfileScanWarnsAtSettle(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			repo := seamRepo(t)
 			if c.staleLock {
 				lock := "[[package]]\nname = \"example\"\nsource = \"registry+http://127.0.0.1:" + seamForwarderPort + "/r0/index/\"\n"
@@ -1724,6 +1758,7 @@ func TestBoxSeamLockfileScanWarnsAtSettle(t *testing.T) {
 // TestBoxSeamReadonlyGuards runs box over each access mode and backend,
 // asserting on the push hooks its guard step leaves behind.
 func TestBoxSeamReadonlyGuards(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		relay bool // the outbox relay is on (BOX_OUTBOX_RELAY_CAPABLE)
@@ -1764,6 +1799,7 @@ func TestBoxSeamReadonlyGuards(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			work := seamRepo(t)
 			if c.env["SELF_CONTAINED"] == "1" {
 				// Box skips branch recovery for a self-contained run, yet this work
@@ -1810,6 +1846,7 @@ func TestBoxSeamReadonlyGuards(t *testing.T) {
 // A Box missing something its dispatch needs stops in the env-guards phase,
 // naming the variable, before the Driver or orchestrator runs.
 func TestBoxSeamEnvGuardNamesTheMissingVariable(t *testing.T) {
+	t.Parallel()
 	butler := map[string]string{
 		"DISPATCH_KIND": "butler", "DISPATCH_KEYING": "chore", "DISPATCH_ANNOUNCE_VERB": "sweeping",
 		"DISPATCH_KEY": "butler-bugs", "ISSUE_NUMBER": "", "CHORE_NAME": "bugs",
@@ -1829,6 +1866,7 @@ func TestBoxSeamEnvGuardNamesTheMissingVariable(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			r := runBoxSeam(t, seamCase{repo: seamRepo(t), env: c.env})
 			r.res.WantExit(t, 1)
 			if want := "box: env-guards: " + c.want; !strings.Contains(r.res.Stderr, want) {
@@ -1844,6 +1882,7 @@ func TestBoxSeamEnvGuardNamesTheMissingVariable(t *testing.T) {
 // Fully-local and self-contained-with-no-reachable-tracker dispatches have no
 // forge to resolve REPO_SLUG against, so the guard skips it.
 func TestBoxSeamEnvGuardExemptsForgelessDispatches(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		env  map[string]string
@@ -1859,6 +1898,7 @@ func TestBoxSeamEnvGuardExemptsForgelessDispatches(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			r := runBoxSeam(t, seamCase{
 				repo:       seamRepo(t),
 				relay:      true,
@@ -1883,6 +1923,7 @@ func mergedEnv(srcs ...map[string]string) map[string]string {
 }
 
 func TestBoxSeamPrintsTheWritableStoreNotice(t *testing.T) {
+	t.Parallel()
 	r := runBoxSeam(t, seamCase{
 		repo:       seamRepo(t),
 		env:        map[string]string{"NIX_STORE_WRITABLE": "true"},
@@ -1958,6 +1999,7 @@ func seamBundleHeads(t *testing.T, work, outbox string) map[string]string {
 // ignored, and the result is read off the unmoved origin ref or the relayed
 // bundle.
 func TestBoxSeamBranchRecovery(t *testing.T) {
+	t.Parallel()
 	forgejo := map[string]string{
 		"CODE_FORGE": "forgejo", "BOX_FORGE_BACKEND": "FORGEJO",
 		"FORGEJO_TOKEN": "tok", "FORGEJO_BASE_URL": "https://forge.example",
@@ -2016,6 +2058,7 @@ func TestBoxSeamBranchRecovery(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			repo := seamRepo(t)
 			if c.prior {
 				repo = seamPriorBranchRepo(t, c.advance, !c.noWork)
@@ -2079,6 +2122,7 @@ func TestBoxSeamBranchRecovery(t *testing.T) {
 // aborts before the Driver and leaves the prior branch alone rather than
 // force-resetting a live PR.
 func TestBoxSeamBranchRecoveryUnsetHostAnswerAborts(t *testing.T) {
+	t.Parallel()
 	repo := seamPriorBranchRepo(t, true, true)
 	prior := seamOriginRef(t, repo)
 	r := runBoxSeam(t, seamCase{
@@ -2137,6 +2181,7 @@ func seamWantNoForgeToken(t *testing.T, envDump string) {
 // rebased as a bundle, none resets it to main with nothing to relay, and a
 // failed host lookup aborts rather than reading as "no PR".
 func TestBoxSeamBranchRecoveryTokenlessAnswersFromTheHost(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name       string
 		hostOpenPR string
@@ -2156,6 +2201,7 @@ func TestBoxSeamBranchRecoveryTokenlessAnswersFromTheHost(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			repo := seamPriorBranchRepo(t, true, true)
 			prior := seamOriginRef(t, repo)
 			envDump := filepath.Join(t.TempDir(), "box.env")
@@ -2215,6 +2261,7 @@ func TestBoxSeamBranchRecoveryTokenlessAnswersFromTheHost(t *testing.T) {
 // pass still runs and the main run still follows, with no forge token in the
 // Box.
 func TestBoxSeamConflictResolveRunsForATokenlessBox(t *testing.T) {
+	t.Parallel()
 	repo := seamConflictRepo(t)
 	envDump := filepath.Join(t.TempDir(), "box.env")
 	sc := seamTokenlessCase(t, repo, branchrecovery.HostOpenPROpen, []seamtest.DriverRun{
@@ -2249,6 +2296,7 @@ func seamGitOut(t *testing.T, dir string, args ...string) string {
 // in the outbox, and what outcome line the harness leaves behind, for each
 // posture that relays code through it.
 func TestBoxSeamSettleBundleOut(t *testing.T) {
+	t.Parallel()
 	local := map[string]string{"CODE_FORGE": "local", "BOX_HOST_MEDIATED_REMOTE": "1"}
 	ready := seamOutcomeLine("ready", "done")
 	resolved := seamOutcomeLine("already-resolved", "dup")
@@ -2327,6 +2375,7 @@ func TestBoxSeamSettleBundleOut(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			repo := seamRepo(t)
 			r := runBoxSeam(t, seamCase{
 				repo: repo, relay: c.relay, env: c.env, driverRuns: c.runs(repo),
@@ -2380,6 +2429,7 @@ func TestBoxSeamSettleBundleOut(t *testing.T) {
 // An unrecognised dispatch kind fails closed rather than defaulting to a
 // posture, and before it clones or creates anything.
 func TestBoxSeamUnrecognizedDispatchKindFails(t *testing.T) {
+	t.Parallel()
 	repo := seamRepo(t)
 	r := runBoxSeam(t, seamCase{
 		repo:       repo,
@@ -2402,6 +2452,7 @@ func TestBoxSeamUnrecognizedDispatchKindFails(t *testing.T) {
 }
 
 func TestBoxSeamClonesTheTargetOntoTheAgentBranch(t *testing.T) {
+	t.Parallel()
 	repo := seamRepo(t)
 	r := runBoxSeam(t, seamCase{
 		repo:       repo,
@@ -2419,6 +2470,7 @@ func TestBoxSeamClonesTheTargetOntoTheAgentBranch(t *testing.T) {
 }
 
 func TestBoxSeamLocalForgeClonesTheMount(t *testing.T) {
+	t.Parallel()
 	repo := seamRepo(t)
 	env := map[string]string{"CODE_FORGE": "local", "BOX_HOST_MEDIATED_REMOTE": "1"}
 	r := runBoxSeam(t, seamCase{
@@ -2444,6 +2496,7 @@ func TestBoxSeamLocalForgeClonesTheMount(t *testing.T) {
 // TestBuildBoxEnvDropsEveryForgeToken and
 // TestSeamSmokeReadOnlyBoxCarriesNoForgeToken.
 func TestBoxSeamReadOnlyBoxRunsWithNoForgeCredential(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		forge    string
 		env      map[string]string
@@ -2462,6 +2515,7 @@ func TestBoxSeamReadOnlyBoxRunsWithNoForgeCredential(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.forge, func(t *testing.T) {
+			t.Parallel()
 			repo := seamRepo(t)
 			envDump := filepath.Join(t.TempDir(), "box.env")
 			env := map[string]string{}
@@ -2499,6 +2553,7 @@ func TestBoxSeamReadOnlyBoxRunsWithNoForgeCredential(t *testing.T) {
 }
 
 func TestBoxSeamSelfContainedClonesNothing(t *testing.T) {
+	t.Parallel()
 	repo := seamRepo(t)
 	r := runBoxSeam(t, seamCase{
 		repo: repo, relay: true,
@@ -2521,6 +2576,7 @@ func TestBoxSeamSelfContainedClonesNothing(t *testing.T) {
 // onto base first, never push itself, report a persistent failure as blocked,
 // and treat a genuine workflow-file change as a hard stop.
 func TestBoxSeamPromptCarriesPushDiscipline(t *testing.T) {
+	t.Parallel()
 	r := runBoxSeam(t, seamCase{
 		repo:       seamRepo(t),
 		driverRuns: []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "prompt"))}},
