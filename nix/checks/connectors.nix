@@ -41,6 +41,11 @@ let
     coreModule
     githubConnector.flakeModule
   ];
+  piConnector = (import ../../connectors/pi).lib.connector { inherit core; };
+  withPi = fixtures.connectorConsumerVia [
+    coreModule
+    piConnector.flakeModule
+  ];
   jiraConnector = (import ../../connectors/jira).lib.connector { inherit core; };
   withJira = fixtures.connectorConsumerVia [
     coreModule
@@ -140,6 +145,22 @@ in
       drivers.renderPreamble row == drivers.renderPreamble drivers.entries.claude
     ) "the claude Connector's row must render core's claude preamble";
     pkgs.runCommand "connectors-claude-contributes-driver-row" { } "touch $out";
+
+  # Issue #6875: the pi Connector contributes pi's row, so the Descriptor facts
+  # and the in-box preamble it renders match core's, and it carries a module.
+  connectors-pi-contributes-driver-row =
+    let
+      row = (configOf withPi).connectors.pi.driver or null;
+    in
+    assert assertMsg (row != null) "the pi Connector must contribute a Driver row";
+    assert assertMsg (
+      drivers.descriptorFacts row == drivers.descriptorFacts drivers.entries.pi
+    ) "the pi Connector's row must carry core's pi Descriptor facts";
+    assert assertMsg (
+      drivers.renderPreamble row == drivers.renderPreamble drivers.entries.pi
+    ) "the pi Connector's row must render core's pi preamble";
+    assert assertMsg (row ? module) "the pi Connector's row must carry a `module`";
+    pkgs.runCommand "connectors-pi-contributes-driver-row" { } "touch $out";
 
   # The github Connector's module registers its Route table on the row, so
   # the table a Consumer's row carries is the one routes.nix declares.

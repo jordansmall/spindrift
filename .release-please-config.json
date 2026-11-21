@@ -37,6 +37,9 @@
     },
     "connectors/opencode": {
       "component": "opencode"
+    },
+    "connectors/pi": {
+      "component": "pi"
     }
   }
 }

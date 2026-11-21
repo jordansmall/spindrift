@@ -6,4 +6,5 @@
   ../connectors/github
   ../connectors/jira
   ../connectors/opencode
+  ../connectors/pi
 ]
