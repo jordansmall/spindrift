@@ -440,32 +440,26 @@ command_backgrounds() {
   # or a backtick substitution sits right before the keyword (#6215).
   local kw_lead='(^|[[:space:];|(&`])'
 
-  # nohup survives the calling shell exiting, the hazard this hook exists to
-  # catch, so it is rejected even without an accompanying &.
+  # nohup and setsid survive the calling shell exiting even without an &;
+  # coproc is a background job. #1635 added setsid and coproc.
   local nohup_re="${kw_lead}nohup([[:space:]]|$)"
   [[ "$masked" =~ $nohup_re ]] && return 0
 
-  # setsid detaches into a new session, surviving the calling shell the same
-  # way nohup does.
   local setsid_re="${kw_lead}setsid([[:space:]]|$)"
   [[ "$masked" =~ $setsid_re ]] && return 0
 
-  # coproc spawns a bash coprocess as a background job. The regex covers both
-  # the named and unnamed forms.
   local coproc_re="${kw_lead}coproc([[:space:]]|$)"
   [[ "$masked" =~ $coproc_re ]] && return 0
 
-  # #1635 closed setsid and coproc. Other ways to detach from the calling
-  # session, such as disown, at, systemd-run, screen -d and tmux
-  # new-session -d, stay deliberately out of scope (#1620's deferral list).
+  # disown, at, systemd-run, screen -d and tmux new-session -d stay
+  # deliberately out of scope (#1620's deferral list).
   return 1
 }
 
 input="$(cat)"
 
-# Non-JSON stdin makes these extractions come back empty, which reads as a
-# non-matching call and allows it, the same as any other non-match. jq's parse
-# error is silenced so a stray payload does not spam the transcript.
+# Non-JSON stdin extracts as empty, a non-matching call, so it is allowed. jq's
+# parse error is silenced so a stray payload does not spam the transcript.
 if [ "$(jq -r '.tool_name // empty' 2>/dev/null <<<"$input")" != "Bash" ]; then
   exit 0
 fi
