@@ -45,20 +45,3 @@ func windowPage[T any](r *http.Request, items []T) []T {
 	}
 	return items[start:end]
 }
-
-// serveCappedNumbered renders a fake list endpoint serving items numbered
-// 1..total, windowed by windowPage so every page is capped at
-// forgejoServerPageCap regardless of the client's requested limit, then an
-// empty page. render(start, count) produces a non-empty window's JSON.
-func serveCappedNumbered(w http.ResponseWriter, r *http.Request, total int, render func(start, count int) string) {
-	nums := make([]int, total)
-	for i := range nums {
-		nums[i] = i + 1
-	}
-	windowed := windowPage(r, nums)
-	if len(windowed) == 0 {
-		w.Write([]byte(`[]`))
-		return
-	}
-	w.Write([]byte(render(windowed[0], len(windowed))))
-}

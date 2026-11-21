@@ -104,12 +104,10 @@ func (w trackerHarness) numbersTitled(title string) []string {
 	return nums
 }
 
-// testTrackerRoutes runs the tracker contract through the Connector, then what
-// the contracts do not reach: the label registry, the org labels, closing a
-// merged issue, the research marker surviving a comment, and the finding's
-// marker surviving filing.
+// testTrackerRoutes runs what the tracker contract does not reach: the label
+// registry, the org labels, closing a merged issue, the research marker
+// surviving a comment, and the finding's marker surviving filing.
 func testTrackerRoutes(t *testing.T, w trackerHarness) {
-	forgetest.RunTrackerContract(t, w)
 	t.Run("LabelRegistry", func(t *testing.T) { testLabelRegistry(t, w) })
 	t.Run("OrgLabelsResolveOnFiling", func(t *testing.T) { testOrgLabelsResolveOnFiling(t, w) })
 	t.Run("UnreadableOrgFilesAndAppliesByName", func(t *testing.T) { testUnreadableOrgFilesAndAppliesByName(t, w) })

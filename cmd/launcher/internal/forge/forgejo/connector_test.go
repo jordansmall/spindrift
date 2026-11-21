@@ -456,6 +456,7 @@ func TestConnector_Contracts(t *testing.T) {
 	}
 	t.Run("TrackerRoutes", func(t *testing.T) {
 		w := newTrackerHarness(t)
+		forgetest.RunTrackerContract(t, w)
 		testTrackerRoutes(t, w)
 		cov.record(t, w.connectorHarness)
 	})

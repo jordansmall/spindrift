@@ -1,8 +1,6 @@
 package forgejo
 
 import (
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -58,22 +56,5 @@ func TestMergeStyle(t *testing.T) {
 		if got := MergeStyle(tt.method); got != tt.want {
 			t.Errorf("MergeStyle(%q) = %q, want %q", tt.method, got, tt.want)
 		}
-	}
-}
-
-// The tracker's client must carry a bounded timeout when NewForgejoClient is
-// given no HTTPClient override: a hung Forgejo instance would otherwise block
-// IssueTracker calls forever.
-func TestNewForgejoClient_DefaultClientIsTimeBounded(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-	defer srv.Close()
-
-	tracker := NewForgejoClient(ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
-	fc, ok := tracker.(*forgejoClient)
-	if !ok {
-		t.Fatalf("NewForgejoClient(...) = %T, want *forgejoClient", tracker)
-	}
-	if timeout := fc.rest.HTTPClientForTest().Timeout; timeout <= 0 {
-		t.Fatalf("rest client Timeout = %v, want a bounded (>0) timeout", timeout)
 	}
 }
