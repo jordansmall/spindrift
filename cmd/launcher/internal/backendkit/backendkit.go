@@ -27,11 +27,14 @@ type Lookup = func(env string) (value string, ok bool)
 // backend's own knobs come through Lookup and its generated ReadKnobs, never a
 // field here.
 type Shared struct {
-	RepoSlug      string
-	BaseBranch    string
-	GitUserName   string
-	GitUserEmail  string
-	Labels        forge.DispatchLabels
+	RepoSlug     string
+	BaseBranch   string
+	GitUserName  string
+	GitUserEmail string
+	Labels       forge.DispatchLabels
+	// Route narrows the Tracker scope to one Target repo (ADR 0075); nil is
+	// the whole scope.
+	Route         forge.Route
 	VerdictLabels forge.VerdictLabels
 	MergeMode     string
 	MergeMethod   string

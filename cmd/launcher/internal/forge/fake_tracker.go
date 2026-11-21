@@ -17,6 +17,11 @@ type IssueTrackerFake struct {
 	*core
 
 	labels DispatchLabels
+	// Route narrows ListIssues and CountReady to issues carrying every label
+	// selector, and the AsIssueFiler and AsLocalIssueFiler wrappers stamp it
+	// onto the labels PostIssue records. Set it directly; nil is the whole
+	// scope.
+	Route Route
 	// VerdictLabels maps a Verdict to the label CompleteVerdict writes. Set it
 	// directly: there is no constructor argument.
 	VerdictLabels VerdictLabels
@@ -199,6 +204,9 @@ func (tf *IssueTrackerFake) listState(state DispatchState) []Issue {
 		// Labels without Priority cannot drift the two apart (#2281). The
 		// github adapter resolves at its own read edge for the same reason.
 		iss.Priority = ResolvePriority(iss.Labels)
+		if !tf.Route.MatchesLabels(iss.Labels) {
+			continue
+		}
 		if label == "" {
 			// A DispatchState the tracker's label family leaves unmapped
 			// matches every open issue, not none: gh ignores `--label ""` and

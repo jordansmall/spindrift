@@ -34,6 +34,7 @@ func (f *Fake) AsIssueFiler() IssueTracker {
 }
 
 func (i issueFilerTracker) PostIssue(title, body string, labels []string) (string, error) {
+	labels = i.f.Route.StampLabels(labels)
 	return i.f.postIssue(title, body, labels, func() error {
 		if missing := i.f.missingLabels(labels); len(missing) > 0 {
 			return fmt.Errorf("could not add label: %q not found", missing)
@@ -116,7 +117,7 @@ func (l localIssueFilerTracker) CloseIssue(num string) error {
 }
 
 func (l localIssueFilerTracker) PostIssue(title, body string, labels []string) (string, error) {
-	return l.f.postIssue(title, body, labels, nil)
+	return l.f.postIssue(title, body, l.f.Route.StampLabels(labels), nil)
 }
 
 // AsLocalIssueFiler returns f in the local adapter's combined shape, AsLocalShaped plus HostPostedIssueFiler (issue #2592).

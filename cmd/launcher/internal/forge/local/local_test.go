@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -1952,5 +1953,75 @@ func TestLocalTracker_CloseIssue_KeepsClosedAtWhenAlreadyClosed(t *testing.T) {
 	}
 	if want := time.Date(2026, 8, 15, 10, 30, 0, 0, time.UTC); !iss.ClosedAt.Equal(want) {
 		t.Errorf("ClosedAt = %v, want unchanged %v", iss.ClosedAt, want)
+	}
+}
+
+func TestLocalTracker_Route_NarrowsDispatchableListAndCount(t *testing.T) {
+	dir := t.TempDir()
+	mk := func(slug string, labels ...string) {
+		writeLocalIssue(t, dir, slug, localIssue{frontmatter: localFrontmatter{
+			Title: slug, State: testLabels.Dispatchable, Labels: labels, Created: "2026-01-01T00:00:00Z",
+		}})
+	}
+	mk("both", "orders", "billing")
+	mk("orders-only", "orders")
+	mk("none")
+
+	slugs := func(lt *LocalTracker) []string {
+		t.Helper()
+		got, err := lt.ListIssues(forge.Dispatchable)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, i := range got {
+			out = append(out, i.Number)
+		}
+		sort.Strings(out)
+		return out
+	}
+
+	if got := slugs(NewLocalTracker(dir, testLabels)); !reflect.DeepEqual(got, []string{"both", "none", "orders-only"}) {
+		t.Errorf("unset route listed %v, want all three", got)
+	}
+	one := NewLocalTracker(dir, testLabels).WithRoute(forge.Route{{Kind: "label", Value: "orders"}})
+	if got := slugs(one); !reflect.DeepEqual(got, []string{"both", "orders-only"}) {
+		t.Errorf("one-label route listed %v", got)
+	}
+	if n, _ := one.CountReady(false); n != 2 {
+		t.Errorf("CountReady = %d, want 2", n)
+	}
+	both := NewLocalTracker(dir, testLabels).WithRoute(forge.Route{{Kind: "label", Value: "orders"}, {Kind: "label", Value: "billing"}})
+	if got := slugs(both); !reflect.DeepEqual(got, []string{"both"}) {
+		t.Errorf("two-label route listed %v, want ANDed to [both]", got)
+	}
+	if open, _ := one.ListOpenIssues(); len(open) != 3 {
+		t.Errorf("ListOpenIssues under a route = %d issues, want the unrouted 3", len(open))
+	}
+}
+
+func TestLocalTracker_PostIssue_StampsRouteLabel(t *testing.T) {
+	dir := t.TempDir()
+	labelsOf := func(lt *LocalTracker, title string, in []string) []string {
+		t.Helper()
+		ref, err := lt.PostIssue(title, "b", in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		iss, err := lt.Issue(strings.TrimPrefix(ref, "local:"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return iss.Labels
+	}
+	if got := labelsOf(NewLocalTracker(dir, testLabels), "plain", []string{"bug"}); !reflect.DeepEqual(got, []string{"bug"}) {
+		t.Errorf("unset route labels = %v, want [bug]", got)
+	}
+	routed := NewLocalTracker(dir, testLabels).WithRoute(forge.Route{{Kind: "label", Value: "orders"}})
+	if got := labelsOf(routed, "stamped", []string{"bug"}); !reflect.DeepEqual(got, []string{"bug", "orders"}) {
+		t.Errorf("routed labels = %v, want [bug orders]", got)
+	}
+	if got := labelsOf(routed, "already", []string{"orders"}); !reflect.DeepEqual(got, []string{"orders"}) {
+		t.Errorf("pre-labelled = %v, want no duplicate", got)
 	}
 }
