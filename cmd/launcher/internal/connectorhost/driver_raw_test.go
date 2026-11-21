@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"spindrift.dev/launcher/internal/connectorhost"
@@ -69,6 +70,9 @@ func TestDriverRawMatchesJSON(t *testing.T) {
 // A line far past any buffer size round-trips intact, escapes and invalid
 // UTF-8 included, and its neighbours around it still decode in order.
 func TestDriverRawMatchesJSONOnVeryLongLine(t *testing.T) {
+	// The interpreter's decodes of the line can outrun the production budget on
+	// a loaded runner, and this test checks the decode, not the budget.
+	defer connectorhost.SetCallBudget(time.Minute)()
 	c, err := load(t, "driver.wasm")
 	if err != nil {
 		t.Fatal(err)
@@ -84,8 +88,7 @@ func TestDriverRawMatchesJSONOnVeryLongLine(t *testing.T) {
 }
 
 // veryLongLine is about 80 KB: past the 64 KiB bufio default, under the
-// request cap even after JSON escaping. No bigger, since each decode of it runs
-// against a wall-clock call budget a loaded CI runner can exhaust.
+// request cap even after JSON escaping.
 func veryLongLine() string {
 	return strings.Repeat("ab\"\\\t\r\xffé ", 1<<13)
 }
