@@ -1173,9 +1173,9 @@ func (a *bwrapAdapter) RemoveHostTree(path string) error { return os.RemoveAll(p
 // Kill sends SIGKILL to name's tracked live process, if Run has one under that
 // name, and otherwise to everything in name's live cgroup, so a Box or
 // Connector sandbox a previous launcher started is killed by name as the OCI
-// runners do (the orphan sweep, Console/Reclaim's Terminate). A miss
-// (already exited, or never launched) is not an error: Terminate's reap step
-// is best-effort by design.
+// runners do (the orphan sweep, Reclaim's Terminate). A miss (already exited,
+// or never launched) is not an error: Terminate's reap step is best-effort by
+// design.
 func (a *bwrapAdapter) Kill(name string) error {
 	a.mu.Lock()
 	proc := a.running[name]
@@ -1244,9 +1244,10 @@ func (a *bwrapAdapter) IsRunning(name string) bool {
 }
 
 // ListRunning enumerates every spindrift-* cgroup dir anywhere under
-// cgroupFSRoot and reports the live subset, so Console startup orphan detection
-// (issue #651) finds Boxes started by a prior launcher invocation (issue #2669).
-// No cgroup v2 tree yields a nil slice and no error.
+// cgroupFSRoot and reports the live subset, so reconcile finds Boxes and the
+// orphan sweep finds Connector sandboxes started by a prior launcher
+// invocation (issue #2669); IsRunning reads the same view. No cgroup v2 tree
+// yields a nil slice and no error.
 func (a *bwrapAdapter) ListRunning() ([]string, error) {
 	var names []string
 	for _, cg := range liveCgroups() {

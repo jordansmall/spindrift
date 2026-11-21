@@ -53,8 +53,8 @@ func TestFakeRegistryProxyTransport_ReturnsScriptedEndpoint(t *testing.T) {
 	}
 }
 
-// Orphan detection on Console startup (issue #651) needs a fake source of
-// "still running" sandbox names with no live goroutine tracking them.
+// The orphan sweep and reconcile need a fake source of "still running"
+// sandbox names with no live goroutine tracking them.
 func TestFakeListRunning_ReturnsConfiguredNames(t *testing.T) {
 	f := NewFake()
 	f.RunningNames = []string{"agent-issue-42", "agent-issue-43"}

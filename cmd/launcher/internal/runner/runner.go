@@ -164,12 +164,12 @@ type Runner interface {
 	IsRunning(name string) bool
 
 	// ListRunning returns the names of every sandbox running under this
-	// runtime, for Console startup orphan detection (issue #651). Deliberately
-	// narrower than IsRunning: a container merely created and not yet started
-	// is a candidate owner under IsRunning but not listed here, since this
-	// display is only useful naming sandboxes actually running. bwrap has no
-	// daemon tracking sandboxes by name, so that adapter uses the named
-	// per-Box cgroup (issue #2669) and returns nothing without cgroup v2.
+	// runtime, for reconcile's live-Box lookup and the Connector sandbox
+	// orphan sweep. It is narrower than IsRunning: a container merely created
+	// and not yet started is a candidate owner under IsRunning but not listed
+	// here. bwrap has no daemon tracking sandboxes by name, so that adapter
+	// uses the named per-Box cgroup (issue #2669) and returns nothing without
+	// cgroup v2.
 	ListRunning() ([]string, error)
 
 	// RegistryProxyTransport reports how a Box reaches the registry proxy (ADR
@@ -188,7 +188,7 @@ type Runner interface {
 }
 
 // ConnectorSandboxPrefix starts every Connector sandbox name. It is distinct
-// from the Box name scheme, so ListRunning's orphan detection skips it.
+// from the Box name scheme, so the orphan sweep never reaps a Box.
 const ConnectorSandboxPrefix = "spindrift-connector-sandbox-"
 
 // ConnectorSandbox is a started Connector sandbox's attached stdio.

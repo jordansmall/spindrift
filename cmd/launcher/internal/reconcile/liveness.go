@@ -43,8 +43,8 @@ func (p *FSProbe) LogStale(num string) bool {
 }
 
 // ContainerLive reports whether num's Box container is running, using the same
-// dispatch.BoxName scheme Kill and OrphanedIssues use. A ListRunning failure
-// reports (false, false): no evidence either way, not a confirmed absence.
+// dispatch.BoxName scheme Kill uses. A ListRunning failure reports
+// (false, false): no evidence either way, not a confirmed absence.
 func (p *FSProbe) ContainerLive(num string) (live, reachable bool) {
 	names, err := p.r.ListRunning()
 	if err != nil {
