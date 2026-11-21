@@ -11,9 +11,8 @@ import (
 
 const routeLabel = "orders-api"
 
-func routedTrackerClient(c *execClient) *execClient {
+func setTrackerRoute(c *execClient) {
 	c.route = forge.Route{{Kind: "label", Value: routeLabel}}
-	return c
 }
 
 // An Issue route reaches the Connector on every tracker read and filing, which
@@ -31,7 +30,7 @@ func TestExecClient_IssueRouteNarrowsReadsAndFilesWithItsLabel(t *testing.T) {
 		t.Fatalf("unrouted count reads = %+v; want the dispatch label alone", got)
 	}
 
-	routedTrackerClient(c)
+	setTrackerRoute(c)
 	if n, err := c.CountReady(true); err != nil || n != 1 {
 		t.Errorf("routed CountReady = %d, %v; want 1", n, err)
 	}
@@ -66,8 +65,6 @@ func TestExecClient_IssueRouteNarrowsReadsAndFilesWithItsLabel(t *testing.T) {
 	}
 }
 
-// Only the Issue Tracker is routed: the Code Forge may pair with a tracker
-// whose route is not a GitHub label filter.
 func TestStrategy_RouteReachesTheTrackerNotTheCodeForge(t *testing.T) {
 	s := backendkit.Shared{RepoSlug: "o/r", Route: forge.Route{{Kind: "label", Value: routeLabel}}}
 	tr, err := Strategy.NewIssueTracker(s, nil)
