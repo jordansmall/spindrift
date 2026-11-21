@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"net/url"
 	"slices"
@@ -33,34 +32,45 @@ func trackerProbe(t tracker.Target) (int, error) {
 	return resp.Status, nil
 }
 
-// labelDefined reports whether label exists on the repository or its owner.
-// Forgejo resolves a labels= filter by name and silently drops it when none
-// resolve, answering every issue (#3944, #3952), so the issue queries below
-// skip an undefined label. When the registry cannot rule the label out (an
-// unreadable repo or org lookup, or an org-only label the token cannot see)
-// it counts as defined and the client-side re-check decides.
-func labelDefined(t tracker.Target, label string) bool {
-	labels, orgUnreadable, err := labelUnion(t)
-	if err != nil {
+// allDefined reports whether every label exists on the repository or its
+// owner, reading the registry once. Forgejo resolves a labels= filter by name
+// and silently drops it when none resolve, answering every issue (#3944,
+// #3952), so the issue queries below skip an undefined label. When the
+// registry cannot rule a label out (an unreadable repo or org lookup, or an
+// org-only label the token cannot see) it counts as defined and the
+// client-side re-check decides.
+func allDefined(t tracker.Target, labels []string) bool {
+	registry, orgUnreadable, err := labelUnion(t)
+	if err != nil || orgUnreadable {
 		return true
 	}
-	if slices.ContainsFunc(labels, func(l rawLabel) bool { return l.Name == label }) {
-		return true
-	}
-	return orgUnreadable
+	return !slices.ContainsFunc(labels, func(want string) bool {
+		return !slices.ContainsFunc(registry, func(l rawLabel) bool { return l.Name == want })
+	})
 }
 
 func hasLabel(i tracker.Issue, label string) bool { return slices.Contains(i.Labels, label) }
 
-// count reads the open issues carrying q.Label from the X-Total-Count of a
-// one-item page rather than walking them, clamped to limit when limit > 0.
+// hasAll re-checks every required label: Forgejo silently drops an unresolved
+// labels= filter, so a listed issue may not carry them.
+func hasAll(i tracker.Issue, labels []string) bool {
+	return !slices.ContainsFunc(labels, func(l string) bool { return !hasLabel(i, l) })
+}
+
+// count reads the open issues carrying q.Label and every route label from the
+// X-Total-Count of a one-item page rather than walking them, clamped to limit
+// when limit > 0.
 func count(t tracker.Target, q tracker.Query, limit int, _ bool) (int, error) {
 	v := url.Values{"state": {"open"}, "type": {"issues"}, "limit": {"1"}, "page": {"1"}}
-	if q.Label != "" {
-		if !labelDefined(t, q.Label) {
+	required, err := tracker.RouteLabels(q.Label, q.Route)
+	if err != nil {
+		return 0, err
+	}
+	if len(required) > 0 {
+		if !allDefined(t, required) {
 			return 0, nil
 		}
-		v.Set("labels", q.Label)
+		v.Set("labels", strings.Join(required, ","))
 	}
 	path := issuePath(t, "/issues") + "?" + v.Encode()
 	resp, err := request("GET", t.API, path, nil)
@@ -77,15 +87,15 @@ func count(t tracker.Target, q tracker.Query, limit int, _ bool) (int, error) {
 	if err != nil || total < 0 {
 		return 0, fmt.Errorf("count issues: missing or invalid X-Total-Count header %q", raw)
 	}
-	if q.Label != "" {
+	if len(required) > 0 {
 		var page []rawIssue
 		if err := decode("GET", path, resp.Body, &page); err != nil {
 			return 0, err
 		}
-		// Forgejo dropped the label from the filter, so total counts unrelated
-		// issues; usually labelDefined answered true for a label it could not
+		// Forgejo dropped a label from the filter, so total counts unrelated
+		// issues; usually allDefined answered true for a label it could not
 		// rule out.
-		if len(page) > 0 && !hasLabel(page[0].issue(), q.Label) {
+		if len(page) > 0 && !hasAll(page[0].issue(), required) {
 			return 0, nil
 		}
 	}
@@ -95,17 +105,13 @@ func count(t tracker.Target, q tracker.Query, limit int, _ bool) (int, error) {
 	return total, nil
 }
 
-// labeledPage returns one page of the issues in state carrying label, newest
-// first, with the close date of a closed one. Forgejo records no close reason,
-// so ClosedNotPlanned stays false. The cursor is the page number ("" is page
-// 1); next follows Forgejo's Link header, since an instance may cap a page
-// below limit, and falls back to a full page when the header is absent.
+// labeledPage returns one page of the issues in state carrying label and every
+// route label, newest first, with the close date of a closed one. Forgejo
+// records no close reason, so ClosedNotPlanned stays false. The cursor is the
+// page number ("" is page 1); next follows Forgejo's Link header, since an
+// instance may cap a page below limit, and falls back to a full page when the
+// header is absent.
 func labeledPage(t tracker.Target, label string, route []tracker.Selector, state, cursor string, limit int) ([]tracker.Issue, string, error) {
-	if len(route) > 0 {
-		// No route kind is declared for this tracker; narrowing nothing would
-		// hand back the whole scope as one route's findings.
-		return nil, "", errors.New("list labeled issues: cannot narrow by route")
-	}
 	if limit < 1 {
 		return nil, "", fmt.Errorf("list labeled issues: limit %d < 1", limit)
 	}
@@ -120,12 +126,16 @@ func labeledPage(t tracker.Target, label string, route []tracker.Selector, state
 		}
 		page = n
 	}
-	if !labelDefined(t, label) {
+	required, err := tracker.RouteLabels(label, route)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(required) == 0 || !allDefined(t, required) {
 		return []tracker.Issue{}, "", nil
 	}
 	perPage := min(limit, pageSize)
 	v := url.Values{
-		"state": {state}, "type": {"issues"}, "labels": {label},
+		"state": {state}, "type": {"issues"}, "labels": {strings.Join(required, ",")},
 		"limit": {strconv.Itoa(perPage)}, "page": {strconv.Itoa(page)},
 	}
 	path := issuePath(t, "/issues") + "?" + v.Encode()
@@ -145,7 +155,7 @@ func labeledPage(t tracker.Target, label string, route []tracker.Selector, state
 	for _, r := range raw {
 		i := r.issue()
 		// An unresolved labels= filter is dropped by Forgejo, so re-check.
-		if !hasLabel(i, label) {
+		if !hasAll(i, required) {
 			continue
 		}
 		if r.State == "closed" {
@@ -176,7 +186,7 @@ func search(t tracker.Target, text, state, label string, limit int) ([]tracker.I
 	}
 	v := url.Values{"q": {text}, "type": {"issues"}, "state": {state}, "limit": {strconv.Itoa(limit)}}
 	if label != "" {
-		if !labelDefined(t, label) {
+		if !allDefined(t, []string{label}) {
 			return []tracker.Issue{}, nil
 		}
 		v.Set("labels", label)

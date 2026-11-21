@@ -267,11 +267,115 @@ func TestUnreadableLabelRegistryQueriesAnyway(t *testing.T) {
 	})
 }
 
-func TestLabeledPageRefusesARoute(t *testing.T) {
-	labelStub(t, `[{"id":1,"name":"finding"}]`, status(404), map[string]connector.Response{})
-	withHeaders(t, nil)
-	_, _, err := labeledPage(ttgt, "finding", []tracker.Selector{{Kind: "label", Value: "a"}}, "open", "", 20)
-	if err == nil || !strings.Contains(err.Error(), "route") {
-		t.Fatalf("err = %v, want one naming the route", err)
+func TestCountRouteIsAndedAndRechecked(t *testing.T) {
+	const routed = repoAPI + "/issues?labels=ready%2Corders-api&limit=1&page=1&state=open&type=issues"
+	for _, tc := range []struct {
+		name string
+		page string
+		want int
+	}{
+		{"carries both", `[{"number":3,"labels":[{"name":"ready"},{"name":"orders-api"}]}]`, 12},
+		{"filter dropped by Forgejo", `[{"number":3,"labels":[{"name":"ready"}]}]`, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			labelStub(t, `[{"id":1,"name":"ready"},{"id":2,"name":"orders-api"}]`, status(404), map[string]connector.Response{routed: ok(tc.page)})
+			withHeaders(t, map[string]string{"X-Total-Count": "12"})
+			got, err := count(ttgt, tracker.Query{Label: "ready", Route: orders}, 0, false)
+			if err != nil || got != tc.want {
+				t.Fatalf("count = %d, %v, want %d", got, err, tc.want)
+			}
+		})
 	}
+}
+
+func TestCountUndefinedRouteLabelAsksNoIssues(t *testing.T) {
+	got := labelStub(t, `[{"id":1,"name":"ready"}]`, ok(`[]`), nil)
+	withHeaders(t, map[string]string{"X-Total-Count": "40"})
+	n, err := count(ttgt, tracker.Query{Label: "ready", Route: orders}, 0, false)
+	if err != nil || n != 0 {
+		t.Fatalf("count = %d, %v; want 0, not the whole scope", n, err)
+	}
+	for _, r := range *got {
+		if strings.Contains(r.URL, "/issues?") {
+			t.Fatalf("issue query sent for an undefined route label: %v", r.URL)
+		}
+	}
+}
+
+func TestCountRefusesANonLabelRoute(t *testing.T) {
+	got := stub(t, nil)
+	if _, err := count(ttgt, tracker.Query{Label: "ready", Route: []tracker.Selector{{Kind: "project", Value: "x"}}}, 0, false); err == nil {
+		t.Fatal("want an error")
+	}
+	if len(*got) != 0 {
+		t.Fatalf("requests = %v, want none", *got)
+	}
+}
+
+func TestLabeledPageRouteIsAndedAndRechecked(t *testing.T) {
+	const routed = repoAPI + "/issues?labels=finding%2Corders-api&limit=20&page=1&state=open&type=issues"
+	labelStub(t, `[{"id":1,"name":"finding"},{"id":2,"name":"orders-api"}]`, status(404), map[string]connector.Response{routed: ok(`[
+		{"number":4,"state":"open","labels":[{"name":"finding"},{"name":"orders-api"}]},
+		{"number":5,"state":"open","labels":[{"name":"finding"}]}]`)})
+	got, _, err := labeledPage(ttgt, "finding", orders, "open", "", 20)
+	if err != nil || len(got) != 1 || got[0].Number != "4" {
+		t.Fatalf("labeledPage = %#v, %v; want only issue 4", got, err)
+	}
+}
+
+func TestLabeledPageUndefinedRouteLabelIsEmpty(t *testing.T) {
+	got := labelStub(t, `[{"id":1,"name":"finding"}]`, ok(`[]`), nil)
+	issues, next, err := labeledPage(ttgt, "finding", orders, "open", "", 20)
+	if err != nil || len(issues) != 0 || next != "" {
+		t.Fatalf("labeledPage = %#v, %q, %v; want empty", issues, next, err)
+	}
+	for _, r := range *got {
+		if strings.Contains(r.URL, "/issues?") {
+			t.Fatalf("issue query sent for an undefined route label: %v", r.URL)
+		}
+	}
+}
+
+func TestLabeledPageRefusesANonLabelRoute(t *testing.T) {
+	if _, _, err := labeledPage(ttgt, "finding", []tracker.Selector{{Kind: "project", Value: "x"}}, "open", "", 20); err == nil {
+		t.Fatal("want an error")
+	}
+}
+
+func TestLabeledPageNoLabelAndNoRouteAsksNothing(t *testing.T) {
+	got := stub(t, nil)
+	issues, next, err := labeledPage(ttgt, "", nil, "open", "", 20)
+	if err != nil || issues == nil || len(issues) != 0 || next != "" {
+		t.Fatalf("labeledPage = %#v, %q, %v; want empty", issues, next, err)
+	}
+	if len(*got) != 0 {
+		t.Fatalf("requests = %v, want none", *got)
+	}
+}
+
+func TestRoutedQueriesReadTheLabelRegistryOnce(t *testing.T) {
+	registry := `[{"id":1,"name":"ready"},{"id":2,"name":"orders-api"}]`
+	reads := func(got *[]connector.Request) (n int) {
+		for _, r := range *got {
+			if r.URL == labelsURL+"1" {
+				n++
+			}
+		}
+		return n
+	}
+	t.Run("count", func(t *testing.T) {
+		got := labelStub(t, registry, status(404), nil)
+		withHeaders(t, map[string]string{"X-Total-Count": "0"})
+		_, _ = count(ttgt, tracker.Query{Label: "ready", Route: orders}, 0, false)
+		if n := reads(got); n != 1 {
+			t.Fatalf("registry read %d times, want 1", n)
+		}
+	})
+	t.Run("labeledPage", func(t *testing.T) {
+		got := labelStub(t, registry, status(404), nil)
+		_, _, _ = labeledPage(ttgt, "ready", orders, "open", "", 20)
+		if n := reads(got); n != 1 {
+			t.Fatalf("registry read %d times, want 1", n)
+		}
+	})
 }
