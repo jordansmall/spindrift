@@ -17,7 +17,7 @@ func fakeReader(t *testing.T) Reader {
 	t.Helper()
 	return Reader{
 		ListIssues: func(tg Target, q Query, limit int) ([]Issue, error) {
-			if tg != wantTarget || q != (Query{Label: "ready", Status: "In Review"}) || limit != 7 {
+			if tg != wantTarget || !reflect.DeepEqual(q, Query{Label: "ready", Status: "In Review"}) || limit != 7 {
 				t.Errorf("ListIssues(%v, %+v, %d)", tg, q, limit)
 			}
 			return []Issue{{Number: "3", Title: "t", Body: "b", State: "open", Labels: []string{"ready"}}}, nil
@@ -335,7 +335,7 @@ func jiraReader(t *testing.T) Reader {
 		}, nil
 	}
 	r.Count = func(tg Target, q Query, _ int, _ bool) (int, error) {
-		if tg != wantTarget || q != (Query{Label: "ready", Status: "In Review"}) {
+		if tg != wantTarget || !reflect.DeepEqual(q, Query{Label: "ready", Status: "In Review"}) {
 			t.Errorf("Count(%v, %+v)", tg, q)
 		}
 		return 12, nil
@@ -480,5 +480,16 @@ func TestCountWireForwardsLimitAndFresh(t *testing.T) {
 	call(t, m, "tracker.count", `{`+target+`,"label":"ready","status":"In Review"}`)
 	if gotLimit != 0 || gotFresh {
 		t.Errorf("absent params: limit=%d fresh=%v, want 0 false", gotLimit, gotFresh)
+	}
+}
+
+func TestQueryRouteWireShape(t *testing.T) {
+	b, err := json.Marshal(Query{Label: "ready"})
+	if err != nil || string(b) != `{"label":"ready","status":""}` {
+		t.Errorf("unrouted Query = %s, %v; want no route key", b, err)
+	}
+	b, err = json.Marshal(Query{Route: []Selector{{Kind: "label", Value: "orders"}}})
+	if err != nil || string(b) != `{"label":"","status":"","route":[{"kind":"label","value":"orders"}]}` {
+		t.Errorf("routed Query = %s, %v", b, err)
 	}
 }
