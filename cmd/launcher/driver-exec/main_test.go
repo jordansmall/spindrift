@@ -632,6 +632,13 @@ func shadowRunDriver(t *testing.T, name, rows, logLine string, rc int) (int, str
 
 // shadowRunDriverTo is shadowRunDriver writing stdout to the given writer.
 func shadowRunDriverTo(t *testing.T, name, rows, logLine string, rc int, stdout io.Writer) int {
+	rc, _ = shadowRunDriverLog(t, name, rows, logLine, rc, stdout, &bytes.Buffer{})
+	return rc
+}
+
+// shadowRunDriverLog is shadowRunDriverTo with the stderr writer given and the
+// Pass log path returned.
+func shadowRunDriverLog(t *testing.T, name, rows, logLine string, rc int, stdout, stderr io.Writer) (int, string) {
 	t.Helper()
 	drivertest.Isolate(t)
 	dir := t.TempDir()
@@ -647,8 +654,8 @@ func shadowRunDriverTo(t *testing.T, name, rows, logLine string, rc int, stdout 
 		h.DriverRowsFile = filepath.Join(dir, "rows.json")
 		writeTestFile(t, h.DriverRowsFile, rows)
 	}
-	var stderr bytes.Buffer
-	return mainRun([]string{"-handoff-file", writeHandoffFile(t, h), "-log-path", filepath.Join(dir, "stream.log")}, stdout, &stderr)
+	logPath := filepath.Join(dir, "stream.log")
+	return mainRun([]string{"-handoff-file", writeHandoffFile(t, h), "-log-path", logPath}, stdout, stderr), logPath
 }
 
 // failFirstWrite fails its first Write, then accepts the rest so the later

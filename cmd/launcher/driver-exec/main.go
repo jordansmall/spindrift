@@ -139,6 +139,8 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		fmt.Fprint(stdout, hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpPassModel, Model: model, Effort: effort}))
 	}
 
+	raw := newRawCopy(handoff.Driver, stderr)
+	defer raw.remove()
 	rc, err := run(execConfig{
 		driver:       handoff.Driver,
 		driverBin:    handoff.DriverBin,
@@ -149,21 +151,33 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		heartbeatLog: heartbeatLog,
 		issue:        issue,
 		topLevelRole: *topLevelRole,
+		raw:          raw,
 	}, stdout)
 	if err != nil {
 		fmt.Fprintln(stderr, "driver-exec:", err)
-		runShadow(handoff.Driver, *logPath, 0, err, stdout)
+		runShadow(handoff.Driver, *logPath, raw.path(), 0, err, stdout)
 		return 1
 	}
 
 	exit := resolveExit(d, rc, *logPath)
-	runShadow(handoff.Driver, *logPath, rc, nil, stdout)
+	runShadow(handoff.Driver, *logPath, raw.path(), rc, nil, stdout)
 	return exit
 }
 
 // shadowReplay is a seam for tests that stub the wasm replay to observe what
 // runShadow hands it.
 var shadowReplay = shadow.Run
+
+// shadowOf is the shadow decision runShadow and newRawCopy share: the Connector
+// module shadowing the named native Driver, and that Driver's Strategy.
+func shadowOf(name string) (module string, native driverkit.Strategy, ok bool) {
+	module, ok = driver.ShadowModule(name)
+	if !ok {
+		return "", driverkit.Strategy{}, false
+	}
+	native, ok = driver.NativeStrategy(name)
+	return module, native, ok
+}
 
 // runShadow replays the Pass log through the Connector shadowing the named
 // native Driver, if a Driver row declared one, writing the comparison to
@@ -172,19 +186,16 @@ var shadowReplay = shadow.Run
 // summary, not an error. rawExit is the CLI's own code (the comparator
 // resolves it per side). A non-nil runErr means the log may be truncated:
 // the summary carries it as the error and nothing is replayed, so the Pass
-// cannot read as clean.
-func runShadow(name, logPath string, rawExit int, runErr error, stdout io.Writer) {
+// cannot read as clean. rawPath is the copy of the CLI's stdout the stream
+// filter is replayed from, empty when there is none.
+func runShadow(name, logPath, rawPath string, rawExit int, runErr error, stdout io.Writer) {
 	emit := func(op hostop.SpindriftOp) { fmt.Fprint(stdout, hostop.EncodeSpindriftOp(op)) }
 	resolved := driver.ResolveName(name)
 	if reason, ok := driver.ShadowSkipped(name); ok {
 		emit(hostop.SpindriftOp{Op: hostop.OpShadowSummary, ShadowSummary: &hostop.ShadowSummary{Driver: resolved, Error: reason}})
 		return
 	}
-	module, ok := driver.ShadowModule(name)
-	if !ok {
-		return
-	}
-	native, ok := driver.NativeStrategy(name)
+	module, native, ok := shadowOf(name)
 	if !ok {
 		return
 	}
@@ -201,7 +212,7 @@ func runShadow(name, logPath string, rawExit int, runErr error, stdout io.Writer
 	defer cancel()
 	// The interpreter, not LoadCompiled: a compiled module is cached on disk,
 	// and a shadow must not depend on, or write to, the host's filesystem.
-	shadowReplay(ctx, native, connectorhost.Load, wasm, logPath, "", rawExit, emit)
+	shadowReplay(ctx, native, connectorhost.Load, wasm, logPath, rawPath, rawExit, emit)
 }
 
 func main() {
