@@ -83,12 +83,6 @@ func TestRemoteLedger_FetchesBaseBranchAndCleansUp(t *testing.T) {
 	}
 }
 
-// The full hosted-forge end-to-end Sweep -- refs/spindrift/butler/<chore>
-// landing on the remote and refs/heads/main staying put -- moved to
-// internal/butler's TestSweep_RemoteBackendEndToEndAgainstHostedForgeShape
-// (issue #3990): it exercises ledger.Remote's own push/fetch behavior under a
-// real Sweep, not remoteLedger's wiring, so it belongs at the Runner level.
-
 // trace2Event is the subset of a GIT_TRACE2_EVENT JSON line this file reads:
 // "start" events carry the full argv for their sid (git's per-process
 // session id, hierarchical for child processes); "cmd_name" events carry the

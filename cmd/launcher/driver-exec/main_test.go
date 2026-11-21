@@ -21,8 +21,7 @@ import (
 	"spindrift.dev/launcher/internal/promptassembly"
 )
 
-// writeHandoffFile builds the -handoff-file fixture that replaced the
-// individually-removed per-pass flags (issue #2975 slice 3).
+// writeHandoffFile builds the -handoff-file fixture (issue #2975 slice 3).
 func writeHandoffFile(t *testing.T, h promptassembly.Handoff) string {
 	t.Helper()
 	data, err := json.Marshal(h)
@@ -36,9 +35,8 @@ func writeHandoffFile(t *testing.T, h promptassembly.Handoff) string {
 	return path
 }
 
-// claudeArgvShape mirrors the argv shape lib/drivers/claude.nix declares.
-// It holds what assemble-prompt's CLI wrapper would put in Handoff.ArgvShape
-// for a claude Driver.
+// claudeArgvShape mirrors the argv shape lib/drivers/claude.nix declares, as
+// assemble-prompt would put it in Handoff.ArgvShape.
 var claudeArgvShape = promptassembly.ArgvShape{
 	PromptStyle: "flag",
 	PromptFlag:  "-p",
@@ -106,9 +104,8 @@ func TestMainRunHandoffFileReproducesClaudeShape(t *testing.T) {
 }
 
 // TestMainRunRoleAwareModelEffort pins the reviewer-role override semantics
-// the orchestrator's runWithReviewPass used to own (issue #2975 slice 3),
-// plus the fallback and partial-override cases that prove the two guards
-// act independently (issue #2975 slice 6).
+// (issue #2975 slice 3) plus the fallback and partial-override cases proving
+// the two guards act independently (slice 6).
 func TestMainRunRoleAwareModelEffort(t *testing.T) {
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")
@@ -279,8 +276,8 @@ func TestMainRunReviewerEffortOpencodeShape(t *testing.T) {
 }
 
 // TestMainRunPromptFileFallsBackToHandoff pins issue #2975 slice 3:
-// -prompt-file still overrides the handoff, but is no longer required when
-// the handoff already carries a PromptFile.
+// -prompt-file still overrides the handoff, but is not required when the
+// handoff carries a PromptFile.
 func TestMainRunPromptFileFallsBackToHandoff(t *testing.T) {
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")
@@ -497,9 +494,9 @@ func TestMainRunRoutesVerbs(t *testing.T) {
 
 // TestMainRunRefusesThirdPartyHandoffDriverRows pins, for an inline unmarked
 // row and the rows file the Nix renders for the fixture Driver Connector (a
-// third-party row, so unmarked), that driver-exec does not load a Connector
-// the batteries flake does not ship: selecting that Driver exits non-zero naming the refusal, and
-// the fixture Driver never runs.
+// third-party row, so unmarked), that driver-exec loads no Connector the
+// batteries flake does not ship: selecting it exits non-zero naming the
+// refusal, and the fixture Driver never runs.
 func TestMainRunRefusesThirdPartyHandoffDriverRows(t *testing.T) {
 	t.Run("inline row", func(t *testing.T) {
 		rows := filepath.Join(t.TempDir(), "rows.json")
@@ -594,11 +591,10 @@ func TestMainRunUnmarkedRowDoesNotBlockOtherDriver(t *testing.T) {
 	}
 }
 
-// TestMainRunAppliesFirstPartyClaudeRowFromNix pins that the plain claude row
-// the Nix renders for the batteries claude Connector carries the first-party
-// mark, so driver-exec applies it (claude has no native Strategy, so it can
-// only be a Connector row) rather than refusing it, and that no shadow replay
-// rides along.
+// TestMainRunAppliesFirstPartyClaudeRowFromNix pins that the claude row the
+// Nix renders for the batteries claude Connector carries the first-party mark,
+// so driver-exec applies it (claude has no native Strategy) rather than
+// refusing it, with no shadow replay riding along.
 func TestMainRunAppliesFirstPartyClaudeRowFromNix(t *testing.T) {
 	rows := os.Getenv("SPINDRIFT_FIXTURE_CLAUDE_ROWS_FILE")
 	if rows == "" {

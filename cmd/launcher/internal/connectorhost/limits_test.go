@@ -56,9 +56,8 @@ func TestDriverDecodesALargeLineWithoutWedging(t *testing.T) {
 }
 
 // The guest is a Go wasip1 reactor that never finishes a GC cycle on its own,
-// so the SDK must collect between connector_calls: otherwise a long log decoded
-// on one Connector grows past the memory cap, the Connector dies ("exceeded its
-// memory cap") partway through a run and every later line goes undecoded.
+// so the SDK must collect between connector_calls, or a long log decoded on one
+// Connector grows past the memory cap and every later line goes undecoded.
 //
 // To show a missing reclaim within a few MiB, the guest runs with GOGC=off
 // under a cap just above what the reclaim needs, so only the SDK's runtime.GC()
@@ -68,9 +67,9 @@ func TestDriverDecodesALargeLineWithoutWedging(t *testing.T) {
 // (sdk/connector/reclaim.go), so 4 KiB lines pile up about 1 MiB of requests
 // between collections and 1 MiB batches about 4 MiB: each shape gets its own
 // base cap (a 1 MiB batch call runs under about 40 MiB, the cap plus 16 times
-// the request), and a cap too low fails even a reclaiming guest. Each total runs
-// past the first reclaim plus the traffic a guest that never collects again
-// survives, so a collect-once regression fails too.
+// the request), and a cap too low fails even a reclaiming guest. Each total
+// runs past the first reclaim plus the traffic a guest that never collects
+// again survives, so a collect-once regression fails too.
 func TestDriverDecodesALongRunWithoutExhaustingMemory(t *testing.T) {
 	t.Cleanup(connectorhost.SetGuestEnv(map[string]string{"GOGC": "off"}))
 	cache := t.TempDir() // compiling driver.wasm is most of a short subtest

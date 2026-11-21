@@ -54,14 +54,12 @@ func relayCapabilityViolations(forgejoBase string) []string {
 	return out
 }
 
-// TestRelayCapableMatchesForgeInterfaces checks the registry's
-// RelayCapable and OutboxRelayCapable bits against what each row's live
-// forge implements: BundleRelay iff RelayCapable, DraftPRCreator iff
-// BundleCommitSubjects, no PR capability without RelayCapable, and
-// OutboxRelayCapable iff DraftPRCreator.
-// A nix-only row with no Go row is
-// already caught by TestBackendRowsCoverRegistry plus nix/checks/schema-drift.nix's
-// backend-registry-gen.
+// TestRelayCapableMatchesForgeInterfaces checks the registry's RelayCapable
+// and OutboxRelayCapable bits against what each row's live forge implements:
+// BundleRelay iff RelayCapable, DraftPRCreator iff BundleCommitSubjects, no PR
+// capability without RelayCapable, and OutboxRelayCapable iff DraftPRCreator.
+// TestStrategiesCoverRegistry plus nix/checks/schema-drift.nix's
+// backend-registry-gen already catch a nix-only row with no Go row.
 func TestRelayCapableMatchesForgeInterfaces(t *testing.T) {
 	if v := relayCapabilityViolations(useForgejoFixtureRow(t)); len(v) > 0 {
 		t.Errorf("RelayCapable or OutboxRelayCapable disagrees with the forge's interfaces:\n%s", strings.Join(v, "\n"))

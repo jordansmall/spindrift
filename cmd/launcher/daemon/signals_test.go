@@ -177,9 +177,8 @@ const (
 )
 
 // TestRealExec_StopDuringExecWindowSurvivesTheExec execs a real successor
-// image while stop signals are pending, the reviewer's repro: a stop pending
-// across execve must not kill the successor with the default action before
-// its main runs.
+// image while stop signals are pending: a stop pending across execve must not
+// kill the successor with the default action before its main runs.
 func TestRealExec_StopDuringExecWindowSurvivesTheExec(t *testing.T) {
 	for _, hupIgnored := range []bool{false, true} {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -329,20 +328,15 @@ const (
 	inPlacePoll    = 2 * time.Millisecond
 )
 
-// TestRealExec_InPlaceRestartUnderARealStop carries an in-place restart across
-// a real execve and stops the successor with a real SIGTERM from this process.
-// Two stop windows are exercised:
-//   - inside the predecessor's settle, after it set SIG_IGN and before the
-//     execve: the stop is dropped by design (ADR 0063's #5016 amendment), so
-//     the successor still comes up and the child is untouched;
-//   - after the successor has started and re-attached its child: its own stop
-//     handler latches the stop and drains the child.
-//
-// Only the settle-window case checks the lock before the exec (the shipped
-// settle is too short to observe reliably there); the post-start case checks
-// it from the paused successor on. The successor itself checks the lock is
-// released after its drain, before it exits, so a release by process death
-// cannot pass for one by the drain.
+// TestRealExec_InPlaceRestartUnderARealStop sends a real SIGTERM across a real
+// in-place restart, in two windows: inside the predecessor's SIG_IGN settle,
+// where the stop is dropped by design (ADR 0063's #5016 amendment), so the
+// successor still comes up and the child is untouched; and after the successor
+// re-attached its child, where it drains. Only the settle-window case, with a
+// lengthened settle, checks the lock before the exec: the shipped settle is
+// too short to observe, so the post-start case checks it from the paused
+// successor on. The successor checks the lock is released before it exits, so
+// a release by process death cannot pass for one by the drain.
 func TestRealExec_InPlaceRestartUnderARealStop(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

@@ -74,8 +74,8 @@ func TestDispatchLabels_Ambiguous_LabelAndAllLabels(t *testing.T) {
 }
 
 // A claim (to == InProgress) removes the from-state label plus the Complete,
-// Failed, and Ambiguous labels, deduplicated. Both github's execClient and
-// forge.Fake call this one method, so the two cannot drift apart (#1985).
+// Failed, and Ambiguous labels, deduplicated. connectortracker and forge.Fake
+// both call this one method, so the two cannot drift apart (#1985).
 func TestDispatchLabels_TransitionRemoveLabels_ClaimStripsStaleTerminals(t *testing.T) {
 	d := DispatchLabels{
 		Dispatchable: "ready-for-agent",
@@ -97,8 +97,7 @@ func TestDispatchLabels_TransitionRemoveLabels_ClaimStripsStaleTerminals(t *test
 }
 
 // A transition that is neither a claim nor a landing (to == Complete) removes
-// only the from-state label, matching TransitionState's prior one-label
-// contract.
+// only the from-state label.
 func TestDispatchLabels_TransitionRemoveLabels_NeitherClaimNorLandingOnlyRemovesFrom(t *testing.T) {
 	d := DispatchLabels{
 		Dispatchable: "ready-for-agent",

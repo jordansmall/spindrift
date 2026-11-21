@@ -65,10 +65,9 @@ func TestValidateRetiredRegistryProxyKnobs_SeveralKnobsNameEachInDeclarationOrde
 	}
 }
 
-// The schema default disappeared along with the retired knob, so a non-empty
+// The retired knob has no schema default, so a non-empty
 // REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT, even "raw", can only come from an
-// operator who set it explicitly. The old ambiguity check's "raw is inert"
-// carve-out does not survive that.
+// operator who set it explicitly.
 func TestValidateRetiredRegistryProxyKnobs_FileFormatRawCountsAsSet(t *testing.T) {
 	err := validateRetiredRegistryProxyKnobs(retiredRegistryProxyKnobs{fileFormat: "raw"})
 	if err == nil {
@@ -79,10 +78,9 @@ func TestValidateRetiredRegistryProxyKnobs_FileFormatRawCountsAsSet(t *testing.T
 	}
 }
 
-// Bearer is the only auth-scheme the scalar knobs ever spoke. A plain https
-// upstream on the default port names no upstream-origin, because the
-// host-rooted route's match-host already says everything that URL did
-// (ADR 0047, issue #3261).
+// Bearer is the only auth-scheme the scalar knobs spoke. A plain https
+// upstream on the default port names no upstream-origin: the host-rooted
+// route's match-host already says everything (ADR 0047, issue #3261).
 func TestValidateRetiredRegistryProxyKnobs_StanzaDerivesMatchHost(t *testing.T) {
 	err := validateRetiredRegistryProxyKnobs(retiredRegistryProxyKnobs{upstreamURL: "https://registry.example.com"})
 	msg := err.Error()
@@ -180,8 +178,8 @@ func TestValidateRetiredRegistryProxyKnobs_StanzaCredentialCargoCredentialsSourc
 }
 
 // The upstream URL alone was a documented, working unauthenticated
-// pass-through proxy on origin/main, so the migration stanza must reproduce it
-// exactly rather than invent a credential requirement.
+// pass-through, so the stanza must reproduce it rather than invent a
+// credential requirement.
 func TestValidateRetiredRegistryProxyKnobs_StanzaNoCredentialKeyWhenNoSource(t *testing.T) {
 	err := validateRetiredRegistryProxyKnobs(retiredRegistryProxyKnobs{upstreamURL: "https://registry.example.com"})
 	if strings.Contains(err.Error(), "credential") {
@@ -200,11 +198,10 @@ func TestValidateRetiredRegistryProxyKnobs_StanzaRegistryNameAloneStillCargoCred
 	}
 }
 
-// The unrecognized format here is a real routes-file source key with different
-// semantics: it looks up one host's "//<registry>/:_authToken=" line, keyed on
-// the route's match host, rather than sending the whole file. The stanza still
-// renders a parseable file key, but calls out the mismatch so nobody reads it
-// as a raw file credential.
+// The unrecognized format here ("npmrc") is a real routes-file source key with
+// different semantics (one host's "//<registry>/:_authToken=" line, not the
+// whole file). The stanza still renders a parseable file key, but calls out
+// the mismatch so nobody reads it as a raw file credential.
 func TestValidateRetiredRegistryProxyKnobs_StanzaUnrecognizedFileFormatIsCalledOut(t *testing.T) {
 	err := validateRetiredRegistryProxyKnobs(retiredRegistryProxyKnobs{
 		upstreamURL: "https://registry.example.com", credFile: "/cred-file", fileFormat: "npmrc",
@@ -220,11 +217,10 @@ func TestValidateRetiredRegistryProxyKnobs_StanzaUnrecognizedFileFormatIsCalledO
 	}
 }
 
-// A strings.Contains check against a hand-written literal, which every other
-// stanza test in this file uses, cannot catch a stanza that reads right but
-// fails to parse. Feeding the rendered stanza back through
-// registryroutes.Parse, the real consumer of a routes file, is the guard that
-// would have caught the defective unauthenticated pass-through stanza.
+// A strings.Contains check against a literal, as every other stanza test here
+// uses, cannot catch a stanza that reads right but fails to parse; feeding it
+// back through registryroutes.Parse, the real consumer, does (it caught a
+// defective unauthenticated pass-through stanza).
 func TestValidateRetiredRegistryProxyKnobs_StanzaParsesThroughRegistryroutes(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -367,9 +363,8 @@ func TestRetiredRegistryProxyKnobsFromEnv_EachEnvVarFillsItsOwnField(t *testing.
 }
 
 // A retired knob supplied only through the ADR 0020 input document's settings
-// section, never exported as ambient env by the wrapper, must still trip the
-// gate. That mirrors the document fallback resolvedKnob gives every other
-// schema knob, so the retired-knob gate is not a silent exception to it.
+// section must still trip the gate, mirroring the document fallback
+// resolvedKnob gives every other schema knob.
 func TestRetiredRegistryProxyKnobsFromEnv_ReadsInputDocumentSettings(t *testing.T) {
 	useDoc(t, &inputdoc.Document{Settings: map[string]string{
 		"REGISTRY_PROXY_CREDENTIAL_ENV": "SOME_ENV_VAR",

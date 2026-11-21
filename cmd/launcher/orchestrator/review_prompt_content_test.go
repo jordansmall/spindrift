@@ -104,9 +104,8 @@ func TestReviewPromptSeverityContract(t *testing.T) {
 			clause: "the rule keeps a weaker model from blocking on nits and stretching the fix loop",
 		},
 		{
-			// #3226 slice 2: these Non-blocking carve-outs had no pin of
-			// their own, so an editorial tightening pass could drop them
-			// silently.
+			// #3226: pinned so an editorial tightening pass cannot drop
+			// these Non-blocking carve-outs silently.
 			name:   "#3226 Non-blocking: smells/nits/style/suggestions named as their own bucket",
 			clause: "smells, nits, style, suggestions",
 		},
@@ -195,7 +194,7 @@ func TestReviewPromptInputsDiffDiscipline(t *testing.T) {
 }
 
 // TestReviewPromptStandardsGrepGuidance guards the STANDARDS & SMELLS
-// dimension (issue #3215): reviewers used to read the whole
+// dimension (issue #3215): without it reviewers read the whole
 // contributing-guidelines document fresh every pass (12,233 chars on the
 // dogfooded Target repo). #3226 keeps the paragraph inline in review-prompt.md
 // because the baked arm defers to a pinned upstream skill spindrift cannot edit.

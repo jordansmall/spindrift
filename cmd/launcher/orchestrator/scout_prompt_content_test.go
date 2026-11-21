@@ -3,10 +3,8 @@ package main
 import "testing"
 
 // TestScoutPromptOperativeContract pins scout-prompt.md's output contract
-// clause by clause (issue #3225, extended by #3449). Issue #3225 cuts the Map
-// section's rationale sentence while keeping the citation obligation itself,
-// and #3449 moves the brief from the return message onto disk, so pinning each
-// clause here first stops either edit from silently taking a rule with it.
+// clause by clause (issues #3225, #3449), so a prose cut cannot silently take
+// a rule with it.
 func TestScoutPromptOperativeContract(t *testing.T) {
 	assertPromptClauses(t, "scout-prompt.md", []promptClause{
 		{

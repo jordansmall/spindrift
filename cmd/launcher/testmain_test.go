@@ -13,17 +13,14 @@ import (
 	"spindrift.dev/launcher/internal/seamtest"
 )
 
-// TestMain scripts registryProxyTransportFn for the whole package. Left at its
-// production default the seam binds a unix listener and execs c.runtime, and
-// doctor tests must start no container (issue #3114), so the stub has to be a
-// package-wide default, not something each unrelated test asks for. Tests for
-// the row's own behaviour override it with withRegistryProxyTransportFake.
+// TestMain scripts registryProxyTransportFn for the whole package: its
+// production default binds a unix listener and execs c.runtime, and doctor
+// tests must start no container (issue #3114). Tests of the row itself
+// override it with withRegistryProxyTransportFake.
 //
-// It scripts installStopSignal the same way and for the same reason
-// (#3520, #3521):
-// at its production default every runContinuousDispatch test would register a
-// real signal.Notify(SIGTERM) that stopCleanup deliberately never undoes,
-// leaving the test binary deaf to SIGTERM for the rest of the run.
+// It scripts installStopSignal too (#3520, #3521): the production default
+// registers a real signal.Notify(SIGTERM) that stopCleanup deliberately never
+// undoes, leaving the test binary deaf to SIGTERM for the rest of the run.
 func TestMain(m *testing.M) {
 	registryProxyTransportFn = func(config) (registrymanifest.Endpoint, error) {
 		return registrymanifest.NewUnixEndpoint(""), nil
@@ -47,7 +44,7 @@ func TestMain(m *testing.M) {
 			os.Exit(1)
 		}
 	}
-	// A dev shell or Box exports knob env vars, and mainRun now refuses to start
+	// A dev shell or Box exports knob env vars, and mainRun refuses to start
 	// with any of them set (ADR 0020).
 	for _, e := range inputdoc.SchemaFlags {
 		if err := os.Unsetenv(e.Env); err != nil {

@@ -49,10 +49,8 @@ var rollupToForgejoState = map[forge.RollupState]string{
 }
 
 // fakeForgejo is an in-memory stand-in for the Forgejo REST API's pull,
-// commit-status, and repo endpoints. It backs forgejo's PRForge contract
-// harness and, per issue #1961 slice 6, the CodeForge contract harness too,
-// so it lives in its own file and its helper methods are shaped like
-// exported ones, ready for both harnesses to embed.
+// commit-status, and repo endpoints, behind the PRForge and CodeForge
+// contract harnesses.
 type fakeForgejo struct {
 	mu  sync.Mutex
 	srv *httptest.Server
@@ -67,16 +65,11 @@ type fakeForgejo struct {
 
 	compareTotalCommits map[string]int // PR number to the total_commits the compare route reports
 
-	// The non-auto-merge POST /pulls/{index}/merge path calls mergeHook
-	// before it flips the pull merged. A non-nil error fails the merge
-	// request instead of flipping state, which slice 6 uses to inject a
-	// real git merge conflict. The nil default keeps slice 5's plain
-	// in-memory flip.
+	// mergeHook runs before a non-auto-merge flips the pull merged; a
+	// non-nil error (a real git merge conflict) fails the merge instead. Nil
+	// is a plain in-memory flip.
 	mergeHook func(num string) error
 
-	// The remaining fields serve the compiled Connector's suite
-	// (connector_test.go); the native harnesses leave them zero.
-	//
 	// web is the base of every html_url the fake serves (https://forge.test
 	// when empty), repo the bare repository behind the branch routes, and token
 	// the credential every request must carry (empty accepts any).
@@ -141,8 +134,7 @@ func startFakeForgejo(t *testing.T, start func(http.Handler) *httptest.Server) *
 // URL returns the fake's base URL.
 func (f *fakeForgejo) URL() string { return f.srv.URL }
 
-// prNumFromURL reads the trailing path segment, the same convention the real
-// adapter's parsePRIndex uses.
+// prNumFromURL reads the trailing path segment of a pull's html_url.
 func prNumFromURL(prURL string) string {
 	trimmed := strings.TrimRight(prURL, "/")
 	idx := strings.LastIndex(trimmed, "/")
@@ -259,10 +251,9 @@ func (f *fakeForgejo) SeedAutoMergeAllowed(allowed bool) {
 	f.autoMergeOK = allowed
 }
 
-// SetMergeable overrides num's mergeable flag. Slice 6's CodeForge harness
-// sets it false alongside a real git conflict (GitRepoFixture's ConflictBase)
-// so the Connector's merge-failure classification, which reads Mergeable over REST,
-// reports forge.ErrMergeConflict and not forge.ErrMergeBlockedByChecks.
+// SetMergeable overrides num's mergeable flag. The CodeForge harness sets it
+// false alongside a real git conflict, so the Connector's merge-failure
+// classification reports forge.ErrMergeConflict, not ErrMergeBlockedByChecks.
 func (f *fakeForgejo) SetMergeable(num string, mergeable bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -316,10 +307,9 @@ func (f *fakeForgejo) IsDraft(url string) bool {
 	return fakeIsDraftTitle(p.Title)
 }
 
-// fakeWIPPrefixes mirrors real Forgejo's default WORK_IN_PROGRESS_PREFIXES
-// config. Keep it separate from the Connector's own prefix list, so this fake
-// stands in for a real server, which derives its draft field independently of
-// the Connector.
+// fakeWIPPrefixes mirrors real Forgejo's default WORK_IN_PROGRESS_PREFIXES.
+// Keep it separate from the Connector's own list: a real server derives its
+// draft field independently.
 var fakeWIPPrefixes = []string{"WIP:", "[WIP]"}
 
 // fakeIsDraftTitle mirrors how real Forgejo derives a pull's served "draft"
@@ -421,10 +411,9 @@ func (f *fakeForgejo) handlePullsList(w http.ResponseWriter, r *http.Request) {
 		}
 		nums = append(nums, num)
 	}
-	// Deterministic order matters here: listPulls walks pages until one
-	// repeats the previous page's first item (issue #3978), and Go's
-	// randomized map iteration order would otherwise make "first item" flap
-	// between requests and defeat that guard, looping forever.
+	// Deterministic order: the Connector's page walk stops when a page
+	// repeats the previous one's first item (issue #3978), and random map
+	// order would defeat that guard and loop forever.
 	sort.Slice(nums, func(i, j int) bool {
 		ni, _ := strconv.Atoi(nums[i])
 		nj, _ := strconv.Atoi(nums[j])
@@ -436,9 +425,8 @@ func (f *fakeForgejo) handlePullsList(w http.ResponseWriter, r *http.Request) {
 	}
 	f.mu.Unlock()
 
-	// Paginate like the real server so a test's full pull set (always under
-	// forgejoServerPageCap here) is served on page 1 and every subsequent
-	// page comes back empty, ending listPulls' walk.
+	// Paginate like the real server: the whole set fits page 1, and the
+	// empty page 2 ends the Connector's walk.
 	json.NewEncoder(w).Encode(windowPage(r, out))
 }
 
@@ -560,9 +548,8 @@ func (f *fakeForgejo) handleCommitStatus(w http.ResponseWriter, _ *http.Request,
 }
 
 // handleCompare serves the swapped-refs compare route NeedsUpdate reads,
-// mirroring the Connector's compare read. It recovers the PR number
-// from the head ref embedded in the compare path, which seedPull always
-// writes as agent/issue-<num>.
+// recovering the PR number from the head ref seedPull writes as
+// agent/issue-<num>.
 func (f *fakeForgejo) handleCompare(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

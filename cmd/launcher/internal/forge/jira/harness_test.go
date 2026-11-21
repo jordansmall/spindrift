@@ -60,10 +60,8 @@ type jiraWireProperty struct {
 }
 
 // jiraHarness stands in for the Jira REST API. Jira's DepsOf and Issue share
-// one underlying GET request (unlike github's separate dependencies/blocked_by
-// call), so this harness implements forgetest.NativeCapable but not
-// NativeFailureIsolatable: the contract's native-error-fallback scenario
-// (AC2, issue #1544) covers only the Fake and github adapters.
+// one GET request, so no jira harness is forgetest.NativeFailureIsolatable
+// (issue #1544 AC2).
 type jiraHarness struct {
 	mu     sync.Mutex
 	order  []string
@@ -222,10 +220,10 @@ func (h *jiraHarness) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		out := h.matching(r.URL.Query().Get("jql"), fullPayload, r.URL.Query().Get("properties"))
 
-		// Genuinely paginate on startAt/maxResults (issue #2265), matching the
-		// real Jira search response shape jiraSearchPayload decodes. total is
-		// the full matching count; doSearch stops once rows received reach it
-		// (and errors on an empty page before it).
+		// Genuinely paginate on startAt/maxResults (issue #2265) in real Jira's
+		// response shape; total is the full matching count, since the
+		// Connector's searchServer stops once rows reach it and errors on an
+		// empty page before it.
 		startAt := 0
 		if s := r.URL.Query().Get("startAt"); s != "" {
 			if v, err := strconv.Atoi(s); err == nil && v >= 0 {

@@ -6,11 +6,10 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 )
 
-// TestGatesIssueTrackerReadAxis covers the issue-read step gate: exactly one of
-// ISSUE_TRACKER_GITHUB/ISSUE_TRACKER_LOCAL/ISSUE_TRACKER_FORGEJO is ever on,
+// TestGatesIssueTrackerReadAxis covers the issue-read step gate: at most one of
+// ISSUE_TRACKER_GITHUB/ISSUE_TRACKER_LOCAL/ISSUE_TRACKER_FORGEJO is on,
 // selected by the pre-resolved TrackerAxisRead rather than re-derived by Gates
-// (issue #2533).
-// Jira uses the github arm because it has the same in-box reachability.
+// (issue #2533). Jira's own JIRA arm fires none of them.
 func TestGatesIssueTrackerReadAxis(t *testing.T) {
 	cases := []struct {
 		name            string
@@ -65,10 +64,9 @@ func TestGatesIssueTrackerReadAxis(t *testing.T) {
 		},
 		{
 			// A host launcher predating issue #2533 never sets
-			// BOX_TRACKER_AXIS_READ and no baked default covers it, so
-			// TrackerAxisRead arrives empty against a newer box image.
-			// Gates must fail open to the old "${ISSUE_TRACKER:-github}"
-			// arm instead of dropping every tracker-gated fragment.
+			// BOX_TRACKER_AXIS_READ, which has no baked default. Gates must
+			// fall back to the github arm instead of dropping every
+			// tracker-gated fragment.
 			name:            "empty TrackerAxisRead falls open to GITHUB defaults",
 			trackerAxisRead: "",
 			want: map[string]bool{
@@ -78,11 +76,9 @@ func TestGatesIssueTrackerReadAxis(t *testing.T) {
 			},
 		},
 		{
-			// Same version-skew shape, but IssueTracker says "local". The
-			// fallback must re-derive from IssueTracker (issue #2533
-			// review): hardcoding the github arm would render
-			// ISSUE_TRACKER_GITHUB alongside the PR_BODY_LOCAL_NOREF that
-			// the PR-body gate below correctly picks.
+			// Same version skew with IssueTracker "local": hardcoding the
+			// github arm would render ISSUE_TRACKER_GITHUB alongside the
+			// PR_BODY_LOCAL_NOREF the PR-body gate picks (issue #2533).
 			name:            "empty TrackerAxisRead with IssueTracker=local falls open to LOCAL",
 			trackerAxisRead: "",
 			issueTracker:    "local",

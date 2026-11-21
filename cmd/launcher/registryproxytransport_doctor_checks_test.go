@@ -52,12 +52,11 @@ func withRegistryProxyTransportFake(t *testing.T, fake *runner.Fake) {
 	t.Cleanup(func() { registryProxyTransportFn = orig })
 }
 
-// The not-configured arm must not call the seam at all. A dispatch probes for
-// the registry proxy only when routes are configured (`needRegistryProxy` in
-// dispatch/box.go), so this row must not start a container to answer a
-// question no dispatch asks on the registry proxy's behalf. A dispatch under
-// BOX_SIGNAL_CARRIER=socket still probes with no routes; the
-// signal-socket-transport row reports that.
+// The not-configured arm must not call the seam: a dispatch probes for the
+// registry proxy only when routes are configured (`needRegistryProxy` in
+// internal/dispatch/box.go), so this row must not start a container for a
+// question no dispatch asks. A socket-carrier dispatch still probes with no
+// routes; the signal-socket-transport row reports that.
 func TestRegistryProxyTransportCheck_UnsetFileReportsNotConfiguredWithoutProbing(t *testing.T) {
 	fake := runner.NewFake()
 	withRegistryProxyTransportFake(t, fake)
@@ -156,11 +155,9 @@ func TestRegistryProxyTransportCheck_ZeroEndpointWrapsErrDegraded(t *testing.T) 
 }
 
 // doctorCheckSets' report half appends the row unconditionally, unlike the
-// per-route and drift rows: the row carries its own not-configured arm, so
+// per-route and drift rows: it carries its own not-configured arm, so
 // `spindrift doctor` always shows one transport line (issue #3114). The
-// classify-side exclusion lives in
-// TestDoctorCheckSets_ClassifyExcludesBwrapGatesAndDriftRowsButIncludesPerRouteRows
-// (doctor_checks_test.go), so this test does not duplicate it.
+// classify-side exclusion is pinned in doctor_checks_test.go.
 func TestDoctorCheckSets_WiresRegistryProxyTransportCheck(t *testing.T) {
 	fake := runner.NewFake()
 	withRegistryProxyTransportFake(t, fake)

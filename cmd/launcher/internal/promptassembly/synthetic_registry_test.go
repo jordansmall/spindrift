@@ -8,14 +8,13 @@ import (
 )
 
 // syntheticRegistry stages files under a fresh PromptsDir and returns the rows
-// as a Registry plus coveredEnv (PromptsDir retargeted at that dir), so a
-// mechanics test reads as rows in, rendered bodies out without touching the
-// production registry or prose. Every gate state therefore follows coveredEnv's
-// flags (skills baked, github tracker and forge); a test needing another state
-// sets it on the returned Env. files maps PromptsDir-relative paths (e.g.
-// "fragments/x.md") to content and overrides the minimal base templates
-// staged by default, which exist because Assemble always reads the kind's
-// base prompt and, on the fresh work path, review-prompt.md.
+// as a Registry plus coveredEnv retargeted at that dir, so a mechanics test
+// never touches the production registry or prose. Gate states follow
+// coveredEnv (skills baked, github tracker and forge); set another on the
+// returned Env. files maps PromptsDir-relative paths ("fragments/x.md") to
+// content, overriding the minimal templates staged by default because
+// Assemble always reads the kind's base prompt and, on the fresh work path,
+// review-prompt.md.
 func syntheticRegistry(t *testing.T, rows []FragmentRow, files map[string]string) (Registry, Env) {
 	t.Helper()
 	dir := t.TempDir()

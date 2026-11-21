@@ -126,7 +126,7 @@ func TestRoutedRow_PostedIssueKeepsItsMarkerAndLabels(t *testing.T) {
 }
 
 // A claim on an issue already in progress is refused by the Connector path
-// with the same sentinel the native claim returns, and without gh.
+// with forge.ErrAlreadyClaimed, and without gh.
 func TestRoutedRow_ClaimOfAClaimedIssueIsRefused(t *testing.T) {
 	h, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
 	h.SeedIssue(forge.Issue{Number: "7", Labels: []string{testLabels.InProgress}})

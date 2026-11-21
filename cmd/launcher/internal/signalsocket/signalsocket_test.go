@@ -226,9 +226,8 @@ func TestIssueIntentsDedupTermsRepeatIsIdempotent(t *testing.T) {
 	}
 }
 
-// Class and Concurrence are optional (issue #3880): an intent that sets
-// neither must accept, and setting either must not sink the intent on its
-// own -- the socket carries them; only settle gates on them.
+// Class and Concurrence are optional (issue #3880): the socket carries them;
+// only settle gates on them.
 func TestIssueIntentClassAndConcurrenceOptional(t *testing.T) {
 	b := newAll(t)
 	mustAcceptIssue(t, b, signalwire.IssueIntent{Title: "t", Body: "b", Type: "bug"})
@@ -329,9 +328,8 @@ func TestRejectOversizeTitle(t *testing.T) {
 	}
 }
 
-// The UTF-8 pass inside validate has no HTTP-path caller to reach it -- decode
-// rejects invalid UTF-8 first -- but it is reachable, and must stay correct,
-// through the Buffer API directly.
+// Over HTTP, decode rejects invalid UTF-8 first, but validate's own pass is
+// still reachable through the Buffer API.
 func TestRejectInvalidUTF8DirectBufferCall(t *testing.T) {
 	bad := string([]byte{0x41, 0xff, 0xfe})
 	b := newAll(t)
@@ -427,9 +425,8 @@ func TestBlankDedupTermDroppedAlongsideGoodTerm(t *testing.T) {
 	}
 }
 
-// Bytes and Hash for a blank-term-only intent must equal the same intent
-// sent with no terms at all: same finding, same terms, so a resend across
-// the two forms must hit the idempotent-repeat branch.
+// A blank-term-only intent must count and hash as the same intent with no
+// terms, so a resend across the two forms is the idempotent repeat.
 func TestBlankDedupTermMatchesNoTermsBytesAndHash(t *testing.T) {
 	b := newAll(t)
 	withBlank := mustAcceptIssue(t, b, signalwire.IssueIntent{Title: "t", Body: "b", Type: "bug", DedupTerms: []string{"   "}})
@@ -441,8 +438,6 @@ func TestBlankDedupTermMatchesNoTermsBytesAndHash(t *testing.T) {
 		t.Fatalf("withBlank = %+v, withNone = %+v, want equal Bytes/Hash", withBlank, withNone)
 	}
 
-	// A resend of the same intent through the other form must be the
-	// idempotent repeat, not a second entry.
 	rDup, rej := b.AcceptIssueIntent(signalwire.IssueIntent{Title: "t", Body: "b", Type: "bug"})
 	if rej != nil {
 		t.Fatalf("AcceptIssueIntent: unexpected reject %+v", *rej)
@@ -474,9 +469,8 @@ func TestRejectIntentCap(t *testing.T) {
 	_, rej := b.AcceptIssueIntent(signalwire.IssueIntent{Title: "t3", Body: "b", Type: "bug"})
 	mustReject(t, rej, "intent_cap", 429)
 
-	// A duplicate past the cap does not grow the list, so it stays idempotent,
-	// and it returns the original's stored receipt rather than minting a
-	// fresh sequence.
+	// A duplicate past the cap returns the original receipt, not a fresh
+	// sequence.
 	dup := mustAcceptIssue(t, b, first)
 	if len(b.IssueIntents()) != 2 {
 		t.Fatalf("IssueIntents() = %+v, want 2 entries", b.IssueIntents())
@@ -506,11 +500,8 @@ func TestCheckOrder(t *testing.T) {
 	mustReject(t, rej, "invalid_type", 400)
 }
 
-// TestIssueIntentEmptyTypeBeatsOtherFaults pins the socket's required-type
-// check into the same "empty always wins" precedence CheckFields gives every
-// other field: an intent wrong in two ways -- blank type plus an oversize
-// body, or blank type plus an illegal class -- must always report the empty
-// type, never the other fault (issue #3992).
+// TestIssueIntentEmptyTypeBeatsOtherFaults pins the required-type check into
+// CheckFields' "empty always wins" precedence (issue #3992).
 func TestIssueIntentEmptyTypeBeatsOtherFaults(t *testing.T) {
 	big := strings.Repeat("x", signalwire.MaxBodyBytes+1)
 	b := signalsocket.New(signalsocket.Config{Consumes: allKinds()})
@@ -628,9 +619,8 @@ func TestDefaultIntentCapApplies(t *testing.T) {
 	mustReject(t, rej, "intent_cap", 429)
 }
 
-// wantReceiptDescribesContent checks the "receipt describes content" rule: a
-// reject's Receipt still carries the kind, the summed byte length and a
-// sha256: hash of values, but Sequence stays zero since nothing was buffered.
+// wantReceiptDescribesContent checks that a reject's Receipt still describes
+// the content, with Sequence zero since nothing was buffered.
 func wantReceiptDescribesContent(t *testing.T, got signalwire.Receipt, k signalwire.Kind, values ...string) {
 	t.Helper()
 	if got.Kind != k {

@@ -675,13 +675,11 @@ func TestBoxSeamPRIntentNudgeExhausted(t *testing.T) {
 	}
 }
 
-// entrypointExports is what the shim's env preamble still exports before it
-// execs box, so the golden's env delta is these plus what box itself sets
-// (BRANCH, PWD and the Bash-timeout vars) and nothing else. The values are
-// hardcoded here, so the Go golden's env section only proves box adds and
-// removes nothing; the real exports are pinned by nix/checks/drivers/claude.nix
-// (the claude Driver's envCommon) and tests/entrypoint-shim.bats (the shim's
-// env reaches box).
+// entrypointExports is what the shim's env preamble exports before it execs
+// box; the golden's env delta is these plus BRANCH, PWD and the Bash-timeout
+// vars box sets. Hardcoded, so the golden only proves box adds and removes
+// nothing; nix/checks/drivers/claude.nix and tests/entrypoint-shim.bats pin
+// the real exports.
 func entrypointExports() map[string]string {
 	return map[string]string{"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1"}
 }
@@ -717,13 +715,10 @@ var argvPlaceholders = map[string]string{
 }
 
 // normaliseDriverInvocation renders an orchestrator snapshot in the golden
-// format captured from the bash path in 6ad56073 ("test: pin the bash Driver
-// invocation in a golden") before it was deleted. baseEnv is the env box would
-// have been launched with had entrypoint.sh exported nothing.
-//
-// The prompt section matches the handoff's PromptFile modulo trailing
-// newlines, and the env delta skips SHLVL, _ and OLDPWD, which vary by shell
-// rather than by invocation.
+// format first captured from the bash path (6ad56073). baseEnv is the env box
+// would have been launched with had entrypoint.sh exported nothing. The prompt
+// section matches the handoff's PromptFile modulo trailing newlines; the env
+// delta skips SHLVL, _ and OLDPWD, which vary by shell, not invocation.
 func normaliseDriverInvocation(t *testing.T, s seamtest.Snapshot, baseEnv map[string]string, outbox, tmpRoot string) string {
 	t.Helper()
 	var b strings.Builder
@@ -817,17 +812,14 @@ func readonlyWorkEnv(extra map[string]string) map[string]string {
 }
 
 // TestBoxSeamDriverInvocationGolden pins the first Driver invocation box makes
-// to the goldens captured from the bash path in 6ad56073 ("test: pin the bash
-// Driver invocation in a golden") before it was deleted; box must keep
-// reproducing them byte for byte.
+// to goldens first captured from the bash path (6ad56073), byte for byte.
 //
 // Regenerate with, from cmd/launcher:
 //
 //	UPDATE_GOLDENS=1 go test -tags integration ./box -run TestBoxSeamDriverInvocationGolden
 //
-// Box produces this invocation now, so regenerating only records its own
-// output: never regenerate to clear a mismatch, which is exactly the drift
-// these goldens exist to catch.
+// Regenerating only records box's own output: never regenerate to clear a
+// mismatch, which is exactly the drift these goldens exist to catch.
 func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -1082,7 +1074,7 @@ func (c seamCase) boxArgs(t *testing.T, outbox string) []string {
 
 // TestBoxSeamAssemblesTheGoldenPrompt runs box over the golden suite's default
 // work cell and requires the prompt it hands the orchestrator to equal the
-// pinned golden byte for byte: box, not bash, now produces it.
+// pinned golden byte for byte.
 func TestBoxSeamAssemblesTheGoldenPrompt(t *testing.T) {
 	t.Parallel()
 	r := runBoxSeam(t, seamCase{
@@ -2176,10 +2168,10 @@ func seamWantNoForgeToken(t *testing.T, envDump string) {
 }
 
 // A read-only Box holds no forge token, so branch recovery takes the open-PR
-// answer from the host's BOX_HOST_OPEN_PR. The Box is
-// read-only, so origin never moves: open adopts the prior branch and relays it
-// rebased as a bundle, none resets it to main with nothing to relay, and a
-// failed host lookup aborts rather than reading as "no PR".
+// answer from the host's BOX_HOST_OPEN_PR, and origin never moves: open adopts
+// the prior branch and relays it rebased as a bundle, none resets it to main
+// with nothing to relay, and a failed host lookup aborts rather than reading
+// as "no PR".
 func TestBoxSeamBranchRecoveryTokenlessAnswersFromTheHost(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -2484,17 +2476,13 @@ func TestBoxSeamLocalForgeClonesTheMount(t *testing.T) {
 }
 
 // Under read-only the launcher mounts a host-seeded mirror and, by default
-// (issue #6900), forwards no forge token at all: the Box env has no
-// token key (absent, not blank),
-// the clone's origin is the mount rather than the forge URL, and the branch
-// still leaves as a bundle. This harness carries Signals on the log carrier,
-// so dispatch's TestRunOnce_ReadOnlyBoxStillAnswersIssueVerbs
-// covers the socket read verbs.
-//
-// The cases hand-build the tokenless env (unset: seamForgeTokenVars); the
-// launcher-side stripping is proven by dispatch's
-// TestBuildBoxEnvDropsEveryForgeToken and
-// TestSeamSmokeReadOnlyBoxCarriesNoForgeToken.
+// (issue #6900), forwards no forge token: the Box env has no token key (absent,
+// not blank), the clone's origin is the mount, and the branch still leaves as a
+// bundle. This harness uses the log carrier; dispatch's
+// TestRunOnce_ReadOnlyBoxStillAnswersIssueVerbs covers the socket read verbs.
+// The cases hand-build the tokenless env; dispatch's
+// TestBuildBoxEnvDropsEveryForgeToken and the launcher's
+// TestSeamSmokeReadOnlyBoxCarriesNoForgeToken prove the launcher-side strip.
 func TestBoxSeamReadOnlyBoxRunsWithNoForgeCredential(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

@@ -29,9 +29,8 @@ func TestFakeRunFuncOverridesDefault(t *testing.T) {
 	}
 }
 
-// Scripting one Endpoint value replaced the old four-tuple (socketCapable,
-// tcpHost, tcpAddHost, err), so a caller can no longer script an incoherent
-// combination such as a socket-capable answer that also carries a TCP host.
+// One scripted Endpoint, so a caller cannot script an incoherent combination
+// such as a socket-capable answer that also carries a TCP host.
 func TestFakeRegistryProxyTransport_ReturnsScriptedEndpoint(t *testing.T) {
 	f := NewFake()
 	want := registrymanifest.NewTCPEndpoint("host.docker.internal", "")

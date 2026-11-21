@@ -73,10 +73,9 @@ func TestRunDirectModePropagatesExitCode(t *testing.T) {
 	}
 }
 
-// run must resolve cfg.driver through driver.New instead of the former
-// hardcoded driver.New("claude") (issue #262 slice 4). An unknown driver name
-// has to reach driver.New and error, which a silent fallback to claude would
-// hide.
+// run must resolve cfg.driver through driver.New, not a hardcoded claude
+// (issue #262 slice 4): an unknown name has to reach driver.New and error,
+// which a silent fallback to claude would hide.
 func TestRunUsesConfiguredDriverNotHardcodedClaude(t *testing.T) {
 	dir := t.TempDir()
 	bin := writeFakeDriver(t, dir, "fake-driver", "echo hi\nexit 0\n")
@@ -126,9 +125,8 @@ func TestRunTeesRawStreamToStdoutAndLogPath(t *testing.T) {
 	}
 }
 
-// driver-exec filters heartbeats in process since it absorbed the standalone
-// heartbeat-filter binary (issue #626): the heartbeat file gets a
-// human-readable status line, never raw stream-json.
+// driver-exec filters heartbeats in process (issue #626): the heartbeat file
+// gets a human-readable status line, never raw stream-json.
 func TestRunWritesHeartbeatToFileNotRawJSON(t *testing.T) {
 	dir := t.TempDir()
 	bin := writeFakeDriver(t, dir, "fake-driver", `printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"main.go"}}]}}\n{"type":"result","num_turns":1}\n'`)
@@ -192,8 +190,7 @@ func TestRunTopLevelRoleAppliesToHeartbeatSwitchHeader(t *testing.T) {
 	}
 }
 
-// driver-exec owns the devShell-first invocation path (ADR 0014) as one code
-// path since it replaced entrypoint.sh's wrapper script (issue #626).
+// driver-exec owns the devShell-first invocation path (ADR 0014, issue #626).
 func TestRunDevshellWrapsCommand(t *testing.T) {
 	dir := t.TempDir()
 	bin := writeFakeDriver(t, dir, "fake-driver", "echo devshell-ran\nexit 0\n")
@@ -231,9 +228,8 @@ func TestRunDevshellWrapsCommand(t *testing.T) {
 }
 
 // writeFakeNixLaunchFail writes a fake `nix` that fails before exec-ing the
-// wrapped command, leaving an empty output stream. That mirrors a devShell
-// which no longer evaluates cleanly at Driver-run time even though
-// box's earlier devShell probe found one.
+// wrapped command, leaving an empty stream: a devShell that no longer
+// evaluates at Driver-run time though box's earlier probe found one.
 func writeFakeNixLaunchFail(t *testing.T, dir string) {
 	t.Helper()
 	body := "#!/bin/sh\nexit 1\n"
@@ -244,10 +240,9 @@ func writeFakeNixLaunchFail(t *testing.T, dir string) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-// The relaunch-once-in-the-baked-env policy replaced entrypoint.sh's bash
-// fallback (issue #626). When the devShell launch fails before the Driver
-// writes anything, driver-exec relaunches directly and returns that direct
-// run's exit code, not the failed launch's.
+// When the devShell launch fails before the Driver writes anything,
+// driver-exec relaunches directly once in the baked env (issue #626) and
+// returns that run's exit code, not the failed launch's.
 func TestRunRelaunchesInBakedEnvOnEmptyStreamLaunchFailure(t *testing.T) {
 	dir := t.TempDir()
 	bin := writeFakeDriver(t, dir, "fake-driver", `printf '{"type":"result"}\n'`+"\nexit 0\n")
@@ -312,10 +307,9 @@ func TestRunDoesNotRelaunchWhenDevshellStreamIsNonEmpty(t *testing.T) {
 	}
 }
 
-// The bash to Go port dropped this observability line (issue #797). The
-// relaunch branch has to log it to stderr, the same channel runOnce wires the
-// Driver's cmd.Stderr to, so operators tailing the Box log see why the Driver
-// output changed.
+// The bash-to-Go port dropped the relaunch's observability line (issue #797).
+// The relaunch logs it to stderr, the channel the Driver's cmd.Stderr uses, so
+// operators tailing the Box log see why the Driver output changed.
 func TestRunLogsObservabilityEventOnRelaunch(t *testing.T) {
 	dir := t.TempDir()
 	bin := writeFakeDriver(t, dir, "fake-driver", `printf '{"type":"result"}\n'`+"\nexit 0\n")

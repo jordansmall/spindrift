@@ -7,11 +7,8 @@ import (
 	"testing"
 )
 
-// repoRoot is the relative path from this package to the repo root, used by
-// the helpers in this file that resolve a prompt or fragment file. Other
-// files in this package that need the repo root declare their own local
-// copy (e.g. run_test.go's chdirToFreshGitRepo return value, a different
-// meaning entirely) rather than sharing this one.
+// repoRoot is the relative path from this package to the repo root, for
+// resolving prompt and fragment files.
 var repoRoot = filepath.Join("..", "..", "..")
 
 // hyphenLineBreak matches a line ending in a word-internal hyphen, plus the

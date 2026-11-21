@@ -1220,10 +1220,9 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// Every route is host-rooted since ADR 0047 (issue #3261), so allow and a
+// Every route is host-rooted (ADR 0047, issue #3261), so allow and a
 // [routes.ecosystems.<name>] block coexist freely with a minimal route of
-// match-host plus a credential; the legacy-route rejections those keys used to
-// hit are gone.
+// match-host plus a credential.
 func TestParse_MinimalHostRootedRouteParses(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1363,9 +1362,8 @@ func TestParse_EcosystemsPathNotStringIsError(t *testing.T) {
 	}
 }
 
-// Drives Parse with a fake Strategy rather
-// than a real ecosystem, so the hook contract is tested without depending on
-// any shipped ecosystem's rules.
+// A fake Strategy tests the hook contract without depending on any shipped
+// ecosystem's rules.
 func TestParseRoutes_FakeRowRouteDeclarationHookSeesBlockKey(t *testing.T) {
 	var gotKey string
 	var gotValue any
@@ -1753,10 +1751,8 @@ credential = { %s }
 }
 
 // Issue #3436: a route carrying a retired key must still validate its
-// credential first. A malformed credential fails on parseCredential's own
-// error before Parse ever reaches the retired-key check, so no
-// replacement stanza is printed for it -- the stanza-echo path only ever
-// sees a credential parseCredential already accepted.
+// credential first, so no replacement stanza ever echoes a credential
+// parseCredential would refuse.
 func TestParse_RetiredKeyRouteWithMalformedCredentialFailsOnCredential(t *testing.T) {
 	credCases := []struct {
 		name          string

@@ -10,11 +10,9 @@ import (
 )
 
 // TestExtract_ReadsEveryPathFromRows verifies Extract reads each config file
-// from wherever the Strategy names it as InTreeConfigPath, rather than a path
-// hardcoded in registrydiscover itself -- the coupling issue #3184 closes. A
-// directory planted at the path makes the read fail, and the failure names the
-// path, so the check needs no Strategy's config format. Two Strategies prove
-// the path comes from each one, not from a single shared constant.
+// from the Strategy's InTreeConfigPath, not a hardcoded path (issue #3184). A
+// directory planted at the path fails the read with the path named, so no
+// config format is needed; two Strategies rule out one shared constant.
 func TestExtract_ReadsEveryPathFromRows(t *testing.T) {
 	rows := []ecosystem.Strategy{synthetic.Strategy, synthetic.Twin("twin")}
 	for _, row := range rows {

@@ -135,8 +135,8 @@ func (f deltaReviewLoopFixture) config(maxSlices int) config {
 	}
 }
 
-// finalOutcomeLine is the outcome line the entrypoint's log scan would find in
-// the config's logPath once run returns: the last one among the log's
+// finalOutcomeLine is the outcome line the box binary's log scan would find
+// in the config's logPath once run returns: the last one among the log's
 // final-result events.
 func (f deltaReviewLoopFixture) finalOutcomeLine(t *testing.T) string {
 	t.Helper()
@@ -291,7 +291,7 @@ func TestRunDeltaReviewGateFiresAndApproves(t *testing.T) {
 	}
 
 	// The delta-review pass writes its own log, so the land pass's stream is
-	// what the entrypoint still finds in cfg.logPath.
+	// what the box binary still finds in cfg.logPath.
 	if got := f.finalOutcomeLine(t); got != deltaReviewLandOutcomeLine {
 		t.Errorf("log's final outcome = %q, want the land pass's %q", got, deltaReviewLandOutcomeLine)
 	}
@@ -344,8 +344,8 @@ func TestRunDeltaReviewGateFiresAndBlocks(t *testing.T) {
 	}
 
 	// The corrective line is appended to the land pass's stream log, which the
-	// entrypoint reads in place of the ready line; stdout would only duplicate
-	// the line the entrypoint prints itself. It copies Issue and Landing
+	// box binary reads in place of the ready line; stdout would only duplicate
+	// the line the box binary prints itself. It copies Issue and Landing
 	// verbatim from the land pass's line (call 5).
 	if strings.Contains(stdout.String(), "status=blocked") {
 		t.Errorf("stdout = %q, want no status=blocked line (the log carries it)", stdout.String())

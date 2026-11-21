@@ -165,9 +165,8 @@ func TestDiscover_StoreOutsideRowSkippedForDeclaration(t *testing.T) {
 	if len(report.Unmatched) != 1 {
 		t.Fatalf("report.Unmatched = %+v, want exactly 1", report.Unmatched)
 	}
-	// outside-store is still named as searched even though its lookup never
-	// ran: it was configured and considered, just found inapplicable. A report
-	// line must never name no stores at all.
+	// outside-store is still named as searched though its lookup never ran: a
+	// report line must never name no stores at all.
 	wantSearched := []string{"outside-store", "netrc"}
 	got := report.Unmatched[0].StoresSearched
 	if !slices.Equal(got, wantSearched) {
@@ -179,9 +178,7 @@ func TestDiscover_OutsideRowOnlyStoreList_NamesStoreForDeclaration(t *testing.T)
 	dir := t.TempDir()
 	testutil.WriteFixture(t, dir, cfgPath, "main = https://registry.example.com/\n")
 
-	// The only configured store is skipped as inapplicable, leaving nothing
-	// else to search. The report must still name it rather than print an empty
-	// "searched" list.
+	// The only configured store is inapplicable; the report must still name it.
 	stores := []Store{{Name: "outside-store", Path: "/home/agent/outside"}}
 	lookup := func(store Store, d ecosystem.Declaration) (bool, error) {
 		t.Fatalf("lookup called for outside-store on a declaration outside its row: %+v", d)
@@ -265,11 +262,9 @@ func TestDiscover_NilStores_UnmatchedHostSearchedIsEmpty(t *testing.T) {
 		return false, nil
 	}
 
-	// An empty stores list has nothing to name, so unlike the
-	// configured-but-inapplicable case above this empty result is correct, not
-	// a firstMatch bug. The command layer owns the fix for the "empty report
-	// line" symptom: it must never pass empty stores when a home directory is
-	// available (see TestCmdRegistryDiscover_HomeDirUnavailable_ErrorsInsteadOfProceeding).
+	// An empty stores list has nothing to name, so this empty result is
+	// correct; the command layer must never pass empty stores (see
+	// TestCmdRegistryDiscover_HomeDirUnavailable_ErrorsInsteadOfProceeding).
 	_, report := discoverSynthetic(t, dir, nil, lookup, probeAs("bearer"))
 	if len(report.Unmatched) != 1 {
 		t.Fatalf("report.Unmatched = %+v, want exactly 1", report.Unmatched)
@@ -293,11 +288,10 @@ func TestDiscover_NoteFlowsToReportNoRegistry(t *testing.T) {
 	}
 }
 
-// A registry URL the Strategy's parser rejects as unusable yields no route, and is
-// reported the way Extract reports any other unusable one. Discover has no
-// empty-MatchHost guard of its own: registryroutes.Parse rejects such a route
-// (see runRegistryDiscover's invariant in registrydiscover.go), so keeping it
-// out is the parser's job.
+// A registry URL the Strategy's parser rejects yields no route and is reported
+// like any other unusable one. Discover has no empty-MatchHost guard:
+// registryroutes.Parse rejects such a route, so keeping it out is the
+// parser's job.
 func TestDiscover_UnusableURLYieldsNoRouteReportedAsSkipped(t *testing.T) {
 	dir := t.TempDir()
 	testutil.WriteFixture(t, dir, cfgPath, "main = ftp://registry.example.com/\n")
@@ -312,10 +306,8 @@ func TestDiscover_UnusableURLYieldsNoRouteReportedAsSkipped(t *testing.T) {
 	}
 }
 
-// envPlaceholder maps every non-alphanumeric byte to "_", so a host with a "."
-// and a host with a "-" in the same position collide onto one env var name, and
-// a token an operator sets for one would silently apply to the other. Both hosts
-// here stay unmatched and must get distinct, deterministic CredentialValue names.
+// envPlaceholder folds "." and "-" alike to "_", so these two unmatched hosts
+// collide and must get distinct, deterministic CredentialValue names.
 func TestDiscover_CollidingEnvPlaceholdersDisambiguated(t *testing.T) {
 	dir := t.TempDir()
 	testutil.WriteFixture(t, dir, cfgPath, "main = https://a.b.example.com/\nscoped = https://a-b.example.com/\n")
@@ -348,9 +340,7 @@ func TestDiscover_CollidingEnvPlaceholdersDisambiguated(t *testing.T) {
 		t.Errorf("a-b.example.com CredentialValue = %q, want prefix %q", dashValue, wantPrefix)
 	}
 
-	// A second run over the same fixture confirms the names are stable across
-	// runs; it does not by itself show independence from declaration order or
-	// map iteration order, since neither the input nor its order changes here.
+	// Stable across runs; order independence is pinned separately.
 	routes2, _ := discoverSynthetic(t, dir, nil, noMatch, probeAs("bearer"))
 	byHost2 := make(map[string]string, len(routes2))
 	for _, r := range routes2 {
@@ -418,13 +408,9 @@ func TestDiscover_ThreeWayEnvPlaceholderCollisionDisambiguated(t *testing.T) {
 		seen[v] = h
 	}
 
-	// A fixture declaring the same three hosts in a different line order,
-	// including the relative order of a.b.example.com and a-b.example.com
-	// (each host keeping its own name key), confirms the names are
-	// independent of declaration order, not merely repeatable across
-	// identical re-runs of the same fixture: a scheme that picks a
-	// bucket's "winner" by first-seen order would pass a same-order
-	// re-run but fail here.
+	// The same three hosts in a different order (a.b vs a-b swapped): a
+	// scheme picking a bucket's "winner" by first-seen order would pass a
+	// same-order re-run but fail here.
 	dir2 := t.TempDir()
 	cfg2 := fmt.Sprintf("scope1 = https://%s/\n"+
 		"scope2 = https://%s/\n"+
@@ -443,12 +429,10 @@ func TestDiscover_ThreeWayEnvPlaceholderCollisionDisambiguated(t *testing.T) {
 }
 
 func TestDisambiguateEnvPlaceholders_BoundExhaustedNamesEveryContestedPlaceholder(t *testing.T) {
-	// Two independent pairs of hosts that genuinely collide under hostHash
-	// (found by brute force, not stubbed): each pair shares one
-	// CredentialValue, so the round bound trips for real, with no injected
-	// hash. The error must name every contested placeholder, not just one,
-	// since silently dropping a colliding name would leave an operator
-	// unaware that name's hosts still share an env var too.
+	// Two pairs, each sharing one CredentialValue, that genuinely collide
+	// under hostHash (brute-forced, not stubbed), so the round bound trips
+	// for real. The error must name every
+	// contested placeholder, or an operator misses hosts still sharing a var.
 	const aHost1, aHost2 = "host-322383.example.com", "host-139598.example.com"
 	const bHost1, bHost2 = "host-322382.example.com", "host-139599.example.com"
 	if hostHash(aHost1) != hostHash(aHost2) {
@@ -483,18 +467,12 @@ func TestDisambiguateEnvPlaceholders_BoundExhaustedNamesEveryContestedPlaceholde
 	}
 }
 
-// Discover must surface a disambiguation failure as an error, not hand back a
-// routes table in which two hosts share one env var. The sibling bound test
-// above exercises the error-message determinism against hand-built routes;
-// this one proves Discover's own call site propagates that error rather than
-// swallowing it.
+// Discover must surface a disambiguation failure as an error, not hand back
+// routes in which two hosts share one env var.
 func TestDiscover_BoundExhaustedPropagatesErrorAndReturnsNilRoutes(t *testing.T) {
-	// A pair colliding twice over: same envPlaceholder (every label folds
-	// to "A_") and, unlike any other fixture here, the same hostHash, so
-	// no round of suffixing can separate them and the bound trips through
-	// production code. Found by brute force over dot/dash variants of a
-	// 19-label host, not stubbed; if either fold changes, re-run that
-	// search rather than hand-editing the literals.
+	// Same envPlaceholder and same hostHash, so no suffixing separates them.
+	// Brute-forced over dot/dash variants of a 19-label host; if either fold
+	// changes, re-run that search rather than hand-editing the literals.
 	const host1 = "a.a-a.a.a-a.a-a.a-a-a.a-a.a-a-a-a.a.a.example.com"
 	const host2 = "a.a.a.a.a-a.a.a.a.a.a.a-a-a.a.a-a-a.a.example.com"
 	if envPlaceholder(host1) != envPlaceholder(host2) {
@@ -522,9 +500,9 @@ func TestDiscover_BoundExhaustedPropagatesErrorAndReturnsNilRoutes(t *testing.T)
 	if err == nil {
 		t.Fatalf("Discover: want error on unresolvable env placeholder collision, got nil (routes = %+v)", routes)
 	}
-	// Both hosts get suffixed in lockstep, so the name still contested when
-	// the bound trips is the base name carrying one suffix per round — the
-	// base name alone would also match as a prefix and prove less.
+	// Both hosts are suffixed in lockstep, so the contested name carries one
+	// suffix per round; the bare base name would match as a prefix and prove
+	// less.
 	const wantContested = "SPINDRIFT_REGISTRY_CREDENTIAL_A_A_A_A_A_A_A_A_A_A_A_A_A_A_A_A_A_A_A_EXAMPLE_COM_C8995528_C8995528"
 	if !strings.Contains(err.Error(), wantContested) {
 		t.Errorf("Discover error %q does not name the still-contested placeholder %q", err.Error(), wantContested)
@@ -532,9 +510,7 @@ func TestDiscover_BoundExhaustedPropagatesErrorAndReturnsNilRoutes(t *testing.T)
 	if routes != nil {
 		t.Errorf("routes = %+v, want nil (Discover must not hand back a table where two hosts share one env var)", routes)
 	}
-	// Discover still hands back the report it built before disambiguation
-	// ran, so a caller can show which hosts went unmatched even on this
-	// error path, rather than only the bare error.
+	// The report survives the error, so a caller can still show unmatched hosts.
 	if len(report.Unmatched) != 2 {
 		t.Fatalf("report.Unmatched = %+v, want 2 entries", report.Unmatched)
 	}
@@ -664,10 +640,8 @@ func TestDiscover_SameHostTwoFilesOneRoute(t *testing.T) {
 	}
 }
 
-// A matched store's companion values (registry name, property key) are exactly
-// what that kind's own StoreConfig derives from the declaration: Discover sets
-// them for every store kind, and a kind with a companion key must end up with
-// that companion filled in.
+// A matched store's companion values are exactly what that kind's StoreConfig
+// derives from the declaration.
 func TestDiscover_MatchedStoreCompanionsComeFromKindStoreConfig(t *testing.T) {
 	dir := t.TempDir()
 	testutil.WriteFixture(t, dir, cfgPath, "main = https://registry.example.com/index/\n")

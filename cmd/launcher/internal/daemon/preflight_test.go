@@ -61,10 +61,9 @@ func TestClassifyPreflight(t *testing.T) {
 	}
 }
 
-// TestClassifyPreflightNeverConflatesWithInterpret is the non-conflation
-// guard issue #3544's AC demands: doctor's exit-code table and a dispatched
-// child's exit-code table (Interpret) must never converge on a shared
-// outcome label, even though both tables index small overlapping integers.
+// TestClassifyPreflightNeverConflatesWithInterpret pins that doctor's
+// exit-code table and Interpret's never share an outcome label, though both
+// index small overlapping integers (issue #3544).
 func TestClassifyPreflightNeverConflatesWithInterpret(t *testing.T) {
 	for exit := 0; exit <= 7; exit++ {
 		preflightOutcome := ClassifyPreflight(exit).Outcome

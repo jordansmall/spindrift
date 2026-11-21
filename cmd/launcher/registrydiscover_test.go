@@ -13,9 +13,9 @@ import (
 	"spindrift.dev/launcher/internal/registryroutes"
 )
 
-// These tests drive the discover command over the synthetic Strategy alone; the
-// real Strategies' declaration shapes, store pairings and route files are pinned by
-// the corpora under internal/ecosystem and its ecosystem packages.
+// These tests drive the discover command over the synthetic Strategy alone;
+// the real Strategies' declaration shapes, store pairings and route files are
+// pinned by the corpora under internal/ecosystem.
 var discoverRows = []ecosystem.Strategy{synthetic.Strategy}
 
 // writeDiscoverDeclarations writes lines ("name = url") to the Strategy's in-tree config.
@@ -363,9 +363,9 @@ func TestCmdRegistryDiscover_ForceFlagAnyPosition_StillTwoPositionals(t *testing
 	}
 }
 
-// os.UserHomeDir failing must fail the command, not silently fall back to zero
-// configured stores, which used to make every unmatched-host report line name
-// no stores at all.
+// os.UserHomeDir failing must fail the command, not fall back to zero
+// configured stores, which would leave every unmatched-host report line naming
+// no stores.
 func TestCmdRegistryDiscover_HomeDirUnavailable_ErrorsInsteadOfProceeding(t *testing.T) {
 	t.Setenv("HOME", "")
 
@@ -474,11 +474,10 @@ func TestRunRegistryDiscover_ReportNamesMatchedUnmatchedAndEmptyConfigSections(t
 // routes file gets written. Issue #3508.
 func TestRunRegistryDiscover_DisambiguationBoundExhausted_StillPrintsReport(t *testing.T) {
 	// Same brute-forced colliding-host fixture as
-	// TestDiscover_BoundExhaustedPropagatesErrorAndReturnsNilRoutes: both
-	// hosts fold to one envPlaceholder and collide under hostHash too, so no
-	// round of suffixing can separate them and the bound trips for real.
-	// The premise guards need unexported helpers, so only that test has
-	// them: a code == 0 failure here means the fixture went stale.
+	// TestDiscover_BoundExhaustedPropagatesErrorAndReturnsNilRoutes: both hosts
+	// fold to one envPlaceholder and collide under hostHash too, so the bound
+	// trips for real. Only that test has the premise guards (they need
+	// unexported helpers): a code == 0 failure here means the fixture went stale.
 	const host1 = "a.a-a.a.a-a.a-a.a-a-a.a-a.a-a-a-a.a.a.example.com"
 	const host2 = "a.a.a.a.a-a.a.a.a.a.a.a-a-a.a.a-a-a.a.example.com"
 
@@ -515,9 +514,7 @@ func TestRunRegistryDiscover_DisambiguationBoundExhausted_StillPrintsReport(t *t
 }
 
 // The store list comes from credresolver's kind table, in its search order
-// with paths under $HOME, not from a hand-maintained parallel copy (acceptance
-// criterion 3 of issue #3407). The table's own order and paths are pinned in
-// credresolver.
+// with paths under $HOME, not a hand-maintained copy (issue #3407 AC3).
 func TestDefaultRegistryDiscoverStores(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

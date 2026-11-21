@@ -22,11 +22,10 @@ func withRelayIncapableGit(t *testing.T) {
 	t.Cleanup(backendkit.ReplaceRegistryForTest(rows))
 }
 
-// mkHarness's readOnlyCapabilityOk eval assert (issue #2526 slice 2) already
-// proves every combination a Consumer can bake into an image, so the Go gate
-// (issue #2526 slice 3) has shrunk to a registry lookup by name that backstops a
-// runtime override of these three knobs. That is why these cases need no live
-// cf/it fixtures.
+// mkHarness's readOnlyCapabilityOk eval assert (issue #2526) already proves
+// every combination a Consumer can bake into an image, so this Go gate is a
+// registry lookup by name backstopping a runtime override of these three
+// knobs, and the cases need no live cf/it fixtures.
 func TestReadOnlyCapabilityGate_Table(t *testing.T) {
 	cases := []struct {
 		name           string
@@ -136,10 +135,9 @@ func TestReadOnlyCapabilityGate_Table(t *testing.T) {
 			},
 		},
 		{
-			// Validate() rejects an unregistered name earlier, so this gate
-			// is only the backstop, and it must report a lookup miss rather
-			// than "does not implement bundle-relay", a claim that presumes
-			// a registered row to check a bit on.
+			// Validate() rejects an unregistered name earlier, so this
+			// backstop must report a lookup miss rather than "does not
+			// implement bundle-relay", which presumes a registered row.
 			name:         "read-only unregistered CODE_FORGE fails naming it unregistered, not capability-incapable",
 			access:       "read-only",
 			codeForge:    "bogus-forge",
@@ -207,11 +205,10 @@ func TestReadOnlyCapabilityGate_Table(t *testing.T) {
 	}
 }
 
-// Issue #2942's AC5 keeps this gate's wording byte-identical to the four older
-// gates: wrapping with fmt.Errorf("%w: ...", errLaunchGateConfigInvalid, ...)
-// would prepend the sentinel's own text to the message dispatch, recover and
-// preview print verbatim to stderr. errors.Is must still hold so doctor.go's
-// doctorExitCodeFor keeps classifying the exit code.
+// Issue #2942 AC5 keeps this gate's wording byte-identical to the older gates:
+// fmt.Errorf("%w: ...", errLaunchGateConfigInvalid, ...) would prepend the
+// sentinel's text to the message dispatch, recover and preview print verbatim,
+// yet errors.Is must still hold for doctorExitCodeFor.
 func TestReadOnlyCapabilityGate_ErrorTextHasNoSentinelPrefix(t *testing.T) {
 	withRelayIncapableGit(t)
 	c := minimalValidConfig()

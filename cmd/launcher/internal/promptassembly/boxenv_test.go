@@ -199,8 +199,7 @@ func TestBoxEnvVarNames_MatchesBoxEnvRows(t *testing.T) {
 }
 
 // TestEnvFromEnviron_SelfContainedRequiresExactlyOne covers the equals1 kind:
-// only the literal "1" satisfies it, matching entrypoint.sh's
-// "$SELF_CONTAINED" == "1" check, so a value like "true" must not.
+// only the literal "1" satisfies it, so a value like "true" must not.
 func TestEnvFromEnviron_SelfContainedRequiresExactlyOne(t *testing.T) {
 	t.Setenv("SELF_CONTAINED", "true")
 

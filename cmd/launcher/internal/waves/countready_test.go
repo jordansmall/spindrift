@@ -7,10 +7,9 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-// Regression test for issue #2939's review finding: the headless CLI's
-// stale-drain heldBack count used to filter on dispatch readiness, so an
-// issue blocked by an unresolved edge did not count. CountReady restores
-// that filtering through the current Batch type.
+// Regression test for issue #2939: the headless stale-drain heldBack count
+// filters on dispatch readiness, so an issue blocked by an unresolved edge
+// does not count.
 func TestCountReady_ExcludesBlockedIssue(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"

@@ -52,8 +52,8 @@ func TestDoctorExitCodeFor(t *testing.T) {
 
 // Issue #2569's configErr class through the real validateConfig(c) path, not
 // a hand-injected error: a config missing MERGE_MODE exits 2 and explains why
-// on stderr, but unlike the short-circuit design a prior round shipped,
-// runDoctor still runs and still writes its full ok/MISSING report to stdout.
+// on stderr, but runDoctor still runs and writes its full ok/MISSING report
+// to stdout.
 func TestDoctorReport_ConfigErr_ExitsTwoAndStillRunsDoctor(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -109,9 +109,9 @@ func TestDoctorReport_ConfigInvalid_NamesEveryBrokenKnob(t *testing.T) {
 	}
 }
 
-// Pins the regression a prior review round caught: gating cmdDoctor on the
-// full validate(c), which includes the runtime prerequisite as Required, turned an
-// advisory-only "runtime not ready" finding into an exit-2 failure. A config
+// Pins a regression: gating cmdDoctor on the full validate(c), which includes
+// the runtime prerequisite as Required, turned an advisory-only "runtime not
+// ready" finding into an exit-2 failure. A config
 // whose only problem is an unresolvable RUNTIME value must still exit 0.
 func TestDoctorReport_RuntimeNotReady_StaysAdvisory(t *testing.T) {
 	f := forge.NewFake()
@@ -282,14 +282,11 @@ func TestDoctorReport_Butler_TrackerCannotFileExitsConfigInvalid(t *testing.T) {
 
 // Issue #3920: doctor --butler folds resolveButlerSettings's whole chain
 // (butlerPreflight, BUTLER_EVERY, BUTLER_CLAIM_TIMEOUT, DAEMON_AWAKE_WINDOW)
-// into configErr, so each of butlerPreflight's guards must actually reach
-// exit 2 through doctorReport, not just through a direct butlerPreflight
-// call. The "healthy" row proves the baseline config clears every guard on
-// its own, so each failing row below fails for its own reason rather than
-// one the baseline never cleared. The DRIVER=opencode row drives the real
-// config.driver field through resolveAgentPresenceSignals and must still
-// clear the Filer guard (issue #5330), so re-gating the Filer on the Driver
-// would show up here.
+// into configErr, so each guard must reach exit 2 through doctorReport. The
+// "healthy" row proves the baseline clears every guard, so each failing row
+// fails for its own reason. The DRIVER=opencode row drives config.driver
+// through resolveAgentPresenceSignals and must still clear the Filer guard
+// (issue #5330), so re-gating the Filer on the Driver shows up here.
 func TestDoctorReport_Butler_MisconfigExitsConfigInvalid(t *testing.T) {
 	newHealthyConfig := func(t *testing.T) config {
 		t.Helper()

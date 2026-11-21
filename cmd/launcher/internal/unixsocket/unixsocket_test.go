@@ -6,10 +6,8 @@ import (
 	"testing"
 )
 
-// TestSunPathCap verifies sunPathCap returns the AF_UNIX sun_path byte cap
-// for each platform (issue #3077): 104 on darwin, and 108 for anything else,
-// checked against both "linux" and a made-up GOOS to confirm the 108 branch
-// is a genuine default case rather than a "linux"-specific match.
+// The made-up GOOS confirms 108 is the default branch, not a "linux" match
+// (issue #3077).
 func TestSunPathCap(t *testing.T) {
 	cases := []struct {
 		goos string
@@ -28,10 +26,8 @@ func TestSunPathCap(t *testing.T) {
 	}
 }
 
-// TestTooLong_Boundary verifies TooLong's off-by-one boundary: a path one
-// byte under the running platform's sun_path cap fits, while a path exactly
-// at the cap does not (issue #3077) -- the kernel needs the last byte for
-// its own NUL terminator.
+// A path exactly at the sun_path cap does not fit (issue #3077): the kernel
+// needs the last byte for its NUL terminator.
 func TestTooLong_Boundary(t *testing.T) {
 	sunPathLimit := sunPathCap(runtime.GOOS)
 	fits := strings.Repeat("a", sunPathLimit-1)

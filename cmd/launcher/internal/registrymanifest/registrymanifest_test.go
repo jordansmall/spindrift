@@ -110,11 +110,9 @@ func TestEncodeParse_RoundTrip(t *testing.T) {
 	}
 }
 
-// Route.Ecosystems (issue #3403) must read back identical after a JSON
-// marshal/unmarshal, not merely be present, because
-// registryvocab.RouteEcosystems holds TOML values decoded into []any. The
-// second route declares no Ecosystems block to pin the other half of the
-// contract: omitted, never emitted empty.
+// Route.Ecosystems (issue #3403) holds TOML values decoded into []any, so it
+// must read back identical, not merely be present. The second route declares
+// no Ecosystems block to pin that it is omitted, never emitted empty.
 func TestEncodeParse_RoundTrip_Ecosystems(t *testing.T) {
 	want := Manifest{
 		Endpoint: NewUnixEndpoint("/registry-proxy.sock"),
@@ -246,11 +244,10 @@ func TestParse_BadEndpoint(t *testing.T) {
 	}
 }
 
-// Defense in depth for issue #3142's reviewer finding. The launcher only
-// mints a Prefix from [a-z0-9-] (registryproxy.isValidPrefix), but Parse
-// must reject anything else on its own: the Box's shell-sourced GOPROXY
-// export and the Groovy gradle init script's double-quoted GString would
-// each interpolate an attacker-controlled character verbatim.
+// Defense in depth (issue #3142): the launcher only mints [a-z0-9-] prefixes,
+// but Parse must reject anything else itself, since the Box's shell-sourced
+// GOPROXY export and the gradle init script's GString interpolate a prefix
+// verbatim.
 func TestParse_RejectsInvalidPrefixCharset(t *testing.T) {
 	const doc = `{"endpoint":"unix:///registry-proxy.sock","routes":[{"prefix":"r0$(id)","upstreamHost":"upstream.example"}]}`
 	_, err := Parse(doc)

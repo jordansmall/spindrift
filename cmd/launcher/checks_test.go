@@ -420,8 +420,7 @@ func TestDoctorCheckSets_BwrapRowsGatedOnRunnerKind(t *testing.T) {
 // validateConfig (main.go) consumes this row set to classify exit 2
 // "configuration invalid", and a bwrap host-capability gap such as missing
 // pasta is an installation problem, not a configuration fault. Folding these
-// rows in here once made `spindrift doctor` wrongly exit 2 (issue #2671
-// round-1 review finding).
+// rows in here once made `spindrift doctor` wrongly exit 2 (issue #2671).
 func TestDoctorExtraChecks_NeverIncludesBwrapCapabilityRows(t *testing.T) {
 	bwrapRowNames := []string{"bwrap-overlay-support", "bwrap-network-isolation", "bwrap-cgroup-delegation"}
 
@@ -520,7 +519,7 @@ func TestLauncherChecks_RegistryProxyRoutes_RetiredKnobInEnvFailsEvenWithoutRout
 	}
 }
 
-// Regression guard from the issue #3145 review: the retirement gate runs
+// Regression guard (issue #3145): the retirement gate runs
 // before the routes-file early return, so a routes file that parses and
 // resolves cleanly can never mask a leftover scalar knob.
 func TestLauncherChecks_RegistryProxyRoutes_RetiredKnobFailsEvenWithValidRoutesFile(t *testing.T) {

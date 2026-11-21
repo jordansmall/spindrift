@@ -23,12 +23,9 @@ func writeBundle(t *testing.T, dir string) {
 	}
 }
 
-// Slice B's positive case for ADR 0039's CODE_FORGE=local push-only
-// counterpart to the PR Lander's salvage (no outcome line): a local run with
-// no parseable outcome line, a genuine success self-report, and a relayable
-// bundle in the outbox must not be parked agent-failed. Local has no PR-shaped
-// adopt path (s.pr is always nil), so it promotes the issue to Recoverable
-// instead.
+// ADR 0039's push-only salvage: a local run with no outcome line, a genuine
+// success self-report and an outbox bundle must not park agent-failed. With
+// no PR adopt path, it promotes to Recoverable.
 func TestSettle_LocalPushOnly_NoOutcomeBundlePresentMarksRecoverable(t *testing.T) {
 	const issNum = "1"
 	outbox := t.TempDir()
@@ -308,10 +305,8 @@ func TestSettle_LocalPushOnly_KilledBySignalBundleMissingFallsBackToFailed(t *te
 	}
 }
 
-// Pins AC3 (issue #2378): a clean, non-signal exit with a bundle present but
-// no self-report is unchanged by the signal-kill evidence leg added alongside
-// it. KilledBySignal false and no self-report together still park the issue
-// agent-failed, the same as before this leg existed.
+// Issue #2378: a clean, non-signal exit with a bundle but no self-report is
+// untouched by the signal-kill evidence leg and still parks agent-failed.
 func TestSettle_LocalPushOnly_CleanFailureBundlePresentFallsBackToFailed(t *testing.T) {
 	const issNum = "1"
 	outbox := t.TempDir()

@@ -6,9 +6,8 @@ import (
 
 // This test pins fix-prompt.md's warm-fix obligations: the no-re-scout rule,
 // the smallest-change rule, and the two override bullets that replace COMMIT's
-// multi-commit guidance and the REVIEW/OPEN A PULL REQUEST steps. Issue #3225
-// cut those bullets' design-history rationale, so every operative rule is
-// pinned here to catch that cut taking a rule with it.
+// multi-commit guidance and the REVIEW/OPEN A PULL REQUEST steps, each pinned
+// so a rationale cut cannot take a rule with it (issue #3225).
 func TestFixPromptWarmFixContract(t *testing.T) {
 	assertPromptClauses(t, "fix-prompt.md", []promptClause{
 		{

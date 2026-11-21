@@ -567,13 +567,12 @@ func bwrapSandboxArtifacts(t *testing.T, host string) map[string]string {
 }
 
 // TestSeamConnectorSandboxPrimaryTotals runs a work dispatch under a primary
-// github row with the sandbox on, and pins the totals line the launcher appends
-// to the run's primary audit file once the sandbox has closed. The fixture
-// Connector declares no forge.tokenGrant, so the startup write gate warns and
-// continues; it is no tracker either, so the run's first primary read (listing
-// issues) is refused as unsupported and the launcher exits 1. The gate's
-// token introspection and that read are the two things the .log holds, and the
-// audit file holds no Connector decisions, only the totals.
+// github row with the sandbox on and pins the totals line appended to the
+// run's primary audit file once the sandbox closes. The fixture Connector
+// declares no forge.tokenGrant (the write gate warns and continues) and is no
+// tracker (the first primary read, listing issues, is refused: exit 1), so the
+// .log holds only the gate's token introspection and that read, and the audit
+// file only the totals.
 func TestSeamConnectorSandboxPrimaryTotals(t *testing.T) {
 	t.Parallel()
 	rig := newSandboxRig(t, "podman", sandboxRigOpts{mode: sandboxPrimary, issues: []int{7}})
@@ -607,8 +606,7 @@ func TestSeamConnectorSandboxPrimaryTotals(t *testing.T) {
 	}
 	// The call count is deterministic: four from the github fixture, the write
 	// gate's token introspection included, and three from claude's Driver
-	// Connector, which every run loads in the sandbox now that it is the Driver
-	// (issue #6799).
+	// Connector, which every run loads in the sandbox (issue #6799).
 	if totals["sandbox_calls"] != 7 {
 		t.Errorf("sandbox_calls = %d, want 7 (%s)", totals["sandbox_calls"], lines[0])
 	}

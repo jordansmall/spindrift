@@ -134,11 +134,9 @@ func TestParse_MissingStatus(t *testing.T) {
 	}
 }
 
-// This pins ReadyBeforeNote to the substring test the deleted bash note-field
-// split used (agent/entrypoint.sh, commit a43506a8): bounded at the first
-// " note=", literal "status=ready" token match. It is deliberately looser than
-// Parse's grammar (an empty landing still counts as ready) and narrower on the
-// note field (a "status=ready" mention inside note text must not count).
+// ReadyBeforeNote is deliberately looser than Parse (an empty landing still
+// counts as ready) and narrower on the note field (a "status=ready" mention
+// inside note text must not count).
 func TestReadyBeforeNote(t *testing.T) {
 	tests := []struct {
 		name string
@@ -355,10 +353,8 @@ func TestLine_NonSyntheticByteIdentical(t *testing.T) {
 	}
 }
 
-// The scanner-mechanics tests for lastInLog and lastSelfReportInLog live in
-// outcome_internal_test.go (package outcome), since those scanners are
-// unexported (issue #2260). The Resolve tests below cover the policy-level
-// behavior: which tier wins, and Resolve's own Skipped field.
+// Scanner-mechanics tests for the unexported lastInLog and lastSelfReportInLog
+// live in outcome_internal_test.go (issue #2260).
 
 func writeLog(t *testing.T, lines ...string) string {
 	t.Helper()
@@ -700,11 +696,9 @@ func TestLastPRIntentInLog_NonceMismatchIgnoredAndWarned(t *testing.T) {
 	}
 }
 
-// An empty expectedNonce, the zero value a caller might pass by mistake, must
-// never verify a line, even one carrying no nonce field at all. The fixture has
-// only one field after the token, so under issue #2089 it also reads as a doc
-// example rather than a signal attempt: it stays silently non-matched
-// (err == nil) rather than warning.
+// An empty expectedNonce must never verify a line. The fixture's single field
+// after the token also makes it a doc example under issue #2089, so it stays
+// silently non-matched (err == nil) rather than warning.
 func TestLastPRIntentInLog_EmptyExpectedNonceNeverMatches(t *testing.T) {
 	payload := encodePRIntent(t, "title", "body")
 	path := writeLog(t, "SPINDRIFT_PR_INTENT "+payload)
@@ -800,11 +794,10 @@ func TestLastPRIntentInLog_SurvivesStreamJSONCollapse(t *testing.T) {
 	}
 }
 
-// When the Box's narration shares the assistant-message text field with the
-// marker, stream-json encodes the separating newline as a literal backslash-n,
-// landing the 'n' directly against the token's first letter with no real
-// whitespace. Same collapse class as issue #1921, but for a token that does not
-// start its JSON text field, which SurvivesStreamJSONCollapse does not exercise.
+// Narration sharing the text field with the marker puts a literal `\n` right
+// against the token's first letter: issue #1921's collapse class for a token
+// that does not start its JSON text field, which SurvivesStreamJSONCollapse
+// does not exercise.
 func TestLastPRIntentInLog_MarkerAfterNarrationInSameTextField(t *testing.T) {
 	payload := encodePRIntent(t, "feat: add widget", "Adds a widget. Closes #42")
 	path := writeLog(t,
@@ -833,11 +826,10 @@ func TestLastPRIntentInLog_FileNotFound(t *testing.T) {
 	}
 }
 
-// The LastFieldedOutcomeLine and LastNearMissOutcomeLine tests pin the deleted
-// bash extractor's filter-then-last semantics (outcomeExtractFnBody/
-// outcomeExtractNearMissFnBody, git show a2addd2b:lib/drivers/claude.nix): a
-// token-leading line is "fielded" purely by carrying a landing= and a status=
-// marker, any value included, never by Parse's grammar, and the last one wins.
+// The LastFieldedOutcomeLine and LastNearMissOutcomeLine tests pin
+// filter-then-last semantics (from the bash extractor at a2addd2b): a
+// token-leading line is "fielded" purely by carrying landing= and status=
+// markers, any value included, never by Parse's grammar.
 
 func TestLastFieldedOutcomeLine_NoFile(t *testing.T) {
 	line, found, err := outcome.LastFieldedOutcomeLine("/nonexistent/path/test.log")
@@ -859,9 +851,8 @@ func TestLastNearMissOutcomeLine_NoFile(t *testing.T) {
 	}
 }
 
-// Bug 1: the deleted bash's filter only checked for the literal "landing="
-// marker, so an empty landing value still counts as fielded, unlike
-// outcome.Parse, which rejects an empty landing as ErrNearMiss.
+// An empty landing value still counts as fielded, unlike outcome.Parse, which
+// rejects it as ErrNearMiss.
 func TestLastFieldedOutcomeLine_EmptyLandingStillFielded(t *testing.T) {
 	want := outcome.Token + " issue=7 landing= status=ready note=done"
 	logPath := writeLog(t, want)
@@ -877,9 +868,8 @@ func TestLastFieldedOutcomeLine_EmptyLandingStillFielded(t *testing.T) {
 	}
 }
 
-// Bug 2: the deleted bash filtered to fielded lines first, then took the last of
-// those, so a later token-leading line carrying neither field marker (a bare
-// paraphrase) must never shadow an earlier genuine fielded line.
+// Filter first, then take the last: a later fieldless paraphrase must never
+// shadow an earlier genuine fielded line.
 func TestLastFieldedOutcomeLine_FieldedLineWinsOverLaterNonFieldedLine(t *testing.T) {
 	fielded := outcome.Token + " issue=7 landing=agent/issue-7 status=ready note=done"
 	logPath := writeLog(t, fielded, outcome.Token+": all set")
@@ -1024,10 +1014,8 @@ func TestLastCommentLineInLog_TakesLast(t *testing.T) {
 	}
 }
 
-// The nonce-gated COMMENT signal prefers the last line that actually verifies,
-// unlike lastInLog's unconditional last-line-wins, so an attacker cannot
-// suppress a real verdict or blocked-note by posting COMMENT-shaped noise after
-// it.
+// Last-verifying-wins, unlike lastInLog's last-line-wins, so COMMENT-shaped
+// noise posted after a real verdict cannot suppress it.
 func TestLastCommentLineInLog_ValidLineNotShadowedByLaterRejectedMention(t *testing.T) {
 	genuine := base64.StdEncoding.EncodeToString([]byte("genuine verdict"))
 	path := writeLog(t,
@@ -1102,11 +1090,10 @@ func TestLastCommentLineInLog_NonceMismatchCountsRejectedLines(t *testing.T) {
 	}
 }
 
-// An empty expectedNonce never verifies a line, mirroring LineHasNonce's own
-// invariant even though classifySignalAt does not call it. The fixture
-// has only one field after the token, so under issue #2089 it also reads as a
-// doc example rather than a signal attempt: it stays silently non-matched
-// (err == nil) rather than warning.
+// An empty expectedNonce never verifies a line: LineHasNonce's invariant,
+// which classifySignalAt holds without calling it. The single-field fixture is
+// also a doc example under issue #2089, so it stays silently non-matched
+// (err == nil).
 func TestLastCommentLineInLog_EmptyExpectedNonceNeverMatches(t *testing.T) {
 	encoded := base64.StdEncoding.EncodeToString([]byte("verdict"))
 	path := writeLog(t, "SPINDRIFT_COMMENT "+encoded)
@@ -1132,11 +1119,9 @@ func TestLastCommentLineInLog_MalformedBase64Rejected(t *testing.T) {
 	}
 }
 
-// Issue #3668: an empty payload decodes without error under the strict
-// standard decoder, so a printf/grep diagnostic that echoes the token and
-// nonce but stops before any base64 character (e.g. `printf 'SPINDRIFT_COMMENT
-// <nonce> %s\n' ...`) would otherwise verify with a zero-length body and,
-// under last-verifying-wins, mask a genuine payload.
+// Issue #3668: an empty payload decodes without error, so a printf/grep
+// diagnostic echoing token and nonce would otherwise verify with an empty
+// body and, under last-verifying-wins, mask a genuine payload.
 func TestLastCommentLineInLog_EmptyPayloadRejected(t *testing.T) {
 	path := writeLog(t, `SPINDRIFT_COMMENT the-nonce %s\n`)
 	_, found, _, err := outcome.LastCommentLineInLog(path, "the-nonce")
@@ -1149,13 +1134,9 @@ func TestLastCommentLineInLog_EmptyPayloadRejected(t *testing.T) {
 }
 
 const (
-	// lib/output-caps.nix's bashMaxOutputLength, which lib/image.nix bakes into
-	// the Box's config.Env as BASH_MAX_OUTPUT_LENGTH: the character count at
-	// which the Box hard-cuts a Bash tool result. Restated here because Go
-	// cannot read the Nix value; nix/checks/prompts.nix parses this const
-	// back out of this file and fails the build if it drifts from
-	// lib/output-caps.nix, so this is a pinned restatement, not an unchecked
-	// one.
+	// lib/output-caps.nix's bashMaxOutputLength (the Box's
+	// BASH_MAX_OUTPUT_LENGTH hard cut), restated because Go cannot read Nix;
+	// nix/checks/prompts.nix parses this const back out and fails on drift.
 	bakedCap = 8192
 
 	// The real nonce width, pinned by dispatch.TestNewNonce_LengthIsNonceHexWidth.
@@ -1175,16 +1156,11 @@ func cutCommentLine(t *testing.T) string {
 	return fullLine[:bakedCap]
 }
 
-// Issue #3669: this is what the verdict fragments' sole-output precondition
-// ("Print nothing before the marker line") buys. With the marker line as the
-// whole Bash output, the cut always lands at the same payload length —
-// bakedCap minus the marker prefix. base64.StdEncoding.Strict() (the decoder
-// in outcome.go) rejects any string whose length is not a multiple of 4, so
-// asserting that property directly -- rather than a specific mod-4 residue
-// that happens to hold for today's bakedCap -- is what actually guarantees
-// the strict decoder rejects a cut payload instead of decoding half a
-// verdict into a posted comment. Anything printed first moves the cut to an
-// arbitrary offset, where a truncated payload can still decode.
+// Issue #3669: what the verdict fragments' "Print nothing before the marker
+// line" buys. As the whole Bash output, the marker line is cut at a fixed
+// payload length; asserting that length is not a multiple of 4 (not a specific mod-4
+// residue) is what guarantees the strict decoder rejects it instead of posting
+// half a verdict. Anything printed first moves the cut to an arbitrary offset.
 func TestLastCommentLineInLog_SoleOutputCutIsNeverDecodable(t *testing.T) {
 	cutLine := cutCommentLine(t)
 
@@ -1214,11 +1190,9 @@ func TestLastCommentLineInLog_SoleOutputCutIsNeverDecodable(t *testing.T) {
 	}
 }
 
-// Issue #3669: ~30 of the 48 research runs on 2026-09-20 hit the Box's hard
-// output cut and emitted a truncated SPINDRIFT_COMMENT line first, followed by
-// a shorter, verifying re-emission. Last-*verifying*-wins (not last-line-wins)
-// is what makes that re-emission recoverable: the cut line must be counted as
-// a rejected signal attempt and skipped, not decoded into a truncated body.
+// Issue #3669: ~30 of 48 research runs on 2026-09-20 emitted a cut
+// SPINDRIFT_COMMENT line, then a shorter verifying re-emission. The cut line
+// must be counted as rejected and skipped, not decoded into a truncated body.
 func TestLastCommentLineInLog_CutLineDoesNotWinOverShorterReemission(t *testing.T) {
 	cutLine := cutCommentLine(t)
 
@@ -1267,11 +1241,9 @@ func TestLastCommentLineInLog_DocExampleDoesNotWarn(t *testing.T) {
 	}
 }
 
-// Issue #1940, issue #1921's twin: a stream-json JSONL box log collapses the
-// printed line onto one physical line, JSON-escaping the trailing newline into a
-// literal backslash-n abutting the base64 payload. The single-line token must
-// still decode cleanly out of that shape, unlike the exact-line
-// SPINDRIFT_COMMENT_BEGIN/END block parser it replaces.
+// Issue #1940, issue #1921's twin: in a stream-json log the trailing newline
+// becomes a literal `\n` abutting the base64 payload, which must still decode
+// cleanly.
 func TestLastCommentLineInLog_SurvivesJSONLShapedLog(t *testing.T) {
 	body := "**Verdict** — recommend"
 	encoded := base64.StdEncoding.EncodeToString([]byte(body))
@@ -1290,12 +1262,9 @@ func TestLastCommentLineInLog_SurvivesJSONLShapedLog(t *testing.T) {
 	}
 }
 
-// Issue #3605, issue #3668's motivating shape: the Box emitted a genuine
-// verdict, then echoed the marker twice while checking its own work — a
-// `printf 'SPINDRIFT_COMMENT <nonce> %s\n' ...` tool_use command and a
-// `grep -o "SPINDRIFT_COMMENT <nonce> [A-Za-z0-9+/=]*"` diagnostic. Both
-// carry the real token and nonce but no base64 after them, so before the
-// zero-length reject they verified empty and, being later, won.
+// Issue #3605 (#3668's motivating shape): after a genuine verdict the Box
+// echoed the marker in a printf tool_use and a grep -o diagnostic, both
+// carrying the real nonce but no base64, which used to verify empty and win.
 func TestLastCommentLineInLog_EchoedMarkerDoesNotMaskVerdict(t *testing.T) {
 	body := "**Verdict** — recommend, real 7628-char-class payload"
 	encoded := base64.StdEncoding.EncodeToString([]byte(body))
@@ -1318,12 +1287,9 @@ func TestLastCommentLineInLog_EchoedMarkerDoesNotMaskVerdict(t *testing.T) {
 	}
 }
 
-// Issue #3597, issue #3668's second motivating shape: the log carries a
-// printf-echoed marker (verifies to an empty payload, now rejected) followed
-// only by a truncated, undecodable payload — no genuine verifying line at
-// all. The caller must see found=false and an empty body, i.e. reach
-// settle's "no comment" branch for the right reason, rather than found=true
-// with an empty verified comment.
+// Issue #3597 (#3668's second shape): a printf-echoed empty marker then only a
+// truncated payload. The caller must see found=false, reaching settle's "no
+// comment" branch, not found=true with an empty verified comment.
 func TestLastCommentLineInLog_TruncatedPayloadAfterEchoReportsNoComment(t *testing.T) {
 	printfEcho := `{"type":"assistant","message":{"content":[{"type":"tool_use","input":{"command":` +
 		`"printf 'SPINDRIFT_COMMENT the-nonce %s\n' \"$body\""}}]}}`
@@ -1389,11 +1355,9 @@ func TestAllIssueIntentLinesInLog_NotFound(t *testing.T) {
 	}
 }
 
-// A mismatched-nonce line (issue #1939's shape: an echoed token written before
-// this run's nonce was minted) is dropped from the payloads but still counted
-// via the rejected-count return, as the singleton scanners count a non-verifying
-// token-bearing line (issue #2976), so a caller can warn instead of the drop
-// staying silent.
+// A mismatched-nonce line (issue #1939's shape) is dropped but counted in
+// Rejections, as the singleton scanners count a non-verifying line (issue
+// #2976), so the drop is never silent.
 func TestAllIssueIntentLinesInLog_NonceMismatchCountedAsRejected(t *testing.T) {
 	genuine := base64.StdEncoding.EncodeToString([]byte(`{"title":"genuine"}`))
 	spoofed := base64.StdEncoding.EncodeToString([]byte(`{"title":"spoofed"}`))
@@ -1595,8 +1559,6 @@ func TestResolve(t *testing.T) {
 			wantKind:  "work",
 		},
 		{
-			// Before #2274 this nonce-free line was excluded from the genuine tier
-			// and surfaced via the self-report fallback.
 			name: "nonce-free full-grammar line is genuine",
 			logs: func(t *testing.T) []outcome.PassLog {
 				path := writeLog(t,
@@ -1610,9 +1572,8 @@ func TestResolve(t *testing.T) {
 			wantKind:       "work",
 		},
 		{
-			// ADR 0055 / issue #2274: the outcome path no longer gates on a nonce,
-			// so any nonce= value, even one that would once have failed the gate,
-			// is accepted as genuine.
+			// ADR 0055 / issue #2274: the outcome path does not gate on a
+			// nonce, so any nonce= value is genuine.
 			name: "genuine line with any nonce value is accepted (no gate)",
 			logs: func(t *testing.T) []outcome.PassLog {
 				path := writeLog(t,
@@ -1683,11 +1644,9 @@ func TestResolve(t *testing.T) {
 			wantKind:  "work",
 		},
 		{
-			// Issue #2973: a later log holding only a mid-sentence mention, which is
-			// field-bearing but not a candidate, must not shadow an earlier log's
-			// genuine leading-token outcome. Before the mention-tier fallback was
-			// deleted, that near-miss overrode the earlier winner via Resolve's
-			// err != nil precedence arm.
+			// Issue #2973: a later log holding only a field-bearing mid-sentence
+			// mention must not shadow an earlier log's genuine outcome via
+			// Resolve's err != nil precedence arm.
 			name: "later mid-sentence mention does not shadow earlier genuine outcome",
 			logs: func(t *testing.T) []outcome.PassLog {
 				first := writeLog(t,
@@ -1730,8 +1689,7 @@ func TestResolve(t *testing.T) {
 	}
 }
 
-// Issue #2929: this pins IsGenuineOrSynthetic's verdict across all three
-// provenance tiers.
+// Issue #2929.
 func TestResolved_IsGenuineOrSynthetic(t *testing.T) {
 	cases := []struct {
 		provenance outcome.Provenance
@@ -1751,11 +1709,9 @@ func TestResolved_IsGenuineOrSynthetic(t *testing.T) {
 	}
 }
 
-// This pins the post-#2274 behavior for a bare-word leading line. Before the
-// nonce gate was retired (ADR 0055), a nonce-less line like this was excluded
-// from the genuine tier ahead of Parse, letting Resolve fall through to the
-// self-report tier. Now lastInLog reaches Parse and the line is a near-miss,
-// which Resolve propagates as an error rather than a fabricated outcome.
+// Issue #2274 / ADR 0055: a bare-word leading line reaches Parse and is a
+// near-miss, which Resolve propagates as an error rather than falling through
+// to the self-report tier.
 func TestResolve_BareWordLeadingLineIsNearMiss(t *testing.T) {
 	path := writeLog(t,
 		"SPINDRIFT_OUTCOME: success",
@@ -1861,10 +1817,8 @@ func TestResolve_SelfReportAlwaysPopulated(t *testing.T) {
 	})
 }
 
-// Issue #2343 slice 1: an I/O error during the self-report tier's log walk
-// surfaces on Resolved.SelfReportError while Found, Provenance and Outcome,
-// driven by the genuine/synthetic tier, stay unaffected. The change is purely
-// additive, so a caller ignoring SelfReportError sees the old behavior.
+// Issue #2343: a self-report walk I/O error surfaces on SelfReportError while
+// Found, Provenance and Outcome stay unaffected.
 func TestResolve_SelfReportErrorPopulated(t *testing.T) {
 	badDir := t.TempDir()
 	goodPath := writeLog(t,
@@ -1893,11 +1847,9 @@ func TestResolve_SelfReportErrorPopulated(t *testing.T) {
 	}
 }
 
-// Issue #2343 slice 1's silent-skip guarantee: a bad log between two good ones
-// is skipped and the self-report walk keeps going. Pass-1 gives an early
-// self-report, pass-2 (a directory) errors, and pass-3 gives both the genuine
-// outcome and the winning later self-report. SelfReportError still surfaces
-// pass-2's error: it is a last-seen tracker, independent of the winning report.
+// Issue #2343: a bad log (pass-2, a directory) between two good ones is
+// skipped and pass-3's self-report wins, yet SelfReportError still carries
+// pass-2's error: it is a last-seen tracker, independent of the winner.
 func TestResolve_MultiLogSelfReportErrorDoesNotAbortWalk(t *testing.T) {
 	pass1 := writeLog(t, "SPINDRIFT_OUTCOME: success")
 	badDir := t.TempDir()
@@ -1934,13 +1886,9 @@ func TestResolve_MultiLogSelfReportErrorDoesNotAbortWalk(t *testing.T) {
 	}
 }
 
-// Issue #3670's acceptance criterion 1 (#3597's shape): a stream-json
-// tool_result line truncated mid-payload by the Box's Bash output cap. The
-// token sits mid-line (after `"content":"`), never leading, and the base64
-// run's length is not a multiple of four, so the strict decoder rejects it.
-// Before #3670 a non-leading token that failed to verify was silently
-// dropped as a bare mention; now a non-empty malformed run counts wherever
-// the token sits (that is the whole point of the slice).
+// Issue #3670 (#3597's shape): a tool_result cut mid-payload by the Box's Bash
+// output cap. The token sits mid-line and the run length is not a multiple of
+// four; a non-empty malformed run counts wherever the token sits.
 func TestLastCommentLineInLog_StreamJSONTruncatedPayloadCountsAsMalformed(t *testing.T) {
 	full := base64.StdEncoding.EncodeToString([]byte(strings.Repeat("verdict body text ", 200)))
 	truncated := full[:len(full)-2] // cut mid-quantum: length not a multiple of four
@@ -1974,13 +1922,9 @@ func TestLastCommentLineInLog_StreamJSONTruncatedPayloadCountsAsMalformed(t *tes
 	}
 }
 
-// The prompt fragment itself carries a placeholder shaped like the grammar
-// ("SPINDRIFT_PR_INTENT <nonce> <base64-encoded title, a blank line, then
-// body>"). Echoed by the Box mid-line inside stream-json (e.g. quoting its
-// own instructions back), it must not be counted: the placeholder text is not
-// base64-alphabet, so its base64 run is empty, and an empty run off a
-// non-leading token stays silent (the same trap TestLastCommentLineInLog_
-// EchoedMarkerDoesNotMaskVerdict pins for SPINDRIFT_COMMENT).
+// The prompt fragment's own "SPINDRIFT_PR_INTENT <nonce> <base64-encoded
+// title...>" placeholder, echoed mid-line, has an empty base64 run off a
+// non-leading token, so it must stay silent.
 func TestLastPRIntentInLog_PromptPlaceholderEmbeddedMidLineNotRejected(t *testing.T) {
 	jsonl := `{"type":"assistant","message":{"content":[{"type":"text","text":"Remember: SPINDRIFT_PR_INTENT the-nonce ` +
 		`<base64-encoded title, a blank line, then body>\n"}]}}`

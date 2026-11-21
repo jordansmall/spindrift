@@ -18,7 +18,7 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-// TestTransitionState_NoteReported pins the #3627 review finding: a Failed
+// TestTransitionState_NoteReported pins #3627: a Failed
 // transition must carry whatever note the caller passes through to the
 // settled record, not a hardcoded "". It also pins issue #4785: the same
 // terminal settle appends one dispatch_settled to the Dispatch's primary log

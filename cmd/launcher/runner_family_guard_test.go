@@ -132,17 +132,15 @@ func outOfScopeFile(path string) bool {
 }
 
 // runnerFamilyViolations parses src as the file at path (slash-separated) and
-// returns one "path:line: why\n\t<source line>" per comparison that spells a
-// runtime/family name, reference to a family constant, or import of a family
-// package. A marker with a reason exempts its own line, and the following line
-// only when the marker comment stands alone on its line. Generated files yield
-// nothing.
+// returns one "path:line: why\n\t<source line>" per comparison spelling a
+// runtime/family name, family constant reference, or family package import. A
+// reasoned marker exempts its own line, and the next line only when the marker
+// stands alone on its line.
 //
-// Known limits: only ==, != and case against a string literal are seen, so
-// strings.EqualFold(rt, "podman"), slices.Contains(xs, "docker") and a named
-// constant compared to rt pass; family constants are matched through the
-// literal identifier runner, so an aliased or dot import of package runner
-// passes. Family imports are matched by path, so any alias is seen.
+// Known limits: only ==, != and case against a string literal are seen
+// (strings.EqualFold, slices.Contains and named constants pass); family
+// constants match only through the literal identifier runner, so an aliased or
+// dot import passes. Family imports are matched by path, so any alias is seen.
 func runnerFamilyViolations(t testing.TB, path string, src []byte, names, idents map[string]bool) []string {
 	t.Helper()
 	fset := token.NewFileSet()
@@ -245,17 +243,13 @@ func runnerFamilyViolations(t testing.TB, path string, src []byte, names, idents
 	return out
 }
 
-// TestRunnerFamilyGuard walks the launcher module and fails on a runtime or
-// family name compared, a family constant referenced, or a family package
-// imported, outside the family packages and the Bundle: core reads the
-// Descriptor row or the Strategy instead of re-deriving a family fact from its
-// name, and only the Bundle links a family in.
+// TestRunnerFamilyGuard fails on a runtime or family name compared, a family
+// constant referenced, or a family package imported, outside the family
+// packages and the Bundle: core reads the Descriptor row or the Strategy
+// instead of re-deriving a family fact from its name.
 //
-// Two structural skips are deliberate policy: _test.go files, since a test
-// asserts per-family outcomes and sets fixtures rather than branching
-// production behavior; and internal/runner/runnertest/**, the test-only
-// contract kit, which names a family on purpose to scope a contract row
-// (ADR 0069).
+// _test.go files are skipped on purpose: a test asserts per-family outcomes
+// rather than branching production behavior.
 func TestRunnerFamilyGuard(t *testing.T) {
 	names := familyNames()
 	idents := familyIdents(t, familiesGen)

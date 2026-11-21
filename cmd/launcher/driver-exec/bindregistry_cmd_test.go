@@ -22,10 +22,9 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// A hermetic $HOME with the synthetic and stub Strategies' home-directory env vars
-// left unset (issue #3201): a run reaching a home-config write would otherwise land in the real
-// ambient one. Tests that t.Setenv their own HOME or home-directory var scope
-// back to this default at teardown.
+// A hermetic $HOME with the synthetic and stub Strategies' home-directory env
+// vars unset (issue #3201): a run reaching a home-config write would otherwise
+// land in the real ambient one.
 func TestMain(m *testing.M) {
 	if err := drivertest.UseClaudeConnector(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -50,22 +49,18 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// lookPathFound stubs bindregistry.ResolveGate's LookPath dep to report
-// socat found without touching the real PATH (issue #3141's CI fix): the Nix
-// test sandbox has no socat, which let this shared-gate test pass locally
-// and fail in-box. Callers always inject a fake SpawnFunc too, so the returned
-// path is never executed, only "found".
+// lookPathFound stubs bindregistry.ResolveGate's LookPath dep to report socat
+// found without touching PATH (issue #3141): the Nix test sandbox has no
+// socat. Callers always inject a fake SpawnFunc, so the path is never run.
 func lookPathFound(string) (string, error) { return "/fake/bin/socat", nil }
 
-// lookPathMissing deterministically reports socat absent, replacing the old
-// trick of emptying $PATH, which depended on no other test having widened PATH
-// and on exec.LookPath being the thing actually consulted.
+// lookPathMissing deterministically reports socat absent, rather than
+// emptying $PATH, which depended on no other test having widened it.
 func lookPathMissing(string) (string, error) { return "", exec.ErrNotFound }
 
 // shortUnixSocketPath avoids t.TempDir(), whose path embeds the full subtest
-// name: AF_UNIX's sun_path is capped at 108 bytes on Linux, and t.TempDir()'s
-// path here regularly blows past that, failing net.Listen("unix", ...) with
-// EINVAL.
+// name and regularly blows AF_UNIX's 108-byte sun_path cap, failing
+// net.Listen("unix", ...) with EINVAL.
 func shortUnixSocketPath(t *testing.T) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "brsock")
@@ -77,8 +72,7 @@ func shortUnixSocketPath(t *testing.T) string {
 }
 
 // setUnixManifestEnv sets REGISTRY_PROXY_MANIFEST (ADR 0045) to a manifest
-// naming a unix endpoint, the replacement for the deleted
-// -registry-proxy-socket/-forwarder-port flags (issue #3141).
+// naming a unix endpoint (issue #3141).
 func setUnixManifestEnv(t *testing.T, socketPath string, routes ...registrymanifest.Route) {
 	t.Helper()
 	m := registrymanifest.Manifest{Endpoint: registrymanifest.NewUnixEndpoint(socketPath), Routes: routes}
@@ -89,9 +83,8 @@ func setUnixManifestEnv(t *testing.T, socketPath string, routes ...registrymanif
 	t.Setenv(registrymanifest.EnvVar, encoded)
 }
 
-// setTCPManifestEnv is the TCP-endpoint counterpart (issue #3111's TCP-fallback
-// transport), replacing the deleted
-// -registry-proxy-tcp-host/-registry-proxy-tcp-port flags.
+// setTCPManifestEnv is the TCP-endpoint counterpart (issue #3111's
+// TCP-fallback transport).
 func setTCPManifestEnv(t *testing.T, host, port string, routes ...registrymanifest.Route) {
 	t.Helper()
 	m := registrymanifest.Manifest{Endpoint: registrymanifest.NewTCPEndpoint(host, port), Routes: routes}
@@ -103,8 +96,8 @@ func setTCPManifestEnv(t *testing.T, host, port string, routes ...registrymanife
 }
 
 // clearManifestEnv sets REGISTRY_PROXY_MANIFEST explicitly empty,
-// registrymanifest.Parse's ErrAbsent shape, rather than relying on the ambient
-// test environment happening to lack the var.
+// registrymanifest.Parse's ErrAbsent shape, rather than trusting the ambient
+// environment to lack it.
 func clearManifestEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv(registrymanifest.EnvVar, "")
@@ -114,9 +107,8 @@ func clearManifestEnv(t *testing.T) {
 // declaration) rendered once for the exact-wording assertions below.
 var forwarderPortStr = strconv.Itoa(bindregistry.ForwarderPort)
 
-// runSyntheticBind is runBindRegistryWithDeps over the kit's synthetic Strategy
-// alone: the generic behaviour of the verb, with no real ecosystem's rendering
-// in the way.
+// runSyntheticBind is runBindRegistryWithDeps over the kit's synthetic
+// Strategy alone, with no real ecosystem's rendering in the way.
 func runSyntheticBind(args []string, stdout io.Writer, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, lookPath bindregistry.LookPathFunc, timeout, pollInterval time.Duration) int {
 	return runBindRegistryWithDeps(args, []ecosystem.Strategy{synthetic.Strategy}, stdout, probe, spawn, lookPath, timeout, pollInterval)
 }
@@ -205,9 +197,8 @@ func forwarderLineOf(stdout string) string {
 	return ""
 }
 
-// At least one complete mode must be requested. -bindings-env-output alone is
-// sufficient on its own since issue #3141, so it no longer appears among the
-// error cases here.
+// At least one complete mode must be requested; -bindings-env-output alone
+// suffices (issue #3141).
 func TestRunBindRegistry_MissingFlagsErrors(t *testing.T) {
 	cases := []struct {
 		name string
@@ -227,9 +218,8 @@ func TestRunBindRegistry_MissingFlagsErrors(t *testing.T) {
 	}
 }
 
-// Issue #3141 replaced entrypoint.sh's `[ -S "$REGISTRY_PROXY_SOCKET_PATH" ] ||
-// return 0` short-circuit: the launcher sets the manifest only when the registry
-// proxy is genuinely enabled, so its absence is the "feature off" signal.
+// Issue #3141: the launcher sets the manifest only when the registry proxy is
+// genuinely enabled, so its absence is the "feature off" signal.
 func TestBindRegistry_ManifestAbsentIsNoOp(t *testing.T) {
 	clearManifestEnv(t)
 	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
@@ -262,9 +252,9 @@ func TestBindRegistry_ManifestAbsentIsNoOp(t *testing.T) {
 	}
 }
 
-// A manifest present but broken is distinct from ErrAbsent's empty-string case,
-// so issue #3141's "manifest present but unusable" branch warns rather than
-// silently no-opping, and never reaches probe/spawn.
+// A manifest present but broken is distinct from ErrAbsent's empty string, so
+// issue #3141's "present but unusable" branch warns rather than silently
+// no-opping, and never reaches probe/spawn.
 func TestBindRegistry_ManifestMalformedJSONWarnsAndSkipsBindings(t *testing.T) {
 	t.Setenv(registrymanifest.EnvVar, "{not valid json")
 	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
@@ -299,9 +289,9 @@ func TestBindRegistry_ManifestMalformedJSONWarnsAndSkipsBindings(t *testing.T) {
 	}
 }
 
-// Issue #2931's blocking finding: this early-return branch had zero coverage,
-// since every other test here injects lookPathFound. The lookPath check only
-// gates the spawn path, so it must run after probe, not before.
+// Issue #2931: every other bindings-mode test injects lookPathFound, leaving
+// this branch uncovered. The lookPath check only gates the spawn path, so it must run
+// after probe, not before.
 func TestBindRegistry_SocatMissingWarnsAndSkipsBindings(t *testing.T) {
 	socketPath := mountSocketManifest(t)
 
@@ -382,9 +372,9 @@ func TestBindRegistry_AlreadyListeningWritesBindings(t *testing.T) {
 	}
 }
 
-// Issue #3181: bindings mode must collect exports by walking the Strategies, not by
-// naming individual ecosystems' renderers. A stub Strategy's export reaching the
-// written file proves the walk; a by-name call site would never see it.
+// Issue #3181: bindings mode collects exports by walking the Strategies; a
+// stub Strategy's export reaching the file proves the walk, which a by-name
+// call site would never see.
 func TestBindRegistry_ExportsComeFromRowsWalk(t *testing.T) {
 	syntheticHome(t)
 	rc, stdout, bindingsOut := bindReady(t, rowsWith(exportStubRow("stub-ecosystem", "STUB_ECOSYSTEM_URL")), registrymanifest.Route{Prefix: "r0"})
@@ -402,9 +392,8 @@ func TestBindRegistry_ExportsComeFromRowsWalk(t *testing.T) {
 	}
 }
 
-// Issue #3182, the same Strategy-generic contract for home-level config writes: a
-// stub Strategy's rendered file reaching disk proves the walk, where a call site
-// naming one ecosystem directly would never write it.
+// Issue #3182, the same Strategy-generic contract for home-level config
+// writes.
 func TestBindRegistry_HomeConfigsComeFromRowsWalk(t *testing.T) {
 	stubHome := t.TempDir()
 	t.Setenv("STUB_ECOSYSTEM_HOME", stubHome)
@@ -436,9 +425,9 @@ func TestBindRegistry_HomeConfigsComeFromRowsWalk(t *testing.T) {
 	}
 }
 
-// Issue #3185, for the success summary's per-ecosystem "bound to it via ..."
-// fragments. Two stub Strategies, one with a BindingEnvVar and one with only a
-// HomeConfig, prove both halves of the precedence a Strategy-generic walk applies.
+// Issue #3185, for the success summary's "bound to it via ..." fragments. One
+// stub has a BindingEnvVar and one only a HomeConfig, covering both halves of
+// the precedence.
 func TestBindRegistry_SuccessSummaryFragmentsComeFromRowsWalk(t *testing.T) {
 	stubHome := t.TempDir()
 	t.Setenv("STUB_HOME_ECOSYSTEM_HOME", stubHome)
@@ -478,8 +467,7 @@ func TestBindRegistry_SuccessSummaryFragmentsComeFromRowsWalk(t *testing.T) {
 }
 
 // Issue #3185, for the gate-unusable fallback warning: the ecosystem list must
-// come from walking the Strategies, not a hand-maintained literal a new Strategy could
-// silently be left out of.
+// come from the walk, not a literal a new Strategy could be left out of.
 func TestBindRegistry_UnusableGateFallbackNamesComeFromRowsWalk(t *testing.T) {
 	rows := rowsWith(ecosystem.Strategy{Name: "stub-ecosystem"})
 
@@ -523,9 +511,7 @@ func TestBindRegistry_NoRoutePrefixFallbackNamesComeFromRowsWalk(t *testing.T) {
 }
 
 // exportNamesInFileOrder parses a rendered bindings env file into its export
-// names in line order, the property
-// TestBindRegistry_ExportOrderFollowsRows pins and a
-// strings.Contains assertion cannot see.
+// names in line order, which a strings.Contains assertion cannot see.
 func exportNamesInFileOrder(t *testing.T, rendered string) []string {
 	t.Helper()
 	var names []string
@@ -542,7 +528,7 @@ func exportNamesInFileOrder(t *testing.T, rendered string) []string {
 	return names
 }
 
-// The rendered file's line order is the Strategies' order, each Strategy's exports staying
+// The file's line order is the Strategies' order, each Strategy's exports
 // contiguous; the stub names sort opposite to their position so a sorted file
 // fails here.
 func TestBindRegistry_ExportOrderFollowsRows(t *testing.T) {
@@ -575,9 +561,8 @@ func TestBindRegistry_ExportOrderFollowsRows(t *testing.T) {
 }
 
 // Issue #3142: bindings mode has no per-ecosystem route mapping, so it binds
-// everything to gate.manifest.Routes[0], preserving the pre-prefix routes[0]
-// fallback semantics. The distinctive non-"r0" prefix proves real propagation
-// from the manifest rather than a coincidental match on a hardcoded default.
+// everything to gate.manifest.Routes[0]. The distinctive non-"r0" prefix
+// proves propagation from the manifest rather than a hardcoded default.
 func TestBindRegistry_BindsToFirstRoutePrefixNotSecond(t *testing.T) {
 	home := syntheticHome(t)
 
@@ -609,11 +594,10 @@ func TestBindRegistry_BindsToFirstRoutePrefixNotSecond(t *testing.T) {
 	}
 }
 
-// Issue #3142: a manifest with a live Forwarder but zero routes carries no
-// prefix to bind to, so it warns and skips rather than binding every ecosystem
-// to the bare, now-404ing "http://127.0.0.1:<port>/" URL. This is a defensive
-// path: the launcher always mints at least one route whenever it sets
-// REGISTRY_PROXY_MANIFEST at all.
+// Issue #3142: a live Forwarder with zero routes has no prefix to bind to, so
+// it warns and skips rather than binding to the bare, 404ing
+// "http://127.0.0.1:<port>/" URL. Defensive: the launcher always mints a route
+// when it sets REGISTRY_PROXY_MANIFEST.
 func TestBindRegistry_NoRoutesWarnsAndSkipsBindings(t *testing.T) {
 	rc, stdout, bindingsOut := bindReady(t, rowsWith()) // no routes at all
 	if rc != 0 {
@@ -628,9 +612,8 @@ func TestBindRegistry_NoRoutesWarnsAndSkipsBindings(t *testing.T) {
 	}
 }
 
-// Mirrors TestBindRegistry_NoRoutesWarnsAndSkipsBindings for the
-// other defensive shape named in the same guard: a route present but its own
-// Prefix field left empty.
+// The no-route-prefix guard's other defensive shape: a route whose Prefix is
+// empty.
 func TestBindRegistry_EmptyRoutePrefixWarnsAndSkipsBindings(t *testing.T) {
 	rc, stdout, bindingsOut := bindReady(t, rowsWith(), registrymanifest.Route{UpstreamHost: "upstream.example"})
 	if rc != 0 {
@@ -645,9 +628,8 @@ func TestBindRegistry_EmptyRoutePrefixWarnsAndSkipsBindings(t *testing.T) {
 	}
 }
 
-// Issue #2931's blocking finding: the port silently dropped the success log
-// line agent/entrypoint.sh printed, leaving the success path printing nothing
-// to stdout.
+// Issue #2931: the Go port once dropped entrypoint.sh's success log line,
+// leaving the success path printing nothing.
 func TestBindRegistry_AlreadyListeningPrintsSuccessLines(t *testing.T) {
 	home := syntheticHome(t)
 	envStub := exportStubRow("stub-env-ecosystem", "STUB_ENV_REGISTRY")
@@ -664,9 +646,9 @@ func TestBindRegistry_AlreadyListeningPrintsSuccessLines(t *testing.T) {
 	}
 }
 
-// The summary half of issues #3259 and #3260: a BindingEnvVar Strategy whose var the
-// route leaves unexported must not appear in the summary, which would otherwise
-// claim a binding that does not exist.
+// Issues #3259 and #3260: a BindingEnvVar Strategy whose var the route leaves
+// unexported must not appear in the summary, which would claim a binding that
+// does not exist.
 func TestBindRegistry_SummaryOmitsUnexportedBindingVars(t *testing.T) {
 	home := syntheticHome(t)
 	unexported := ecosystem.Strategy{
@@ -688,10 +670,9 @@ func TestBindRegistry_SummaryOmitsUnexportedBindingVars(t *testing.T) {
 	}
 }
 
-// Covers the $HOME/<HomeRelativeDefault> fallback branch itself, not just the
-// both-unset guard around it: every other home-config test here either pins the
-// Strategy's home var or empties both, so none runs the one branch every real
-// deployment takes.
+// Covers the $HOME/<HomeRelativeDefault> fallback branch itself: every other
+// home-config test pins the Strategy's home var or empties both, so none runs
+// the one branch every real deployment takes.
 func TestBindRegistry_EmptyHomeEnvVarFallsBackToHomeRelativeDefault(t *testing.T) {
 	t.Setenv(synthetic.Strategy.HomeConfig.HomeEnvVar, "")
 	home := t.TempDir()
@@ -738,13 +719,11 @@ func TestBindRegistry_TimeoutSkipsHomeConfig(t *testing.T) {
 	}
 }
 
-// With a Strategy's home var and $HOME both unset, bindings mode must fail loud
-// rather than resolve the home to a path under the cwd or "/", which
-// MkdirAll/WriteFile happily create as root, claiming success while binding
-// nothing anyone will read. The bash this replaced ran under `set -u` and would
-// have died on the unset $HOME expansion. It must also not print a line
-// claiming a binding or a live Forwarder when that later write failed (issue
-// #2931).
+// With a Strategy's home var and $HOME both unset, bindings mode must fail
+// loud rather than resolve the home under the cwd or "/", which
+// MkdirAll/WriteFile happily create as root while binding nothing anyone
+// reads. Nor may it print a line claiming a binding or a live Forwarder when
+// that later write failed (issue #2931).
 func TestBindRegistry_EmptyHomeEnvVarAndHomeFailsLoud(t *testing.T) {
 	t.Setenv(synthetic.Strategy.HomeConfig.HomeEnvVar, "")
 	t.Setenv("HOME", "")
@@ -766,8 +745,8 @@ func TestBindRegistry_EmptyHomeEnvVarAndHomeFailsLoud(t *testing.T) {
 	}
 }
 
-// Issue #2931 finding: a Strategy's EnvExports warnings used to print before the
-// fallible writes, so stdout could claim an override that was never applied.
+// Issue #2931: a Strategy's EnvExports warnings must not print before the
+// fallible writes, or stdout claims an override that was never applied.
 func TestBindRegistry_HomeResolveFailureOmitsRowWarnings(t *testing.T) {
 	t.Setenv(synthetic.Strategy.HomeConfig.HomeEnvVar, "")
 	t.Setenv("HOME", "")
@@ -788,9 +767,7 @@ func TestBindRegistry_HomeResolveFailureOmitsRowWarnings(t *testing.T) {
 }
 
 // Issue #3141's timeout warning names the manifest's endpoint. The small
-// timeout/pollInterval keeps this test's wall-clock cost well under a second
-// instead of eating the real 5s; production callers still use the real
-// bindregistry.ForwarderReadyTimeout/PollInterval constants unchanged.
+// timeout/pollInterval keep this well under a second instead of the real 5s.
 func TestBindRegistry_TimeoutWarnsAndSkipsBindings(t *testing.T) {
 	socketPath := mountSocketManifest(t)
 
@@ -821,9 +798,8 @@ func TestBindRegistry_TimeoutWarnsAndSkipsBindings(t *testing.T) {
 	}
 }
 
-// EnsureForwarderReady's other failure mode, spawn returning an error rather
-// than a readiness timeout, also warns naming both the endpoint and the error
-// (issue #3141's "manifest present but unusable" branch).
+// Spawn returning an error, rather than a readiness timeout, also warns naming
+// both the endpoint and the error (issue #3141).
 func TestBindRegistry_ForwarderSpawnErrorWarnsNamingEndpoint(t *testing.T) {
 	socketPath := mountSocketManifest(t)
 
@@ -850,10 +826,9 @@ func TestBindRegistry_ForwarderSpawnErrorWarnsNamingEndpoint(t *testing.T) {
 	}
 }
 
-// Issue #2931 finding: the LookPath check used to run unconditionally before the
-// readiness probe, so an already-ready Forwarder still failed bindings mode
-// entirely if socat had since left PATH. lookPath is wired to t.Fatal here to
-// prove it is never reached.
+// Issue #2931: an already-ready Forwarder must not fail bindings mode because
+// socat has since left PATH. lookPath is wired to t.Fatal to prove it is never
+// reached.
 func TestBindRegistry_AlreadyListeningSkipsSocatCheck(t *testing.T) {
 	mountSocketManifest(t, registrymanifest.Route{Prefix: "r0"})
 	syntheticHome(t)
@@ -891,11 +866,10 @@ func TestBindRegistry_AlreadyListeningSkipsSocatCheck(t *testing.T) {
 	}
 }
 
-// Bindings mode's TCP-fallback transport (issue #3111 slice 8, manifest-driven
-// since #3141) must spawn via spawnHTTPForwarder, never the injected
-// socket-shaped spawn, and write the same bindings and home config the
-// socket-mode success test asserts, proving the downstream computation really is
-// transport-blind.
+// Bindings mode's TCP-fallback transport (issue #3111, manifest-driven since
+// #3141) must spawn via spawnHTTPForwarder, never the injected socket-shaped
+// spawn, and write the same bindings and home config as socket mode, proving
+// the downstream computation is transport-blind.
 func TestBindRegistry_TCPTransportWritesBindings(t *testing.T) {
 	t.Setenv("REGISTRY_PROXY_TCP_SECRET", "s3cr3t")
 	setTCPManifestEnv(t, "registry.example", "9443", registrymanifest.Route{Prefix: "r0"})
@@ -910,8 +884,8 @@ func TestBindRegistry_TCPTransportWritesBindings(t *testing.T) {
 	}
 	t.Cleanup(func() { spawnHTTPForwarder = origSpawnHTTPForwarder })
 
-	// Not-yet-listening once forces EnsureForwarderReady to call spawn, then ready
-	// lets the bindings write proceed, covering both paths in one test.
+	// Not ready once forces a spawn, then ready lets the write proceed,
+	// covering both paths in one test.
 	probeCalls := 0
 	probe := func(int) bool {
 		probeCalls++
@@ -964,9 +938,9 @@ func TestBindRegistry_TCPTransportWritesBindings(t *testing.T) {
 	}
 }
 
-// A TCP endpoint with REGISTRY_PROXY_TCP_SECRET unset warns and no-ops (exit 0)
-// rather than hard-failing the whole verb: the launcher always mints the secret
-// together with the TCP endpoint, so a missing one is a real misconfiguration.
+// A TCP endpoint with REGISTRY_PROXY_TCP_SECRET unset warns and no-ops (exit
+// 0) rather than failing the verb: the launcher always mints the secret with
+// the endpoint, so a missing one is a real misconfiguration.
 func TestBindRegistry_TCPTransportMissingSecretWarnsAndSkipsBindings(t *testing.T) {
 	t.Setenv("REGISTRY_PROXY_TCP_SECRET", "")
 	setTCPManifestEnv(t, "registry.example", "9443")
@@ -1045,9 +1019,8 @@ func TestBindRegistry_TCPTransportNeverChecksSocat(t *testing.T) {
 	}
 }
 
-// ParseEndpoint only checks that host and port are non-empty, not that port
-// parses as a number, so a non-numeric port must warn rather than panic on the
-// strconv.Atoi this internal-consistency guard exists for.
+// ParseEndpoint does not check that port is numeric, so a non-numeric port
+// must warn rather than panic on the strconv.Atoi this guard exists for.
 func TestBindRegistry_TCPManifestNonNumericPortWarns(t *testing.T) {
 	t.Setenv("REGISTRY_PROXY_TCP_SECRET", "s3cr3t")
 	setTCPManifestEnv(t, "registry.example", "https")
@@ -1076,12 +1049,10 @@ func TestBindRegistry_TCPManifestNonNumericPortWarns(t *testing.T) {
 }
 
 // AC1 for issue #3141: one -intree-action=apply invocation runs both in-tree
-// apply modes and must probe/spawn the Forwarder exactly once across both. probe
-// always reports "not ready", so a gate resolved once per mode (the pre-#3141
-// shape) would call spawn twice. Issue #3201 split bindings mode out of this
-// invocation, so it is no longer folded in here. The repo-aware Strategy is a stub:
-// the synthetic Strategy has no repo-aware home config, and a Strategy carrying one is
-// excluded from the in-tree rewrite.
+// apply modes and must probe/spawn the Forwarder exactly once. probe always
+// reports "not ready", so a gate resolved per mode would spawn twice. The
+// repo-aware Strategy is a stub: the synthetic Strategy has no repo-aware home
+// config, and one carrying it is excluded from the in-tree rewrite.
 func TestBindRegistry_SharedGateSpawnsForwarderAtMostOnceAcrossBothModes(t *testing.T) {
 	dir := newIntreeTestRepo(t)
 	writeTrackedIntreeFile(t, dir, synthetic.Strategy.InTreeConfigPath, intreeRegistriesContent)
@@ -1120,9 +1091,8 @@ func TestBindRegistry_SharedGateSpawnsForwarderAtMostOnceAcrossBothModes(t *test
 	}
 }
 
-// newIntreeTestRepo returns a fresh, empty git repo: one local dir, since
-// skip-worktree/checkout are purely local operations. Reuses the shared
-// runGitCmd test helper.
+// newIntreeTestRepo returns a fresh, empty local git repo; no remote is needed,
+// since skip-worktree and checkout are purely local operations.
 func newIntreeTestRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -1134,7 +1104,7 @@ func newIntreeTestRepo(t *testing.T) string {
 
 // intreeRegistriesContent names upstream.example in the synthetic Strategy's
 // `name = <url>` shape. ApplyInTreeBinding only string-replaces the upstream
-// host and never parses the file, so one line covers every in-tree Strategy.
+// host, so one line covers every in-tree Strategy.
 const intreeRegistriesContent = "main = https://upstream.example/\n"
 
 // intreeRootRow is an in-tree Strategy whose config sits at the repo root, beside
@@ -1159,8 +1129,8 @@ var intreeRepoAwareRow = ecosystem.Strategy{
 	RepoAwareHomeConfig: renderRepoAware,
 }
 
-// writeTrackedIntreeFile commits relPath so
-// ApplyInTreeBinding/RevertInTreeBinding see a git-tracked file to operate on.
+// writeTrackedIntreeFile commits relPath so the in-tree binding sees a
+// tracked file.
 func writeTrackedIntreeFile(t *testing.T, dir, relPath, content string) {
 	t.Helper()
 	full := filepath.Join(dir, relPath)
@@ -1185,8 +1155,7 @@ func readIntreeFile(t *testing.T, dir, relPath string) string {
 }
 
 // intreeSkipWorktreeSet reports whether relPath's skip-worktree bit is set,
-// via the same "S "-prefix `git ls-files -v` convention
-// bindregistry.skipWorktreeBitSet uses internally.
+// reading the same "S " prefix bindregistry.skipWorktreeBitSet uses.
 func intreeSkipWorktreeSet(t *testing.T, dir, relPath string) bool {
 	t.Helper()
 	out, err := exec.Command("git", "-C", dir, "ls-files", "-v", "--", relPath).CombinedOutput()
@@ -1208,9 +1177,8 @@ func listenOnFakeSocket(t *testing.T, socketPath string) {
 	ln.Close()
 }
 
-// intreeUpstreamRoute names upstream.example with prefix "r0", so a rewritten
-// URL carries a "/r0" path segment (buildIntreeHostRewrites, issue #3142), which
-// the exact-match content assertions below account for.
+// intreeUpstreamRoute has prefix "r0", so a rewritten URL carries a "/r0"
+// segment (buildIntreeHostRewrites, issue #3142).
 var intreeUpstreamRoute = registrymanifest.Route{Prefix: "r0", UpstreamHost: "upstream.example"}
 
 // runIntree runs one in-tree action over Strategies with the default readiness
@@ -1249,9 +1217,8 @@ func wantRewritten(t *testing.T, dir, relPath, when string) {
 	}
 }
 
-// AC5, the all-or-nothing gate (issue #2932 brief section 3): with the Forwarder
-// dead, apply must leave the file byte-for-byte unchanged and the skip-worktree
-// bit unset. No partial rewrite.
+// AC5, the all-or-nothing gate (issue #2932): with the Forwarder dead, apply
+// must leave the file byte-for-byte unchanged and the skip-worktree bit unset.
 func TestBindRegistry_IntreeApplyDeadForwarderLeavesFileUntouched(t *testing.T) {
 	dir := newIntreeTestRepo(t)
 	rel := synthetic.Strategy.InTreeConfigPath
@@ -1299,8 +1266,7 @@ func TestBindRegistry_IntreeApplyReadyRewritesAndHidesFromGit(t *testing.T) {
 		t.Error("spawn was called, want it never called when probe already reports ready")
 	}
 
-	// Issue #3044: the already-ready short-circuit never spawns, so there is no PID
-	// to report and the stdout line must stay silent on this path.
+	// Issue #3044: the already-ready short-circuit never spawns, so no PID line.
 	if strings.Contains(stdout, "registry proxy Forwarder pid") {
 		t.Errorf("stdout = %q, want no Forwarder pid line when probe already reports ready (nothing was spawned)", stdout)
 	}
@@ -1312,9 +1278,8 @@ func TestBindRegistry_IntreeApplyReadyRewritesAndHidesFromGit(t *testing.T) {
 }
 
 // Issue #3142's buildIntreeHostRewrites filter: an empty-UpstreamHost route
-// alongside a real one is silently skipped when building rewrites, never
-// reaching ApplyInTreeBinding's own internal-consistency error for an empty
-// entry, and the valid route's rewrite still applies.
+// beside a real one is skipped, never reaching ApplyInTreeBinding's own
+// empty-entry error, and the valid route's rewrite still applies.
 func TestBindRegistry_IntreeApplySkipsRouteWithEmptyUpstreamHost(t *testing.T) {
 	dir := newIntreeTestRepo(t)
 	rel := synthetic.Strategy.InTreeConfigPath
@@ -1328,9 +1293,8 @@ func TestBindRegistry_IntreeApplySkipsRouteWithEmptyUpstreamHost(t *testing.T) {
 	wantRewritten(t, dir, rel, "after apply with the valid route")
 }
 
-// The other half of buildIntreeHostRewrites' filter from the caller side: a route
-// whose UpstreamHost is empty is still "no route upstream host at all", since
-// every rewrite candidate was filtered out.
+// When every route's UpstreamHost is empty, the result reads as "no route
+// upstream host at all".
 func TestBindRegistry_IntreeApplyAllRoutesEmptyUpstreamHostWarns(t *testing.T) {
 	dir := newIntreeTestRepo(t)
 	rel := synthetic.Strategy.InTreeConfigPath
@@ -1349,9 +1313,9 @@ func TestBindRegistry_IntreeApplyAllRoutesEmptyUpstreamHostWarns(t *testing.T) {
 	}
 }
 
-// The caller side of the same review finding: the generic "carries no route
-// upstream host" warning must be suppressed, since the manifest does carry one,
-// it is just unusable for host-based rewriting.
+// Routes sharing one upstream host warn, and the generic "carries no route
+// upstream host" warning must be suppressed: the manifest does carry one, it
+// is just unusable for host-based rewriting.
 func TestBindRegistry_IntreeApplyDuplicateUpstreamHostWarnsAndSuppressesGenericWarning(t *testing.T) {
 	dir := newIntreeTestRepo(t)
 	rel := synthetic.Strategy.InTreeConfigPath
@@ -1375,9 +1339,8 @@ func TestBindRegistry_IntreeApplyDuplicateUpstreamHostWarnsAndSuppressesGenericW
 	}
 }
 
-// Issue #3141: box's in-process apply passes no transport
-// flag at all, so an unset manifest silently no-ops apply mode, the replacement
-// for the old empty -registry-proxy-socket no-op.
+// Issue #3141: box's in-process apply passes no transport flag, so an unset
+// manifest silently no-ops apply mode.
 func TestBindRegistry_IntreeApplyManifestAbsentIsNoOp(t *testing.T) {
 	dir := newIntreeTestRepo(t)
 	rel := synthetic.Strategy.InTreeConfigPath
@@ -1426,11 +1389,9 @@ func TestBindRegistry_IntreeApplyEmptyUpstreamHostWarns(t *testing.T) {
 	}
 }
 
-// Review finding on issue #2932, mirroring
-// TestBindRegistry_SocatMissingWarnsAndSkipsBindings for the
-// intree-apply path: apply must print a socat-specific warning naming the
-// endpoint rather than falling through to EnsureForwarderReady's generic "failed
-// to start" warning.
+// Issue #2932: the intree-apply path must print a socat-specific warning
+// naming the endpoint rather than EnsureForwarderReady's generic "failed to
+// start" one.
 func TestBindRegistry_IntreeApplySocatMissingWarnsAndSkipsRewrite(t *testing.T) {
 	dir := newIntreeTestRepo(t)
 	rel := synthetic.Strategy.InTreeConfigPath
@@ -1467,9 +1428,8 @@ func TestBindRegistry_IntreeApplySocatMissingWarnsAndSkipsRewrite(t *testing.T) 
 	}
 }
 
-// Mirrors TestBindRegistry_TCPTransportWritesBindings for intree-apply
-// mode (issue #3111 slice 8, manifest-driven since #3141): apply must spawn via
-// spawnHTTPForwarder, never the injected socket-shaped spawn.
+// Issue #3111's TCP-fallback transport in intree-apply mode: apply must spawn
+// via spawnHTTPForwarder, never the injected socket-shaped spawn.
 func TestBindRegistry_IntreeApplyTCPTransportRewritesFile(t *testing.T) {
 	dir := newIntreeTestRepo(t)
 	rel := synthetic.Strategy.InTreeConfigPath
@@ -1486,9 +1446,7 @@ func TestBindRegistry_IntreeApplyTCPTransportRewritesFile(t *testing.T) {
 	}
 	t.Cleanup(func() { spawnHTTPForwarder = origSpawnHTTPForwarder })
 
-	// Same "not-ready-once-then-ready" probe shape as the bindings-mode TCP
-	// test: forces EnsureForwarderReady to call spawn once, then reports
-	// ready so the apply proceeds.
+	// Not ready once, then ready: forces one spawn, then the apply proceeds.
 	probeCalls := 0
 	probe := func(int) bool {
 		probeCalls++
@@ -1518,9 +1476,7 @@ func TestBindRegistry_IntreeApplyTCPTransportRewritesFile(t *testing.T) {
 	}
 }
 
-// Mirrors
-// TestBindRegistry_TCPTransportMissingSecretWarnsAndSkipsBindings for
-// intree-apply mode.
+// The intree-apply counterpart of the missing-secret bindings test.
 func TestBindRegistry_IntreeApplyTCPTransportMissingSecretWarns(t *testing.T) {
 	dir := newIntreeTestRepo(t)
 	rel := synthetic.Strategy.InTreeConfigPath
@@ -1553,8 +1509,8 @@ func TestBindRegistry_IntreeApplyTCPTransportMissingSecretWarns(t *testing.T) {
 	}
 }
 
-// Revert runs with no manifest set at all, since it is a pure git operation that
-// never consults REGISTRY_PROXY_MANIFEST or the probe/spawn deps.
+// Revert runs with no manifest set: it is a pure git operation that never
+// consults REGISTRY_PROXY_MANIFEST or the probe/spawn deps.
 func TestBindRegistry_IntreeRevertRestoresAppliedFile(t *testing.T) {
 	dir := newIntreeTestRepo(t)
 	rel := synthetic.Strategy.InTreeConfigPath
@@ -1583,10 +1539,10 @@ func TestBindRegistry_IntreeRevertRestoresAppliedFile(t *testing.T) {
 	}
 }
 
-// The multi-Strategy happy path a review finding called out as missing: every other
-// intree test here exercises the first Strategy only. A tracked repo-aware Strategy's
-// config sits alongside three in-tree Strategies and must never be touched by any pass
-// (issue #3201: a repo-aware Strategy does not participate in InTreeBindings at all).
+// The multi-Strategy happy path; the other intree happy-path tests exercise
+// the synthetic Strategy only. A tracked repo-aware Strategy's config sits beside three
+// in-tree Strategies and no pass may touch it: a repo-aware Strategy is not in
+// InTreeBindings at all (issue #3201).
 func TestBindRegistry_IntreeApplyAndRevertAcrossRows(t *testing.T) {
 	dir := newIntreeTestRepo(t)
 	rows := rowsWith(intreeRootRow, intreeSecondRow, intreeRepoAwareRow)
@@ -1642,8 +1598,8 @@ func TestBindRegistry_IntreeApplyAndRevertAcrossRows(t *testing.T) {
 	}
 	assertRepoAwareUntouched()
 
-	// Re-apply pass (AC4): the revert/re-apply sequence around branch recovery must
-	// rewrite and re-tag every Strategy, not just the apply/revert pair above.
+	// Re-apply (AC4): the revert/re-apply around branch recovery must rewrite
+	// and re-tag every Strategy.
 	rc, stdout = applyReady(dir, rows)
 	if rc != 0 {
 		t.Fatalf("bind-registry re-apply exit = %d, want 0 (stdout=%q)", rc, stdout)
@@ -1651,13 +1607,10 @@ func TestBindRegistry_IntreeApplyAndRevertAcrossRows(t *testing.T) {
 	assertApplied("after re-apply")
 }
 
-// newIntreeUnmergedTestRepo leaves the synthetic Strategy's config genuinely unmerged
-// (UU), the same fixture shape as bindregistry's own unexported
-// newUnmergedTestRepo in intreebinding_test.go, replicated here because that
-// helper is unexported in a different package. `git update-index
-// --skip-worktree` then fails with exit 128 on that file, giving
-// ApplyInTreeBinding a genuine per-Strategy failure. The sibling Strategies' configs are
-// tracked and clean.
+// newIntreeUnmergedTestRepo leaves the synthetic Strategy's config genuinely
+// unmerged (UU), replicating bindregistry's unexported newUnmergedTestRepo, so
+// setting skip-worktree on it fails with exit 128 and ApplyInTreeBinding gets
+// a genuine per-Strategy failure. Siblings stay tracked and clean.
 func newIntreeUnmergedTestRepo(t *testing.T, siblings ...ecosystem.Strategy) string {
 	t.Helper()
 	dir := newIntreeTestRepo(t)
@@ -1692,8 +1645,7 @@ func newIntreeUnmergedTestRepo(t *testing.T, siblings ...ecosystem.Strategy) str
 	runGitCmd(t, dir, "add", rel)
 	runGitCmd(t, dir, "commit", "-m", "base2")
 
-	// A conflicting merge is the point of this fixture, so unlike runGitCmd's other
-	// calls a nonzero exit here is the desired outcome, not a setup failure.
+	// The conflicting merge is the point, so a nonzero exit is desired here.
 	if err := exec.Command("git", "-C", dir, "merge", "feature").Run(); err == nil {
 		t.Fatal("git merge feature: succeeded, want a conflict")
 	}
@@ -1706,10 +1658,9 @@ func newIntreeUnmergedTestRepo(t *testing.T, siblings ...ecosystem.Strategy) str
 	return dir
 }
 
-// Regression test for a review finding: the apply loop used to return as soon as
-// one Strategy errored, aborting the rest. A genuinely failing Strategy (the unmerged
-// first one) must not stop the loop, and the overall apply must still report
-// failure.
+// Regression: the apply loop once returned on the first Strategy error. A
+// failing Strategy (the unmerged first one) must not stop the loop, and the
+// overall apply must still report failure.
 func TestBindRegistry_IntreeApplyPartialFailureDoesNotBlockSiblingRows(t *testing.T) {
 	siblings := []ecosystem.Strategy{intreeRootRow, intreeSecondRow}
 	dir := newIntreeUnmergedTestRepo(t, siblings...)
@@ -1737,9 +1688,9 @@ func TestBindRegistry_IntreeApplyPartialFailureDoesNotBlockSiblingRows(t *testin
 	}
 }
 
-// Issue #3082's AC: ApplyMissing must read differently from ApplyNoopContent's
-// "content no longer mentions the upstream host", since the two point an operator
-// at different fixes (registry pinned outside the repo vs. wrong upstream host).
+// Issue #3082: ApplyMissing must read differently from ApplyNoopContent; the
+// two point an operator at different fixes (registry pinned outside the repo
+// vs. wrong upstream host).
 func TestBindRegistry_IntreeApplyMissingConfigWarns(t *testing.T) {
 	dir := newIntreeTestRepo(t)
 	mountSocketManifest(t, intreeUpstreamRoute)
@@ -1754,8 +1705,7 @@ func TestBindRegistry_IntreeApplyMissingConfigWarns(t *testing.T) {
 	}
 }
 
-// Issue #2933's `[ -f ]` parity guard had no operator-facing message at all
-// before #3082.
+// Issue #2933's `[ -f ]` parity guard gets an operator-facing message (#3082).
 func TestBindRegistry_IntreeApplyNotRegularConfigWarns(t *testing.T) {
 	dir := newIntreeTestRepo(t)
 	if err := os.MkdirAll(filepath.Join(dir, synthetic.Strategy.InTreeConfigPath), 0o755); err != nil {
@@ -1773,9 +1723,8 @@ func TestBindRegistry_IntreeApplyNotRegularConfigWarns(t *testing.T) {
 	}
 }
 
-// Pins that the existing ApplyUntracked warning survives the
-// bool-to-ApplyOutcome signature change unchanged: #3082 slice 2 only added the
-// four other messages.
+// The ApplyUntracked warning survives the bool-to-ApplyOutcome change (#3082)
+// unchanged.
 func TestBindRegistry_IntreeApplyUntrackedConfigWarns(t *testing.T) {
 	dir := newIntreeTestRepo(t)
 	full := filepath.Join(dir, synthetic.Strategy.InTreeConfigPath)
@@ -1797,9 +1746,9 @@ func TestBindRegistry_IntreeApplyUntrackedConfigWarns(t *testing.T) {
 	}
 }
 
-// Issue #2932's crash window: the bit can be tagged before content is rewritten,
-// so "bit set" alone never proves the content converged, and the warning must
-// read differently from ApplyNoopContent's "nothing to do".
+// Issue #2932's crash window: the bit can be tagged before content is
+// rewritten, so "bit set" never proves convergence, and the warning must read
+// differently from ApplyNoopContent's "nothing to do".
 func TestBindRegistry_IntreeApplySkipWorktreeAlreadySetWarns(t *testing.T) {
 	dir := newIntreeTestRepo(t)
 	rel := synthetic.Strategy.InTreeConfigPath
@@ -1817,9 +1766,8 @@ func TestBindRegistry_IntreeApplySkipWorktreeAlreadySetWarns(t *testing.T) {
 	}
 }
 
-// ApplyNoopContent is distinct from ApplyMissing's "file not found" and points an
-// operator at a different fix: the manifest's route upstream host is wrong, not
-// that the registry pin lives outside this file.
+// ApplyNoopContent points at a different fix than ApplyMissing: the manifest's
+// route upstream host is wrong.
 func TestBindRegistry_IntreeApplyNoopContentWarns(t *testing.T) {
 	dir := newIntreeTestRepo(t)
 	writeTrackedIntreeFile(t, dir, synthetic.Strategy.InTreeConfigPath, "main = https://other.example/\n")
@@ -1855,9 +1803,9 @@ func renderRepoAware(port int, prefix string, routes []registrymanifest.Route, r
 	return b.String(), exports, warnings
 }
 
-// repoAwareSetup is a fresh repo (with repoConfig tracked at the repo-aware
-// Strategy's in-tree path unless empty), a ready manifest naming routes, and a home
-// directory for the Strategy, returning the repo, the home and an env output path.
+// repoAwareSetup builds a repo (repoConfig tracked at the repo-aware
+// Strategy's in-tree path unless empty), a ready manifest naming routes, and a
+// home directory, returning the repo, the home and an env output path.
 func repoAwareSetup(t *testing.T, repoConfig string, routes ...registrymanifest.Route) (dir, home, envOut string) {
 	t.Helper()
 	dir = newIntreeTestRepo(t)
@@ -1897,9 +1845,8 @@ func readFileOrFail(t *testing.T, path string) string {
 	return string(got)
 }
 
-// The end-to-end proof the verb wiring reaches a Strategy's RepoAwareHomeConfig at
-// all: the rendered home config must match that renderer's own output for the
-// same inputs.
+// The end-to-end proof the verb reaches a Strategy's RepoAwareHomeConfig: the
+// home config must match that renderer's own output for the same inputs.
 func TestBindRegistry_IntreeApplyWritesRepoAwareHomeConfig(t *testing.T) {
 	dir, home, envOut := repoAwareSetup(t, intreeRegistriesContent, intreeUpstreamRoute)
 
@@ -1914,8 +1861,8 @@ func TestBindRegistry_IntreeApplyWritesRepoAwareHomeConfig(t *testing.T) {
 		t.Errorf("home config = %q, want %q", got, want)
 	}
 
-	// A repo-aware Strategy binds through its home config, so the tracked repo file
-	// stays untouched.
+	// A repo-aware Strategy binds through its home config, so the tracked
+	// repo file stays untouched.
 	if repoConfig := readIntreeFile(t, dir, intreeRepoAwareRow.InTreeConfigPath); repoConfig != intreeRegistriesContent {
 		t.Errorf("%s = %q, want byte-for-byte unchanged", intreeRepoAwareRow.InTreeConfigPath, repoConfig)
 	}
@@ -1984,9 +1931,8 @@ func TestBindRegistry_IntreeApplyPassesEveryRouteToRepoAwareRenderer(t *testing.
 	}
 }
 
-// The Strategy value only returns warning strings, so without an end-to-end
-// assertion the print loop in bindregistry.ApplyInTree's repo-aware half could be
-// deleted and nothing would fail.
+// Without this end-to-end assertion, the repo-aware warning print loop in
+// bindregistry.ApplyInTree could be deleted and nothing would fail.
 func TestBindRegistry_IntreeApplyPrintsRepoAwareWarningsToStdout(t *testing.T) {
 	dir, _, envOut := repoAwareSetup(t, intreeRegistriesContent, intreeUpstreamRoute)
 
@@ -2001,10 +1947,9 @@ func TestBindRegistry_IntreeApplyPrintsRepoAwareWarningsToStdout(t *testing.T) {
 	}
 }
 
-// multiBlockRoute is one route carrying a declaration block for each Strategy below,
-// plus a block no Strategy in the run knows. Every assertion that uses it is an
-// exact expected string, so the unknown block must change neither the exit code
-// nor a rendered byte.
+// multiBlockRoute carries a declaration block for each Strategy below plus one
+// no Strategy knows. Every assertion using it is exact, so the unknown block
+// must change neither the exit code nor a rendered byte.
 func multiBlockRoute() registrymanifest.Route {
 	return registrymanifest.Route{
 		Prefix:       "r0",
@@ -2041,9 +1986,8 @@ var pathHomeRow = ecosystem.Strategy{
 	},
 }
 
-// The pre-clone half: each renderer reads its own block and binds to its own
-// declared path. A shared source would give both the same path, or one of them
-// none.
+// The pre-clone half: each renderer binds to its own block's declared path. A
+// shared source would give both the same path, or one of them none.
 func TestBindRegistry_OneRouteBindsEachRowFromItsOwnBlock(t *testing.T) {
 	syntheticHome(t)
 	stubHome := t.TempDir()
@@ -2086,11 +2030,10 @@ func TestBindRegistry_IntreeApplyRepoAwareRowReadsItsOwnBlock(t *testing.T) {
 	}
 }
 
-// A non-ENOENT read error: a missing config means "this repo declares nothing
-// for the Strategy", while an unreadable one means the plan was derived from nothing
-// and the run must fail. The unreadable file is a directory, since os.ReadFile
-// then returns EISDIR without depending on the test running as a non-root user,
-// which a Box does not guarantee.
+// A missing config means "this repo declares nothing", but an unreadable one
+// must fail the run. The unreadable file is a directory, so os.ReadFile
+// returns EISDIR without depending on a non-root user, which a Box does not
+// guarantee.
 func TestBindRegistry_IntreeApplyUnreadableRepoConfigFails(t *testing.T) {
 	dir, _, envOut := repoAwareSetup(t, "", intreeUpstreamRoute)
 	if err := os.MkdirAll(filepath.Join(dir, intreeRepoAwareRow.InTreeConfigPath), 0o755); err != nil {
@@ -2137,11 +2080,10 @@ func TestBindRegistry_IntreeBindingsEnvOutputRequiresApply(t *testing.T) {
 	}
 }
 
-// Review finding on issue #3201: -intree-action=apply re-renders the repo-aware
-// home configs from the repo's own tracked config, and bindings mode would then
-// re-render the same Strategies from the base template in the same invocation,
-// silently clobbering what apply just wrote. No caller combines the two flags
-// today; this guards against one starting to.
+// Issue #3201: apply re-renders the repo-aware home configs from the repo's
+// tracked config, and bindings mode would then re-render them from the base
+// template in the same invocation, clobbering what apply wrote. No caller
+// combines the two flags today; this guards against one starting to.
 func TestBindRegistry_IntreeApplyWithBindingsEnvOutputRejected(t *testing.T) {
 	var stdout bytes.Buffer
 	rc := runSyntheticBind([]string{
@@ -2166,8 +2108,7 @@ func TestBindRegistry_IntreeApplyWithBindingsEnvOutputRejected(t *testing.T) {
 	}
 }
 
-// Mirrors TestRunBindRegistry_MissingFlagsErrors' style for the
-// -intree-work-dir/-intree-action pair and the -intree-action value check.
+// The -intree-work-dir/-intree-action pair and -intree-action value checks.
 func TestBindRegistry_IntreeFlagValidation(t *testing.T) {
 	cases := []struct {
 		name string
@@ -2195,9 +2136,8 @@ func TestBindRegistry_IntreeFlagValidation(t *testing.T) {
 	}
 }
 
-// Issue #3199: this scan reads the manifest only to decide on or off. It never
-// resolves the shared Forwarder-readiness gate and must never itself spawn a
-// Forwarder, unlike bindings and intree-apply mode.
+// Issue #3199: the lockfile scan reads the manifest only to decide on or off;
+// it never resolves the Forwarder-readiness gate or spawns a Forwarder.
 func TestBindRegistry_LockfileScanWarnsOnHit(t *testing.T) {
 	dir := newIntreeTestRepo(t)
 	lockfile := synthetic.Strategy.LockfileNames[0]
@@ -2248,11 +2188,10 @@ func TestBindRegistry_LockfileScanFlagAloneSatisfiesModeGuard(t *testing.T) {
 	}
 }
 
-// Pins the fix for the command-injection finding on renderEnvExports: a value
-// carrying shell metacharacters must round-trip through a real `source`
-// unexpanded, byte-for-byte. The input flagged against issue #3259 is a
-// host-rooted route's derived path, sourced from a repo's own committed,
-// therefore untrusted, registry config.
+// The command-injection fix on renderEnvExports: a value carrying shell
+// metacharacters must round-trip through a real `source` unexpanded. The input
+// flagged on issue #3259 is a host-rooted route's derived path, sourced from a
+// repo's committed, therefore untrusted, registry config.
 func TestRenderEnvExports_ShellMetacharactersDoNotExecute(t *testing.T) {
 	path, err := exec.LookPath("bash")
 	if err != nil {

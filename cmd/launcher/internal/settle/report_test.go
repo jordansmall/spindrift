@@ -112,11 +112,9 @@ func TestInternalSeam_TransitionState_Terminal_EmitsRecordEvenOnTrackerError(t *
 	}
 }
 
-// The blocking review finding at gate.go:227 (issue #3627): a green self-heal
-// that lands Complete (completeLanding) and is then demoted by verifyMerged's
-// PR-state re-check (pr_lander.go) must reach the daemon as exactly one settled
-// record carrying the tracker's final decision, state=failed — never two
-// contradicting records.
+// Issue #3627: a green self-heal that lands Complete and is then demoted by
+// verifyMerged's PR-state re-check must reach the daemon as exactly one
+// settled record, state=failed, never two contradicting ones.
 func TestRecoverOpenPR_CompleteThenDemoted_EmitsSingleFailedSettledRecord(t *testing.T) {
 	readRecords := testutil.InstallPipeReporter(t)
 
@@ -159,10 +157,8 @@ func TestRecoverOpenPR_CompleteThenDemoted_EmitsSingleFailedSettledRecord(t *tes
 	}
 }
 
-// The blocking review finding at gate.go:227 (issue #3627): settleUnresolved's
-// "no outcome in log" park must carry that reason into the settled record's
-// note, so the settle outcome is diagnosable on disk without the daemon's
-// terminal.
+// Issue #3627: settleUnresolved's "no outcome in log" park carries that reason
+// into the settled record's note, so it is diagnosable on disk.
 func TestSettle_SettleUnresolved_NoOutcomeNote_ReachesSettledRecord(t *testing.T) {
 	readRecords := testutil.InstallPipeReporter(t)
 

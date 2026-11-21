@@ -220,10 +220,8 @@ func TestIsMergeTransient(t *testing.T) {
 	}
 }
 
-// A genuine stale-lease rejection, where the branch moved since the last
-// fetch, must be terminal rather than transient, because retrying it would be
-// pointless. The stderr-substring assertion also subsumes the removed
-// TestGitForcePush_CapturesStderr (b1d0489 / #684).
+// A genuine stale-lease rejection must be terminal, not transient: a retry is
+// pointless. The stderr-substring assertion also covers #684.
 func TestGitForcePush_StaleLeaseIsNotTransient(t *testing.T) {
 	dir := t.TempDir()
 	bare := filepath.Join(dir, "origin.git")
@@ -369,11 +367,9 @@ func TestWrapForcePushError_Classification(t *testing.T) {
 	}
 }
 
-// wrapForcePushError must never echo a credential from git's stderr, because
-// the error flows unmodified into a public GitHub issue comment
-// (settle.mergeImmediate). Git anonymizes URLs in its own connect diagnostics,
-// so a subprocess test would pass either way, but it still echoes the full URL
-// for other failure shapes like the 403 below, which is why this crafts one.
+// wrapForcePushError must never echo a credential: the error reaches a public
+// issue comment (settle.mergeImmediate). Git anonymizes URLs in its connect
+// diagnostics but not in other shapes like this crafted 403.
 func TestWrapForcePushError_RedactsCredentialsFromStderr(t *testing.T) {
 	const secret = "sometoken123"
 	stderr := "fatal: unable to access 'https://oauth2:" + secret + "@git.example.com/org/repo.git/': The requested URL returned error: 403"

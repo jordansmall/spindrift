@@ -136,9 +136,8 @@ func TestAssembleRejectsUnsupportedCells(t *testing.T) {
 }
 
 // Axis resolution lives in nix (issue #2533) and upstream validation, so
-// checkCoveredCell no longer rejects a bogus tracker or forge (issue #2540),
-// and every CodeForge cell beyond github renders.
-// A future change re-adding allowlist validation here must show up as a
+// checkCoveredCell accepts a bogus tracker or forge (issue #2540) and every
+// CodeForge cell renders. Re-adding allowlist validation here must be a
 // deliberate edit to this test.
 func TestAssembleAxisValuesAreNotRejected(t *testing.T) {
 	cases := []struct {

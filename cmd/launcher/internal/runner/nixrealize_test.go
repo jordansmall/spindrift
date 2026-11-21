@@ -13,11 +13,9 @@ import (
 	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
-// TestNixRealizer_Start_ChildInOwnProcessGroup pins what Setpgid buys: the
-// `nix build` child gets its own process group instead of inheriting the
-// launcher's. It does not test survival past the launcher's exit, which comes
-// from the Start/wait split on freshness.Realizer. Without Setpgid,
-// a driving loop's Ctrl-C hard abort kills a backgrounded realize outright.
+// Without Setpgid a driving loop's Ctrl-C hard abort kills a backgrounded
+// realize outright. Survival past the launcher's exit comes from the
+// Start/wait split on freshness.Realizer and is not tested here.
 func TestNixRealizer_Start_ChildInOwnProcessGroup(t *testing.T) {
 	dir := t.TempDir()
 	pidFile := filepath.Join(dir, "pid")
@@ -78,9 +76,8 @@ func TestNixRealizer_Start_ChildInOwnProcessGroup(t *testing.T) {
 	}
 }
 
-// TestNixRealizerStart_BuildsHermeticGitFileRef pins the flake reference Start
-// hands `nix build`: a hermetic git+file URL at the fetched rev, never the
-// working tree, and with no .outPath suffix, unlike NixEvaluator.Eval's ref.
+// No .outPath suffix, unlike NixEvaluator.Eval's ref: nix build wants the
+// derivation attr itself.
 func TestNixRealizerStart_BuildsHermeticGitFileRef(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	orig := execCommand
@@ -145,9 +142,8 @@ func TestNixRealizer_Start_SuccessReturnsNil(t *testing.T) {
 	}
 }
 
-// TestNixRealizer_Start_ForkFailureReturnsError pins the split: a process that
-// fails to fork/exec at all errors from Start, with no wait function, unlike
-// one that runs and then fails, which surfaces from wait.
+// A fork/exec failure errors from Start with no wait function, unlike a run
+// that then fails, which surfaces from wait.
 func TestNixRealizer_Start_ForkFailureReturnsError(t *testing.T) {
 	orig := execCommand
 	t.Cleanup(func() { execCommand = orig })

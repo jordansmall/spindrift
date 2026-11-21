@@ -112,8 +112,7 @@ func TestBreakerAgedOutFailuresDoNotCount(t *testing.T) {
 // still fit inside DAEMON_BREAKER_WINDOW. Values that push that span past
 // the window leave a 1-slot daemon burning its only slot until morning with
 // no breaker_trip ever emitted. The shipped defaults come from
-// lib/env-schema.nix, via shippedKnobDefaults (shippeddefaults_gen_test.go);
-// cmd/launcher/daemon/main.go no longer holds them as constants.
+// lib/env-schema.nix, via shippedKnobDefaults (shippeddefaults_gen_test.go).
 func TestBreakerDefaults_TripReachableAtOneSlot(t *testing.T) {
 	threshold, err := strconv.Atoi(shippedKnobDefaults["DAEMON_BREAKER_THRESHOLD"])
 	if err != nil {

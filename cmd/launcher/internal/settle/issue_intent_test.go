@@ -23,14 +23,12 @@ import (
 
 // withEmptyMarker is the body a term-less intent actually files: the
 // launcher appends its own marker line unconditionally, empty when the
-// intent carried no usable dedup term (issue #3609 review).
+// intent carried no usable dedup term (issue #3609).
 func withEmptyMarker(body string) string {
 	return body + "\n\n" + dedupmarker.Bare
 }
 
-// filedURLs returns filed's successful entries' URLs in payload order,
-// mirroring the URL-only shape the now-deleted fileIssueIntents wrapper used
-// to return, so tests written against that shape keep their assertions.
+// filedURLs returns filed's successful entries' URLs in payload order.
 func filedURLs(filed []filedIntent) []string {
 	var urls []string
 	for _, f := range filed {
@@ -41,14 +39,10 @@ func filedURLs(filed []filedIntent) []string {
 	return urls
 }
 
-// TestParseIssueIntent_ClassMustBeALowercaseSlug: a Class outside
-// signalwire.ValidClass's shape now skips the whole intent (issue #3992 --
-// signalwire.IssueIntent.Validate rejects it with Status "invalid_class")
-// rather than silently clearing Class and filing anyway (the pre-#3992
-// behavior, issue #3880 review finding). It is Box-supplied text
-// interpolated unescaped into host-authored backlink/note strings, so the
-// socket carrier has always rejected it at the door; the log carrier now
-// applies the identical rule.
+// A Class outside signalwire.ValidClass's shape skips the whole intent
+// ("invalid_class", issue #3992) rather than being silently cleared while the
+// intent files anyway (issue #3880). It is Box-supplied text interpolated
+// unescaped into host-authored strings, so both carriers reject it.
 func TestParseIssueIntent_ClassMustBeALowercaseSlug(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -70,11 +64,9 @@ func TestParseIssueIntent_ClassMustBeALowercaseSlug(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// json.Marshal, not string concatenation, so a class containing a
-			// character JSON must escape (a literal newline, a quote) still
-			// produces well-formed input -- the test is about
-			// signalwire.ValidClass's shape check, not JSON's own escaping
-			// rules.
+			// json.Marshal, not concatenation, so a class with a newline or
+			// quote still produces well-formed JSON: the test is about the
+			// shape check, not JSON escaping.
 			payload, err := json.Marshal(map[string]string{"title": "t", "body": "b", "class": tc.class})
 			if err != nil {
 				t.Fatalf("json.Marshal: %v", err)
@@ -104,14 +96,11 @@ func TestParseIssueIntent_ClassMustBeALowercaseSlug(t *testing.T) {
 // promotion note as Class, so it gets the same treatment: capped length and
 // no backticks that could open/close a markdown code span in that note.
 func TestParseIssueIntent_ConcurrenceIsBoundedAndBacktickNeutralized(t *testing.T) {
-	// family and eCombining are each a single grapheme cluster made of
-	// multiple runes -- a ZWJ emoji sequence and a base rune plus a
-	// combining mark, respectively. The "as last kept grapheme stays whole"
-	// cases place one straddling the maxConcurrenceLen boundary: a
-	// rune-boundary cut would split it, corrupting the last visible
-	// character, while a grapheme-boundary cut keeps it whole. The "past
-	// limit dropped whole" cases pin that nothing of a cluster past the
-	// limit leaks into the result, whichever cut made the call.
+	// family (a ZWJ emoji sequence) and eCombining (base rune plus
+	// combining mark) are each one multi-rune grapheme cluster. Placed
+	// straddling the maxConcurrenceLen boundary, a rune-boundary cut would
+	// split them; the "past limit" cases pin that no part of a cluster
+	// past the limit leaks.
 	const family = "👩‍👩‍👧‍👦"
 	const eCombining = "é"
 
@@ -162,12 +151,10 @@ func TestParseIssueIntent_ConcurrenceIsBoundedAndBacktickNeutralized(t *testing.
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// sanitizeConcurrence itself, independent of the MaxBodyBytes wire
-			// bound signalwire.IssueIntent.Validate now applies to Concurrence
-			// (issue #3992): a couple of cases below flood past that 64KB bound
-			// on purpose to pin sanitizeConcurrence's own fail-closed behavior,
-			// and would never reach sanitizeConcurrence through parseIssueIntent
-			// at all -- Validate rejects the whole intent first.
+			// Called directly: some cases flood past Validate's 64KB
+			// MaxBodyBytes bound (issue #3992) on purpose to pin
+			// sanitizeConcurrence's own fail-closed behavior, and would never
+			// reach it through parseIssueIntent.
 			if got := sanitizeConcurrence(tc.concurrence); got != tc.want {
 				t.Errorf("sanitizeConcurrence(%q) = %q, want %q", tc.name, got, tc.want)
 			}
@@ -533,11 +520,9 @@ func TestSettle_NoIssueIntentsFound_NoFilingAttempted(t *testing.T) {
 	}
 }
 
-// fileIssueIntentsDetailed reports both success and failure as filedIntent
-// entries, rather than silently dropping failures the way the now-deleted
-// fileIssueIntents wrapper's URL-only return did. fc.PostIssueErr scripts
-// every PostIssue call on a given fake uniformly, so each case needs its own
-// fake.
+// fileIssueIntentsDetailed reports failures as filedIntent entries too,
+// never dropping them. fc.PostIssueErr scripts every PostIssue call on a
+// fake uniformly, so each case needs its own fake.
 func TestFileIssueIntentsDetailed_ReturnsSuccessAndFailureEntries(t *testing.T) {
 	result := dispatch.Result{
 		IssueIntentsFound: true,
@@ -616,9 +601,8 @@ func TestFileIssueIntentsDetailed_AppendsBacklinkToPostedBody(t *testing.T) {
 	}
 }
 
-// An empty bodyBacklink adds no backlink separator -- only the dedup marker
-// line every filing carries -- proving fileIssueIntents' wrapper behavior (it
-// always passes "") survived the refactor.
+// An empty bodyBacklink adds no backlink separator, only the dedup marker
+// line every filing carries.
 func TestFileIssueIntentsDetailed_EmptyBacklinkLeavesBodyUnchanged(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
@@ -920,10 +904,9 @@ func TestFileIssueIntentsDetailed_ListLabelsErrSkipsPreCheckButCreateSucceeds(t 
 	}
 }
 
-// Pins the finding-B bug: the hoisted ListLabels call misses the label (empty
-// or stale), CreateLabel then fails because the label already exists, and
-// ensureTypeLabel's retry ListLabels call reveals it was there all along. The
-// label must still be applied, not dropped.
+// The hoisted ListLabels call misses the label (empty or stale), CreateLabel
+// then fails because it already exists, and ensureLabel's re-list reveals it
+// was there all along: the label must still be applied, not dropped.
 func TestFileIssueIntentsDetailed_CreateLabelFailsButLabelAlreadyExists_StillApplied(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
@@ -1623,9 +1606,9 @@ func TestFileIssueIntentsDetailed_Dedup_ExactRetryMatchesBacklogMarker(t *testin
 
 // Two genuinely distinct findings that happen to share a formulaic title
 // (e.g. a conventional-commit prefix) but carry different -- or no -- dedup
-// terms both file: the title is no longer a dedup key (issue #3609 review),
-// so prose alone never merges unrelated findings, whether the match would be
-// against the open backlog or, as here, within one run.
+// terms both file: the title is not a dedup key (issue #3609), so prose
+// alone never merges unrelated findings, whether the match would be against
+// the open backlog or, as here, within one run.
 func TestFileIssueIntentsDetailed_Dedup_SharedTitleDifferentTermsBothFile(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{
@@ -2066,9 +2049,8 @@ func TestFileIssueIntentsDetailed_Dedup_FiledBodyCarriesMarkerAndRoundTrips(t *t
 
 // An intent whose only dedup term is unusable (a Filer comma-joining two
 // sites into one entry) files under an empty marker, and the run warns
-// naming the dropped term -- silently swallowing it would leave the next
-// run's re-file with nothing in the transcript explaining why (issue #3609
-// review).
+// naming the dropped term, so the next run's re-file has an explanation in
+// the transcript (issue #3609).
 func TestFileIssueIntentsDetailed_Dedup_DroppedTermWarns(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
@@ -2171,12 +2153,10 @@ func TestFileIssueIntentsDetailed_Dedup_NonFindingIssueNeverSuppresses(t *testin
 }
 
 // combinedBacklogListerFilerStub composes a scriptable LabeledBacklogLister
-// with a HostPostedIssueFiler-capable forge.Fake, so a test can drive
-// fileIssueIntentsDetailed's full path through backlogDedupIndex: err (when
-// set) fails both the closed and open lookups alike, for the list-failure
-// branch (dedup_test.go's own list-failure test calls backlogDedupIndex
-// directly, which never reaches a filer); issues, keyed by state, scripts a
-// per-state result for the closed-match tests (issue #3873).
+// with a HostPostedIssueFiler-capable forge.Fake, so a test drives
+// fileIssueIntentsDetailed through backlogDedupIndex: err fails both the
+// closed and open lookups, and issues scripts a per-state result for the
+// closed-match tests (issue #3873).
 type combinedBacklogListerFilerStub struct {
 	forge.IssueTracker
 	forge.HostPostedIssueFiler
@@ -2195,7 +2175,7 @@ func (s *combinedBacklogListerFilerStub) ListIssuesWithLabels(state forge.IssueS
 
 // A LabeledBacklogLister list failure degrades to intra-run-only dedup
 // (empty backlog index) rather than blocking filing: the intent still files,
-// and the warning fires (issue #3609 review).
+// and the warning fires (issue #3609).
 func TestFileIssueIntentsDetailed_Dedup_ListFailureStillFiles(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
@@ -2234,7 +2214,7 @@ func TestFileIssueIntentsDetailed_Dedup_ListFailureStillFiles(t *testing.T) {
 
 // A pass whose intents carry no dedup terms never builds the backlog index:
 // the two list round trips (closed and open) could not match anything, so
-// they are not paid (issue #3609 review).
+// they are not paid (issue #3609).
 func TestFileIssueIntentsDetailed_Dedup_NoTermsSkipsBacklogList(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
@@ -2301,7 +2281,7 @@ func TestFileIssueIntentsDetailed_Dedup_BacklogListBuiltOnce(t *testing.T) {
 // An intent that carries no usable dedup key at all warns on stderr in the
 // same style as its dropped-term sibling, so "filed without dedup" is
 // observable host-side rather than only a prompt-compliance claim (issue
-// #3609 review).
+// #3609).
 func TestFileIssueIntentsDetailed_Dedup_NoTermsWarns(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
@@ -2332,7 +2312,7 @@ func TestFileIssueIntentsDetailed_Dedup_NoTermsWarns(t *testing.T) {
 // A finding whose body quotes a marker line in prose, filed by an intent
 // with no usable dedup term of its own, indexes under zero keys: the
 // launcher appends its own (empty) marker last, so last-wins parsing reads
-// the launcher's, never the quote's (issue #3609 review).
+// the launcher's, never the quote's (issue #3609).
 func TestFileIssueIntentsDetailed_Dedup_QuotedMarkerNeverIndexed(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"

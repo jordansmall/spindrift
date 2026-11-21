@@ -61,10 +61,8 @@ func TestUncoveredHosts_DeclaredHostNotInCovered_ReturnsHost(t *testing.T) {
 	}
 }
 
-// Coverage matching runs through the same registryvocab.HostKey
-// normalization Discover and registryroutes.Parse apply, so a covered
-// MatchHost differing only in case or an explicit default port still counts
-// as coverage.
+// Coverage normalizes through registryvocab.HostKey, so a covered MatchHost
+// differing only in case or an explicit default port still counts.
 func TestUncoveredHosts_DeclaredHostCoveredCaseAndPortNormalized_ReturnsEmpty(t *testing.T) {
 	dir := t.TempDir()
 	testutil.WriteFixture(t, dir, cfgPath, hostDecl)
@@ -93,11 +91,9 @@ func TestUncoveredHosts_NoDeclarations_ReturnsEmpty(t *testing.T) {
 	}
 }
 
-// This test pins the shared-engine acceptance criterion of issue #3144.
-// Discover and UncoveredHosts read their declared hosts off the same Extract
-// call, so with zero routes configured every host Discover proposes a route
-// for must come back uncovered, and covering exactly those routes' own
-// MatchHost values must leave nothing uncovered.
+// Discover and UncoveredHosts share one Extract (issue #3144): with zero
+// routes every proposed host is uncovered, and covering exactly those
+// MatchHosts leaves nothing uncovered.
 func TestUncoveredHosts_ConsistentWithDiscover_SameTree(t *testing.T) {
 	dir := t.TempDir()
 	twin := synthetic.Twin("synthetic-twin")

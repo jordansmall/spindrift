@@ -76,9 +76,7 @@ func TestCargoCredentialsToken_TablePresentNoTokenIsError(t *testing.T) {
 	}
 }
 
-// The old hand-rolled scanner took first-match-wins. The TOML spec makes
-// redefining a table a hard error and go-toml/v2 enforces that, so neither
-// token is picked.
+// TOML makes redefining a table a hard error, so neither token is picked.
 func TestCargoCredentialsToken_DuplicateTableIsError(t *testing.T) {
 	content := []byte(
 		"[registries.acme]\ntoken = \"first-tok\"\n" +
@@ -172,8 +170,7 @@ func TestCargoCredentialsToken_StandaloneCommentLineInTableBodyDoesNotBreakParsi
 	}
 }
 
-// The truncation fix that closed the table-header-with-trailing-comment bug
-// also covers a trailing comment on the token assignment itself.
+// A trailing comment on the token assignment is not part of the token.
 func TestCargoCredentialsToken_TokenLineTrailingCommentIsStripped(t *testing.T) {
 	content := []byte("[registries.acme]\ntoken = \"s3kr3t\" # prod credential\n")
 
@@ -209,10 +206,8 @@ func TestCargoCredentialsToken_HeaderWithHashInQuotedNameDoesNotLeakSection(t *t
 	}
 }
 
-// The old hand-rolled scanner tolerated each of these broken headers as
-// merely ending the previous table's section. A real TOML parser rejects the
-// document outright, so the other table's token can never leak into a lookup
-// for "myreg", either as the result or inside the error.
+// Each broken header rejects the document outright, so the other table's
+// token can never leak into a lookup for "myreg", as result or in the error.
 func TestCargoCredentialsToken_MalformedHeaderIsError(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -260,9 +255,8 @@ func TestCargoCredentialsToken_SingleQuotedTokenWorks(t *testing.T) {
 	}
 }
 
-// The old hand-rolled scanner never resolved a token containing a backslash,
-// and the "behaves identically" acceptance criterion pins the set of tokens
-// it accepted.
+// A token containing a backslash never resolves: the accepted token set is
+// pinned to what the pre-go-toml scanner accepted.
 func TestCargoCredentialsToken_EscapedQuoteInTokenIsRejected(t *testing.T) {
 	const secret = "abc\"#def"
 	content := []byte("[registries.acme]\ntoken = \"abc\\\"#def\"\n")
@@ -332,10 +326,8 @@ func TestCargoCredentialsToken_DisallowedCharacterErrorIsDistinctFromMissingToke
 	}
 }
 
-// Resolving a multi-line basic string would let an embedded newline flow
-// from the token into an HTTP header value. The old hand-rolled scanner
-// failed closed here, and the "behaves identically" acceptance criterion
-// forbids reintroducing that hole.
+// A multi-line basic string would let an embedded newline flow from the
+// token into an HTTP header value.
 func TestCargoCredentialsToken_TripleQuotedTokenIsRejected(t *testing.T) {
 	const secret = "SECRET"
 	content := []byte("[registries.acme]\ntoken = \"\"\"\nSECRET\n\"\"\"\n")

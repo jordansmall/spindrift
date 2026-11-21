@@ -22,23 +22,19 @@ const lifecycleKit = "internal/runner/runnertest/contract"
 // Every gh API call must stay behind the forge seam, so no file outside
 // internal/forge may shell out to gh directly.
 func TestNoGhExecOutsideForge(t *testing.T) {
-	// Go runs each test with the working directory set to the package
-	// directory, cmd/launcher, so this walk starts there.
 	err := walkOwnSource(".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		// The forge package is where gh calls are allowed.
 		if strings.HasPrefix(filepath.ToSlash(path), "internal/forge") {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		// Quickstart runs before nix develop, so no forge client exists yet.
-		// Its Environment seam shells to gh directly for the gh CLI fallback
-		// token (issue #1047), the same carve-out ADR 0027 makes for the
-		// pre-CLI wizard.
+		// Quickstart runs before nix develop, so no forge client exists yet:
+		// its Environment seam shells to gh for the fallback token (issue
+		// #1047), the carve-out ADR 0027 makes for the pre-CLI wizard.
 		if strings.HasPrefix(filepath.ToSlash(path), "quickstart") {
 			if d.IsDir() {
 				return filepath.SkipDir
@@ -81,10 +77,9 @@ func TestNoRunnerExecOutsidePackage(t *testing.T) {
 		}
 		exempt := []string{
 			"internal/runner",
-			// driver-exec is a standalone in-box binary (issue #626) that spawns the
-			// Driver from inside the disposable container. That is a different seam
-			// from the host-side runner.Runner this guard polices, which launches
-			// the Box itself.
+			// driver-exec is a standalone in-box binary (issue #626) spawning
+			// the Driver inside the container, a different seam from the
+			// host-side runner.Runner this guard polices.
 			"driver-exec",
 			// toolchain is box's in-box devShell probe and prefetch (issue
 			// #4297): its nix runs inside the Box, not as a sandbox launch.
@@ -92,8 +87,8 @@ func TestNoRunnerExecOutsidePackage(t *testing.T) {
 			// seamtest is test support (issue #4280): it shells out to the host's
 			// `nix build` for fixtures, never to a sandbox.
 			"internal/seamtest",
-			// fixturebuild is seamtest's nix-build resolver, moved to a leaf
-			// package core's test Fake can import (issue #6809).
+			// fixturebuild is seamtest's nix-build resolver, a leaf package
+			// core's test Fake can import (issue #6809).
 			"internal/fixturebuild",
 		}
 		if slices.ContainsFunc(exempt, func(p string) bool {
@@ -134,7 +129,6 @@ func TestNoOutcomeParsingOutsidePackage(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		// The outcome package is where the parsing lives.
 		if strings.HasPrefix(filepath.ToSlash(path), "internal/outcome") {
 			if d.IsDir() {
 				return filepath.SkipDir
@@ -184,14 +178,10 @@ func TestNoBoxConstructionOutsideDispatchPackage(t *testing.T) {
 			}
 			return nil
 		}
-		// driver-exec's own os.Create writes its teed stream log (issue #626), a
-		// different file in a different process from the launcher's per-issue
-		// Box log this guard polices.
-		//
-		// The conformance kit classifies corpus logs from Driver packages'
-		// tests (issue #5506), and the lifecycle kit builds Boxes to drive a
-		// Runner (issue #5680); nothing in the launcher's runtime imports
-		// either.
+		// driver-exec's os.Create writes its own teed stream log (issue #626),
+		// not the launcher's per-issue Box log. The conformance kit (issue
+		// #5506) and the lifecycle kit (issue #5680) are test-only; see
+		// TestTestOnlyKitsNotImportedByRuntime.
 		if strings.HasPrefix(filepath.ToSlash(path), "driver-exec") ||
 			strings.HasPrefix(filepath.ToSlash(path), conformanceKit) ||
 			strings.HasPrefix(filepath.ToSlash(path), lifecycleKit) {
@@ -213,8 +203,7 @@ func TestNoBoxConstructionOutsideDispatchPackage(t *testing.T) {
 		content := string(data)
 		for _, needle := range forbidden {
 			// oci.go builds throwaway probe Boxes for the registry-proxy
-			// reachability check (it spelled them `Box{` back in package runner);
-			// the other needles still apply to it.
+			// reachability check; the other needles still apply to it.
 			if needle == `runner.Box{` && filepath.ToSlash(path) == "internal/runner/oci/oci.go" {
 				continue
 			}
@@ -230,8 +219,8 @@ func TestNoBoxConstructionOutsideDispatchPackage(t *testing.T) {
 }
 
 // Issue #445 deleted newRunner and newBuildRunner, the positional-unpacking
-// wrappers around oci.New, bwrap.New and bwrap.NewBuild. Call sites now
-// build a runner.Config via runnerConfig(c) and select the adapter directly.
+// wrappers around oci.New, bwrap.New and bwrap.NewBuild; call sites build a
+// runner.Config via runnerConfig(c).
 func TestRunnerUnpackingWrappersRemoved(t *testing.T) {
 	data, err := os.ReadFile("main.go")
 	if err != nil {
@@ -347,8 +336,8 @@ func TestNoBranchPrefixConcatOutsideForge(t *testing.T) {
 	}
 }
 
-// Issue #442 absorbed the merge gate into internal/settle. This guard fails if
-// any of those functions crept back into package main.
+// Issue #442 absorbed the merge gate into internal/settle; none of its
+// functions may creep back into package main.
 func TestNoMergeGateOutsideSettlePackage(t *testing.T) {
 	forbidden := []string{
 		"func gateToGreen(",

@@ -64,10 +64,9 @@ func TestBwrapRegistryProxyTransport_AlwaysSocketCapable(t *testing.T) {
 	}
 }
 
-// Before the issue #2666 review fix, bwrap was always the literal top-level
-// command even when isolating with pasta, leaving pasta buried in bwrap's
-// trailing argv with no namespace left to configure. The default
-// (zero-value) networkMode must make pasta the top-level program.
+// Issue #2666: when bwrap was the top-level command, pasta sat buried in
+// bwrap's trailing argv with no namespace left to configure. The zero-value networkMode must make
+// pasta the top-level program.
 func TestBwrapRun_PastaIsTopLevelProgramByDefault(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	orig := execCommand
@@ -333,11 +332,9 @@ func TestBwrapBuildEnsureReady_GroupFileFailureWrapsError(t *testing.T) {
 }
 
 // With nixConfigFileDrv set, EnsureReady realizes a fifth closure and then
-// snapshots the host nix store DB with one "sqlite3 ... VACUUM INTO" call
-// through the same seam, so 6 execCommand invocations in all. The argv
-// assertion pins the quoted destination, so a dest containing a space would
-// round-trip correctly. VACUUM INTO targets a temp sibling of dest, never dest
-// itself (issue #4817).
+// runs one "sqlite3 ... VACUUM INTO", so 6 execCommand calls. The argv
+// assertion pins the quoted destination, so a dest with a space round-trips;
+// VACUUM INTO targets a temp sibling of dest, never dest (issue #4817).
 func TestBwrapBuildEnsureReady_GeneratesStoreDBSnapshotWhenNixConfigDrvSet(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t,
 		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
@@ -737,7 +734,7 @@ func TestBwrapBuildEnsureReady_SnapshotFailureWrapsError(t *testing.T) {
 	}
 }
 
-// Issue #2664 review finding: a missing host db previously produced a
+// Issue #2664: a missing host db previously produced a
 // silently-empty, valid-looking snapshot instead of an error, so EnsureReady
 // must fail fast before invoking sqlite3. The 5 closures still run first,
 // since the snapshot preflight happens only after they succeed, so callCount
@@ -967,7 +964,7 @@ func TestBwrapRun_NixConfigEmptyStillHoldsLockWithoutSnapshotDir(t *testing.T) {
 // 0042's degrade-don't-lie precedent): it is a reclaim-correctness concern,
 // not a Box requirement. The generation's lock path is a directory here, so
 // os.OpenFile fails with EISDIR. Asserting the warning text catches a
-// regression that drops the fmt.Printf (issue #2680 review finding).
+// regression that drops the fmt.Printf (issue #2680).
 func TestBwrapRun_LockAcquireFailureDoesNotFailRun(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{})
 	orig := execCommand
@@ -1131,7 +1128,7 @@ func probeExclusiveLock(path string) error {
 }
 
 // Run must release the shared lock when cmd.Start() itself fails, not leak it
-// (issue #2680 review finding). execCommand points at a nonexistent absolute
+// (issue #2680). execCommand points at a nonexistent absolute
 // path so exec.Command skips its own LookPath, which resolves bare names
 // only, and the failure comes from cmd.Start() itself.
 func TestBwrapRun_StartFailureReleasesNixVarSnapshotLock(t *testing.T) {
@@ -1227,7 +1224,7 @@ func TestBwrapRun_LocksPerLaunchSnapshotDirWhenClosureGenerationSet(t *testing.T
 	}
 }
 
-// Issue #2682 review finding: a tip closure whose store path moved because
+// Issue #2682: a tip closure whose store path moved because
 // nix.conf itself changed must swap that file in too, so Run's
 // /etc/nix/nix.conf bind resolves through box.ClosureGeneration's
 // NixConfigFile override, the way AgentFiles/AgentEnv already do.
@@ -1308,7 +1305,7 @@ func TestSnapshotGeneration_ThenRunPassesStatGuard(t *testing.T) {
 	}
 }
 
-// Issue #2682 review Finding A: the hot-swap path must never call
+// Issue #2682: the hot-swap path must never call
 // reclaimStaleSnapshots. A live dispatch.Dispatch holds no flock on its own
 // generation between Run() and a later Fix() while it waits on CI, so a swap
 // landing in that window would delete a generation the Dispatch still needs.
@@ -3293,7 +3290,7 @@ func TestReclaimStaleSnapshots_NonexistentRootReturnsNil(t *testing.T) {
 // by the open-then-lock race Run's re-verify guards against) must be removed
 // once nothing holds it, rather than accumulating forever:
 // reclaimStaleSnapshots previously skipped every non-directory entry
-// unconditionally (issue #2680 review finding).
+// unconditionally (issue #2680).
 func TestReclaimStaleSnapshots_SweepsOrphanedLockWithNoGenerationDir(t *testing.T) {
 	root := t.TempDir()
 	orphanLock := filepath.Join(root, "gen-gone.lock")
@@ -3445,7 +3442,7 @@ func installOnceInodeSwapHook(t *testing.T, lockPath string) *bool {
 	return &swapped
 }
 
-// Issue #2680 review finding: EnsureReady calls LockSnapshotShared before the
+// Issue #2680: EnsureReady calls LockSnapshotShared before the
 // generation dir exists, so a concurrent build's reclaim pass can see the lock
 // file as orphaned and win LOCK_EX in the open-then-lock window. The returned
 // *os.File must always identify whatever sits at SnapshotLockPath. A once-only
@@ -3500,7 +3497,7 @@ func TestLockSnapshotShared_SurvivesConcurrentOrphanSweep_WidenedGap(t *testing.
 
 // The open-failure branch: when os.OpenFile(lockPath, O_CREATE|...) fails, the
 // generation dir is left in place and a warning names the lock path (issue
-// #2680 review finding). root is chmod'd 0o555 so os.ReadDir still succeeds
+// #2680). root is chmod'd 0o555 so os.ReadDir still succeeds
 // but creating the sibling "<gen>.lock" fails; uid 0 ignores directory
 // permission bits entirely, hence the skip.
 func TestReclaimStaleSnapshots_OpenLockFailureLeavesGenerationAndWarns(t *testing.T) {
@@ -3538,7 +3535,7 @@ func TestReclaimStaleSnapshots_OpenLockFailureLeavesGenerationAndWarns(t *testin
 
 // The RemoveAll-failure branch: once the exclusive lock is acquired, a
 // RemoveAll failure is warned rather than propagated (best-effort), and the
-// lock is still released (issue #2680 review finding). genDir is chmod'd
+// lock is still released (issue #2680). genDir is chmod'd
 // 0o555 after seeding a file inside it, so RemoveAll fails partway rather
 // than up front. Skipped under uid 0, like the open-failure sibling.
 func TestReclaimStaleSnapshots_RemoveAllFailureWarnsButReturnsNilAndReleasesLock(t *testing.T) {
@@ -3761,7 +3758,7 @@ func TestBwrapBuildEnsureReady_ReclaimSkipsGenerationWithLiveLock(t *testing.T) 
 	}
 }
 
-// Issue #2680 review finding: reclaimStaleSnapshots' root/keepGeneration must
+// Issue #2680: reclaimStaleSnapshots' root/keepGeneration must
 // not be re-derived by filepath.Dir/Base surgery on nixVarSnapshotDir. With
 // generation "" the flat path itself is the snapshot root, and its parent
 // .spindrift also holds unrelated siblings like accum.git, which that surgery
@@ -3806,7 +3803,7 @@ func TestBwrapBuildEnsureReady_EmptyGenerationDoesNotSweepSiblings(t *testing.T)
 	}
 }
 
-// Issue #2682 review finding: a swap must rebind AgentEnv too, not just
+// Issue #2682: a swap must rebind AgentEnv too, not just
 // AgentFiles, or PATH/SSL_CERT_FILE/GIT_SSL_CAINFO keep pointing at the
 // pre-swap generation. A Box carrying ClosureGeneration.AgentEnv must
 // override the adapter's startup-baked a.agentEnv in the rendered --setenv

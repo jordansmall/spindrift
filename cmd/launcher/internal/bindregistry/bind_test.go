@@ -10,11 +10,10 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// Blocking review finding on issue #3142: two routes naming the same UpstreamHost
-// (legal, e.g. one Artifactory host fronting separate registry prefixes)
-// cannot be told apart by ApplyInTreeBinding's host-only content match, so every
-// rewrite for the shared host is dropped rather than the first kept, while a
-// third route on a distinct host survives untouched.
+// Issue #3142: two routes naming the same UpstreamHost (legal, e.g. one
+// Artifactory host fronting separate prefixes) cannot be told apart by
+// ApplyInTreeBinding's host-only content match, so both are dropped, not the
+// first kept, while a third route on a distinct host survives.
 func TestBuildIntreeHostRewrites_DuplicateUpstreamHostDropsBothAndReportsCollision(t *testing.T) {
 	routes := []registrymanifest.Route{
 		{Prefix: "r0", UpstreamHost: "shared.example"},
@@ -78,9 +77,8 @@ func TestBuildIntreeHostRewrites_HostAndHostWithPortDoNotCollide(t *testing.T) {
 	}
 }
 
-// Non-blocking review finding on issue #3142: rewriteHostNames must not repeat a
-// host appearing in more than one rewrite, and must preserve first-occurrence
-// order rather than sorting.
+// Issue #3142: rewriteHostNames must not repeat a host appearing in more than
+// one rewrite, and must preserve first-occurrence order rather than sorting.
 func TestRewriteHostNames_DedupesPreservingFirstOccurrenceOrder(t *testing.T) {
 	rewrites := []HostRewrite{
 		{UpstreamHost: "a.example", LocalURL: "http://127.0.0.1:1/a"},

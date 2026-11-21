@@ -45,9 +45,8 @@ func localDescriptor(t *testing.T) backend.Descriptor {
 	return mustDescriptor(t, "local")
 }
 
-// fakeLiveness is a no-op reconcile.LivenessProbe by default: LogStale reports
-// not stale and ContainerLive always reports live=false, so it never triggers a
-// reset on its own, which is what the Closed-only tests here need.
+// fakeLiveness is a no-op reconcile.LivenessProbe by default (not stale, never
+// live), so it never triggers a reset on its own.
 type fakeLiveness struct {
 	stale     map[string]bool
 	reachable map[string]bool
@@ -184,10 +183,9 @@ func TestReconcileAfterDispatch_NonLocalTracker_SilentNoOp(t *testing.T) {
 }
 
 // Pins issue #3064 for both reconcile entry points: the guard must read
-// caps.TrackerDescriptor, not look c.IssueTracker up again. The fixture
-// deliberately disagrees with itself, naming a non-local tracker in c while
-// forcing caps.TrackerDescriptor to "local", so a guard reading c alone would
-// say "no-op" and the sweep would not run.
+// caps.TrackerDescriptor, not look c.IssueTracker up again. The fixture names
+// a non-local tracker in c while forcing caps.TrackerDescriptor to "local", so
+// a guard reading c would no-op and the sweep would not run.
 func TestReconcileGuards_ReadTrackerDescriptorFromCaps(t *testing.T) {
 	reconcileFuncs := []struct {
 		name string
@@ -240,8 +238,7 @@ func writeSeamIssue(t *testing.T, dir, slug, parent string, closed bool) {
 }
 
 // setGitIdentityEnv gives forgetest.NewGitRepoFixture's own commits an
-// identity, mirroring the local package's bundle_test.go helper of the same
-// name.
+// identity, like the local package's bundle_test.go helper.
 func setGitIdentityEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("GIT_AUTHOR_NAME", "Test Bot")
@@ -259,9 +256,8 @@ type surfaceFixture struct {
 	integrationBranch string
 }
 
-// The call is ResolveParent("", parent), not ResolveParent(parent, ""): parent
-// stands in for the raw parent frontmatter value writeSeamIssue writes, not an
-// issue's own number or slug, so it belongs in the rawParent argument.
+// ResolveParent("", parent), not (parent, ""): parent stands in for the raw
+// parent frontmatter value writeSeamIssue writes, so it is the rawParent arg.
 func newSurfaceFixture(t *testing.T, parent, codeForge string) surfaceFixture {
 	t.Helper()
 	setGitIdentityEnv(t)
@@ -306,10 +302,9 @@ func TestSurfaceAfterDispatch_AllSeamsClosed_SurfacesBranch(t *testing.T) {
 }
 
 // Issue #1833: surfaceAfterDispatch must surface through the *localloop.Wired
-// it is handed, not mint a fresh one from (c, it). c's AccumulationRepoDir
-// points at a decoy repo while only the passed lw points at the repo carrying
-// the ticket's Integration branch, so a surfaceAfterDispatch that builds its
-// own Wired surfaces the decoy's tip and fails.
+// it is handed. c's AccumulationRepoDir points at a decoy repo and only lw at
+// the repo carrying the Integration branch, so minting its own Wired surfaces
+// the decoy's tip and fails.
 func TestSurfaceAfterDispatch_UsesPassedWiredInstance(t *testing.T) {
 	setGitIdentityEnv(t)
 	const parent = "1700"
@@ -347,9 +342,8 @@ func TestSurfaceAfterDispatch_UsesPassedWiredInstance(t *testing.T) {
 	}
 }
 
-// Issue #1730 AC3: surfaceAfterDispatch surfaces no branch while any seam is
-// still open, and issue #1811 requires a held verdict naming that seam rather
-// than the earlier silent no-op.
+// Issue #1730 AC3: no branch surfaces while any seam is still open, and issue
+// #1811 requires a held verdict naming that seam.
 func TestSurfaceAfterDispatch_OpenSeamRemains_PrintsHeldVerdict(t *testing.T) {
 	setGitIdentityEnv(t)
 	const parent = "1700"
@@ -405,9 +399,8 @@ func TestSurfaceAfterDispatch_NonLocalCodeForge_NoOp(t *testing.T) {
 }
 
 // Pins issue #3064: the auto-surface guard must read caps.ForgeDescriptor, not
-// look c.CodeForge up again. The fixture names a non-local codeForge in c
-// while forcing caps.ForgeDescriptor to "local", so a guard reading c alone
-// would say "no-op" instead of surfacing the Integration branch.
+// c.CodeForge. c names a non-local codeForge while caps.ForgeDescriptor is
+// forced to "local", so a guard reading c would no-op instead of surfacing.
 func TestSurfaceAfterDispatch_ReadsForgeDescriptorFromCaps(t *testing.T) {
 	const parent = "1700"
 	fx := newSurfaceFixture(t, parent, "github")
@@ -435,10 +428,8 @@ func TestSurfaceAfterDispatch_ReadsForgeDescriptorFromCaps(t *testing.T) {
 }
 
 // ADR 0033 and issue #1734: the sweep iterates every distinct resolved parent
-// among the tracker's issues instead of collapsing onto a single env-wide
-// parent the way the removed CODE_FORGE_INTEGRATION_PARENT knob did. The batch
-// mixes a fully closed ticket with one that still has an open seam so both
-// outcomes have to appear in a single run.
+// rather than a single env-wide parent. The batch mixes a fully closed ticket
+// with one that still has an open seam so both outcomes appear in one run.
 func TestSurfaceAfterDispatch_MixedParentBatch_SurfacesOnlyCompletedTickets(t *testing.T) {
 	setGitIdentityEnv(t)
 	repo := forgetest.NewGitRepoFixture(t, local.IntegrationBranch(local.ResolveParent("", "broad-a")))
@@ -477,10 +468,9 @@ func TestSurfaceAfterDispatch_MixedParentBatch_SurfacesOnlyCompletedTickets(t *t
 	}
 }
 
-// Issue #1734 review follow-up: one parent's SurfaceIntegrationBranch error
-// must not abort the sweep. Leaving pwd un-inited makes every parent's current
-// branch resolution fail the same way, so both names have to appear in the
-// combined error for the sweep to have reached the second one.
+// Issue #1734: one parent's SurfaceIntegrationBranch error must not abort the
+// sweep. An un-inited pwd fails every parent's branch resolution the same way,
+// so both names must appear in the combined error.
 func TestSurfaceAfterDispatch_OneParentErrors_StillAttemptsTheOthers(t *testing.T) {
 	setGitIdentityEnv(t)
 	repo := forgetest.NewGitRepoFixture(t, local.IntegrationBranch(local.ResolveParent("", "broad-a")))
@@ -564,9 +554,8 @@ func TestRunReconcile_ClosingLastSeamSurfacesIntegrationBranch(t *testing.T) {
 }
 
 // Issue #1739: each closed parentless issue is its own singleton broad ticket
-// (ADR 0033, issue #1734), so a tracker holding hundreds of standalone issues
-// that never went through CODE_FORGE=local would print that many identical
-// never-landed skip lines on every sweep. They collapse into one summary line.
+// (ADR 0033), so a tracker of standalone issues would print one identical
+// never-landed skip line per issue every sweep; they collapse into one line.
 func TestSurfaceAfterDispatch_ManyNeverLandedParents_CollapsesIntoOneSummaryLine(t *testing.T) {
 	setGitIdentityEnv(t)
 	repo := forgetest.NewGitRepoFixture(t, "main")
@@ -830,7 +819,7 @@ func TestRunReconcile_RecordsLateMergeForGithubTracker(t *testing.T) {
 
 // brokenStatsFixture is a local tracker with a PR-capable forge holding an
 // open issue whose landing PR merged, and a pwd whose dispatch-record store
-// cannot open (a directory sits where the database file belongs), so
+// cannot open (a directory sits where the database belongs), so
 // settle.LateMerges fails.
 func brokenStatsFixture(t *testing.T) (root string, f *forge.Fake, c config) {
 	t.Helper()

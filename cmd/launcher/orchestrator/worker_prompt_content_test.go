@@ -3,10 +3,8 @@ package main
 import "testing"
 
 // TestWorkerPromptOperativeContract guards worker-prompt.md's operative rules
-// against silent content drift (issues #3225, #3419, #3420). Issue #3225 cut
-// the batching paragraph's coordinator-side rationale clause while keeping the
-// operative batching rule itself, so this table pins each clause separately and
-// a later cut cannot quietly take a rule with it.
+// against silent content drift (issues #3225, #3419, #3420), one clause per
+// case so a later cut cannot quietly take a rule with it.
 func TestWorkerPromptOperativeContract(t *testing.T) {
 	assertPromptClauses(t, "worker-prompt.md", []promptClause{
 		{

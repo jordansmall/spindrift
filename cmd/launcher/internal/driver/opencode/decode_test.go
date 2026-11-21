@@ -254,11 +254,10 @@ func TestNewDecoder_IsDecode(t *testing.T) {
 
 // TestDecode_CorpusLines decodes every corpus pass.jsonl line: none may panic or
 // yield an event with an empty Kind. Every text event of a real capture must
-// also carry its part.messageID, and at least one real case must hold text under
-// more than one messageID so the check cannot pass vacuously. LastMessageText
-// resets on an ID-less text event too, so the result goldens would stay green if
-// opencode dropped the ID, and only this assertion pins it. Synthetic cases are
-// exempt: hand-written, they say nothing about what opencode emits.
+// carry its part.messageID (the result goldens would stay green without it,
+// since LastMessageText resets on an ID-less event too), and one real case must
+// span several messageIDs so the check is not vacuous. Synthetic cases are
+// exempt: they say nothing about what opencode emits.
 func TestDecode_CorpusLines(t *testing.T) {
 	paths, err := filepath.Glob("testdata/corpus/*/pass.jsonl")
 	if err != nil || len(paths) == 0 {

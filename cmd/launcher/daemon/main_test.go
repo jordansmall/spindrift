@@ -46,12 +46,9 @@ func newTestEmitter(w io.Writer) *daemon.Emitter {
 	return daemon.NewEmitter(w, io.Discard, func() time.Time { return time.Unix(0, 0).UTC() })
 }
 
-// validKnobDocument builds the minimal input document mainRun needs to get
-// past every required knob (DAEMON_APP, BASE_BRANCH, MAX_PARALLEL, and the
-// five schema-defaulted backoff/breaker knobs, all set to their
-// lib/env-schema.nix defaults) and reach the DAEMON_AWAKE_WINDOW parse
-// step, so awake-window tests below fail (or don't) for the reason they're
-// actually testing rather than an earlier missing-knob error.
+// validKnobDocument carries every knob mainRun requires before the
+// DAEMON_AWAKE_WINDOW parse (the backoff/breaker ones at their schema
+// defaults), so awake-window tests fail for the reason they test.
 func validKnobDocument() *inputdoc.Document {
 	settings := map[string]string{
 		"DAEMON_APP":   ".#dogfood",
@@ -127,10 +124,8 @@ func TestMainRun_BadKindSelector(t *testing.T) {
 }
 
 // TestMainRun_AbsentAwakeWindowIsNotAnError asserts an absent
-// DAEMON_AWAKE_WINDOW proceeds exactly as startup does today: no
-// "no value for DAEMON_AWAKE_WINDOW" diagnostic, and mainRun fails for the
-// same reason it already does without this knob at all (no --input, so
-// parseArgs fails first) rather than for a DAEMON_AWAKE_WINDOW complaint.
+// DAEMON_AWAKE_WINDOW draws no diagnostic of its own; the exit 1 is
+// parseArgs' (no --input).
 func TestMainRun_AbsentAwakeWindowIsNotAnError(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	got := mainRun([]string{"dispatch"}, &stdout, &stderr)
@@ -142,13 +137,9 @@ func TestMainRun_AbsentAwakeWindowIsNotAnError(t *testing.T) {
 	}
 }
 
-// TestMainRun_ValidAwakeWindowReachesRepoRoot asserts a valid
-// DAEMON_AWAKE_WINDOW resolved from the document's settings parses cleanly
-// and mainRun proceeds past knob resolution. There is no seam onto
-// daemon.Config from here, so this uses repoRoot's own fast-failing check as
-// an observable proxy: chdir into a non-git directory and confirm the
-// failure is repoRoot's "not a git checkout", not a DAEMON_AWAKE_WINDOW
-// diagnostic — proof the window resolved and parsed before mainRun moved on.
+// TestMainRun_ValidAwakeWindowReachesRepoRoot asserts a document
+// DAEMON_AWAKE_WINDOW parses. With no seam onto daemon.Config, repoRoot's
+// "not a git checkout" from a non-git cwd is the proxy for getting past it.
 func TestMainRun_ValidAwakeWindowReachesRepoRoot(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -178,11 +169,9 @@ func TestMainRun_ValidAwakeWindowReachesRepoRoot(t *testing.T) {
 	}
 }
 
-// TestParseSlots pins MAX_PARALLEL's parse step: the schema declares it
-// intKind = "positive" (lib/env-schema.nix), so anything else — unparsable,
-// zero, or negative — must fail startup with a clear diagnostic rather than
-// reach daemon.Loop's own non-positive-Slots halt, which is for a
-// programming error, not an operator's env var.
+// TestParseSlots pins that an unparsable or non-positive MAX_PARALLEL fails
+// startup rather than reaching daemon.Loop's Slots halt, which is for
+// programming errors.
 func TestParseSlots(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -393,19 +382,11 @@ func TestParseArgs(t *testing.T) {
 	}
 }
 
-// TestGateKinds pins the descriptor-Enablement gating decision (ADR 0056, issue
-// #3878): butler drops out of a bare "every kind" default when
-// BUTLER_CHORES is empty, survives when it isn't, an explicit butler
-// selector with no chores enabled fails instead of dropping silently, and a
-// kind set that never had butler in it is untouched either way -- including
-// when BUTLER_EVERY/BUTLER_CHORE_CLASSES are themselves malformed, since a
-// research/dispatch-only daemon must never fail on butler config it never
-// parses (issue #3991). With BUTLER_CHORES empty, chore.Load short-circuits
-// before it ever looks at BUTLER_EVERY/BUTLER_CHORE_CLASSES, so a bare
-// invocation drops the butler even with a leftover or malformed value in
-// either -- an explicit `butler` selector still fails, since it wants the
-// butler regardless of what got it there. Once a Chore is actually enabled,
-// a chore.Load error fails startup outright.
+// TestGateKinds pins Enablement gating (ADR 0056, issue #3878): a bare
+// invocation drops butler without chores, an explicit `butler` fails instead,
+// and a butler-free kind set never fails on malformed butler knobs (issue
+// #3991). With no chores, malformed BUTLER_EVERY/BUTLER_CHORE_CLASSES are
+// never parsed; with one enabled, a chore.Load error fails startup.
 func TestGateKinds(t *testing.T) {
 	every := []daemon.Kind{daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Research), daemon.KindOf(dispatchkind.Butler)}
 	recoverKind := daemon.KindOf(dispatchkind.Recover)
@@ -574,11 +555,9 @@ func TestGateKinds(t *testing.T) {
 	}
 }
 
-// TestParseResearchReservation pins RESEARCH_RESERVATION's parse step:
-// lib/env-schema.nix declares it intKind = "nonneg" and bounds it at
-// MAX_PARALLEL, so anything else — unparsable, negative, or over the slot
-// count — must fail startup with a diagnostic naming both numbers, rather
-// than reach daemon.Loop's own out-of-range halt.
+// TestParseResearchReservation pins that an unparsable, negative, or
+// over-MAX_PARALLEL RESEARCH_RESERVATION fails startup naming both numbers,
+// rather than reaching daemon.Loop's halt.
 func TestParseResearchReservation(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -855,11 +834,8 @@ func TestValidateSignalCarrier(t *testing.T) {
 	}
 }
 
-// TestMainRun_BadDaemonIdleCapFailsStartup is the end-to-end case: an
-// --input document whose DAEMON_IDLE_CAP sits below DAEMON_IDLE_FLOOR must
-// refuse the start before any slot, any claim, any Box — exit 1, with
-// stderr naming both knobs, the same seam TestMainRun_BadAwakeWindow uses
-// for its own knob.
+// TestMainRun_BadDaemonIdleCapFailsStartup: a document DAEMON_IDLE_CAP below
+// DAEMON_IDLE_FLOOR refuses the start, naming both knobs.
 func TestMainRun_BadDaemonIdleCapFailsStartup(t *testing.T) {
 	clearKnobEnvT(t)
 	docPath := writeInputDocT(t, map[string]string{
@@ -994,11 +970,8 @@ func TestMainRun_CheckOnlyMissingInputDocument(t *testing.T) {
 	}
 }
 
-// TestMainRun_BadSignalCarrierFailsStartup is the end-to-end case: a
-// BOX_SIGNAL_CARRIER value outside the schema's choices must refuse the
-// start before any child is spawned — exit 1, with stderr naming the knob,
-// the same seam TestMainRun_BadDaemonIdleCapFailsStartup uses for its own
-// knobs.
+// TestMainRun_BadSignalCarrierFailsStartup: a BOX_SIGNAL_CARRIER outside the
+// schema's choices refuses the start, naming the knob.
 func TestMainRun_BadSignalCarrierFailsStartup(t *testing.T) {
 	clearKnobEnvT(t)
 	t.Setenv("BOX_SIGNAL_CARRIER", "carrier-pigeon")
@@ -1049,15 +1022,9 @@ func TestNixSystemDouble(t *testing.T) {
 	}
 }
 
-// TestAnnounceStop asserts the first latch emits exactly the
-// shutdown/ShutdownDrain event, cancels the startup context, and closes the
-// returned pool Stop — with the event visible in the emitted stream before
-// that close is observed (asserted from inside a goroutine that reads the
-// buffer only once poolStop has closed, not merely that both happened) —
-// and the second latch emits ShutdownEscalate then closes poolAbort, same
-// ordering. announceStop replaces handleStopSignals (issue #3626): the
-// shared stopsignal relay now owns the signal wiring, this function only
-// re-derives the pool's own Stop/Abort pair from it.
+// TestAnnounceStop asserts each latch's shutdown event is in the stream
+// before its pool channel closes (read only once the close is observed), and
+// that the first latch cancels the startup context (issue #3626).
 func TestAnnounceStop(t *testing.T) {
 	stop := make(chan struct{})
 	abort := make(chan struct{})
@@ -1070,10 +1037,8 @@ func TestAnnounceStop(t *testing.T) {
 
 	poolStop, poolAbort := announceStop(stop, abort, quit, cancel, em)
 
-	// No lock needed around buf: announceStop's em.Emit happens strictly
-	// before its close(stopCh) in program order, and a channel close
-	// happens-before the receive it unblocks, so <-poolStop already
-	// orders this read after that write under the Go memory model.
+	// No lock around buf: the Emit precedes close(stopCh), and the close
+	// happens-before the <-poolStop receive.
 	drainSeen := make(chan string, 1)
 	go func() {
 		<-poolStop
@@ -1130,11 +1095,9 @@ func TestAnnounceStop(t *testing.T) {
 	}
 }
 
-// TestAnnounceStop_QuitBeforeFirstLatch asserts that closing quit before any
-// latch fires unparks announceStop's goroutine rather than leaving it
-// blocked on <-stop forever — the leak mainRun's repeated test-driving would
-// otherwise accumulate one goroutine per call (issue #3546, carried to
-// announceStop by #3626).
+// TestAnnounceStop_QuitBeforeFirstLatch asserts closing quit before any
+// latch unparks announceStop's goroutine; otherwise each mainRun test call
+// would leak one (issues #3546, #3626).
 func TestAnnounceStop_QuitBeforeFirstLatch(t *testing.T) {
 	stop := make(chan struct{})
 	abort := make(chan struct{})
@@ -1213,10 +1176,8 @@ func TestAnnounceStop_QuitAfterFirstLatch(t *testing.T) {
 	}
 }
 
-// TestMainRun_BadArgv drives mainRun's own startup path (rather than
-// os.Exit'ing main() directly, which a test process cannot observe) with an
-// argv that fails parseArgs, asserting the exit code and message land on the
-// injected stderr rather than the real os.Stderr.
+// TestMainRun_BadArgv asserts a parseArgs failure's exit code and message
+// land on the injected stderr.
 func TestMainRun_BadArgv(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	got := mainRun([]string{"dispatch"}, &stdout, &stderr)
@@ -1245,11 +1206,9 @@ func TestMainRun_MissingInputDocument(t *testing.T) {
 	}
 }
 
-// writeInputDocT writes an inputdoc.Document with the given settings to a
-// fresh file in t.TempDir() and returns its path. The five backoff/breaker
-// knobs are filled in at their lib/env-schema.nix defaults unless settings
-// already names one, so a caller testing something else (e.g. the
-// RESEARCH_RESERVATION checks below) doesn't also have to carry them.
+// writeInputDocT writes an input document with settings and returns its
+// path, filling the five backoff/breaker knobs at their schema defaults
+// unless settings names them.
 func writeInputDocT(t *testing.T, settings map[string]string) string {
 	t.Helper()
 	merged := maps.Clone(shippedKnobDefaults)
@@ -1263,12 +1222,10 @@ func writeInputDocT(t *testing.T, settings map[string]string) string {
 	return path
 }
 
-// daemonKnobEnvVars is every env var the daemon package reads by name,
-// including the wrapper's SPINDRIFT_DAEMON_PROGRAM, cleared to keep
-// mainRun's self-change check off. TestClearKnobEnvT_CoversEveryKnob pins
-// it to the call sites. DRIVER is not a knob but an artifact read for the
-// baked-Driver rule (issue #5050); it is listed because the guard covers every
-// literal-keyed env read.
+// daemonKnobEnvVars is every env var the daemon package reads by name, which
+// TestClearKnobEnvT_CoversEveryKnob pins to the call sites. Clearing
+// SPINDRIFT_DAEMON_PROGRAM keeps the self-change check off. DRIVER is an
+// artifact (issue #5050), listed because the guard covers every literal key.
 var daemonKnobEnvVars = []string{
 	"DAEMON_APP", "BASE_BRANCH", "MAX_PARALLEL", "RESEARCH_RESERVATION",
 	"DAEMON_IDLE_FLOOR", "DAEMON_IDLE_CAP", "DAEMON_FAILURE_BACKOFF",
@@ -1282,12 +1239,10 @@ var daemonKnobEnvVars = []string{
 	"CODE_FORGE", "BOX_FORGE_AND_ISSUE_ACCESS", "DRIVER",
 }
 
-// clearKnobEnvT clears the daemon's knob env vars for the duration of the
-// test, so an ambient export in the host/CI environment cannot shadow the
-// input document values these tests set up. The backend knobs are read through
-// the Strategies' Lookup, not literally, so they are discovered by running
-// every tracker and web-URL facet against a recording Lookup (the generated
-// ReadKnobs reads every row knob whatever the values).
+// clearKnobEnvT clears the daemon's knob env vars for the test, so an ambient
+// export cannot shadow the document. Backend knobs are read through the
+// Strategies' Lookup, so they are discovered with a recording Lookup (the
+// generated ReadKnobs reads every row knob whatever the values).
 func clearKnobEnvT(t *testing.T) {
 	t.Helper()
 	keys := slices.Clone(daemonKnobEnvVars)
@@ -1315,12 +1270,9 @@ func clearKnobEnvT(t *testing.T) {
 }
 
 // TestMainRun_WorkOnlyIgnoresExcessiveReservation asserts a `dispatch`
-// invocation is never failed by RESEARCH_RESERVATION, however it is set:
-// the knob is inert for a single-kind daemon, so mainRun must not even
-// resolve or validate it there. The input document's MAX_PARALLEL=1 with
-// RESEARCH_RESERVATION=5 would fail parseResearchReservation outright if it
-// ran; running cwd from a non-git tempdir instead surfaces repoRoot's "not
-// a git checkout" failure, proving startup got past knob resolution.
+// daemon never validates RESEARCH_RESERVATION: MAX_PARALLEL=1 with
+// RESEARCH_RESERVATION=5 would fail if checked, so reaching repoRoot's "not
+// a git checkout" proves it was skipped.
 func TestMainRun_WorkOnlyIgnoresExcessiveReservation(t *testing.T) {
 	clearKnobEnvT(t)
 	docPath := writeInputDocT(t, map[string]string{
@@ -1344,14 +1296,10 @@ func TestMainRun_WorkOnlyIgnoresExcessiveReservation(t *testing.T) {
 	}
 }
 
-// TestMainRun_BothKindsValidatesReservation is the both-kinds counterpart:
-// with no positional verb and no BUTLER_CHORES, gateKinds drops butler
-// from parseArgs' every-kind default, leaving dispatch and research, so the
-// same RESEARCH_RESERVATION=5/MAX_PARALLEL=1 document must now fail startup
-// at the reservation check, before ever reaching
-// repoRoot — this is the seam the brief's "input document's
-// RESEARCH_RESERVATION reaches daemon.Config" requirement is covered at,
-// since mainRun has no seam to observe the daemon.Config value itself.
+// TestMainRun_BothKindsValidatesReservation is the multi-kind counterpart:
+// the bare selector (butler gated out) must fail at the reservation check
+// before repoRoot. With no seam onto daemon.Config, this is where the
+// document's RESEARCH_RESERVATION is shown to reach it.
 func TestMainRun_BothKindsValidatesReservation(t *testing.T) {
 	clearKnobEnvT(t)
 	docPath := writeInputDocT(t, map[string]string{
@@ -1780,12 +1728,9 @@ func TestCmdStatus_Stale(t *testing.T) {
 	}
 }
 
-// TestCmdStatus_GarbageStatusFileStillReportsLiveness pins the review
-// finding at cmdStatus: a genuinely held lock beside a garbage status file
-// must not suppress the liveness truth just because the advisory file
-// failed to parse. cmdStatus must still exit 1 (the ReadStatus error is
-// real), but must print summarizeStatus's liveness sentence to stderr
-// before the failure line.
+// TestCmdStatus_GarbageStatusFileStillReportsLiveness pins that a held lock
+// beside a garbage status file still prints the liveness sentence before
+// the exit-1 failure line.
 func TestCmdStatus_GarbageStatusFileStillReportsLiveness(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -1852,11 +1797,9 @@ func TestSummarizeSlot(t *testing.T) {
 	}
 }
 
-// TestSummarizeStatus_LockHeldDistinguishesNoStatusFromUncorrelated pins the
-// review finding that the LockHeld branch used one wording ("has not
-// published its status yet") even when a status file was present but named
-// a predecessor, not the current holder — the two cases must read
-// differently.
+// TestSummarizeStatus_LockHeldDistinguishesNoStatusFromUncorrelated pins
+// that a held lock with no status file and one with a predecessor's file
+// read differently.
 func TestSummarizeStatus_LockHeldDistinguishesNoStatusFromUncorrelated(t *testing.T) {
 	noStatus := daemon.StatusReport{LockHeld: true, Holder: "pid=1 host=h kind=dispatch started=x"}
 	got := summarizeStatus(noStatus)
@@ -1983,17 +1926,14 @@ func TestMainRun_StatusOutsideGitCheckout(t *testing.T) {
 	}
 }
 
-// TestExitSelfChanged_OutsideChildExitBand pins the invariant daemon.ExitSelfChanged's
-// own doc comment claims but nothing enforces: it must fall outside the 0-7
-// band a *child* launcher's exit codes occupy (daemon.Interpret), so an
-// operator restarting a service unit on daemon.ExitSelfChanged alone can never be
-// triggered by a child's exit leaking through. Fails if daemon.ExitSelfChanged is
-// ever lowered into that band.
+// TestExitSelfChanged_OutsideChildExitBand pins daemon.ExitSelfChanged
+// outside a child launcher's exit band, so a service unit restarting on it
+// alone is never triggered by a child's exit leaking through.
 func TestExitSelfChanged_OutsideChildExitBand(t *testing.T) {
 	for exit := 0; exit < 256; exit++ {
 		outcome, action, _ := daemon.Interpret(exit, false)
 		// The band is two things, and neither alone is all of it: the 0-7 span
-		// the doc names (exit 1 is a child's generic failure, which Interpret
+		// ExitSelfChanged's doc names (exit 1 is a child's generic failure, which Interpret
 		// leaves unclassified), plus every code Interpret *does* classify, so a
 		// `case 10:` added there later collides here instead of silently.
 		if exit > 7 && action == daemon.Backoff {
@@ -2115,9 +2055,7 @@ func TestStartupPreflight_RequiredLabelsMissing(t *testing.T) {
 		t.Errorf("reason = %q, want it to carry the remedy", reason)
 	}
 
-	// startupPreflight itself emits only the "preflight" event now; the
-	// matching "halt" event is mainRun's finish helper's job, not
-	// exercised by this direct call.
+	// The matching "halt" event is finish's, not exercised here.
 	events := decodePreflightEvents(t, &buf)
 	if len(events) != 1 {
 		t.Fatalf("events = %+v, want exactly one preflight event", events)
@@ -2127,8 +2065,8 @@ func TestStartupPreflight_RequiredLabelsMissing(t *testing.T) {
 	}
 }
 
-// TestStartupPreflight_ConfigInvalid covers doctor exit 2 — the exit an
-// undersized podman machine now arrives as (slice 2) — refusing to start.
+// TestStartupPreflight_ConfigInvalid covers doctor exit 2 (e.g. an
+// undersized podman machine) refusing to start.
 func TestStartupPreflight_ConfigInvalid(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
@@ -2152,11 +2090,8 @@ func TestStartupPreflight_Connectivity(t *testing.T) {
 	}
 }
 
-// TestStartupPreflight_RunsExactlyOnce asserts RunDoctor is called exactly
-// once across a whole startupPreflight call. The stronger structural claim —
-// "called once per daemon startup, not once per Loop iteration" — is
-// established by inspection of mainRun's call site (placed before
-// daemon.Loop, outside any loop), not by this test alone.
+// TestStartupPreflight_RunsExactlyOnce asserts one RunDoctor call per
+// startupPreflight; once per startup rests on mainRun's call site.
 func TestStartupPreflight_RunsExactlyOnce(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
@@ -2183,8 +2118,7 @@ func TestStartupPreflight_FetchRevisionFailure(t *testing.T) {
 		t.Errorf("RunDoctor called %d times, want 0 (never reached)", r.calls())
 	}
 
-	// The matching "halt" event is mainRun's finish helper's job now, not
-	// exercised by this direct call — see TestStartupPreflight_RequiredLabelsMissing.
+	// The matching "halt" event is finish's, not exercised here.
 	events := decodePreflightEvents(t, &buf)
 	if len(events) != 1 {
 		t.Fatalf("events = %+v, want exactly one preflight error event", events)
@@ -2194,13 +2128,10 @@ func TestStartupPreflight_FetchRevisionFailure(t *testing.T) {
 	}
 }
 
-// TestStartupPreflight_FeatureBranchGone pins that a confirmed-gone
-// --feature-branch refuses startup the same way as any other resolve
-// failure (issue #3883): Class stays HaltPreflight — HaltFeatureBranchGone
-// is Loop's class, reached only once the pool is already running, never
-// startup's — its rendered String() names both the branch and the remote,
-// RunDoctor is never called, and the "preflight" event's outcome gets its
-// own label distinct from an ordinary seam error.
+// TestStartupPreflight_FeatureBranchGone pins that a gone --feature-branch
+// refuses startup as HaltPreflight (HaltFeatureBranchGone is Loop's class),
+// naming branch and remote, without RunDoctor, under its own outcome label
+// (issue #3883).
 func TestStartupPreflight_FeatureBranchGone(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
@@ -2226,17 +2157,11 @@ func TestStartupPreflight_FeatureBranchGone(t *testing.T) {
 	}
 }
 
-// TestStartupPreflight_NeverEvaluatesSelfPath is the regression pinned by
-// the #3625 review finding: startupPreflight only needs a revision to pin
-// doctor to, and must never reach ResolveTip's self `nix eval` half even
-// with the self check configured (selfAttr set). Driven against a real
-// *hostRunner — not fakePreflightRunner — because the bug was in
-// preflightRunner's shape (ResolveTip, not fetchRevision), which a fake
-// satisfying the narrowed interface can no longer exercise; only the real
-// runner's ResolveTip has an eval half to wrongly reach. runnerEvalCommand
-// fails were it ever invoked, so the assertion is "0 calls", not "calls
-// succeeded" — the finding was that a failing self-eval hard-refused
-// startup, so a stub that quietly passes would hide exactly that.
+// TestStartupPreflight_NeverEvaluatesSelfPath pins issue #3625:
+// startupPreflight must never reach ResolveTip's self `nix eval`, whose
+// failure hard-refused startup. It drives a real *hostRunner, since only the
+// real ResolveTip has an eval half to wrongly reach; the eval stub fails, and
+// the assertion is zero calls, so a quietly passing stub cannot hide it.
 func TestStartupPreflight_NeverEvaluatesSelfPath(t *testing.T) {
 	origFetch, origEval, origDoctor := runnerFetchCommand, runnerEvalCommand, runnerDoctorCommand
 	t.Cleanup(func() { runnerFetchCommand, runnerEvalCommand, runnerDoctorCommand = origFetch, origEval, origDoctor })
@@ -2330,10 +2255,8 @@ func TestStartupPreflight_ContextCancelled(t *testing.T) {
 				t.Fatalf("startupPreflight().Class = %v, want %v", h.Class, daemon.HaltOperatorStop)
 			}
 
-			// A cancelled preflight must still reach the durable event
-			// stream (every other halt in this daemon does) via its
-			// "preflight" event — the matching "halt" event is mainRun's
-			// finish helper's job now, not exercised by this direct call.
+			// A cancelled preflight still reaches the durable event stream
+			// via "preflight"; the matching "halt" is finish's, not exercised here.
 			events := decodePreflightEvents(t, &buf)
 			if len(events) != 1 {
 				t.Fatalf("events = %+v, want exactly one preflight event", events)
@@ -2393,14 +2316,10 @@ func TestStartupPreflight_SignalKilledDoctorOnCancelledContext(t *testing.T) {
 	}
 }
 
-// TestFinish_OnePathForEveryPreLoopHalt pins mainRun's single finish path
-// (issue #3622 slice 3): a preflight refusal, an operator Ctrl-C during the
-// preflight, and an instance-lock refusal each emit exactly one "halt"
-// event carrying h.String()'s documented reason and return the exit code
-// their HaltClass derives — 11, 0, and 1 respectively — print their
-// h.Diagnostic() line to stderr unchanged, and only the first
-// two (sw != nil) publish a halted status file; the instance-lock refusal
-// (sw == nil, per finish's doc) leaves no status file behind.
+// TestFinish_OnePathForEveryPreLoopHalt pins finish (issue #3622): each
+// pre-loop halt emits one "halt" event, prints its Diagnostic and returns
+// its class's exit code; the instance-lock refusal (sw == nil) leaves no
+// status file.
 func TestFinish_OnePathForEveryPreLoopHalt(t *testing.T) {
 	countHalts := func(t *testing.T, buf *bytes.Buffer, h daemon.Halt) int {
 		t.Helper()
@@ -2591,12 +2510,8 @@ func TestWarnStrippedChildEnv_DaemonOnlyKnobKeepsNotForwardedWording(t *testing.
 	}
 }
 
-// TestWarnStrippedChildEnv_UnsetKnobWarnsNever asserts a key genuinely
-// absent from the environment (not exported at all) produces no line at
-// all. t.Setenv registers the restore cleanup; the immediate os.Unsetenv
-// then makes the key actually absent for the test body, since t.Setenv
-// itself only ever exports (see EmptyExportWarnsNever below for the
-// exported-but-empty case).
+// TestWarnStrippedChildEnv_UnsetKnobWarnsNever: t.Setenv registers the
+// restore, then os.Unsetenv makes the key truly absent.
 func TestWarnStrippedChildEnv_UnsetKnobWarnsNever(t *testing.T) {
 	t.Setenv("MODEL", "x")
 	os.Unsetenv("MODEL")
@@ -2607,11 +2522,8 @@ func TestWarnStrippedChildEnv_UnsetKnobWarnsNever(t *testing.T) {
 	}
 }
 
-// TestWarnStrippedChildEnv_EmptyExportWarnsNever mirrors the "set" test
-// inputdoc.Document.Lookup itself applies (its `v := os.Getenv(envVar);
-// v != ""` guard in inputdoc.go): an exported-but-empty knob (present in
-// the environment with value "") is not "set" there, so it must not be
-// "set" here either.
+// TestWarnStrippedChildEnv_EmptyExportWarnsNever: an exported-but-empty knob
+// is not "set" for inputdoc.Document.Lookup, so not here either.
 func TestWarnStrippedChildEnv_EmptyExportWarnsNever(t *testing.T) {
 	t.Setenv("ISSUE_NUMBER", "")
 	var stderr bytes.Buffer
@@ -2640,13 +2552,9 @@ func TestWarnStrippedChildEnv_MultipleKeysSortedOrder(t *testing.T) {
 	}
 }
 
-// TestMainRun_StrippedEnvWarningPrecedesPreflight asserts the startup
-// warning for a stripped knob appears in stderr before mainRun reaches any
-// later startup diagnostic. There is no seam onto the real preflight here
-// (it needs a real nix/doctor run), so this uses repoRoot's own fast-failing
-// "not a git checkout" as the ordering anchor — the same proxy
-// TestMainRun_ValidAwakeWindowReachesRepoRoot uses — which is itself well
-// before the startupPreflight call in mainRun.
+// TestMainRun_StrippedEnvWarningPrecedesPreflight asserts the stripped-knob
+// warning precedes repoRoot's "not a git checkout", which itself precedes
+// startupPreflight; the real preflight needs nix.
 func TestMainRun_StrippedEnvWarningPrecedesPreflight(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -2720,14 +2628,9 @@ func bareOriginConsumerT(t *testing.T) string {
 	return dirConsumer
 }
 
-// assertCapturedEnvT checks env for a PATH and HOME entry (proving the
-// child inherited the parent's environment, not an empty one) and asserts
-// MODEL was stripped (it names a settings key, not a passthrough var).
-// label distinguishes the doctor and dispatch child in failure output.
-//
-// Failure output names keys only, never env itself: env is the live
-// os.Environ()-derived child environment, so a %v of it would put real
-// credentials into the test log and any transcript that captures it.
+// assertCapturedEnvT asserts env inherited PATH and HOME and lost the
+// settings key MODEL. Failures name keys only: env is the live environment,
+// and printing it would leak real credentials into the test log.
 func assertCapturedEnvT(t *testing.T, label string, env []string) {
 	t.Helper()
 	var hasPath, hasHome, hasModel bool
@@ -2763,12 +2666,9 @@ func assertCapturedEnvT(t *testing.T, label string, env []string) {
 	}
 }
 
-// capturedEnvFixtureT is the shared setup for TestMainRun_*ChildGetsCapturedEnv:
-// skip without git, a synthetic HOME (so the fixture never depends on the
-// ambient test environment), a cleared+MODEL-set knob env, a bare-origin
-// consumer repo, and an input document carrying MODEL plus extra, chdir'd
-// into the consumer. Returns the input document path; each caller keeps its
-// own doctor/exec stubs and assertions, which diverge between the tests.
+// capturedEnvFixtureT is TestMainRun_*ChildGetsCapturedEnv's setup: a
+// synthetic HOME, a bare-origin consumer repo as cwd, and a document carrying
+// MODEL plus extra. It returns the document path.
 func capturedEnvFixtureT(t *testing.T, extra map[string]string) string {
 	return capturedEnvFixtureArtifactsT(t, extra, inputdoc.Artifacts{})
 }
@@ -2800,11 +2700,8 @@ func capturedEnvFixtureArtifactsT(t *testing.T, extra map[string]string, artifac
 }
 
 // TestMainRun_FeatureBranchPrintsStartupLineAndReachesDoctor pins issue
-// #3882 end to end in one table, flag-set and flag-unset, matching
-// TestParseArgs's style: --feature-branch wired from argv reaches the
-// doctor preflight's argv as --base-branch and mainRun prints the one
-// startup line naming both branches before the (stubbed, failing) preflight
-// halts it, while an unset flag leaves both byte-for-byte absent.
+// #3882: --feature-branch reaches doctor as --base-branch and prints the
+// startup line naming both branches; unset, both are absent.
 func TestMainRun_FeatureBranchPrintsStartupLineAndReachesDoctor(t *testing.T) {
 	tests := []struct {
 		name              string
@@ -2833,11 +2730,7 @@ func TestMainRun_FeatureBranchPrintsStartupLineAndReachesDoctor(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			path := capturedEnvFixtureT(t, nil)
 			if tt.pushFeatureBranch {
-				// fetchRevision now confirms --feature-branch exists on
-				// origin (issue #3883) before this test ever reaches
-				// RunDoctor; push the branch here so the preflight still
-				// gets past that check to the doctor argv this test is
-				// actually about.
+				// fetchRevision requires the branch on origin (issue #3883).
 				gitRunT(t, "", "checkout", "-b", "feature-x")
 				gitRunT(t, "", "push", "-u", "origin", "feature-x")
 				gitRunT(t, "", "checkout", "main")
@@ -2963,12 +2856,9 @@ func TestMainRun_ButlerInPlayReachesDoctorAsButlerFlag(t *testing.T) {
 	}
 }
 
-// TestMainRun_DoctorChildGetsCapturedEnv is the regression test for the bug
-// where newHostRunner's call site never set env/knobs, so RunDoctor exec'd
-// children with an EMPTY environment (no PATH, no HOME) — dogfood's doctor
-// preflight couldn't even locate `sh`. The stubbed doctor exits non-zero,
-// halting mainRun at startupPreflight before daemon.Loop starts, which
-// keeps the test bounded to the doctor seam.
+// TestMainRun_DoctorChildGetsCapturedEnv pins the bug where RunDoctor exec'd
+// doctor with an empty environment and dogfood's preflight could not find
+// `sh`. The stubbed doctor fails, so mainRun halts before daemon.Loop.
 func TestMainRun_DoctorChildGetsCapturedEnv(t *testing.T) {
 	path := capturedEnvFixtureT(t, nil)
 
@@ -2994,14 +2884,9 @@ func TestMainRun_DoctorChildGetsCapturedEnv(t *testing.T) {
 }
 
 // TestMainRun_DispatchChildGetsCapturedEnv is the dispatch-child sibling of
-// TestMainRun_DoctorChildGetsCapturedEnv above: it stubs the doctor preflight
-// to pass, so daemon.Loop actually starts a slot and runs a child through
-// runnerExecCommand (runner.go's StartChild seam), and asserts that child gets
-// the same captured, knob-stripped environment. Bounding: the stubbed child
-// exits 1, an unclassified outcome (Interpret's default case), and
-// DAEMON_BREAKER_THRESHOLD is set to 1 (the parser's own minimum) so the
-// pool-wide breaker trips on that first failure and Loop halts at once,
-// rather than backing the slot off forever.
+// TestMainRun_DoctorChildGetsCapturedEnv. The child exits 1 (unclassified)
+// and DAEMON_BREAKER_THRESHOLD=1 trips the breaker on it, so Loop halts at
+// once instead of backing off forever.
 func TestMainRun_DispatchChildGetsCapturedEnv(t *testing.T) {
 	path := capturedEnvFixtureT(t, map[string]string{"DAEMON_BREAKER_THRESHOLD": "1"})
 
@@ -3013,10 +2898,8 @@ func TestMainRun_DispatchChildGetsCapturedEnv(t *testing.T) {
 
 	origExec := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = origExec })
-	// No mutex needed: mainRun calls daemon.Loop synchronously, and Loop
-	// joins every slot goroutine at wg.Wait() before returning, so this
-	// write happens-before the read below. A mutex here would anyway never
-	// have covered cmd.Env, which runner.go sets after this stub returns.
+	// No mutex: Loop joins every slot goroutine before mainRun returns, and
+	// a mutex could not cover cmd.Env, which runner.go sets after this returns.
 	var captured *exec.Cmd
 	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
 		cmd := exec.Command("/bin/sh", "-c", "exit 1")
@@ -3043,25 +2926,16 @@ func TestMainRun_DispatchChildGetsCapturedEnv(t *testing.T) {
 	assertCapturedEnvT(t, "dispatch child", captured.Env)
 }
 
-// childDrainThenEscalate is the scripted child for
-// TestMainRun_EndToEndSignalDrainsThenEscalates: it traps both TERM and
-// INT (the daemon only ever sends SIGTERM then SIGINT, forwardSignals'
-// own doc), writes a distinct word to the transcript file ($1) per signal
-// it has actually received, and exits 7 only on the second — the same
-// "operator stopped this child" exit code childExitOnSecondSignal above
-// uses, but with a transcript instead of a bare counter so the test can
-// tell drain and escalation apart, not just count two signals. `: >"$0"`
-// arms the marker file once the trap is installed.
+// childDrainThenEscalate writes a distinct word to its transcript ($1) per
+// signal so the test tells drain from escalation, and exits 7 (operator
+// stop) on the second. `: >"$0"` arms the marker once the traps are set.
 const childDrainThenEscalate = `
 n=0
 trap 'n=$((n+1)); if [ "$n" -eq 1 ]; then echo drain >>"$1"; else echo escalate >>"$1"; exit 7; fi' TERM INT
 : >"$0"
 while :; do sleep 0.05; done`
 
-// waitForFileContains polls path until its contents contain want, bounded
-// like waitForArmed's own 2s budget — a plain os.ReadFile poll is enough
-// here because the transcript is a small file one shell script appends to,
-// not a socket or pipe a reader could observe half-written.
+// waitForFileContains polls path until it contains want, within 2s.
 func waitForFileContains(t *testing.T, path, want string) {
 	t.Helper()
 	for i := 0; i < 1000; i++ {
@@ -3073,23 +2947,12 @@ func waitForFileContains(t *testing.T, path, want string) {
 	t.Fatalf("%s never contained %q", path, want)
 }
 
-// TestMainRun_EndToEndSignalDrainsThenEscalates is the one test that
-// actually drives mainRun through daemon.Loop with a real child process
-// (issue #3626's Seam 2, T7): every other link in the drain/escalate chain
-// — the stopsignal relay, announceStop, Config.Stop/Abort, ChildRequest,
-// forwardSignals — has its own narrower test elsewhere, but this is the
-// only one that wires all of them together and watches a real SIGTERM then
-// SIGINT actually reach a real process. It earns its cost (a real git
-// checkout, a real child, two real signal deliveries) as the regression
-// tripwire for that whole chain: any single broken link here fails this
-// test even if every narrower test above it still passes on its own.
-//
-// It drives the stop/abort latch directly through installStopSignal's test
-// seam (never a real signal to the test binary itself — mainRun's own
-// argument for the same seam applies here too) and stubs the doctor and
-// child exec seams so the daemon needs nothing but a real git checkout with
-// a fetchable origin — ResolveTip's own contract (see the package doc
-// on bareOriginConsumerT's other callers).
+// TestMainRun_EndToEndSignalDrainsThenEscalates is the one test wiring the
+// whole drain/escalate chain (relay, announceStop, Config.Stop/Abort,
+// ChildRequest, forwardSignals) to a real child receiving SIGTERM then SIGINT
+// (issue #3626): a broken link fails it even if every narrower test passes.
+// The latch is driven through installStopSignal, never a real signal to the
+// test binary.
 func TestMainRun_EndToEndSignalDrainsThenEscalates(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -3105,10 +2968,7 @@ func TestMainRun_EndToEndSignalDrainsThenEscalates(t *testing.T) {
 	dirConsumer := bareOriginConsumerT(t)
 
 	doc := validKnobDocument()
-	// Small enough that nothing in this test could ever wait one out —
-	// the scripted child never exits on its own, so idle/failure backoff
-	// never actually triggers, but a tiny value keeps that true even if a
-	// future change to the flow adds an extra iteration before shutdown.
+	// Tiny, in case a future flow adds an iteration before shutdown.
 	doc.Settings["DAEMON_IDLE_FLOOR"] = "1ms"
 	doc.Settings["DAEMON_IDLE_CAP"] = "2ms"
 	doc.Settings["DAEMON_FAILURE_BACKOFF"] = "0s"
@@ -3226,13 +3086,8 @@ func TestMainRun_EndToEndSignalDrainsThenEscalates(t *testing.T) {
 	if !haltSeen {
 		t.Fatalf("no halt event in the stream: %s", stdout.String())
 	}
-	// Either reason is a clean stop reaching the same operator-visible
-	// fact (exit 0): the pool's own Stop watcher (loop.go) and the slot
-	// reading the child's exit 7 while Stop is closed (Interpret) race to
-	// record the halt first, and idempotency (pool.halt) means only the
-	// winner's reason survives — which one wins is not a contract this
-	// test pins, only that whichever it is, it is one of the two clean
-	// stops.
+	// The pool's Stop watcher and the slot reading exit 7 race to record the
+	// halt; either is a clean stop, and only the winner's reason survives.
 	if haltReason != "context-cancelled: stop requested" && haltReason != "outcome: signalled-stop" {
 		t.Errorf("halt reason = %q, want %q or %q", haltReason, "context-cancelled: stop requested", "outcome: signalled-stop")
 	}
@@ -3307,8 +3162,7 @@ func assertHaltBeforeDiagnostic(t *testing.T, merged, stderrLine string) []strin
 
 // TestMainRun_HaltEventPrecedesStderrDiagnostic pins issue #3711: every
 // pre-loop refusal emits its halt event before the "daemon: <reason>" stderr
-// line, so a terminal merging stdout and stderr reads event then diagnostic
-// (the order before 580296cf), not the reverse.
+// line, so a merged terminal reads event then diagnostic.
 func TestMainRun_HaltEventPrecedesStderrDiagnostic(t *testing.T) {
 	failingDoctor := func(ctx context.Context, name string, args ...string) *exec.Cmd {
 		return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 1")
@@ -3410,13 +3264,10 @@ func TestMainRun_HaltEventPrecedesStderrDiagnostic(t *testing.T) {
 	}
 }
 
-// TestFinish_StatusWriteWarningTrailsDiagnostic pins the other half of issue
-// #3711 at finish itself, with one writer standing in for a merged terminal:
-// an operator cancel still reads halt event then diagnostic, and a failed
-// status write's warning lands after both, never ahead of the halt
-// diagnostic it qualifies. Checked at finish rather than mainRun because
-// mainRun's status file lives in the git dir, which a test cannot make
-// unwritable portably.
+// TestFinish_StatusWriteWarningTrailsDiagnostic pins issue #3711's other
+// half: a failed status write's warning trails the halt event and
+// diagnostic. It is checked at finish, since mainRun's status file lives in
+// the git dir, which cannot be made unwritable portably.
 func TestFinish_StatusWriteWarningTrailsDiagnostic(t *testing.T) {
 	kinds := []daemon.Kind{daemon.KindOf(dispatchkind.Work)}
 	for _, tt := range []struct {
@@ -3552,7 +3403,7 @@ func TestInvalidConfigHaltParity(t *testing.T) {
 
 // TestStartupPreflight_ExitFourNamesMissingLabels pins that doctor's own
 // labels line, not ClassifyPreflight's generic text, becomes the halt's
-// detail: exit 4 now also covers the butler/research/Filer label sets.
+// detail: exit 4 also covers the butler/research/Filer label sets.
 func TestStartupPreflight_ExitFourNamesMissingLabels(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
@@ -3893,11 +3744,11 @@ func (f *inPlaceFixture) stubExternalCommands(t *testing.T) {
 		}
 		return sh(ctx, "echo "+newSelf)
 	}
-	// nix build emulates --out-link by creating the symlink: a prebuild
-	// (<drv>^out) links the new build's store path, a rooting links its argument.
-	// A prebuild waits for the first child: one that beats the slot's first
-	// start puts the pool in the waiting phase, which refuses that start and
-	// hands off with no child to inherit.
+	// The nix stub emulates --out-link: a prebuild (<drv>^out) links the new
+	// build's store path, a rooting links its argument. A prebuild waits for
+	// the first child: one that beats the slot's first start puts the pool in
+	// the waiting phase, which refuses that start and hands off with no child
+	// to inherit.
 	runnerPrebuildCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
 		if name == "nix" {
 			out, target := filepath.Dir(filepath.Dir(newSelf)), args[len(args)-1]

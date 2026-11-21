@@ -20,7 +20,7 @@ import (
 // sequencedEval varies its outPath across successive Eval calls against the
 // image attr, which freshness.Fake cannot do. Calls against launcherAttr are a
 // fixed side channel that never consume the sequence: the swap branch needs a
-// genuinely evaluated, fresh launcher dimension (issue #2682 review finding).
+// genuinely evaluated, fresh launcher dimension (issue #2682).
 type sequencedEval struct {
 	// mu guards Eval; RunContinuous may call fresh() from more than one goroutine.
 	mu              sync.Mutex
@@ -66,7 +66,7 @@ func TestRunContinuousDispatch_StoreClosureImageOnlyStale_HotSwapsAndKeepsRefill
 	c.imageTag = "/nix/store/" + loadedHash + "-agent-closure"
 	// The swap branch requires the launcher dimension to have been genuinely
 	// probed, not merely defaulted true by an unconfigured attr (ADR 0043,
-	// issue #2682 review finding). staleEval returns the same outpath for every
+	// issue #2682). staleEval returns the same outpath for every
 	// attr, so setting loadedLauncherHash to staleHash makes the launcher
 	// dimension both evaluated and fresh, isolating image-only staleness.
 	c.flakeLauncherAttr = ".#launcher-currency"
@@ -111,7 +111,7 @@ func TestRunContinuousDispatch_StoreClosureImageOnlyStale_HotSwapsAndKeepsRefill
 	// staleOutPath is the agent-closure linkFarm's own store path (what
 	// freshness.Probe reports as res.TipTag under bwrap); AgentFiles/AgentEnv
 	// must be its "files"/"env" linkFarm children, not the closure path
-	// itself (issue #2682 review finding).
+	// itself (issue #2682).
 	if want := staleOutPath + "/files"; box.ClosureGeneration.AgentFiles != want {
 		t.Errorf("box.ClosureGeneration.AgentFiles = %q, want %q (the closure's \"files\" child)", box.ClosureGeneration.AgentFiles, want)
 	}
@@ -632,7 +632,7 @@ func TestRunContinuousDispatch_StoreClosureNixInBoxSwap_EmptyTipTag_SkipsPrepara
 }
 
 // TestRunContinuousDispatch_StoreClosureLauncherUnconfigured_FallsBackToDrain pins the
-// swap branch's launcher-dimension prerequisite (issue #2682 review finding):
+// swap branch's launcher-dimension prerequisite (issue #2682):
 // Probe hard-codes LauncherFresh true when flakeLauncherAttr is unconfigured,
 // so without an explicit gate an otherwise textbook Box-only-stale shape would
 // hot-swap forever and never catch a launcher-side change (ADR 0043).
@@ -684,7 +684,7 @@ func TestRunContinuousDispatch_StoreClosureLauncherUnconfigured_FallsBackToDrain
 
 // TestRunContinuousDispatch_StoreClosureEmptyTipTag_FallsBackToDrain pins the
 // strings.HasPrefix(res.TipTag, "/nix/store/") guard in fresh()'s swap branch
-// (issue #2682 review finding): an empty image out-path makes RealizeSync a
+// (issue #2682): an empty image out-path makes RealizeSync a
 // no-op rather than a failure, so without the guard the swap would bind an
 // empty TipTag as a live generation with no store path instead of draining.
 func TestRunContinuousDispatch_StoreClosureEmptyTipTag_FallsBackToDrain(t *testing.T) {

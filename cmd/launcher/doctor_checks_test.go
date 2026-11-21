@@ -83,7 +83,7 @@ func TestMemoizeCheckProbes_ProbeInvokedOnceAcrossTwoRuns(t *testing.T) {
 // slice, which validateConfigChecks turns into exit 2 "configuration
 // invalid", keeps the Required per-route rows but drops the bwrap and drift
 // rows: those are environment and staleness concerns, not configuration
-// faults (issue #2671 round-1 review finding, extended to the drift row).
+// faults (issue #2671, extended to the drift row).
 func TestDoctorCheckSets_ClassifyExcludesBwrapGatesAndDriftRowsButIncludesPerRouteRows(t *testing.T) {
 	withDriftRepoDir(t, t.TempDir()) // No declared hosts, so the drift row still exists and reports no drift.
 	withDriftMatchingRemote(t)       // Issue #3144: the drift row needs a positively identified Target checkout.

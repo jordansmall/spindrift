@@ -23,11 +23,11 @@ func reconcileConfig() config {
 	return c
 }
 
-// recoverByNumber is the sole adopt-and-gate path (#600). reconcileStranded,
-// the unguarded sweep over every agent-in-progress issue, was removed because
-// a bare agent-in-progress label carries no liveness signal (see
-// TestRun_DoesNotAdoptLiveRunnersInProgressIssue in run_test.go). An operator
-// reaches recoverByNumber only through the explicit agent-recover label.
+// recoverByNumber is the sole adopt-and-gate path (#600): a bare
+// agent-in-progress label carries no liveness signal (see
+// TestRun_DoesNotAdoptLiveRunnersInProgressIssue), so no sweep adopts one. An
+// operator reaches it only explicitly, via `spindrift recover <n>` or the
+// agent-recover label's workflow.
 
 func TestRecoverByNumber_GreenMergesAndCompletes(t *testing.T) {
 	c := reconcileConfig()
@@ -122,8 +122,7 @@ func TestRecoverByNumber_AdoptedPRAlwaysCallsMarkReadyThenMergesAndCompletes(t *
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	branch := forge.AgentBranchName(c.BranchPrefix, "42")
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR})
-	// The leading PENDING proves this run's own checks registered. Issue
-	// #1652's adopted-path gate does not trust an immediate SUCCESS alone.
+	// Leading PENDING: see TestRecoverByNumber_GreenMergesAndCompletes (#1652).
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 
 	dir := tempLogDir(t)
@@ -160,16 +159,14 @@ func TestRecoverByNumber_RelayedBranchAdoptedMergesAndCompletes(t *testing.T) {
 	// No PR is registered for the branch, so forge.ResolveOpenPR reports
 	// res.Found=false and the adopt arm fires.
 	fc.CreateDraftPRURL = testReconcilePR
-	// The leading PENDING proves this run's own checks registered, matching
-	// TestRecoverByNumber_GreenMergesAndCompletes' reasoning (#1652).
+	// Leading PENDING: see TestRecoverByNumber_GreenMergesAndCompletes (#1652).
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 
 	dir := tempLogDir(t)
 	logPath := filepath.Join(dispatch.HostLogDirFor(dir), "issue-42.log")
-	// The log line is a leading-token near-miss with no full grammar. Its bare
-	// word is the generated vocabulary's own "ready", not the removed "success"
-	// synonym, because isSuccessSelfReport only recognizes words from
-	// outcome.WorkStatuses and "success" was never one (#2981).
+	// A leading-token near-miss with no full grammar. Its bare word is the
+	// generated vocabulary's "ready", not "success", because
+	// isSuccessSelfReport only recognizes outcome.WorkStatuses (#2981).
 	if err := os.WriteFile(logPath, []byte("SPINDRIFT_OUTCOME: ready\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
@@ -199,8 +196,8 @@ func TestRecoverByNumber_RelayedBranchAdoptedMergesAndCompletes(t *testing.T) {
 }
 
 // The relayed-branch adoption arm must never fire with neither an open PR nor
-// a self-report on disk to recover. The pre-#2225 no-PR path, labels untouched
-// and no PR opened, stays exactly unchanged.
+// a self-report on disk: the pre-#2225 no-PR path, labels untouched and no PR
+// opened, stays unchanged.
 func TestRecoverByNumber_NoPRNoSelfReportStillNoOps(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake()
@@ -248,10 +245,10 @@ func TestRecoverByNumber_NoPRSkipped(t *testing.T) {
 	}
 }
 
-// This pins #2477's fix. A no-PR, no-self-report recover attempt against an
-// issue that was agent-complete before the workflow's host-side claim stripped
-// that label must restore agent-complete rather than let the caller's non-nil
-// error drive the workflow's blind park-to-agent-failed step.
+// Pins #2477: a no-PR, no-self-report recover of an issue that was
+// agent-complete before the workflow's claim stripped that label restores
+// agent-complete, rather than let the caller's error drive the workflow's
+// blind park-to-agent-failed step.
 func TestRecoverByNumber_NoPRRestoresPriorComplete(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
@@ -284,8 +281,8 @@ func TestRecoverByNumber_NoPRRestoresPriorComplete(t *testing.T) {
 }
 
 // recoverFailed restores only a prior agent-complete state, never a prior
-// agent-failed one. An issue already agent-failed before the claim must still
-// park agent-failed exactly as it did before #2477.
+// agent-failed one: an issue already agent-failed must still park there, as
+// before #2477.
 func TestRecoverByNumber_NoPRPriorFailedStillErrors(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))

@@ -24,12 +24,9 @@ func newResearchFake(num string) *forge.Fake {
 	return fc
 }
 
-// A verdict causes no other transition: ADR 0022's one-shot settle path parses
-// the outcome line, posts the relayed comment, applies the label, and stops.
-//
-// This is also the research path's no-intents filed= tally fixture (issue
-// #3608): a run that never filed anything still prints "filed=ok:0,failed:0,skipped:0",
-// so it reads as "reached filing" rather than leaving no trace at all.
+// A verdict causes no other transition (ADR 0022's one-shot settle). Also the
+// research path's no-intents tally fixture (issue #3608): a run that filed
+// nothing still prints "filed=ok:0,failed:0,skipped:0".
 func TestResearchSettle_Recommend(t *testing.T) {
 	fc := newResearchFake("42")
 	result := dispatch.Result{

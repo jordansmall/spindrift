@@ -13,13 +13,11 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-// The advisory package and file roots are the enforcement paths ADR 0071
-// keeps host-profile-free: the proxy and route parsing as whole packages, and
-// the launcher's route resolution as one file, because that lives in package
-// main and walking all of main would flag every future legitimate
-// host-profile consumer. The cost: a main-package helper the file calls,
-// such as checkoutIsTargetRepo in registryroutesdrift_doctor_checks.go (a
-// doctor file), is outside the guard.
+// The advisory roots are the enforcement paths ADR 0071 keeps
+// host-profile-free. Route resolution is guarded as one file because it lives
+// in package main, where walking the whole package would flag legitimate
+// consumers; a main-package helper it calls (checkoutIsTargetRepo, in a doctor
+// file) is outside the guard.
 var (
 	advisoryPackageRoots = []string{"internal/registryproxy", "internal/registryroutes"}
 	advisoryFileRoots    = []string{"registryroutesresolve.go"}

@@ -26,14 +26,11 @@ import (
 )
 
 // The smoke matrix drives the real launcher binary with a rendered input
-// document, faking only the tools it shells out to, and checks that the
-// runtime and the forge each receive what the document specifies. One test
-// per distinguishing path: dispatch kind x container runtime.
-//
-// The expectations come from the document and the recorded argv alone, via
-// checkRuntimeArgv and checkForgeCalls, which return problems instead of
-// failing a test: a caller can run the launcher on a different document than
-// the one it takes expectations from and assert the checks notice.
+// document, faking only the tools it shells out to, with one test per dispatch
+// kind x container runtime. checkRuntimeArgv and checkForge take expectations
+// from the document and the run's record alone and return problems instead of
+// failing, so a caller can run the launcher on a different document and assert
+// they notice.
 
 const (
 	smokeRepo = "owner/repo"
@@ -195,7 +192,7 @@ func checkRuntimeArgv(doc *inputdoc.Document, kind string, argv []string) []stri
 // research family's are fixed by the launcher (ADR 0022). A work or research
 // run is checked by the issue file's end state and whether the change landed,
 // since the local tracker and git forge make no gh calls; a butler run by the
-// issue files it filed. No kind may reach gh: the native path is gone.
+// issue files it filed. No kind may reach gh.
 func checkForge(doc *inputdoc.Document, kind string, r smokeRun) []string {
 	var bad []string
 	if len(r.gh) > 0 {
@@ -309,8 +306,8 @@ type smokeRun struct {
 // issue file per n in issues, each in state, under workDir, and a git forge
 // landing on the bare remote. It edits docPath, so pass a copy. The git forge
 // merges in its own clone of bare, which ignores the launcher's insteadOf
-// rules, so the remote is named directly. The github path is no longer
-// runnable here: every github read needs a routed Connector row.
+// rules, so the remote is named directly. The github path is not runnable
+// here: every github read needs a routed Connector row.
 func useLocalForge(t *testing.T, docPath, workDir, bare string, issues []int, state string) {
 	t.Helper()
 	setDocSettings(t, docPath, map[string]string{"ISSUE_TRACKER": "local", "CODE_FORGE": "git", "CODE_FORGE_REMOTE_URL": bare})

@@ -75,11 +75,10 @@ func TestLoadHandoffFileMissing(t *testing.T) {
 	}
 }
 
-// Pins the graceful degrade of -max-budget-tokens (issue #2694 review finding;
-// moved here from orchestrator/caps_test.go by issue #2975 review finding #1):
-// a negative or malformed value collapses to 0 instead of erroring, matching
-// the host launcher's atoiNonneg tolerance for the same MAX_BUDGET_TOKENS env
-// var, so the Box is never stricter than the host about that knob.
+// Pins the graceful degrade of -max-budget-tokens (issues #2694, #2975): a
+// negative or malformed value collapses to 0 instead of erroring, matching the
+// host's inputdoc NonnegInt tolerance for MAX_BUDGET_TOKENS, so the Box is
+// never stricter than the host about that knob.
 func TestParseNonnegBudgetTokens(t *testing.T) {
 	tests := []struct {
 		name   string

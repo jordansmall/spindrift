@@ -260,11 +260,9 @@ func TestShouldNudgeOutcome_FullyValidLine(t *testing.T) {
 	}
 }
 
-// Pins review-round-2 bug 1: the deleted bash gate only checked field-marker
-// presence (landing=/status=, any value including empty), not outcome.Parse's
-// full grammar validity, which rejects an empty landing as ErrNearMiss. A
-// status=ready line with an empty landing satisfied the deleted bash's fielded
-// test and must not nudge here either.
+// The gate checks field-marker presence, not outcome.Parse validity: Parse
+// rejects an empty landing as ErrNearMiss, but a fielded status=ready line with
+// an empty landing must not nudge.
 func TestShouldNudgeOutcome_FieldedEmptyLandingDoesNotNudge(t *testing.T) {
 	logPath := writeLog(t, outcome.Token+" issue=7 landing= status=ready note=done\n")
 	got, err := ShouldNudgeOutcome(NudgeConfig{LogPath: logPath})
@@ -276,11 +274,9 @@ func TestShouldNudgeOutcome_FieldedEmptyLandingDoesNotNudge(t *testing.T) {
 	}
 }
 
-// Pins review-round-2 bug 2 (ordering): the deleted bash filtered to fielded
-// lines first, then took the last of those, so a later token-leading line
-// carrying neither field marker never shadowed an earlier genuine fielded
-// line. The prior Go implementation took the unconditional last token-leading
-// line, which wrongly flipped this case to nudge.
+// Fielded lines are filtered before the last is taken, so a later
+// token-leading line carrying neither field marker never shadows an earlier
+// genuine fielded line (taking the last token-leading line wrongly nudged).
 func TestShouldNudgeOutcome_FieldedLineFollowedByLaterNonFieldedLineDoesNotNudge(t *testing.T) {
 	logPath := writeLog(t, outcome.Token+" issue=7 landing=agent/issue-7 status=ready note=done\n"+outcome.Token+": all set\n")
 	got, err := ShouldNudgeOutcome(NudgeConfig{LogPath: logPath})
@@ -359,10 +355,9 @@ func TestShouldNudgePRIntent_NonReadyStatus(t *testing.T) {
 	}
 }
 
-// Pins review finding A: a status=ready outcome line with an empty landing
-// field used to nudge under the deleted bash logic, and outcome.Parse rejects
-// an empty landing as ErrNearMiss, so ShouldNudgePRIntent must use
-// outcome.ReadyBeforeNote's looser substring test and still nudge here.
+// outcome.Parse rejects an empty landing as ErrNearMiss, so
+// ShouldNudgePRIntent must use outcome.ReadyBeforeNote's looser substring test
+// and still nudge a status=ready line with an empty landing.
 func TestShouldNudgePRIntent_ReadyEmptyLanding(t *testing.T) {
 	logPath := writeLog(t, "")
 	got, err := ShouldNudgePRIntent(NudgeConfig{
@@ -378,8 +373,8 @@ func TestShouldNudgePRIntent_ReadyEmptyLanding(t *testing.T) {
 	}
 }
 
-// Pins review finding B: a line with no real status= field, only a
-// "status=ready" mention inside free-text note, must not nudge.
+// A line with no real status= field, only a "status=ready" mention inside
+// free-text note, must not nudge.
 func TestShouldNudgePRIntent_StatusMentionOnlyInNote(t *testing.T) {
 	logPath := writeLog(t, "")
 	got, err := ShouldNudgePRIntent(NudgeConfig{
@@ -395,11 +390,10 @@ func TestShouldNudgePRIntent_StatusMentionOnlyInNote(t *testing.T) {
 	}
 }
 
-// Pins the tightened presence rule (review round 3): a line leading with the
-// PR-intent token and a matching nonce, but a payload that fails the strict
-// base64 decode, no longer counts as present the way the deleted bash gate's
-// looser "token + nonce + two fields" check did. It must nudge again rather
-// than treat the malformed attempt as satisfying the gate.
+// A line leading with the PR-intent token and a matching nonce, but a payload
+// that fails the strict base64 decode, does not count as present: a looser
+// "token + nonce + two fields" check would let the malformed attempt satisfy
+// the gate.
 func TestShouldNudgePRIntent_MalformedPRIntentPayloadStillNudges(t *testing.T) {
 	logPath := writeLog(t, outcome.PRIntentToken+" abc123 not-valid-base64!!!\n")
 	got, err := ShouldNudgePRIntent(NudgeConfig{

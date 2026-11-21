@@ -83,8 +83,8 @@ func TestWalkGateRegistry_SkipsInapplicableGateEntirely(t *testing.T) {
 }
 
 // A failing gate must never leave the report silent, whether or not the walk
-// then stops (code-review finding on issue #2942). The row format follows
-// doctor/registry.go and docs/reference.md's stdout convention.
+// then stops (issue #2942). The row format follows doctor/registry.go and
+// docs/reference.md's stdout convention.
 func TestWalkGateRegistry_FailingGateWritesMissingReportLine(t *testing.T) {
 	wantErr := errors.New("first gate failed")
 	registry := []launchGate{
@@ -292,9 +292,7 @@ func gateNamesFromOkLines(out string) []string {
 
 // The fixture interleaves network and non-network gates so that no single split
 // point separates the two groups, a shape a hardcoded index like
-// gateRegistry[:2]/gateRegistry[2:] could never partition correctly. That index
-// is what the previous newGatedContext used, and fixed indices encoded the very
-// ordering assumption under test.
+// gateRegistry[:2]/gateRegistry[2:] could never partition correctly.
 func TestSplitGateRegistryByNetwork_PartitionsByFieldNotPosition(t *testing.T) {
 	registry := []launchGate{
 		{Name: "net-a", Network: true},

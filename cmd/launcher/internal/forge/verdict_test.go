@@ -73,8 +73,7 @@ func TestParseVerdict(t *testing.T) {
 	}
 }
 
-// TestResearchVerdictLabels_DefaultSet verifies the compiled-default verdict
-// set's tokens, labels, and Parse behavior match ADR 0022.
+// The compiled-default verdict set matches ADR 0022.
 func TestResearchVerdictLabels_DefaultSet(t *testing.T) {
 	vl := forge.ResearchVerdictLabels()
 
@@ -110,8 +109,6 @@ func TestResearchVerdictLabels_DefaultSet(t *testing.T) {
 	}
 }
 
-// TestParseResearchVerdicts_Empty verifies an empty knob returns the
-// compiled default set, ordered, with the default labels.
 func TestParseResearchVerdicts_Empty(t *testing.T) {
 	vl, err := forge.ParseResearchVerdicts("")
 	if err != nil {
@@ -133,9 +130,7 @@ func TestParseResearchVerdicts_Empty(t *testing.T) {
 	}
 }
 
-// TestParseResearchVerdicts_Custom verifies a custom JSON array configures a
-// distinct verdict set, order preserved, and the default tokens no longer
-// parse.
+// A custom set replaces the defaults: their tokens stop parsing.
 func TestParseResearchVerdicts_Custom(t *testing.T) {
 	vl, err := forge.ParseResearchVerdicts(`[
 		{"verdict":"approve","label":"agent-research-approve","description":"looks good"},
@@ -162,8 +157,6 @@ func TestParseResearchVerdicts_Custom(t *testing.T) {
 	}
 }
 
-// TestParseResearchVerdicts_Invalid verifies every documented validation
-// failure returns an error.
 func TestParseResearchVerdicts_Invalid(t *testing.T) {
 	cases := map[string]string{
 		"not json":               `not json`,

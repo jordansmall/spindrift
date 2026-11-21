@@ -78,11 +78,10 @@ func requireRealBwrap(t *testing.T) string {
 }
 
 // requireRealBwrapProc guards the nix probes, which keep --proc/--dev because
-// nix resolves its own binary via /proc/self/exe. It unshares pid/ipc/uts to
-// match buildArgs' unshareFlags: a bare --proc/--dev probe without
-// --unshare-pid mounts fine in a nested sandbox that then fails to mount /proc
-// once a fresh pid namespace is layered on top. It skips rather than fails
-// unless requireBwrapEnv is set.
+// nix resolves its own binary via /proc/self/exe. It unshares pid/ipc/uts as
+// buildArgs does: without --unshare-pid the probe passes in a nested sandbox
+// that then fails to mount /proc under a fresh pid namespace. It skips unless
+// requireBwrapEnv is set.
 func requireRealBwrapProc(t *testing.T) string {
 	t.Helper()
 	bashBin := requireRealBwrap(t)
@@ -518,12 +517,11 @@ func TestBwrapIntegration_PastaBlocksHostLoopback(t *testing.T) {
 	}
 }
 
-// TestBwrapIntegration_PastaProvidesWorkingEgressInterface is a CI-safe proxy
-// for "pasta gave the sandbox working egress" that does not depend on real
-// internet reachability. It asserts the namespace's non-loopback interface is UP
-// with an IPv4 address and that a default route exists. Without --config-net the
-// pinned passt leaves the tap device DOWN with no address or route, so a bare
-// "an interface exists" check passes while the Box has no egress (issue #5981).
+// A CI-safe proxy for "pasta gave the sandbox working egress": an UP
+// non-loopback interface with an IPv4 address and a default route. Without
+// --config-net the pinned passt leaves the tap device DOWN with no address or
+// route, so "an interface exists" passes while the Box has no egress (issue
+// #5981).
 func TestBwrapIntegration_PastaProvidesWorkingEgressInterface(t *testing.T) {
 	requireRealPasta(t)
 	bashBin := requireRealBwrap(t)

@@ -54,10 +54,8 @@ func TestGitCheckoutRoot_NestedSubdirWalksUpToRoot(t *testing.T) {
 }
 
 // Drift is only meaningful alongside a routes file, so an unset
-// registryProxyRoutesFile excludes the row from the report, the slice-1 gate
-// pattern (issue #3144 slice 2). The drift seams are stubbed to the state
-// that does yield the row, so the routes-file gate is the only thing left
-// that can suppress it.
+// registryProxyRoutesFile excludes the row (issue #3144). The drift seams are
+// stubbed to yield the row, so only the routes-file gate can suppress it.
 func TestDoctorCheckSets_UnsetRoutesFileExcludesRegistryRouteDriftRow(t *testing.T) {
 	withDriftRepoDir(t, t.TempDir())
 	withDriftMatchingRemote(t)
@@ -75,10 +73,8 @@ func withDriftRepoDir(t *testing.T, dir string) {
 	t.Cleanup(func() { registryRouteDriftRepoDirFn = orig })
 }
 
-// The stubbed remote matches minimalValidConfig's identity (codeForge:
-// "github", repoSlug: "owner/repo"), so content tests that do not care about
-// identity resolution get a matching checkout without shelling out to git.
-// The production seam is `git remote get-url origin`.
+// The stubbed remote matches minimalValidConfig's identity, so content tests
+// get a matching checkout without shelling out to git.
 func withDriftMatchingRemote(t *testing.T) {
 	t.Helper()
 	orig := registryRouteDriftOriginRemoteFn
@@ -86,10 +82,9 @@ func withDriftMatchingRemote(t *testing.T) {
 	t.Cleanup(func() { registryRouteDriftOriginRemoteFn = orig })
 }
 
-// assertNoDriftRow scans report for the registry-route-drift row and fails
-// naming the condition that should have excluded it, the shared assertion
-// behind the doctorCheckSets-level gating tests. condition completes "want it
-// excluded ...", so each caller carries its own leading preposition.
+// assertNoDriftRow fails if report carries the registry-route-drift row.
+// condition completes "want it excluded ...", so each caller carries its own
+// leading preposition.
 func assertNoDriftRow(t *testing.T, report []doctor.Check, condition string) {
 	t.Helper()
 	for _, ch := range report {
@@ -167,10 +162,9 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_COVERED" }
 	}
 }
 
-// Pins issue #3405: a route in ADR 0048 block grammar still parses through
-// registryroutes.Parse. The len(checks) == 1 assertion plus a passing Probe
-// together prove the migrated grammar reached the drift check rather than
-// degrading down the parse-error path, which returns zero rows.
+// Pins issue #3405: a route in ADR 0048 block grammar still parses. One check
+// plus a passing Probe prove the grammar reached the drift check rather than
+// the parse-error path, which returns zero rows.
 func TestRegistryRouteDriftCheckForRoutes_BlockGrammarRouteParsesAndReportsNoDrift(t *testing.T) {
 	repoDir := t.TempDir()
 	writeSyntheticRegistries(t, repoDir, "reg = https://covered.example.com/\n")
@@ -225,10 +219,9 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_NO_CHECKOUT" }
 	}
 }
 
-// The seam reports no error but resolves no checkout (repoDir == ""), the
-// gitCheckoutRoot case where the walk reached the filesystem root. No
-// checkout available is not the same as an error resolving one, but both
-// must suppress the row.
+// The seam resolves no checkout without error (repoDir == ""), as when
+// gitCheckoutRoot's walk reaches the filesystem root. That differs from a
+// resolve error, but both must suppress the row.
 func TestRegistryRouteDriftCheckForRoutes_EmptyRepoDirReturnsNil(t *testing.T) {
 	orig := registryRouteDriftRepoDirFn
 	registryRouteDriftRepoDirFn = func() (string, error) { return "", nil }
@@ -247,11 +240,9 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_EMPTY_REPO_DIR" }
 	}
 }
 
-// doctorCheckSets defers to the existing registry-proxy-routes row
-// (checks.go), which already reports this same read failure, rather than
-// reporting a duplicate error over the identical cause. The drift seams are
-// stubbed to the state that does yield the row, so only the read failure can
-// suppress it.
+// The registry-proxy-routes row (checks.go) already reports this read failure,
+// so the drift row stays out rather than duplicate it. The drift seams are
+// stubbed to yield the row, so only the read failure can suppress it.
 func TestDoctorCheckSets_UnreadableRoutesFileExcludesRegistryRouteDriftRow(t *testing.T) {
 	withDriftRepoDir(t, t.TempDir())
 	withDriftMatchingRemote(t)
@@ -263,10 +254,10 @@ func TestDoctorCheckSets_UnreadableRoutesFileExcludesRegistryRouteDriftRow(t *te
 	assertNoDriftRow(t, report, "for an unreadable routes file")
 }
 
-// The parse-failure counterpart of the unreadable case above: the aggregate
+// The parse-failure counterpart of the unreadable case above: the
 // registry-proxy-routes row already reports it, so the drift row stays out.
-// The drift seams are stubbed to the state that does yield the row, so only
-// the parse failure can suppress it.
+// The drift seams are stubbed to yield the row, so only the parse failure can
+// suppress it.
 func TestDoctorCheckSets_UnparsableRoutesFileExcludesRegistryRouteDriftRow(t *testing.T) {
 	withDriftRepoDir(t, t.TempDir())
 	withDriftMatchingRemote(t)
@@ -304,10 +295,9 @@ func TestRegistryRouteDriftCheckFor_ExtractErrorDegradesProbe(t *testing.T) {
 	}
 }
 
-// AC2's counterpart to TestPrerequisites_RenderTiers in
-// internal/runner/bwrap/prerequisites_test.go. The row's Advisory Tier drives the
-// "advisory:" framing, so a genuine drift finding carries a bare Probe
-// error, not a doctor.ErrDegraded wrap.
+// AC2's counterpart to TestPrerequisites_RenderTiers (internal/runner/bwrap):
+// the row's Advisory Tier drives the "advisory:" framing, so a genuine drift
+// finding carries a bare Probe error, not a doctor.ErrDegraded wrap.
 func TestRegistryRouteDriftCheckFor_UncoveredHostRendersAdvisoryNotMissing(t *testing.T) {
 	repoDir := t.TempDir()
 	writeSyntheticRegistries(t, repoDir, "reg = https://uncovered.example.com/\n")
@@ -340,10 +330,8 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_ADVISORY_RENDER" }
 	}
 }
 
-// Pins that drift is host coverage only. The fixture declares two registries
-// on one host at different index paths, and the single route
-// covers that host while declaring no path, so differing paths under a
-// covered host are not a drift category (ADR 0047, issue #3262).
+// Drift is host coverage only: two registries on one host at different index
+// paths, covered by one path-less route, are not drift (ADR 0047, #3262).
 func TestRegistryRouteDriftCheckFor_DifferingPathsOnCoveredHostIsNotDrift(t *testing.T) {
 	repoDir := t.TempDir()
 	writeTwoRegistrySameHostFixture(t, repoDir, "registry.example.com")
@@ -361,9 +349,8 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_PATH_NOT_CATEGORY" }
 	}
 }
 
-// The companion half of the "path drift is not a category" pin above:
-// absence of a path in the finding text matters as much as presence of the
-// host.
+// Companion to the differing-paths test above: the finding names the uncovered
+// host but never a path.
 func TestRegistryRouteDriftCheckFor_UncoveredHostFailureIsSilentAboutPath(t *testing.T) {
 	repoDir := t.TempDir()
 	writeSyntheticRegistries(t, repoDir, "reg = https://uncovered.example.com/some/path/\n")
@@ -388,10 +375,9 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_UNCOVERED_PATH_SILENT"
 	}
 }
 
-// The Consumer-flake-versus-Target-repo mismatch issue #3144 flagged.
-// Without this identity gate the row reports the enclosing checkout's own
-// drift as if it were the Target repo's, a false all-clear or false failure
-// whenever the two roles differ.
+// Issue #3144: without checkoutIsTargetRepo's identity gate the row would
+// report the enclosing checkout's (e.g. the Consumer flake's) drift as the
+// Target repo's.
 func TestRegistryRouteDriftCheckForRoutes_NonTargetCheckoutReturnsNil(t *testing.T) {
 	repoDir := t.TempDir()
 	testutil.GitRun(t, repoDir, "init")
@@ -412,17 +398,15 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_NON_TARGET" }
 	}
 }
 
-// Under CODE_FORGE=local the drift row must come from the Accumulation
-// repo's baseBranch snapshot, never the cwd checkout. The failing stub and
-// the t.Chdir into an unrelated directory both exist so a fallback to the
-// cwd-checkout branch fails loudly instead of passing from the wrong source.
-// Follows TestBuildRegistryProxyRoutes_HostRooted_Local_DerivesFromAccumulationRepo.
+// Under CODE_FORGE=local the drift row must come from the Accumulation repo's
+// baseBranch snapshot, never the cwd checkout; the failing stub and the
+// t.Chdir into an unrelated dir make any fallback fail loudly.
 func TestRegistryRouteDriftCheckForRoutes_LocalForgeReadsFromAccumulationRepo(t *testing.T) {
 	orig := registryRouteDriftRepoDirFn
 	registryRouteDriftRepoDirFn = func() (string, error) {
-		// t.Error, not t.Fatal: the subtests below call this stub on their own
-		// goroutines, where FailNow on the parent t is documented misuse.
-		// Returning an error still starves the cwd-checkout path of a repo dir.
+		// t.Error, not t.Fatal: the subtests call this stub on their own
+		// goroutines, where FailNow on the parent t is misuse. Returning an
+		// error still starves the cwd-checkout path of a repo dir.
 		t.Error("registryRouteDriftRepoDirFn called under CODE_FORGE=local; the local path must derive from the Accumulation repo, never a cwd checkout")
 		return "", errors.New("registryRouteDriftRepoDirFn must not be called under CODE_FORGE=local")
 	}
@@ -702,7 +686,7 @@ func TestCheckoutIsTargetRepo_LocalCodeForgeNeverMatches(t *testing.T) {
 }
 
 // The remedy takes its synopsis from the registry, so a placeholder rename in
-// lib/subcommands.nix reaches it, yet it still says --force is mandatory even
+// lib/subcommands.nix reaches it, yet it still says --force is mandatory
 // though the synopsis brackets it as optional.
 func TestRegistryRouteDriftRow_RemedyDerivesDiscoverSynopsis(t *testing.T) {
 	synopsis := subcommandSynopsis("registry")

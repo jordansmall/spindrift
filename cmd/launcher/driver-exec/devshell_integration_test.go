@@ -111,11 +111,10 @@ func TestRunDevshellRealNixKeepsHarnessToolsReachable(t *testing.T) {
 	runIn(t, dir, "git", "init", "-q")
 	runIn(t, dir, "git", "add", "-A")
 
-	// The shellHook marker distinguishes a real devShell entry from run()'s
-	// relaunch-on-launch-failure fallback (run.go:59), which reruns the Driver
-	// directly with no devShell and no marker if the wrap produces no output.
-	// Without the check, a broken throwaway devShell would silently degrade to
-	// that path and still pass.
+	// The shellHook marker tells a real devShell entry from run()'s
+	// relaunch-on-launch-failure fallback, which reruns the Driver with no
+	// devShell; without the marker check a broken throwaway devShell would
+	// degrade to that path and still pass.
 	bin := writeFakeDriver(t, dir, "fake-driver", `set -e
 [ "$SPINDRIFT_TEST_DEVSHELL_MARKER" = "798" ] || { echo "devshell not entered"; exit 1; }
 command -v git >/dev/null || { echo "git not on PATH"; exit 1; }

@@ -13,13 +13,13 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-// Issue #4016 (ADR 0039): an already-resolved claim must not close the issue
-// when commits exist. This pins the in-box demotion route: the harness
-// already rewrote the outcome line to a synthetic status=blocked when its
-// SYNTHETIC backstop found commits on the branch, but the driver's own last
-// genuine self-report still says already-resolved. No outbox relay, no landing
-// recorder: settle must post the note itself (the agent never got the
-// chance to comment) and never close.
+// Issue #4016 (ADR 0039): an already-resolved claim with commits must not
+// close the issue. This pins the in-box demotion route: the harness's
+// backstop found commits on the branch and rewrote the outcome to a synthetic
+// status=blocked, while the driver's last self-report still says
+// already-resolved.
+// With no outbox relay, settle must post the note itself (the agent never got
+// the chance to comment) and never close.
 func TestSettle_SyntheticBlockedDemotedFromAlreadyResolved_PostsCommentFailsNotCloses(t *testing.T) {
 	const issNum = "4016"
 	const note = "agent reported already-resolved but 2 commits exist on agent/issue-4016; treating as blocked"
@@ -134,8 +134,7 @@ func TestSettle_GenuineAlreadyResolvedWithBundlePresent_DemotesRelaysNotCloses(t
 
 // The negative case for the host-side bundle check: OutboxDir is configured
 // but the outbox holds no bundle file, so bundlePresent reports false and
-// the already-resolved outcome must settle exactly as before this issue —
-// Complete and closed.
+// the already-resolved outcome settles Complete and closed.
 func TestSettle_AlreadyResolvedOutboxConfiguredNoBundle_StillClosesAsComplete(t *testing.T) {
 	const issNum = "4016"
 	const note = "Already fixed by commit abc1234 on main."
@@ -326,12 +325,10 @@ func TestSettle_AlreadyResolvedOutcome_SettledRecordStateComplete(t *testing.T) 
 	}
 }
 
-// orderTrackingTracker wraps a forge.IssueTracker to log Comment,
-// TransitionState, and CloseMergedIssue calls into one shared slice, in
-// call order, across methods — forge.Fake logs each method into its own
-// slice, with no cross-method ordering, so this is the cheapest way to
-// assert gate.go's already-resolved arm fires comment, then label swap,
-// then close, in that order.
+// orderTrackingTracker logs Comment, TransitionState and CloseMergedIssue
+// calls into one shared slice in call order: forge.Fake keeps a slice per
+// method, so it cannot show the already-resolved arm's comment, then label
+// swap, then close.
 type orderTrackingTracker struct {
 	forge.IssueTracker
 	closer forge.MergeCloser
@@ -584,12 +581,10 @@ func TestSettle_AlreadyResolvedOutcome_BothClosersPrefersMergeCloser(t *testing.
 	}
 }
 
-// Issue #3939's actual run shape: a read-only github worker scouts the issue,
-// finds the fix already landed on main, makes zero commits, and prints
-// status=already-resolved. This replays that shape end to end: no draft PR is
-// ever created (there is nothing to relay — no branch, no commits), yet the
-// host still reaches agent-complete with the issue closed, not stranded in
-// agent-in-progress and never agent-failed.
+// Issue #3939's run shape: a read-only github worker finds the fix already
+// on main, makes zero commits, and prints status=already-resolved. With no
+// draft PR ever created, the host still reaches agent-complete with the issue
+// closed, neither stranded in agent-in-progress nor agent-failed.
 func TestSettle_GithubReadOnly_AlreadyResolvedZeroCommits_ClosesAsComplete(t *testing.T) {
 	const issNum = "3939"
 	const note = "Verified the reported bug is already fixed by commit deadbee on main; no changes needed."

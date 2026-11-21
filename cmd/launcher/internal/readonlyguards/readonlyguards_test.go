@@ -11,9 +11,8 @@ import (
 	"spindrift.dev/launcher/internal/testutil/repopath"
 )
 
-// runGitCmd duplicates the helper of the same name in
-// cmd/launcher/driver-exec/helpers_test.go (see there for why gc is off),
-// which is in a different package and so cannot be imported here.
+// runGitCmd copies cmd/launcher/driver-exec/helpers_test.go's helper (see
+// there for why gc is off); test helpers cannot be imported across packages.
 func runGitCmd(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "gc.auto=0", "-c", "maintenance.auto=false"}, args...)...)
@@ -69,11 +68,10 @@ func TestInstall_GitHookRow(t *testing.T) {
 	}
 }
 
-// Issue #2509 Finding 1: box's read-only guards must
-// install the guard at both the decoy repo (RepoDir, which catches a plain
-// `git push` to origin, whose pushurl is repointed there) and $WORK_DIR itself
-// (an ExtraRepoDirs entry, which catches a push to an explicit URL or a
-// non-origin remote). Losing the second install regresses the fix in #2463.
+// Issue #2509 Finding 1: the guard must land in both the decoy repo (RepoDir,
+// catching a plain `git push` to origin, whose pushurl is repointed there) and
+// $WORK_DIR (ExtraRepoDirs, catching a push to an explicit URL or another
+// remote). Losing the second install regresses the fix in #2463.
 func TestInstall_GitHookRow_ExtraRepoDirs(t *testing.T) {
 	rows := []promptassembly.ForbiddenMarkerRow{
 		{
@@ -103,7 +101,6 @@ func TestInstall_GitHookRow_ExtraRepoDirs(t *testing.T) {
 		t.Fatalf("result.HookInstalled = false, want true")
 	}
 
-	// repoDir is bare, so hooks land directly under repoDir/hooks.
 	for _, name := range []string{"pre-push", "pre-receive"} {
 		hookPath := filepath.Join(repoDir, "hooks", name)
 		content, err := os.ReadFile(hookPath)
@@ -115,8 +112,6 @@ func TestInstall_GitHookRow_ExtraRepoDirs(t *testing.T) {
 		}
 	}
 
-	// extraDir is a normal working copy, so hooks land under
-	// extraDir/.git/hooks.
 	for _, name := range []string{"pre-push", "pre-receive"} {
 		hookPath := filepath.Join(extraDir, ".git", "hooks", name)
 		content, err := os.ReadFile(hookPath)
@@ -135,10 +130,9 @@ func TestInstall_GitHookRow_ExtraRepoDirs(t *testing.T) {
 	}
 }
 
-// A bare repo has no .git subdirectory, so hooks must land under
-// repoDir/hooks. Installing them at repoDir/.git/hooks, a path git never
-// consults, leaves the guard silently absent while Result.HookInstalled still
-// reports true.
+// A bare repo's hooks must land under repoDir/hooks; repoDir/.git/hooks is a
+// path git never consults there, leaving the guard silently absent while
+// Result.HookInstalled still reports true.
 func TestInstall_GitHookRow_BareRepo(t *testing.T) {
 	rows := []promptassembly.ForbiddenMarkerRow{
 		{

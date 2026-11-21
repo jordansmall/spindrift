@@ -341,14 +341,11 @@ registry = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote
 	}
 }
 
-// Spelling variants of the same SourceId (issue #3251): a [registries.*].index
-// and the [source.*].registry that claims it can differ by trailing slash,
-// host case, or both, and cargo still treats them as one SourceId -- the
-// claiming name must be reused, not re-minted. "sparse+" is the one prefix
-// that must NOT be normalized away: cargo treats a sparse HTTP registry and a
-// git registry index at the same URL as different SourceIds, so a stanza
-// differing only in that prefix must keep the freshly minted name instead of
-// reusing the other stanza's.
+// Spelling variants of the same SourceId (issue #3251): an index and the
+// [source.*].registry claiming it may differ by trailing slash, host case or
+// both, and the claiming name must still be reused. "sparse+" must NOT be
+// normalized away: sparse and git indexes at one URL are different SourceIds,
+// so a stanza differing only there keeps the freshly minted name.
 func TestCargoSourceReplacements_ReusesClaimingSourceName_AcrossSpellingVariants(t *testing.T) {
 	const port = 27182
 	routes := []registrymanifest.Route{
@@ -547,11 +544,11 @@ registry = "sparse+https://cargo.example.test/a/"
 		t.Errorf("cargoSourceReplacements() = %+v, want decl a to keep its minted name spindrift-upstream-a", got)
 	}
 
-	// The repo's own [source.spindrift-upstream-b] still collides on aURL with
-	// home's separately-minted [source.spindrift-upstream-a] once merged, which
-	// assertNoDuplicateCargoSourceTables's cross-file URL check (gotcha 1) would
-	// flag. That is not this fix's target. Its contract is narrower: the
-	// rendered home file alone must never carry the same [source.…] name twice.
+	// Merged, the repo's [source.spindrift-upstream-b] still collides on decl
+	// a's URL with home's [source.spindrift-upstream-a], which
+	// assertNoDuplicateCargoSourceTables would flag; that is not the guard's
+	// target, so this pins only that the home file alone never carries a
+	// [source.…] name twice.
 	rendered, _, warnings := cargoRepoAwareConfig(port, "r0", routes, repoConfig)
 	if len(warnings) != 0 {
 		t.Errorf("cargoRepoAwareConfig() warnings = %v, want none", warnings)
@@ -631,10 +628,9 @@ index = "sparse+https://cargo.example.test/undeclared-index/"
 	}
 }
 
-// The drift case the retired ApplyNoopContent diagnostic used to catch: the
-// route declares a registry, the repo config declares it too, but its index
-// points at some other host, so nothing binds. Silence here would fail a
-// network-less cargo build with no signal at all.
+// The route and repo both declare a registry but its index points at another
+// host, so nothing binds. Silence would fail a network-less cargo build with
+// no signal at all.
 func TestCargoSourceReplacements_DeclaredNameOnWrongHostWarns(t *testing.T) {
 	const port = 27182
 	routes := []registrymanifest.Route{
@@ -895,13 +891,11 @@ registry = "sparse+https://cargo.example.test/index/"
 	}
 }
 
-// The same collapse (issue #3251), but with no [source.*] claiming the index
-// at all: cargo still maps one canonical URL to one source name whether or
-// not a repo stanza claims it, so the dedupe applies either way. The
-// surviving matchedDecl keeps the first decl's own index spelling and mints
-// spindrift-upstream-<first-name> off the first decl's own name; the second
-// declared name still counts as bound, since it collapsed into the
-// survivor's stanza rather than falling through unbound.
+// The same collapse (issue #3251) with no [source.*] claiming the index:
+// cargo maps one canonical URL to one source name either way. The survivor
+// keeps the first decl's index spelling and mints
+// spindrift-upstream-<first-name>, and the second declared name still counts
+// as bound through the survivor's stanza.
 func TestCargoSourceReplacements_DedupeSameIndexURL_CanonicalizedAcrossTrailingSlash_NoClaim(t *testing.T) {
 	const port = 27182
 	routes := []registrymanifest.Route{
@@ -1401,19 +1395,12 @@ func TestCargoReplacementPlaceholders_DedupesReusedProxySource(t *testing.T) {
 	}
 }
 
-// cargoSourceIDCollisionKey is assertNoDuplicateCargoSourceTables's own
-// oracle for "same SourceId to cargo", deliberately independent of (and wider
-// than) cargoCanonicalSourceURLKey: keying the guard on the production
-// function itself would only ever catch collisions that function already
-// recognizes, so a real cargo collision the production key deliberately
-// leaves unfolded -- e.g. a default port spelled explicitly on one side --
-// would pass the guard silently instead of failing it. This folds one
-// trailing slash off the path, the host lowercased, and the default port
-// (:443 on https, :80 on http), in addition to the two axes production
-// folds, so the guard fails whenever a render emits two [source.…] names for
-// a pair cargo itself would call one source, even on an axis production
-// deliberately does not canonicalize. "sparse+" stays significant here too:
-// it is a different source kind to cargo, not a spelling variant.
+// cargoSourceIDCollisionKey is assertNoDuplicateCargoSourceTables's oracle for
+// "same SourceId to cargo", deliberately wider than cargoCanonicalSourceURLKey:
+// keyed on the production function, the guard could only catch collisions it
+// already recognizes. Beyond production's trailing slash and host case it also
+// folds the default port (:443 on https, :80 on http), which production leaves
+// unfolded. "sparse+" stays significant: a different source kind to cargo.
 func cargoSourceIDCollisionKey(value string) string {
 	sparse := strings.HasPrefix(value, "sparse+")
 	raw := strings.TrimPrefix(value, "sparse+")
@@ -1461,14 +1448,11 @@ func decodeCargoSourceRegistries(t *testing.T, label, content string) []cargoSou
 }
 
 // assertNoDuplicateCargoSourceTables pins AC 1 (issue #3248): homeConfig alone
-// must never declare the same [source.…] table name twice (a same-file
-// duplicate table is a TOML error, not a merge question), and once merged with
-// repoConfig no two table names may claim registry URLs cargo itself treats as
-// the same SourceId -- keyed by cargoSourceIDCollisionKey, not
-// cargoCanonicalSourceURLKey or byte equality (issue #3251), since a spelling
-// difference on any axis cargo folds is still one cargo error waiting to
-// happen, whether or not the production render's own key folds that axis. A
-// stanza with no registry key claims no URL and is exempt from that second check.
+// never declares a [source.…] table name twice (a TOML error), and merged with
+// repoConfig no two table names claim URLs cargo treats as one SourceId, keyed
+// by cargoSourceIDCollisionKey rather than the production key or byte equality
+// (issue #3251). A stanza with no registry key claims no URL and is exempt
+// from that second check.
 func assertNoDuplicateCargoSourceTables(t *testing.T, repoConfig, homeConfig string) {
 	t.Helper()
 
@@ -1619,14 +1603,10 @@ index = "sparse+https://cargo.example.test/index/"
 	})
 }
 
-// The repo's own [source.artifactory-remote] claims a URL that spells the
-// [registries.artifactory-remote] index differently -- one trailing slash --
-// but the two are one SourceId to cargo (issue #3251). If the claiming-name
-// lookup ever regressed to byte-for-byte matching, the render would mint a
-// second stanza, [source.spindrift-upstream-artifactory-remote], claiming
-// the same canonical URL under a different name -- exactly what the
-// strengthened assertNoDuplicateCargoSourceTables (canonical URL keying, not
-// byte equality) exists to catch.
+// The repo's [source.artifactory-remote] spells the index with one extra
+// trailing slash, still one SourceId to cargo (issue #3251). A byte-for-byte
+// claiming-name lookup would mint a second stanza on the same canonical URL,
+// which assertNoDuplicateCargoSourceTables catches.
 func TestCargoRepoAwareConfig_ReusesClaimingSourceName_TrailingSlashDiffers(t *testing.T) {
 	repoConfig := `[registries.artifactory-remote]
 index = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote/index"

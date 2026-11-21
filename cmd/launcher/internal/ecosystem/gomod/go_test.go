@@ -153,11 +153,10 @@ func TestComputeBindings(t *testing.T) {
 			wantExports: map[string]string{"GOPROXY": "http://127.0.0.1:27182/r0/artifactory/api/go/go-remote"},
 		},
 		{
-			// AC3's fallback: a route declaring no go path leaves GOPROXY
-			// unexported, not set to the bare-root URL. GONOPROXY and GOSUMDB
-			// stay unset too, since GONOPROXY=none would push private paths to
-			// Go's public proxy and GOSUMDB=off would drop checksum
-			// verification. GOTOOLCHAIN=local is about the toolchain, not routing.
+			// AC3's fallback: no go path leaves GOPROXY unexported, not the
+			// bare-root URL, and GONOPROXY/GOSUMDB unset too (none would push
+			// private paths to Go's public proxy; off would drop checksum
+			// verification). GOTOOLCHAIN=local is not about routing.
 			name:              "route with no go declaration leaves GOPROXY, GONOPROXY and GOSUMDB unset",
 			port:              27182,
 			prefix:            "r0",

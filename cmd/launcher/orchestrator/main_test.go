@@ -12,8 +12,8 @@ import (
 )
 
 // singlePassFakeDriverArgv builds the argv mainRun needs for one end-to-end
-// pass. The driver and cap facts that used to be CLI flags now live inside the
-// handoff file this helper writes (issue #2975).
+// pass; the driver and cap facts live in the handoff file it writes (issue
+// #2975).
 func singlePassFakeDriverArgv(t *testing.T, dir string, caps promptassembly.Caps) []string {
 	handoffFile := writeHandoffFile(t, dir, promptassembly.Handoff{
 		Driver:    "claude",
@@ -29,8 +29,8 @@ func singlePassFakeDriverArgv(t *testing.T, dir string, caps promptassembly.Caps
 }
 
 // reviewPassFakeDriverArgv is singlePassFakeDriverArgv plus a
-// Handoff.ReviewPromptFile. That field, not a -review-prompt-file CLI flag, is
-// what now enables the review pass (issue #2975).
+// Handoff.ReviewPromptFile, the field that enables the review pass (issue
+// #2975).
 func reviewPassFakeDriverArgv(t *testing.T, dir string, caps promptassembly.Caps) []string {
 	handoffFile := writeHandoffFile(t, dir, promptassembly.Handoff{
 		Driver:           "claude",
@@ -76,12 +76,11 @@ exit 0
 func TestMainRunReviewPassEnabledUsesReviewPassFormula(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
-	// passmachine.implementFixTransition has no "no verdict" fallback like the
-	// legacy loop's, so before an APPROVE a non-ready outcome is what stops it (a premature
-	// ready continues into review, issue #5972).
-	// The outcome must land in $DRIVER_LOG_PATH as a real stream-json line, not
-	// just on stdout, or pass 1 falls through to a review pass and then a land
-	// pass that needs a real prompt.txt on disk.
+	// implementFixTransition has no "no verdict" fallback, so before an APPROVE
+	// only a non-ready outcome stops it (a premature ready continues into
+	// review, issue #5972). It must land in $DRIVER_LOG_PATH as a real
+	// stream-json line, or pass 1 falls through to review and a land pass that
+	// needs a real prompt.txt on disk.
 	writeFakeDriverExec(t, dir, callLog, `printf '%s' '`+streamJSONFinalResult("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=stop nonce=abc")+`' | tee -a "$DRIVER_LOG_PATH"
 exit 0
 `)

@@ -95,10 +95,10 @@ func bufferWith(t *testing.T, comment *signalwire.Comment, prIntent *signalwire.
 	return buf
 }
 
-// TestOutcomeResult_SocketCarrierEquivalentToLogMarkerLines is this ticket's
-// central contract: a socket-carrier Result built from a buffer must equal
-// the log-carrier Result built from equivalent marker lines, field for field,
-// whichever of the three channels are present or absent.
+// TestOutcomeResult_SocketCarrierEquivalentToLogMarkerLines pins the carrier
+// contract (issue #3725): a socket-carrier Result must equal the log-carrier
+// Result built from equivalent marker lines, field for field, whichever of
+// the three channels are present.
 func TestOutcomeResult_SocketCarrierEquivalentToLogMarkerLines(t *testing.T) {
 	comment := &signalwire.Comment{Body: "verdict body"}
 	prIntent := &signalwire.PRIntent{Title: "feat: widget", Body: "Adds a widget."}
@@ -286,11 +286,10 @@ func TestSignalResultFromBuffer_AppendWithDedup(t *testing.T) {
 	}
 }
 
-// TestOutcomeResult_SocketModeWarnsOnStaleLogMarkerLines is the ticket's
-// second acceptance criterion: in socket mode a log that still carries a
-// marker line for one of the three channels warns naming that channel and
-// contributes no data. d.signalBuffer is left nil, the "never started a
-// listener" case, which must degrade to empty signals rather than panic.
+// TestOutcomeResult_SocketModeWarnsOnStaleLogMarkerLines: in socket mode a
+// log marker line warns naming its channel and contributes no data.
+// d.signalBuffer is left nil, which must degrade to empty signals rather
+// than panic.
 func TestOutcomeResult_SocketModeWarnsOnStaleLogMarkerLines(t *testing.T) {
 	d := newSocketDispatch(t)
 	comment := &signalwire.Comment{Body: "verdict body"}
@@ -336,11 +335,9 @@ func TestOutcomeResult_SocketModeWarnsOnStaleLogMarkerLines(t *testing.T) {
 	}
 }
 
-// TestOutcomeResult_SocketModeWarnsOnRejectedLogMarkerLines pins the same
-// acceptance criterion for a marker line that attempted the grammar and
-// failed to verify: a nonce-mismatched line is still a log-carrier marker
-// line, so socket mode warns on it too rather than passing over it in
-// silence.
+// TestOutcomeResult_SocketModeWarnsOnRejectedLogMarkerLines: a
+// nonce-mismatched line is still a log-carrier marker line, so socket mode
+// warns on it too.
 func TestOutcomeResult_SocketModeWarnsOnRejectedLogMarkerLines(t *testing.T) {
 	d := newSocketDispatch(t)
 	// A nonce no Box of this run could have printed, so every scanner counts

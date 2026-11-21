@@ -124,12 +124,11 @@ func TestFetchTree_FetchesBranchAndReturnsTreeOverScratch(t *testing.T) {
 	}
 }
 
-// makeDiff checks out commit into a throwaway linked worktree of bare
-// (bare repos support worktree add, no primary checkout to conflict with),
-// overwrites path with newContent, and returns `git diff`'s unified-diff
-// text -- a real diff whose hunk headers/context are guaranteed to match
+// makeDiff checks out commit into a throwaway linked worktree of bare (a bare
+// repo has no primary checkout to conflict with), overwrites path with
+// newContent, and returns `git diff`'s text -- a real diff guaranteed to match
 // commit, rather than a hand-authored one that would silently drift from
-// whatever ledgertest.NewRepo's fixture format actually produces.
+// ledgertest.NewRepo's fixture format.
 func makeDiff(t *testing.T, bare, commit, path, newContent string) string {
 	t.Helper()
 	wt := t.TempDir()
@@ -147,10 +146,8 @@ func makeDiff(t *testing.T, bare, commit, path, newContent string) string {
 }
 
 // advanceBranch commits content for path on top of branch's current tip in
-// bare, via the same linked-worktree trick as makeDiff, and returns the new
-// tip's sha. The commit's author/committer identity is passed with -c so
-// the commit succeeds with no ambient git config, independent of whatever
-// identity env vars a given test did or didn't set for other purposes.
+// bare and returns the new tip's sha. The identity is passed with -c so the
+// commit succeeds with no ambient git config.
 func advanceBranch(t *testing.T, bare, branch, path, content string) string {
 	t.Helper()
 	wt := t.TempDir()
@@ -259,11 +256,9 @@ func TestGitTreeCommitPatch_StaleDiffErrorsAndWritesNoRef(t *testing.T) {
 
 // TestGitTreeCommitPatch_FailsWhenDiffDoesNotApplyToScannedCommit pins the
 // other half of ADR 0057's ordered gate: a diff that applies cleanly to the
-// current base head but not to the scanned commit it was actually built
-// against (an older commit here) must still fail -- named "scanned commit"
-// -- and must leave patchRef untouched. Guards against a diff that only
-// happens to still apply to wherever the base head drifted, which was never
-// what the Box actually reviewed.
+// current base head but not to the scanned commit must still fail -- named
+// "scanned commit" -- and leave patchRef untouched: it was never what the
+// Box actually reviewed.
 func TestGitTreeCommitPatch_FailsWhenDiffDoesNotApplyToScannedCommit(t *testing.T) {
 	t.Parallel()
 	bare, scanned := newTreeBareRepo(t)
@@ -285,12 +280,12 @@ func TestGitTreeCommitPatch_FailsWhenDiffDoesNotApplyToScannedCommit(t *testing.
 }
 
 // TestGitTreeCommitPatch_RefetchesBeforeApplying pins that CommitPatch, when
-// URL is set (as FetchTree sets it), re-fetches branch's tip rather than
-// trusting scratch's ref from an earlier FetchTree call: an upstream commit
-// landing between FetchTree and CommitPatch is the parent CommitPatch
-// commits on top of. The advance touches only b.go, leaving a.go -- the
-// diff's own file -- matching between scanned (origTip) and the refetched
-// tip, so the scanned gate and the refetch are each pinned independently.
+// URL is set, re-fetches branch's tip rather than trusting scratch's ref from
+// the earlier FetchTree: an upstream commit landing between FetchTree and
+// CommitPatch is the parent CommitPatch commits on top of. The
+// advance touches only b.go, leaving a.go -- the diff's own file -- matching
+// between scanned and the refetched tip, so the scanned gate and the refetch
+// are each pinned independently.
 func TestGitTreeCommitPatch_RefetchesBeforeApplying(t *testing.T) {
 	t.Parallel()
 	upstream, origTip := newTreeBareRepo(t, "a.go", "b.go")
@@ -345,15 +340,12 @@ index 1111111..2222222 100644
 `
 
 // TestVerifyDiffMatchesGit_RefusesReviewerAttacks pins the defense-in-depth
-// gate itself, independent of whatever the parser currently does with these
-// bytes: each diff smuggles a write to CLAUDE.md past a section signalwire's
-// old (pre-fix) parser silently dropped -- attack A via a binary-looking
-// "Files ... differ" line, attack B via the legacy "rename old"/"rename new"
-// header pair -- so entries here is what that old parser returned: just the
-// unrelated docs/x.md entry, with no sign CLAUDE.md was ever touched. git's
-// own numstat/summary reading of the bytes disagrees (it reports the
-// CLAUDE.md section too), and verifyDiffMatchesGit must refuse on that
-// disagreement alone, whatever entries a parser handed it (issue #4075).
+// gate independent of the parser: each diff smuggles a write to CLAUDE.md
+// past a section signalwire's pre-fix parser dropped (A: a binary-looking
+// "Files ... differ" line; B: the legacy "rename old"/"rename new" header
+// pair), so entries is hand-built as what that parser returned: only the
+// unrelated docs/x.md entry. git's own reading reports CLAUDE.md too, and
+// verifyDiffMatchesGit must refuse on that disagreement alone (issue #4075).
 func TestVerifyDiffMatchesGit_RefusesReviewerAttacks(t *testing.T) {
 	t.Parallel()
 	bare, _ := newTreeBareRepo(t)

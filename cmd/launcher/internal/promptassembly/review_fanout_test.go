@@ -6,11 +6,10 @@ import (
 	"testing"
 )
 
-// TestReviewFanoutAgentFollowsProvisionedAgents covers issue #3447's second
-// round: the baked /code-review anchor must name an agent type the run
-// actually provisions. A Consumer pinning the historical four-entry roster,
-// or taking issue #392's reviewModel="" opt-out, gets the skill's own
-// general-purpose default instead of an agent type its session never defines.
+// TestReviewFanoutAgentFollowsProvisionedAgents covers issue #3447: the baked
+// /code-review anchor must name an agent type the run actually provisions. A
+// roster without review-axis (a pinned four-entry roster, or issue #392's
+// reviewModel="" opt-out) gets the skill's general-purpose default instead.
 func TestReviewFanoutAgentFollowsProvisionedAgents(t *testing.T) {
 	reg, env0 := syntheticRegistry(t, []FragmentRow{
 		{Gate: "CODE_REVIEW_BAKED", Fragment: "fanout.md", Var: "FANOUT_STEP", ExtraSubstVars: []string{"REVIEW_FANOUT_AGENT"}},

@@ -755,9 +755,7 @@ func TestResolveUnsetsEnv(t *testing.T) {
 }
 
 // Peek must not leak the launcher's ambient environment into the credential
-// helper's child process (issue #3151). cmd.Env left nil means "inherit
-// os.Environ() unconditionally" per os/exec, so an undeclared var like this
-// one must never reach the child.
+// helper (issue #3151).
 func TestExecResolver_PeekDoesNotLeakUndeclaredAmbientVariable(t *testing.T) {
 	t.Setenv("SPINDRIFT_TEST_SECRET_LEAK", "leaked-value")
 	r := execResolver{argv: []string{"/bin/sh", "-c", "printf 'SPINDRIFT_TEST_SECRET_LEAK=%s\\n' \"${SPINDRIFT_TEST_SECRET_LEAK:-absent}\""}, matchHost: "x"}
@@ -790,16 +788,15 @@ func TestExecResolver_PeekForwardsAllowlistedVariable(t *testing.T) {
 	}
 }
 
-// Pins execCredentialEnv's output under this test's own ambient env (PATH,
-// HOME, GNUPGHOME set; GPG_TTY, SSH_AUTH_SOCK unset), not the full allowlist
-// in general -- a sixth allowlisted name would need its own case here.
+// Pins execCredentialEnv's output under this test's own env (PATH, HOME,
+// GNUPGHOME set; GPG_TTY, SSH_AUTH_SOCK unset); a sixth allowlisted name needs
+// its own case.
 func TestExecCredentialEnv_ForwardsOnlyAllowlistedSetVars(t *testing.T) {
 	t.Setenv("PATH", "/test/path")
 	t.Setenv("HOME", "/test/home")
 	t.Setenv("GNUPGHOME", "/test/gnupg")
-	// t.Setenv first, so the test's own cleanup restores whatever the ambient
-	// value was: a bare os.Unsetenv would leak the removal into every later
-	// test in this package.
+	// t.Setenv first so cleanup restores the ambient value; a bare
+	// os.Unsetenv would leak into later tests.
 	t.Setenv("GPG_TTY", "")
 	os.Unsetenv("GPG_TTY")
 	t.Setenv("SSH_AUTH_SOCK", "")
@@ -823,9 +820,7 @@ func TestExecCredentialEnv_ForwardsOnlyAllowlistedSetVars(t *testing.T) {
 	}
 }
 
-// The empty-but-non-nil slice is the whole point of execCredentialEnv (see
-// its doc comment) -- a nil Env would make exec.Cmd inherit os.Environ()
-// unconditionally.
+// A nil Env would make exec.Cmd inherit os.Environ().
 func TestExecCredentialEnv_NoAllowlistedVarSetReturnsNonNilEmpty(t *testing.T) {
 	for _, k := range execCredentialEnvAllowlist {
 		t.Setenv(k, "")
@@ -842,9 +837,8 @@ func TestExecCredentialEnv_NoAllowlistedVarSetReturnsNonNilEmpty(t *testing.T) {
 	}
 }
 
-// Per ADR 0045's issue #3151 amendment, a set-but-empty allowlisted name
-// still forwards, as "NAME=", matching os.LookupEnv's semantics -- distinct from
-// the unset case above, which omits the name entirely.
+// A set-but-empty allowlisted name forwards as "NAME=" (ADR 0045's issue
+// #3151 amendment), unlike an unset one.
 func TestExecCredentialEnv_SetButEmptyAllowlistedVarForwardsAsEmpty(t *testing.T) {
 	t.Setenv("HOME", "")
 

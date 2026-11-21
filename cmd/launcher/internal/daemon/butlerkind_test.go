@@ -74,12 +74,10 @@ func TestPoolButlerStartsOnlyOnceDispatchAndResearchBothBackOff(t *testing.T) {
 }
 
 // TestPoolRunningButlerChildIsNeverPreempted pins the awake-window rule
-// (ADR 0056: "gate starting, never stopping") at the pool level: once a
-// slot has started a butler child, dispatch or research regaining work
-// while that child is still in flight must never cancel it. The pool's own
-// derived context (pctx) is the thing that would have to be cancelled to
-// interrupt a running child, so this asserts directly on it rather than on
-// a timing-sensitive absence of some hypothetical preemption event.
+// (ADR 0056: "gate starting, never stopping"): dispatch or research
+// regaining work must never cancel an in-flight butler child. It asserts on
+// pctx, the context that would have to be cancelled, rather than on a
+// timing-sensitive absence of a preemption event.
 func TestPoolRunningButlerChildIsNeverPreempted(t *testing.T) {
 	cfg := triKindConfig(1, 0)
 	r := &scriptedRunner{revisions: []string{"rev1"}}
@@ -134,12 +132,9 @@ func TestPoolRunningButlerChildIsNeverPreempted(t *testing.T) {
 }
 
 // TestPoolRunningButlerChildIsNeverPreemptedAcrossSlots extends
-// TestPoolRunningButlerChildIsNeverPreempted to two slots (issue #3878's
-// review): slot 0's butler child staying in flight must survive not only
-// its own kind regaining work but a *sibling* slot picking that regained
-// kind up and running it to completion — the awake-window rule ("gate
-// starting, never stopping", ADR 0056) is pool-wide, not just "this slot's
-// own next pick".
+// TestPoolRunningButlerChildIsNeverPreempted to two slots (issue #3878): the
+// awake-window rule is pool-wide, so slot 0's butler child must survive a
+// *sibling* running the regained kind to completion.
 func TestPoolRunningButlerChildIsNeverPreemptedAcrossSlots(t *testing.T) {
 	cfg := triKindConfig(2, 0)
 	r := &scriptedRunner{revisions: []string{"rev1"}}
@@ -176,10 +171,8 @@ func TestPoolRunningButlerChildIsNeverPreemptedAcrossSlots(t *testing.T) {
 		t.Fatalf("pool ctx = %v, want nil: a running butler child must never be cancelled by another kind regaining work", pctx.Err())
 	}
 
-	// Slot 0 is the pre-assigned initial baton holder and has not passed it
-	// yet (its held child has reported no box record), so slot 1 would park
-	// in awaitBaton forever without this: a live box record is the only
-	// thing that passes the baton before a child exits.
+	// Slot 0 holds the baton and its held child has reported no box
+	// record, so without this slot 1 would park in awaitBaton forever.
 	r.fireOnRecord(t, 0, Record{Event: report.EventBox, Key: dispatchkey.Chore("bugs")})
 
 	// A sibling slot picks up and starts the regained kind, not the butler.
@@ -217,12 +210,9 @@ func TestPoolRunningButlerChildIsNeverPreemptedAcrossSlots(t *testing.T) {
 	}
 }
 
-// TestPoolButlerBackoffGrowsIndependently pins the idle tier onto the same
-// per-kind backoff every other kind gets (kindBackoff): butler's own
-// no-work streak doubles across its own consecutive empty checks exactly
-// like dispatch/research's would, and a dispatch reset in between never
-// perturbs it — the counterpart of TestPoolPerKindBackoffGrowsIndependently
-// for the idle-priority kind added by issue #3878.
+// TestPoolButlerBackoffGrowsIndependently is
+// TestPoolPerKindBackoffGrowsIndependently for the idle-priority butler
+// (issue #3878): its streak doubles and a dispatch reset never perturbs it.
 func TestPoolButlerBackoffGrowsIndependently(t *testing.T) {
 	clk := &testClock{}
 	clk.setNow(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))

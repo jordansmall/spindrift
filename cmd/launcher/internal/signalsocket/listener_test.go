@@ -20,10 +20,8 @@ import (
 )
 
 // mirroredOps decodes log as a stream of hostop.Event lines and returns the
-// spindrift_op payloads, failing the test on anything else. Package-local
-// twin of handler_test.go's helper of the same name: that one lives in
-// signalsocket_test and this file is package signalsocket, so the two are
-// not the same identifier despite the shared name.
+// spindrift_op payloads. Package-local twin of handler_test.go's helper, which
+// lives in package signalsocket_test.
 func mirroredOps(t *testing.T, log string) []hostop.SpindriftOp {
 	t.Helper()
 	var ops []hostop.SpindriftOp
@@ -43,11 +41,9 @@ func mirroredOps(t *testing.T, log string) []hostop.SpindriftOp {
 	return ops
 }
 
-// testSocketDir prefers t.TempDir() but falls back to a fresh dir directly
-// under /tmp when that path would already overflow AF_UNIX's sun_path cap
-// once a filename is joined onto it (issue #3077). A nix build sandbox's own
-// working directory can nest deep enough to trigger this, unlike an ordinary
-// `go test` invocation from a shell.
+// testSocketDir falls back to a dir under /tmp when t.TempDir() would
+// overflow AF_UNIX's sun_path cap (issue #3077), as a nix build sandbox's
+// deep working directory can.
 func testSocketDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -62,9 +58,8 @@ func testSocketDir(t *testing.T) string {
 	return fallback
 }
 
-// newTestListener serves a real Buffer behind a real NewHandler: this slice's
-// claim is that the transport carries the handler unchanged, so a stub
-// handler would test nothing.
+// newTestListener serves a real Buffer behind a real NewHandler: the claim is
+// that the transport carries the handler unchanged, so a stub tests nothing.
 func newTestListener(t *testing.T) (*Listener, *Buffer, *bytes.Buffer) {
 	t.Helper()
 	buf := New(Config{Consumes: []signalwire.Kind{signalwire.KindComment, signalwire.KindPRIntent, signalwire.KindIssueIntent}})
@@ -74,8 +69,7 @@ func newTestListener(t *testing.T) (*Listener, *Buffer, *bytes.Buffer) {
 	return l, buf, logw
 }
 
-// newGatedTestListener serves a real Buffer behind a real NewGatedHandler,
-// mirroring newTestListener's unix counterpart for the TCP tests below.
+// newGatedTestListener is newTestListener's TCP counterpart.
 func newGatedTestListener(t *testing.T, secret string) (*Listener, *Buffer, *bytes.Buffer) {
 	t.Helper()
 	buf := New(Config{Consumes: []signalwire.Kind{signalwire.KindComment, signalwire.KindPRIntent, signalwire.KindIssueIntent}})
@@ -200,11 +194,8 @@ func TestListener_TCPWithSecret(t *testing.T) {
 	}
 }
 
-// TestListener_TCPRejectsBadSecret pins the review finding fixed by this
-// slice (issue #3724): the gate now runs inside the mirror, so a wrong or
-// missing secret still emits exactly one spindrift_op reject event -- it no
-// longer disappears before the one emission point the way a wrapper-around
-// gate would.
+// TestListener_TCPRejectsBadSecret pins the gate inside the mirror (issue
+// #3724): a wrong or missing secret still emits exactly one reject event.
 func TestListener_TCPRejectsBadSecret(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -269,9 +260,8 @@ func TestListener_TCPRejectsBadSecret(t *testing.T) {
 	}
 }
 
-// TestListener_TCPEmptySecretBindsNothing moved from ListenAndServeTCP's own
-// guard (deleted in this slice) to NewGatedHandler's: an empty secret now
-// fails at handler construction, before there is a listener to bind at all.
+// TestListener_TCPEmptySecretBindsNothing pins that an empty secret fails at
+// handler construction, before there is a listener to bind.
 func TestListener_TCPEmptySecretBindsNothing(t *testing.T) {
 	buf := New(Config{Consumes: []signalwire.Kind{signalwire.KindComment}})
 	if _, err := NewGatedHandler(buf, nil, "", nil, nil); err == nil {
@@ -280,8 +270,7 @@ func TestListener_TCPEmptySecretBindsNothing(t *testing.T) {
 }
 
 // TestListener_TCPRefusesUngatedHandler pins ListenAndServeTCP's fail-closed
-// guard: serving TCP with a Handler built by NewHandler (unix, no gate) must
-// be refused rather than silently exposing the known routes with no secret.
+// guard against a NewHandler (ungated) Handler.
 func TestListener_TCPRefusesUngatedHandler(t *testing.T) {
 	l, _, _ := newTestListener(t)
 	if err := l.ListenAndServeTCP("127.0.0.1:0"); err == nil {
@@ -292,10 +281,8 @@ func TestListener_TCPRefusesUngatedHandler(t *testing.T) {
 	}
 }
 
-// TestListener_UnixRefusesNilHandler pins ListenAndServe's fail-closed guard,
-// the unix-socket twin of TestListener_TCPRefusesUngatedHandler above: a nil
-// Handler must be rejected before the socket is bound, rather than binding
-// and then panicking per request inside net/http's own recover.
+// TestListener_UnixRefusesNilHandler pins that a nil Handler is rejected
+// before binding, not left to panic per request inside net/http's recover.
 func TestListener_UnixRefusesNilHandler(t *testing.T) {
 	l := &Listener{}
 	path := filepath.Join(testSocketDir(t), "signal.sock")
@@ -345,11 +332,10 @@ func TestListener_AddrNilBeforeListen_CloseSafe(t *testing.T) {
 	}
 }
 
-// TestListener_CloseReleasesSocketImmediately pins that Close frees the raw
-// listener even when it wins the race against the serve goroutine: there
-// http.Server.Close has not yet tracked the listener and would leave it
-// accepting (issue #4209). The tcp subtest is the strong proof: closing a
-// UnixListener also unlinks its file, so the unix dial is refused either way.
+// TestListener_CloseReleasesSocketImmediately pins that Close frees the
+// listener even when it beats the serve goroutine, before http.Server tracks
+// it (issue #4209). Only the tcp subtest is a strong proof: closing a
+// UnixListener unlinks its file, so the unix dial is refused either way.
 func TestListener_CloseReleasesSocketImmediately(t *testing.T) {
 	t.Run("unix", func(t *testing.T) {
 		l, _, _ := newTestListener(t)

@@ -6,11 +6,9 @@ import (
 	"unicode/utf8"
 )
 
-// TestIssueIntentValidate pins Validate's own rule set: required title and
-// body, well-formed UTF-8 and size for every field actually set, and a
-// legal class slug when Class is set. Type is deliberately not required
-// here -- the socket enforces that on top (signalsocket_test.go's
-// TestRejectEmpty); a settle log-carrier payload's Type can be blank.
+// TestIssueIntentValidate pins Validate's rule set. Type is not required:
+// a log-carrier payload's Type can be blank, and the socket enforces it on
+// top (signalsocket_test.go's TestRejectEmpty).
 func TestIssueIntentValidate(t *testing.T) {
 	bad := string([]byte{0xff})
 	big := strings.Repeat("x", MaxBodyBytes+1)

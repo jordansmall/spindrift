@@ -10,10 +10,8 @@ import (
 	"spindrift.dev/launcher/internal/usage"
 )
 
-// fakeBackend is a minimal in-memory ledger.Backend for exercising
-// DayTotalsAll's own summing and error-wrapping logic without a real git
-// round-trip per chore; DayTotals' midnight-boundary behavior is already
-// covered by ledgertest's contract suite against the real backends.
+// fakeBackend is an in-memory ledger.Backend for DayTotalsAll's summing and
+// error wrapping; ledgertest's contract suite covers the real backends.
 type fakeBackend struct {
 	history map[string][]ledger.Entry
 	errFor  string

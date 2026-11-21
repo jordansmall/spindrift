@@ -7,9 +7,7 @@ import (
 	"spindrift.dev/launcher/internal/forge/jira"
 )
 
-// TestValidateJiraEnv_RequiresBaseURLProjectKeyToken verifies ValidateJiraEnv
-// fails fast when any of the three required Jira connection fields is empty,
-// rather than deferring to a runtime Jira API error.
+// A missing connection field fails at startup, not at the first Jira API call.
 func TestValidateJiraEnv_RequiresBaseURLProjectKeyToken(t *testing.T) {
 	if err := jira.ValidateJiraEnv("https://example.atlassian.net", "PROJ", "tok", "", "hybrid"); err != nil {
 		t.Fatalf("fully configured jira env should validate: %v", err)

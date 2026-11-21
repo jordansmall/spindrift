@@ -15,11 +15,8 @@ import (
 	"spindrift.dev/launcher/internal/forge/local"
 )
 
-// normalizeDedupKey trims, collapses internal whitespace runs to one space,
-// lowercases, folds ".", ":", "#", "/", "_" runs to a single ":", and trims
-// any leading/trailing ":" left by the fold -- the normalizations the dedup
-// key comparison relies on to treat "different prose, same site" as one key
-// (issue #3609), including a site named with a different punctuation style
+// normalizeDedupKey's folds let "different prose, same site" compare as one
+// key (issue #3609), including a site spelled with different punctuation
 // (issue #3977).
 func TestNormalizeDedupKey(t *testing.T) {
 	cases := []struct {
@@ -57,11 +54,9 @@ func TestNormalizeDedupKey(t *testing.T) {
 	}
 }
 
-// normalizeDedupTerm normalizes like normalizeDedupKey, then rejects a term
-// that would corrupt the marker line: one carrying "," (the marker's own
-// field separator) or "--" (would prematurely close the marker's HTML
-// comment) is dropped whole rather than split or stripped (issue #3609
-// review).
+// normalizeDedupTerm drops whole, never splits or strips, a term carrying ","
+// (the marker's field separator) or "--" (would close the marker's HTML
+// comment early) (issue #3609).
 func TestNormalizeDedupTerm(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -184,8 +179,7 @@ func TestMatchDedup_AcrossOldAndNewSeparatorStyle(t *testing.T) {
 
 // splitDedupTerms' key set is terms-only: no title argument, and an intent
 // with no usable term has an empty key set rather than falling back to prose
-// (issue #3609 review -- keying on a formulaic title merges distinct
-// findings).
+// (issue #3609: keying on a formulaic title merges distinct findings).
 func TestSplitDedupTerms_TermsOnly(t *testing.T) {
 	keys, _ := splitDedupTerms([]string{"  race in settle  ", "", "  "})
 	want := map[string]bool{"race in settle": true}
@@ -324,7 +318,7 @@ func TestParseDedupMarker_NoMarkerLine(t *testing.T) {
 
 // The bare marker fileIssueIntentsDetailed appends when an intent has no
 // usable term parses back to zero keys, so an always-appended marker costs a
-// term-less issue nothing in the backlog index (issue #3609 review).
+// term-less issue nothing in the backlog index (issue #3609).
 func TestParseDedupMarker_EmptyMarkerYieldsNoKeys(t *testing.T) {
 	body := "a finding body\n\n" + dedupmarker.Bare
 	if got := parseDedupMarker(body); len(got) != 0 {
@@ -352,11 +346,10 @@ func TestBuildDedupMarker_AllInvalidTermsProducesEmpty(t *testing.T) {
 	}
 }
 
-// matchDedup partitions keys into the subset index already tracks; a
-// multi-site intent must file when even one of its sites is untracked, so the
-// caller needs a three-way answer, not an any-hit boolean: full decides
-// skip-versus-file, covered names which sites were already tracked, and refs
-// names every distinct issue tracking them.
+// A multi-site intent must file when even one site is untracked, so matchDedup
+// answers three ways, not with an any-hit boolean: full decides skip versus
+// file, covered names the tracked sites, refs every distinct issue tracking
+// them.
 func TestMatchDedup(t *testing.T) {
 	// Both keys covered by the same issue: full, refs names it once.
 	index := map[string]string{"site a": "#42", "site b": "#42"}
@@ -551,11 +544,9 @@ type backlogListerCall struct {
 }
 
 // labeledBacklogListerStub wraps forge.IssueTrackerFake with
-// forge.LabeledBacklogLister so backlogDedupIndex's capability-preferred path
-// (issue #3609 review; closed lookup added issue #3873) has something to
-// prefer. issues and errs are keyed by state so a test can script the open
-// and closed lookups independently -- unlike the fake's own ListOpenIssues,
-// which forces isFindingIssue to filter.
+// forge.LabeledBacklogLister so backlogDedupIndex's capability path (issues
+// #3609, #3873) has something to prefer. issues and errs are keyed by state so
+// a test scripts the open and closed lookups independently.
 type labeledBacklogListerStub struct {
 	*forge.IssueTrackerFake
 	calls  []backlogListerCall
@@ -625,8 +616,8 @@ func TestBacklogDedupIndex_PrefersLabeledBacklogLister(t *testing.T) {
 	}
 }
 
-// Without the capability, backlogDedupIndex falls back to ListOpenIssues, the
-// pre-#3609-review behavior forgejo/jira/local rely on.
+// Without the capability (only a test fake lacks it), backlogDedupIndex falls
+// back to ListOpenIssues.
 func TestBacklogDedupIndex_FallsBackToListOpenIssues(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{dispatchkind.Work.FindingLabel}, Body: "<!-- spindrift-dedup: race in settle -->"})
@@ -645,7 +636,7 @@ func TestBacklogDedupIndex_FallsBackToListOpenIssues(t *testing.T) {
 // Both LabeledBacklogLister lookups failing is non-fatal: backlogDedupIndex
 // warns twice, in the same "?? #<num>" style as the sibling degradations in
 // this package, and falls back to an empty index rather than erroring the
-// whole filing pass (issue #3609 review).
+// whole filing pass (issue #3609).
 func TestBacklogDedupIndex_ListFailureWarnsAndReturnsEmpty(t *testing.T) {
 	stub := &labeledBacklogListerStub{
 		IssueTrackerFake: forge.NewFake().IssueTrackerFake,

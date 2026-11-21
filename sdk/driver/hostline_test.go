@@ -33,8 +33,8 @@ func TestHostLine(t *testing.T) {
 	}
 }
 
-// hostLineViaJSON is HostLine before it moved onto Scan (#7107): the reference
-// the scanner-based implementation must agree with on every line.
+// hostLineViaJSON is the encoding/json reference HostLine must agree with on
+// every line (#7107).
 func hostLineViaJSON(line string) (passRole string, ok bool) {
 	var l struct {
 		Type        string `json:"type"`

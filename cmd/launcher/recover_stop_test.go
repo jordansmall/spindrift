@@ -24,11 +24,10 @@ import (
 	"spindrift.dev/launcher/internal/waves"
 )
 
-// TestCmdRecover_SignalledStop_NoFailedLabel pins the first checkpoint: a
-// stop closed before recoverByNumber acts on it.Issue must exit
-// exitcode.SignalledStop, write no recover-reason output, leave the issue off the
-// failed label, and still run cleanup -- a requested stop is not a recover
-// failure (issue #3522).
+// TestCmdRecover_SignalledStop_NoFailedLabel pins the first checkpoint: a stop
+// closed before recoverByNumber acts on it.Issue exits exitcode.SignalledStop,
+// writes no recover-reason output, stays off the failed label, and still runs
+// cleanup -- a requested stop is not a recover failure (issue #3522).
 func TestCmdRecover_SignalledStop_NoFailedLabel(t *testing.T) {
 	withClosedStopSignal(t)
 
@@ -121,13 +120,11 @@ func TestCmdRecover_SignalledAbort_NoFailedLabel(t *testing.T) {
 	}
 }
 
-// abortDuringSettle makes s close abortCh from inside Recover: unlike
-// selective dispatch's Run, recoverByNumber has no Box goroutine to
-// synchronize an external abort against, so the settle stub is the one seam
-// standing in for "CI is being watched" when the operator's second signal
-// lands. It then waits on killSignal so the watcher's whole reclaimInFlight
-// call -- not just the Kill inside it -- has provably started before
-// Recover returns.
+// abortDuringSettle closes abortCh from inside Recover: recoverByNumber has no
+// Box goroutine to synchronize an external abort against, so the settle stub
+// stands in for "CI is being watched". It then waits on killSignal so the
+// watcher's whole reclaimInFlight call -- not just the Kill inside it -- has
+// provably started before Recover returns.
 func abortDuringSettle(s *settle.Fake, abortCh chan struct{}, killSignal chan string) {
 	s.On("Recover", func(int) {
 		close(abortCh)
@@ -139,12 +136,10 @@ func abortDuringSettle(s *settle.Fake, abortCh chan struct{}, killSignal chan st
 	})
 }
 
-// TestRecoverByNumber_MidFlightAbort_ReclaimsToDispatchable proves the
-// Gate's watcher reaches terminate.Reclaim's TransitionState(InProgress,
-// Dispatchable) call for the adopt path exactly as it does for a wave: an
-// abort that lands while the settle is watching CI must release the issue
-// back to dispatchable, never leaving it on agent-complete or agent-failed
-// (issue #3522).
+// TestRecoverByNumber_MidFlightAbort_ReclaimsToDispatchable proves the Gate's
+// watcher reaches terminate.Reclaim's TransitionState(InProgress, Dispatchable)
+// for the adopt path as it does for a wave: an abort while the settle watches
+// CI must never leave the issue on agent-complete or agent-failed (#3522).
 func TestRecoverByNumber_MidFlightAbort_ReclaimsToDispatchable(t *testing.T) {
 	orig := installStopSignal
 	stopCh := make(chan struct{})
@@ -241,10 +236,8 @@ func TestRecoverByNumber_MidFlightAbort_ParkedFailedLabelStillReaped(t *testing.
 	}
 }
 
-// pollGoroutines waits up to 2s for runtime.NumGoroutine() to settle back to
-// at most baseline, giving a just-torn-down watcher goroutine (and the
-// runtime's own scheduling housekeeping) a moment to actually exit rather
-// than asserting on a single racy sample.
+// pollGoroutines waits up to 2s for runtime.NumGoroutine() to fall back to at
+// most baseline, rather than asserting on a single racy sample.
 func pollGoroutines(baseline int) int {
 	deadline := time.Now().Add(2 * time.Second)
 	got := runtime.NumGoroutine()
@@ -256,13 +249,10 @@ func pollGoroutines(baseline int) int {
 	return got
 }
 
-// TestRecoverByNumber_IssueFetchFails_NoWatcherLeak pins the first
-// early-return finding: it.Issue failing must not strand the Gate's abort
-// watcher goroutine behind. Before the fix, recoverByNumber's gate.Watch()
-// was joined only by the inline gate.Settle() calls further down, so this
-// return -- taken before either of those runs -- leaked the watcher (plus
-// the Gate/tracker/forge/factory it captures) for the life of the process
-// (issue #3522).
+// TestRecoverByNumber_IssueFetchFails_NoWatcherLeak pins that it.Issue failing
+// must not strand the Gate's abort watcher goroutine: gate.Watch() was once
+// joined only by the inline gate.Settle() calls further down, so this early
+// return leaked the watcher for the life of the process (issue #3522).
 func TestRecoverByNumber_IssueFetchFails_NoWatcherLeak(t *testing.T) {
 	orig := installStopSignal
 	stopCh := make(chan struct{})
@@ -292,12 +282,10 @@ func TestRecoverByNumber_IssueFetchFails_NoWatcherLeak(t *testing.T) {
 }
 
 // completeThenAbort stands in for a second operator signal landing the instant
-// after the settle labelled the issue agent-complete -- the blocking finding's
-// own scenario (issue #3522, recoverByNumber's adopt arm). The hook runs
-// before the fake records its call, which changes nothing the fake reads. It
-// flips #42 to Complete first, mirroring what a real settle does on that path,
-// so a wrongly-triggered reclaim is visible as a Complete->Dispatchable
-// transition plus a reclaim comment under any trigger, not just a missing one.
+// after the settle labelled the issue agent-complete (issue #3522, the adopt
+// arm). It flips #42 to Complete first, as a real settle does, so a wrongly
+// triggered reclaim shows as a Complete->Dispatchable transition plus a
+// reclaim comment under any trigger, not just a missing one.
 func completeThenAbort(s *settle.Fake, fc *forge.Fake, abortCh chan struct{}) {
 	hook := func(int) {
 		if err := fc.TransitionState("42", forge.InProgress, forge.Complete); err != nil {
@@ -308,13 +296,11 @@ func completeThenAbort(s *settle.Fake, fc *forge.Fake, abortCh chan struct{}) {
 	s.On("Recover", hook)
 }
 
-// TestRecoverByNumber_AbortAfterAdoptSettled_NoReclaim pins the blocking
-// finding: an abort that closes after the adopt settle has already finished
-// (PR merged, issue labelled agent-complete) must not drag the issue back
-// to Dispatchable. Before the fix, `defer gate.Leave(iss.number)` ran only
-// after the inline `gate.Settle()` below it, so Settle's final abort check
-// still found #42 in-flight and reclaimed a finished issue (issue #3522,
-// in both recoverByNumber's relay and adopt arms).
+// TestRecoverByNumber_AbortAfterAdoptSettled_NoReclaim pins that an abort
+// closing after the adopt settle finished (PR merged, agent-complete) must not
+// drag the issue back to Dispatchable. `defer gate.Leave` once ran only after
+// the inline gate.Settle(), whose final abort check then reclaimed a finished
+// issue (issue #3522, both relay and adopt arms).
 func TestRecoverByNumber_AbortAfterAdoptSettled_NoReclaim(t *testing.T) {
 	orig := installStopSignal
 	stopCh := make(chan struct{})
@@ -442,9 +428,8 @@ func TestRecoverByNumber_OwnerSettling_Skips(t *testing.T) {
 	}
 }
 
-// TestRecoverByNumber_IssueClaimedElsewhere_Skips pins the acceptance
-// criterion for issue #3885: an issue whose flock claim.go's claim file
-// (2baa3b3d) another process still holds -- a live Run() -- must be skipped
+// TestRecoverByNumber_IssueClaimedElsewhere_Skips pins issue #3885: an issue
+// whose claim file another process (a live Run()) still holds is skipped
 // outright, never relayed or settled out from under that owner.
 func TestRecoverByNumber_IssueClaimedElsewhere_Skips(t *testing.T) {
 	c := reconcileConfig()

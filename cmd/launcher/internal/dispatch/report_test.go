@@ -111,16 +111,13 @@ func TestDispatch_ResolveConflict_EmitsBoxRecordWithConflictResolvePhase(t *test
 	}
 }
 
-// TestFD3ClosedAcrossDispatchSpawn closes the gap TestFromEnv_CloseOnExec
-// (report_test.go) leaves: that test proves FromEnv's own close-on-exec
-// call, but never runs Dispatch code, so a regression that let a Box (or
-// anything Dispatch's runner spawns) inherit the report pipe's write end
-// would keep the daemon's readReports blocked past child exit with nothing
-// here to catch it (issue #3627). It re-execs the test binary as a helper
-// process wired the way runner.go really wires a child — SPINDRIFT_REPORT_FD
-// via ExtraFiles, which os/exec explicitly clears FD_CLOEXEC on — because
-// fd inheritance across a real fork+exec can't be reproduced by calling
-// FromEnv in-process.
+// TestFD3ClosedAcrossDispatchSpawn covers what internal/report's
+// TestFromEnv_CloseOnExec cannot, since that test never runs Dispatch code: a
+// Box (or anything Dispatch's runner spawns) inheriting the report pipe's
+// write end would keep the daemon's readReports blocked past child exit
+// (issue #3627). It re-execs the test binary wired the way a real child is
+// -- SPINDRIFT_REPORT_FD via ExtraFiles, which clears FD_CLOEXEC -- because fd
+// inheritance across a real fork+exec can't be reproduced in-process.
 func TestFD3ClosedAcrossDispatchSpawn(t *testing.T) {
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -188,10 +185,8 @@ func TestFD3ClosedAcrossDispatchSpawn(t *testing.T) {
 }
 
 // TestFD3ClosedHelperProcess is not a real test: it is the re-exec target
-// for TestFD3ClosedAcrossDispatchSpawn, gated by GO_WANT_FD3_HELPER_PROCESS
-// so an ordinary `go test` run treats it as a no-op (the standard Go
-// helper-process pattern, as used by os/exec's own tests) rather than
-// running Dispatch code as its own OS process with fd 3 wired up.
+// for TestFD3ClosedAcrossDispatchSpawn, a no-op unless
+// GO_WANT_FD3_HELPER_PROCESS is set.
 func TestFD3ClosedHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_FD3_HELPER_PROCESS") != "1" {
 		return

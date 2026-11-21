@@ -107,8 +107,8 @@ func TestQuickstartLauncherRows_NoRuntimeRow(t *testing.T) {
 
 // This test mirrors cmd/launcher's own TestRunDoctor_WiresDoctorReportChecksIntoOutput
 // (issue #2725). The answer set leaves the git user name blank so the
-// transcript must report the launcherchecks "git-user-name" row, the one
-// assertion that proves the doctor.Run call site is no longer handed nil.
+// transcript must report the launcherchecks "git-user-name" row, proving the
+// doctor.Run call site is not handed nil.
 func TestRunQuickstart_WiresLauncherChecksIntoDoctorOutput(t *testing.T) {
 	requireConnector(t)
 	dir := t.TempDir()
@@ -139,13 +139,11 @@ func TestRunQuickstart_WiresLauncherChecksIntoDoctorOutput(t *testing.T) {
 	}
 }
 
-// The wizard's doctor step must reach the same gh-token verdict `spindrift
-// doctor` reaches against the harness.env the wizard wrote. The shared row
-// reads GH_TOKEN, so the token belongs in Config.GHToken only when the
-// scaffold writes it under that name: a forgejo scaffold writes
-// FORGEJO_TOKEN, leaving GH_TOKEN blank. The row passes for a pure
-// forgejo pairing (never reaches GitHub) and reports MISSING for a jira
-// tracker on a github forge (#3325).
+// The wizard's doctor step must reach the gh-token verdict `spindrift doctor`
+// reaches against the wizard's harness.env (#3325): a forgejo scaffold writes
+// FORGEJO_TOKEN, leaving GH_TOKEN blank, so the gh-token row passes for a
+// pure forgejo pairing and reports MISSING for a jira tracker on a github
+// forge.
 func TestQuickstartCheckConfig_GHTokenMirrorsHarnessEnvKnob(t *testing.T) {
 	for _, tc := range []struct {
 		issueTracker string

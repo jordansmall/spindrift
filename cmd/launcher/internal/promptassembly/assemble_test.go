@@ -14,9 +14,8 @@ import (
 var promptsDir = repopath.PromptsDir()
 
 // A fixture Env sitting exactly in Assemble's covered cell (see
-// checkCoveredCell). Gates no longer re-derives the tracker/forge axes
-// in-box (issue #2533), so the axis and backend fields must carry nix's
-// already-resolved values. Tests mutate a copy to move one axis off the cell.
+// checkCoveredCell). The axis and backend fields carry nix's resolved values,
+// since Gates does not re-derive them (issue #2533). Tests mutate a copy.
 func coveredEnv() Env {
 	return Env{
 		IssueTracker:         "github",
@@ -47,8 +46,8 @@ func coveredEnv() Env {
 }
 
 // Callers assert a whole fragment body against the prompt. Reading the
-// fragment beats hand-copying an excerpt: a review round found a copied one
-// had silently stopped matching after the fragment's wording changed.
+// fragment beats hand-copying an excerpt, which silently stops matching once
+// the fragment's wording changes.
 func fragmentText(t *testing.T, name string) string {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join(promptsDir, "fragments", name))
@@ -394,11 +393,10 @@ func TestAssembleSharedBlockAlreadyPresentIsNoOp(t *testing.T) {
 	}
 }
 
-// Issue #420 / #455, the ported entrypoint-outcome-contract.bats cases: a
-// runtime prompt-dir override lacking a shared block gets the canonical one
-// appended exactly once, and an override already carrying it is left alone.
-// Without the appended outcome contract the agent never emits the outcome
-// line and the launcher never learns the PR.
+// Issues #420, #455: a prompt-dir override lacking a shared block gets the
+// canonical one appended exactly once, and one already carrying it is left
+// alone. Without the outcome contract the agent never emits the outcome line
+// and the launcher never learns the PR.
 func TestAssembleOverrideSharedBlocks(t *testing.T) {
 	const reviewStub = "reviewer stub\n\nVERDICT: APPROVE or BLOCK\n"
 	const ownBlocks = "stub\n\n# COMMS\n\nown comms\n\n# CHECK\n\nown check\n\n# LAND THE CHANGE\n\nown outcome\n"
@@ -486,8 +484,7 @@ func TestAssembleOverrideSharedBlocks(t *testing.T) {
 }
 
 // A missing or unreadable OUTCOME_CONTRACT_FILE must fail Assemble loudly
-// rather than proceed without the contract, the failure mode #420 exists to
-// prevent (ported from entrypoint-outcome-contract.bats).
+// rather than proceed without the contract, the failure mode #420 prevents.
 func TestAssembleMissingOutcomeContractFileFails(t *testing.T) {
 	reg, env := syntheticRegistry(t, nil, map[string]string{
 		"issue-prompt.md":  "issue stub, no contract here\n",
@@ -535,8 +532,7 @@ func TestAssembleResearchCellOnlyInjectsResearchVerdict(t *testing.T) {
 }
 
 // The research kind's own outcome contract ("# POST THE VERDICT", issue #640)
-// follows the same override rules as the work kind's (TestAssembleOverrideSharedBlocks),
-// ported from the deleted research-kind bats suite.
+// follows the same override rules as the work kind's (TestAssembleOverrideSharedBlocks).
 func TestAssembleResearchOverrideVerdictBlock(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -1146,9 +1142,8 @@ func TestAssembleDriverAgentFilesFrontmatterFallbackTrimsTrailingNewlines(t *tes
 	}
 }
 
-// The missing-`model:` case of frontmatterScalar's missing-key fallback, where
-// entrypoint.sh's `sed -n 's/^model: //p'` found no match:
-// Handoff.ReviewModel stays empty. The effort key's case lives in
+// A reviewer.md with no `model:` line takes frontmatterScalar's missing-key
+// fallback, so Handoff.ReviewModel stays empty. The effort key's case lives in
 // TestAssembleReviewerModelAndEffortExtraction.
 func TestAssembleDriverAgentFilesReviewerModelMissingFallback(t *testing.T) {
 	reg, env := agentFilesRegistry(t)
@@ -1495,13 +1490,11 @@ func TestGatesFilerFileRelayResearchAndButlerAreDisjoint(t *testing.T) {
 	}
 }
 
-// Butler review findings #1 and #2 (ADR 0056, issue #3880): the butler is
-// AdviseOnly, so it never gets the orchestrator's code-owned review pass
-// (the AdviseOnly gate on review-prompt.md), which means its `reviewer`
-// subagent is the only review a promotion candidate gets. Dropping the
-// reviewer key (work's behavior) would leave no finding ever reviewed;
-// rendering it from review-prompt.md (a branch-diff rubric) would leave the
-// reviewer judging an issue, branch, and diff it never has.
+// ADR 0056, issue #3880: the AdviseOnly butler never gets the code-owned
+// review pass, so its `reviewer` subagent is a promotion candidate's only
+// review. Dropping the key (work's behavior) would leave no finding reviewed;
+// rendering review-prompt.md (a branch-diff rubric) would have the reviewer
+// judge an issue, branch, and diff it never has.
 func TestAssembleButlerReviewerKeptAndRendersButlerReviewPrompt(t *testing.T) {
 	reg, base := butlerStubRegistry(t, nil, map[string]string{
 		"butler-review-prompt.md": "butler review stub\n",
@@ -1598,8 +1591,8 @@ func TestAssembleButlerReviewerPromptCarriesExactRubricOnlyWithPatchClasses(t *t
 }
 
 // A kind with no reviewer prompt of its own (work, research) never sets
-// AdvisoryReviewer: its inline reviewer subagent is
-// dropped there, so no advisory verdict exists to suppress (issue #3925).
+// AdvisoryReviewer: its inline reviewer subagent is dropped, so no advisory
+// verdict exists to suppress (issue #3925).
 func TestAssembleAdvisoryReviewerOnlyForKindWithOwnReviewerPrompt(t *testing.T) {
 	reg, base := syntheticRegistry(t, nil, map[string]string{"research-prompt.md": "research stub\n"})
 
@@ -1649,9 +1642,8 @@ func TestAssembleButlerDriverAgentFilesReviewerKeptAndRewritten(t *testing.T) {
 	})
 }
 
-// work's reviewer-drop stays exactly as it was (TestAssembleOrchestratorReviewerKeyDrop
-// already pins the JSON path); this pins the opencode agent-files path's twin,
-// which this issue's rewriteAgentFiles signature change could otherwise regress.
+// Pins work's reviewer-drop on the opencode agent-files path, the twin of the
+// JSON path TestAssembleOrchestratorReviewerKeyDrop pins.
 func TestAssembleWorkDriverAgentFilesReviewerStillDropped(t *testing.T) {
 	reg, env := syntheticRegistry(t, nil, nil)
 	dir := t.TempDir()
@@ -1719,8 +1711,7 @@ func TestAssembleFragmentsCoverageRecord(t *testing.T) {
 }
 
 // A row that omits its gate renders unconditionally; a row naming an unknown
-// gate stays off. The ungated rule is what lets the orchestrator fragments
-// drop their old switch gate.
+// gate stays off.
 func TestAssembleUngatedRowRendersUnconditionally(t *testing.T) {
 	reg := Registry{Rows: []FragmentRow{
 		{Fragment: "land-pass-order-orchestrator.md", Var: "LAND_PASS_ORDER_ORCHESTRATOR_STEP"},
@@ -1781,8 +1772,9 @@ func TestAssembleRowsSharingVarWithExclusiveGates(t *testing.T) {
 }
 
 // An axis row reads fragments/<backend>/<fragment> for the active tracker or
-// forge, picked by the axis signal rather than the backend name; a folder without the file renders empty rather than failing, a gate
-// still applies, and an unset backend takes the default.
+// forge, picked by the axis signal rather than the backend name; a folder
+// without the file renders empty rather than failing, a gate still applies,
+// and an unset backend takes the default.
 func TestAssembleAxisRowResolvesBackendFolder(t *testing.T) {
 	dir := t.TempDir()
 	files := map[string]string{

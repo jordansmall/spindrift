@@ -123,9 +123,9 @@ func composeForge(conn *connectorhost.Connector, api string) (forge.CodeForge, f
 }
 
 // newConnectorHarness loads the Connector and composes the Code Forge over it.
-// The fake serves over TLS, since core
-// refuses a remote that is not https, with git pointed at its bare repository
-// through the environment: production git is https-only.
+// The fake serves over TLS, since core refuses a non-https remote, and git
+// reaches its bare repository through the environment: production git is
+// https-only.
 func newConnectorHarness(t *testing.T, production bool) *connectorHarness {
 	t.Helper()
 	for k, v := range map[string]string{
@@ -407,11 +407,9 @@ func (c *routeCoverage) assertUsed(t *testing.T) {
 	}
 }
 
-// TestConnector_Contracts runs the shared contracts against the compiled
-// Connector: the whole Code Forge composed from it, both directly and as the
-// production constructor builds it under a forgejo row. A route no
-// request in any run used is broader than the Connector needs, so coverage is
-// judged over all.
+// TestConnector_Contracts runs the shared contracts against the Code Forge
+// composed from the compiled Connector, directly and via the production
+// constructor. Route coverage is judged over all runs together.
 func TestConnector_Contracts(t *testing.T) {
 	var cov routeCoverage
 	t.Run("Capabilities", func(t *testing.T) {

@@ -404,10 +404,8 @@ func TestChildCommandReturnsChildEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ChildCommand(%+v): unexpected error: %v", spec, err)
 	}
-	// SPINDRIFT_REPORT_FD=3 rides every ChildCommand result now (see
-	// TestChildCommandSetsReportFD below for that half in isolation); this
-	// test's own focus stays on the knob-stripping behaviour it shares with
-	// DoctorCommand.
+	// SPINDRIFT_REPORT_FD=3 is TestChildCommandSetsReportFD's concern; this
+	// test covers the knob stripping shared with DoctorCommand.
 	want := []string{"PATH=/bin", "SPINDRIFT_REPORT_FD=3", PoolChildEnv + "=1"}
 	if !reflect.DeepEqual(got.Env, want) {
 		t.Fatalf("ChildCommand(%+v) env = %v, want %v", spec, got.Env, want)
@@ -448,11 +446,9 @@ func TestChildCommandSetsReportFD(t *testing.T) {
 	}
 }
 
-// TestChildCommandStripsAmbientReportFD guards withoutKeys's promise: an
-// operator's stray SPINDRIFT_REPORT_FD (or a nested daemon's) already
-// sitting in the daemon's own environment must not survive alongside the
-// value ChildCommand sets, or the child would see two conflicting
-// definitions of the same variable.
+// TestChildCommandStripsAmbientReportFD pins that a stray SPINDRIFT_REPORT_FD
+// in the daemon's environment does not survive alongside the value
+// ChildCommand sets.
 func TestChildCommandStripsAmbientReportFD(t *testing.T) {
 	spec := ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Kind: KindOf(dispatchkind.Work), Env: []string{"PATH=/bin", "SPINDRIFT_REPORT_FD=9"}}
 	got, err := ChildCommand(spec)
@@ -586,10 +582,8 @@ func TestDoctorCommandOmitsReportFD(t *testing.T) {
 }
 
 // TestDoctorCommandStripsAmbientReportFD is TestChildCommandStripsAmbientReportFD's
-// other half (issue #3627's review finding): unlike ChildCommand, DoctorCommand
-// never re-adds SPINDRIFT_REPORT_FD, so an ambient one in DoctorSpec.Env must
-// still be stripped rather than left to leak through untouched — the preflight
-// gets neither an ambient nor a daemon-assigned report fd.
+// other half (issue #3627): DoctorCommand never re-adds SPINDRIFT_REPORT_FD,
+// so an ambient one must still be stripped.
 func TestDoctorCommandStripsAmbientReportFD(t *testing.T) {
 	spec := DoctorSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Env: []string{"PATH=/bin", "SPINDRIFT_REPORT_FD=9"}}
 	got, err := DoctorCommand(spec)

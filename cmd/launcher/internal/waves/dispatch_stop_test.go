@@ -1,7 +1,6 @@
 // This file drives Dispatch's one-shot wave through the same cfg.Stop/
-// cfg.Abort seam continuous_test.go uses for RunContinuous (#3522), so there
-// is one way to exercise operator shutdown in tests rather than two. It
-// reuses continuous_test.go's killHook and waitOn helpers.
+// cfg.Abort seam continuous_test.go uses for RunContinuous (#3522), reusing
+// its killHook and waitOn helpers.
 package waves
 
 import (
@@ -54,9 +53,9 @@ func TestDispatch_StopPreClosed_NoLaunchesReturnsErrSignalledStop(t *testing.T) 
 // TestDispatch_StopClosedMidWave_FinishesInFlightNoFurtherLaunch pins the
 // drain half of the first stage: a Box already running when Stop closes
 // still runs to completion and settles, but the slot it frees never launches
-// another issue. MaxParallel=1 forces issue #2's Acquire to block until #1's
-// Release, so #2's own Allowed check is guaranteed to run only after Stop
-// is already closed -- no sleep needed to make the race deterministic.
+// another issue. MaxParallel=1 blocks the second goroutine's Acquire until
+// the first's Release, so its Allowed check runs after Stop closed,
+// deterministically.
 func TestDispatch_StopClosedMidWave_FinishesInFlightNoFurtherLaunch(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -144,13 +143,10 @@ func TestDispatch_AbortPreClosed_NoLaunchesReturnsErrSignalledStop(t *testing.T)
 }
 
 // TestDispatch_ClaimedBlocked_StopPreClosed_ReturnsErrSignalledStopAndWritesMarker
-// pins the reviewer's exact BLOCKING finding on #3522: OriginClaimed's own
-// blocked-issue return inside drainMaxJobs is a bare nil, so it never reached
-// dispatchWave's Gate at all. With #1 claimed and blocked by open #3, and Stop
-// already closed before Dispatch runs, Dispatch must still report
-// ErrSignalledStop -- but the blocked marker must still land first, since the
-// release pipeline needs it to free the claim regardless of why the wave
-// never launched.
+// pins #3522: OriginClaimed's blocked-issue return in drainMaxJobs is a bare
+// nil that never reaches dispatchWave's Gate. With #1 claimed and blocked by
+// open #3 and Stop pre-closed, Dispatch must report ErrSignalledStop, and the
+// blocked marker must still land: the release pipeline needs it.
 func TestDispatch_ClaimedBlocked_StopPreClosed_ReturnsErrSignalledStopAndWritesMarker(t *testing.T) {
 	c := baseConfig()
 	c.MaxParallel = 1
@@ -243,11 +239,10 @@ func TestDispatch_SelectiveAllBlocked_StopPreClosed_ReturnsErrSignalledStop(t *t
 }
 
 // TestDispatch_AbortClosedWithBoxInFlight_ReclaimsNeitherFailsNorSettles pins
-// the second stage's own launch path (#3522): an Abort closed while a Box is
-// in flight reaps it rather than waiting for it to finish, moves the issue
-// InProgress -> Dispatchable, marks the shared registry Session carries so
-// the reclaimed Box's own completion goroutine abandons instead of failing
-// or settling, and Dispatch still reports ErrSignalledStop.
+// the second stage (#3522): an Abort closed while a Box is in flight reaps it,
+// moves the issue InProgress -> Dispatchable, marks Session's registry so the
+// Box's completion goroutine abandons rather than failing or settling, and
+// Dispatch reports ErrSignalledStop.
 func TestDispatch_AbortClosedWithBoxInFlight_ReclaimsNeitherFailsNorSettles(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -314,13 +309,10 @@ func TestDispatch_AbortClosedWithBoxInFlight_ReclaimsNeitherFailsNorSettles(t *t
 }
 
 // TestDispatch_AbortClosedWithBoxInFlight_NilSession_ReclaimsNeitherFailsNorSettles
-// is the nil-Session twin of the test above: Dispatch(cfg, nil, ...) is the
-// shape Dispatch's own doc blesses (a nil session, or a nil session.Terminated,
-// means dispatchWave's Gate builds its own registry). dispatchWave's abort
-// result switch must observe that same fresh registry's mark, not the caller's
-// nil, or a reclaimed issue falls through to the failure arm and gets
-// a spurious Failed transition on top of Reclaim's own Dispatchable one
-// (#3522 review finding).
+// is the nil-Session twin of the test above: a nil Session makes dispatchWave
+// substitute a fresh registry, and its result switch must observe that
+// registry's mark, not the caller's nil, or a reclaimed issue gets a spurious
+// Failed transition on top of Reclaim's Dispatchable one (#3522).
 func TestDispatch_AbortClosedWithBoxInFlight_NilSession_ReclaimsNeitherFailsNorSettles(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -390,13 +382,9 @@ func TestDispatch_AbortClosedWithBoxInFlight_NilSession_ReclaimsNeitherFailsNorS
 }
 
 // TestDispatch_NilStopAndAbort_OrdinarySuccessUnaffected covers the
-// nil-channel, nil-Session shape every remaining headless/embedding caller of
-// waves.Dispatch still uses (main.go and selective.go's own Dispatch call
-// sites now pass a live &waves.Session{Terminated: ...} and set both
-// cfg.Stop and cfg.Abort, per #3522): with both channels nil, dispatchWave's
-// Gate is permanently inert, so a wave behaves exactly as it did before this
-// issue -- ordinary dispatch must never regress for a caller that never
-// opted into the two-stage shutdown latch at all.
+// nil-channel, nil-Session shape (#3522): with both channels nil, the Gate is
+// inert, so ordinary dispatch must not regress for a caller that never opts
+// into the two-stage shutdown.
 func TestDispatch_NilStopAndAbort_OrdinarySuccessUnaffected(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -446,12 +434,10 @@ func releasedTo(fc *forge.Fake, num, match string) (int, bool) {
 }
 
 // TestDispatch_ClaimedUnblocked_StopPreClosed_ReleasesInheritedClaim pins the
-// mirror image of the blocked-claim case above: with ISSUE_NUMBER=#42 already
-// swapped to in-progress by the workflow and nothing blocking it, the wave
-// goroutine's own Allowed check declines before it ever claims. Nobody writes
-// a blocked marker on that path, so unless the wave tells the Gate it
-// inherited #42's claim, the run exits leaving #42 stranded in-progress with
-// no release path (#3522 review finding).
+// mirror image of the blocked-claim case above: #42 is already claimed by the
+// workflow and unblocked, so the wave's Allowed check declines before any
+// Claim and no marker is written. Unless the wave tells the Gate it inherited
+// the claim, #42 is stranded in-progress (#3522).
 func TestDispatch_ClaimedUnblocked_StopPreClosed_ReleasesInheritedClaim(t *testing.T) {
 	c := baseConfig()
 	c.MaxParallel = 1
@@ -564,7 +550,7 @@ func TestDispatch_StopAfterClaimBeforeLaunch_ReleasesOwnClaim(t *testing.T) {
 // TestDispatch_CycleErrorWithStopPreClosed_ReportsDisplacedCause pins what the
 // boundary override owes the operator: ErrSignalledStop still wins as the
 // return value, but the cycle error it displaces must not vanish unprinted
-// (#3522 review finding) -- exit 7 with no stated cause is undebuggable.
+// (#3522) -- exit 7 with no stated cause is undebuggable.
 func TestDispatch_CycleErrorWithStopPreClosed_ReportsDisplacedCause(t *testing.T) {
 	c := baseConfig()
 	c.MaxParallel = 1

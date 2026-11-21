@@ -19,11 +19,10 @@ import (
 	"spindrift.dev/launcher/internal/signalwire"
 )
 
-// TestRunOnce_SignalCarrierLog_NoOp pins slice 3b's "log mode is unchanged"
-// acceptance criterion (issue #3725): with SignalCarrier unset and with the
-// explicit "log" value, no SIGNAL_SOCKET_* env key, no extra socket mount and
-// a zero Box.SignalSocket reach the Box, and -- with no registry routes --
-// the transport probe never runs at all.
+// TestRunOnce_SignalCarrierLog_NoOp (issue #3725): with SignalCarrier unset
+// or "log", no SIGNAL_SOCKET_* env key, no extra socket mount and a zero
+// Box.SignalSocket reach the Box, and -- with no registry routes -- the
+// transport probe never runs.
 func TestRunOnce_SignalCarrierLog_NoOp(t *testing.T) {
 	for _, carrier := range []string{"", "log"} {
 		t.Run(fmt.Sprintf("carrier=%q", carrier), func(t *testing.T) {
@@ -69,14 +68,12 @@ func TestRunOnce_SignalCarrierLog_NoOp(t *testing.T) {
 	}
 }
 
-// TestRunOnce_SignalCarrierSocket_UnixVerdict_LiveMountAndRetainedBuffer pins
-// three of slice 3b's socket-mode acceptance criteria at once (issue #3725):
-// the listener is up and reachable before the container starts (the fake
-// runner's Run dials the mounted socket and posts a comment through the real
-// handler), the socket is in box.Sockets at runner.SignalSocketTarget with
-// SIGNAL_SOCKET_ENDPOINT set to the in-Box target rather than the host path,
-// and after the Dispatch returns the listener is closed (a fresh dial fails)
-// while the buffer still holds what was posted.
+// TestRunOnce_SignalCarrierSocket_UnixVerdict_LiveMountAndRetainedBuffer
+// (issue #3725): the listener is reachable before the container starts (the
+// fake runner dials the mounted socket and posts a comment), the endpoint is
+// the in-Box target rather than the host path, and after the Dispatch
+// returns the listener is closed while the buffer still holds what was
+// posted.
 func TestRunOnce_SignalCarrierSocket_UnixVerdict_LiveMountAndRetainedBuffer(t *testing.T) {
 	cfg := retryConfig(3, 0, 0)
 	cfg.SignalCarrier = "socket"
@@ -207,11 +204,10 @@ func TestRunOnce_SignalCarrierSocket_TCPVerdict(t *testing.T) {
 	}
 }
 
-// TestRunOnce_SignalCarrierSocket_TCPVerdictUnderNoHostLoopback_Fails pins
-// slice 3b's startup-gate acceptance criterion (issue #3725): a TCP verdict
-// under NETWORK_MODE=no-host-loopback can only be known after the
-// per-Dispatch transport probe, so runOnce itself must reject it, naming the
-// knob and the mode, before the Box ever runs.
+// TestRunOnce_SignalCarrierSocket_TCPVerdictUnderNoHostLoopback_Fails (issue
+// #3725): a TCP verdict under NETWORK_MODE=no-host-loopback is only known
+// after the per-Dispatch probe, so runOnce itself must reject it, naming the
+// knob and the mode, before the Box runs.
 func TestRunOnce_SignalCarrierSocket_TCPVerdictUnderNoHostLoopback_Fails(t *testing.T) {
 	cfg := retryConfig(3, 0, 0)
 	cfg.SignalCarrier = "socket"
@@ -309,10 +305,9 @@ func TestRunOnce_SignalCarrierSocket_TransportProbeErrorsAbortsDispatch(t *testi
 // TestRunOnce_SignalCarrierSocket_MirrorNeverSplicesOutcomeLine pins the one
 // interleaving that silently loses a dispatch (issue #3725): the Box's output
 // copy and the Signal handler's spindrift_op mirror share the raw log file, so
-// a signal POST landing while a stream line is still half-written must not cut
-// that line in two. Here the half-written line is the SPINDRIFT_OUTCOME line
-// itself -- spliced, outcome.Resolve finds no token-leading fielded outcome
-// and a clean Box exit settles as a no-outcome run.
+// a signal POST landing while the SPINDRIFT_OUTCOME stream line is
+// half-written must not cut it in two, or a clean Box exit settles as a
+// no-outcome run.
 func TestRunOnce_SignalCarrierSocket_MirrorNeverSplicesOutcomeLine(t *testing.T) {
 	cfg := retryConfig(3, 0, 0)
 	cfg.SignalCarrier = "socket"
@@ -422,11 +417,9 @@ func TestSignalSocketConfig_ChoreForwardsMaxFindings(t *testing.T) {
 	}
 }
 
-// TestSignalSocketConfig_ZeroCapLeavesSocketDefault covers the issue's other
-// half: a work/issue Dispatch never sets MaxIssueIntents at all, and a Chore
-// Dispatch whose MaxFindings is 0 (no host-side per-sweep limit) forwards the
-// same DefaultMaxIssueIntents the socket falls back to on its own -- both
-// leave the socket at its 8-intent default.
+// TestSignalSocketConfig_ZeroCapLeavesSocketDefault: a work or research
+// Dispatch, and a Chore Dispatch whose MaxFindings is 0 (no per-sweep limit),
+// all leave the socket at its default cap (issue #3994).
 func TestSignalSocketConfig_ZeroCapLeavesSocketDefault(t *testing.T) {
 	dir := tempLogDir(t)
 	f, err := NewFactory(Config{}, dir, nil, fakeDriver{}, RealClock())

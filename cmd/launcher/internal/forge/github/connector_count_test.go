@@ -34,9 +34,8 @@ func countVia(t *testing.T, c *execClient, fresh bool) int {
 	return n
 }
 
-// Under a github row the daemon's demand count keeps the native adapter's
-// protections: an unchanged poll is one conditional request answered 304, and
-// fresh forces a full read.
+// Under a github row the daemon's demand count stays cheap: an unchanged
+// poll is one conditional request answered 304, and fresh forces a full read.
 func TestConnector_CountReadyUnchangedPollIs304(t *testing.T) {
 	h, c, calls := routedHarness(t)
 	seedReadyRange(h, 1, 3)

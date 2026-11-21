@@ -255,10 +255,9 @@ func TestHostRooted_IndexJSONRewrittenPerIndexBase(t *testing.T) {
 	}
 }
 
-// The same per-base row match as
-// TestHostRooted_IndexJSONRewrittenPerIndexBase, for a host-rooted layout
-// where download nests under the index base instead of sitting beside it. The match
-// rule is layout-agnostic; rewriteSyntheticDownload's host check, not the row match,
+// The same per-base row match as TestHostRooted_IndexJSONRewrittenPerIndexBase,
+// for a layout where download nests under the index base. The match rule is
+// layout-agnostic; rewriteSyntheticDownload's host check, not the row match,
 // decides whether a given download is rewritable.
 func TestHostRooted_IndexJSONRewrittenWithDownloadNestedUnderIndexBase(t *testing.T) {
 	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
@@ -443,9 +442,8 @@ func TestHostRooted_LearnedDownloadBaseAdmitsDownloadSiblingShape(t *testing.T) 
 }
 
 // The nested-download layout version of
-// TestHostRooted_LearnedDownloadBaseAdmitsDownloadSiblingShape, where download nests under
-// the index base instead of sitting beside it, so the learning path is
-// layout-agnostic in the same way the rewrite itself is.
+// TestHostRooted_LearnedDownloadBaseAdmitsDownloadSiblingShape: learning is
+// layout-agnostic like the rewrite itself.
 func TestHostRooted_LearnedDownloadBaseAdmitsDownloadNestedShape(t *testing.T) {
 	var downloadRequests int
 	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
@@ -675,11 +673,10 @@ func TestRouteLogHandler_LearnEmptyPathNormalizesToRoot(t *testing.T) {
 	}
 }
 
-// Drives the download rewrite through a real bindregistry.NewTCPForwarder in front
-// of the gated TCP listener, unlike
-// TestHostRooted_IndexJSONRewrittenPerIndexBase above, which sets
-// req.Host by hand, then asserts the same download sent straight to the
-// listener, without the Forwarder, is refused with 401.
+// Drives the download rewrite through a real bindregistry.NewTCPForwarder in
+// front of the gated TCP listener rather than setting req.Host by hand, then
+// asserts the same download sent straight to the listener, without the
+// Forwarder, is refused with 401.
 func TestHostRooted_IndexJSONDownloadNamesForwarderThroughGatedTCPListener(t *testing.T) {
 	const secret = "s3kr1t-e2e-secret"
 	const blobBody = "crate-bytes-for-foo"

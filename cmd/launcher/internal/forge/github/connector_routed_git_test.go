@@ -230,8 +230,8 @@ func TestRoutedRow_RebasePRHeadRunsInCoreGit(t *testing.T) {
 	}
 }
 
-// A conflicting sync under a routed row surfaces forge.ErrMergeConflict, as
-// the native path does, and never reaches gh.
+// A conflicting sync under a routed row surfaces forge.ErrMergeConflict and
+// never reaches gh.
 func TestRoutedRow_RebasePRHeadConflictIsErrMergeConflict(t *testing.T) {
 	for _, method := range []string{"rebase", "merge"} {
 		t.Run(method, func(t *testing.T) {

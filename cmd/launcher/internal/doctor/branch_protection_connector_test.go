@@ -10,7 +10,7 @@ import (
 
 // A Connector that does not declare "forge.branchProtection" resolves a forge
 // without that surface, so the row is not applicable, never a failure, under
-// every merge policy: the same outcome as a native forge lacking the API.
+// every merge policy: the same outcome as CODE_FORGE=local, which lacks the API.
 func TestBranchProtectionCheck_ConnectorWithoutCapabilityIsNotApplicable(t *testing.T) {
 	h := connectorforgetest.NewPRVariant(t, connectorforgetest.MinimalPRWasm)
 	caps := h.Capabilities()
@@ -33,7 +33,7 @@ func TestBranchProtectionCheck_ConnectorWithoutCapabilityIsNotApplicable(t *test
 }
 
 // A Connector declaring "forge.branchProtection" answers the probe through the
-// backend: protected succeeds, unprotected fails as for a native forge.
+// backend: protected succeeds, unprotected fails.
 func TestBranchProtectionCheck_ConnectorWithCapabilityProbesBackend(t *testing.T) {
 	h := connectorforgetest.NewPR(t)
 	// doctor.Run resolves capabilities by type probe, so probe the forge itself.

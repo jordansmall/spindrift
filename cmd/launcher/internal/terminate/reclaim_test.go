@@ -121,7 +121,7 @@ func TestReclaim_MarksRegistry(t *testing.T) {
 
 // TestReclaim_PropagatesKillError pins that a non-nil reaper Kill error
 // returns from Reclaim unmasked while every other best-effort step (both
-// transitions, the comment) still runs (issue #749, moved for #3519).
+// transitions, the comment) still runs (issues #749, #3519).
 func TestReclaim_PropagatesKillError(t *testing.T) {
 	fc, fr, factory, _ := newReclaimFixture(t)
 	fr.KillErr = errors.New("boom: kill failed")

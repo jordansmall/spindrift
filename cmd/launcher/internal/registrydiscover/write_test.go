@@ -14,10 +14,7 @@ import (
 )
 
 // TestRender_CompanionKeyMatchesKindTable pins Render's companion rendering to
-// the credresolver kind table itself rather than a parallel copy. For every
-// kind, the rendered route carries the value that kind's CompanionField
-// selects and survives registryroutes.Parse, and it carries no companion at
-// all when CompanionKey is "".
+// the credresolver kind table rather than a parallel copy.
 func TestRender_CompanionKeyMatchesKindTable(t *testing.T) {
 	for _, kind := range credresolver.Kinds() {
 		if kind.ArgvValue {
@@ -68,10 +65,8 @@ func TestRender_CompanionKeyMatchesKindTable(t *testing.T) {
 	}
 }
 
-// TestRender_NetrcRouteRoundTripsThroughParse is the shape-defining case.
-// registryroutes.Parse is the only authority on what a valid routes file
-// (ADR 0045) looks like, so round-tripping through it proves the output where
-// a hand-checked TOML string would not.
+// TestRender_NetrcRouteRoundTripsThroughParse is the shape-defining case:
+// registryroutes.Parse is the authority on a valid routes file (ADR 0045).
 func TestRender_NetrcRouteRoundTripsThroughParse(t *testing.T) {
 	routes := []Route{{
 		MatchHost:        "registry.acme.example",
@@ -104,8 +99,7 @@ func TestRender_NetrcRouteRoundTripsThroughParse(t *testing.T) {
 }
 
 // TestWriteFile_RefusesExistingFileWithoutForce also checks that the refusal
-// error names the offending path, so an operator running spindrift registry
-// discover against a populated directory can tell which file it balked at.
+// names the offending path.
 func TestWriteFile_RefusesExistingFileWithoutForce(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "routes.toml")
@@ -139,9 +133,7 @@ func TestWriteFile_RefusesExistingFileWithoutForce(t *testing.T) {
 }
 
 // TestRender_StoreKindRouteRoundTrips round-trips a route through every
-// credential-store kind, so a kind the table gains is covered without a new
-// test. Each must survive Parse with its file path, file format and, where the
-// kind takes one, its companion value.
+// credential-store kind, so a kind the table gains is covered automatically.
 func TestRender_StoreKindRouteRoundTrips(t *testing.T) {
 	for _, kind := range storeKinds() {
 		t.Run(kind.SourceKey, func(t *testing.T) {
@@ -337,11 +329,9 @@ func TestWriteFile_NewFilePermsAndParses(t *testing.T) {
 	}
 }
 
-// TestRender_RouteCarriesNoCredentialValueField documents the guarantee behind
-// "does Render leak a secret": Route has no field able to hold a resolved
-// credential value, only a store path or an env var name. The check below is a
-// trip-wire for a future field that starts threading resolved values through,
-// not proof on its own; this comment is the guarantee.
+// TestRender_RouteCarriesNoCredentialValueField: Render cannot leak a secret
+// because Route has no field able to hold a resolved credential, only a store
+// path or env var name. The check is a trip-wire for a future field, not proof.
 func TestRender_RouteCarriesNoCredentialValueField(t *testing.T) {
 	const neverProvidedSecret = "sk_live_should_never_appear_in_rendered_output"
 
@@ -374,9 +364,8 @@ func TestRender_RouteCarriesNoCredentialValueField(t *testing.T) {
 }
 
 // TestRender_PlainHTTPSHostOmitsUpstreamOrigin pins the exact bytes for the
-// common case: an upstream on plain https with no port says nothing match-host
-// does not already say, so the stanza carries no upstream-origin and the
-// derivation supplies the origin (ADR 0047, issue #3261).
+// common case: plain https, no port, so no upstream-origin (ADR 0047, issue
+// #3261).
 func TestRender_PlainHTTPSHostOmitsUpstreamOrigin(t *testing.T) {
 	routes := []Route{{
 		MatchHost:        "registry.acme.example",
@@ -402,11 +391,9 @@ credential = { netrc = "/home/op/.netrc" }
 	}
 }
 
-// TestRender_ExplicitPortEmitsOriginWithoutPath covers the port case:
-// match-host is port-stripped, so an upstream on a non-default port needs
-// upstream-origin to reach the registry. The base URL's path is dropped
-// because a host-rooted route derives the paths it serves rather than joining
-// a base path.
+// TestRender_ExplicitPortEmitsOriginWithoutPath: match-host is port-stripped,
+// so a non-default port needs upstream-origin. The path is dropped: a
+// host-rooted route derives its paths rather than joining a base path.
 func TestRender_ExplicitPortEmitsOriginWithoutPath(t *testing.T) {
 	routes := []Route{{
 		MatchHost:        "mirror.example.com",
@@ -509,12 +496,10 @@ func TestRender_MixedOriginRoutesRoundTripThroughParse(t *testing.T) {
 	}
 }
 
-// TestRender_BlockGrammarRoundTripsRenderParseRender pins the discovery
-// acceptance criterion (issue #3405), including that the output carries only
-// the keys of the block grammar, never one of the per-ecosystem keys
-// registryroutes now refuses at the launch gate. Discovery has never emitted
-// one, but Render's output would still parse if a future change did, so
-// nothing else would catch that.
+// TestRender_BlockGrammarRoundTripsRenderParseRender pins issue #3405,
+// including that the output carries no per-ecosystem key the launch gate
+// refuses: Render's output would still parse with one, so nothing else
+// would catch it.
 func TestRender_BlockGrammarRoundTripsRenderParseRender(t *testing.T) {
 	routes := []Route{{
 		MatchHost:        "registry.acme.example",

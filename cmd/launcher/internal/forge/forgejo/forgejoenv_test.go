@@ -8,9 +8,7 @@ import (
 )
 
 // TestValidateForgejoEnv_RequiresBaseURLAndToken verifies ValidateForgejoEnv
-// fails fast when either required Forgejo connection field is empty, rather
-// than deferring to a runtime Forgejo API error, and names the knob that
-// required them.
+// fails fast on an empty field, naming the knob that required it.
 func TestValidateForgejoEnv_RequiresBaseURLAndToken(t *testing.T) {
 	for _, tc := range []struct{ knob, other string }{
 		{"ISSUE_TRACKER", "CODE_FORGE"},

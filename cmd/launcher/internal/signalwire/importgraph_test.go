@@ -10,14 +10,8 @@ import (
 )
 
 // TestImportGraphIsStandardLibraryOnly pins the package doc's claim, which
-// lib/harness-core.nix's driver-exec fileset depends on: signalwire imports
-// nothing outside the standard library, so a Box binary linking it never
-// drags in the launcher-side listener's closure (internal/doctor, and behind
-// it internal/runner, internal/forge and the container backend). No transitive
-// walk is needed -- a module-local import is itself non-standard-library, so
-// the property is visible one level down. registryproxy's importgraph_test.go
-// is the precedent for pinning a boundary this way; its walk exists because it
-// forbids three specific packages rather than all of them.
+// lib/harness-core.nix's driver-exec fileset depends on. No transitive walk is
+// needed: any module-local import is itself non-standard-library.
 func TestImportGraphIsStandardLibraryOnly(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	if err != nil {
@@ -41,9 +35,7 @@ func TestImportGraphIsStandardLibraryOnly(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unquoting import %s in %s: %v", imp.Path.Value, name, err)
 			}
-			// A standard-library import path's first segment names no
-			// host, so it holds no dot; every module-local and
-			// third-party one does.
+			// A standard-library path's first segment holds no dot.
 			if first, _, _ := strings.Cut(path, "/"); strings.Contains(first, ".") {
 				t.Errorf("%s imports %s, outside the standard library", name, path)
 			}

@@ -5,10 +5,9 @@ import (
 	"testing"
 )
 
-// TestKinds_SourceKeyOrder pins the seven-entry order that
-// registryroutes.credentialSourceKeys must reproduce: the retired-key
-// renderer and the "names more than one source" error text both key off
-// this exact sequence.
+// TestKinds_SourceKeyOrder pins the order registryroutes.credentialSourceKeys
+// reproduces for its retired-key renderer and "names more than one source"
+// error text.
 func TestKinds_SourceKeyOrder(t *testing.T) {
 	want := []string{"env", "file", "netrc", "cargo-credentials", "exec", "npmrc", "gradle-properties"}
 	if got := SourceKeys(); !reflect.DeepEqual(got, want) {
@@ -61,9 +60,8 @@ func TestKinds_FileFormats(t *testing.T) {
 	}
 }
 
-// cmd/launcher/registrydiscover.go derives its store list by walking
-// StoreKinds(), so this table is the single source of truth for the
-// documented search order and the $HOME-relative path segments.
+// cmd/launcher/registrydiscover.go walks StoreKinds(), so this pins the
+// documented search order and $HOME-relative paths.
 func TestKinds_StoreKindsOrderAndPaths(t *testing.T) {
 	sk := StoreKinds()
 
@@ -89,9 +87,8 @@ func TestKinds_StoreKindsOrderAndPaths(t *testing.T) {
 	}
 }
 
-// registrydiscover.storeLookupConfig delegates here rather than keeping a
-// parallel copy, so each store kind's StoreConfig must reproduce the exact
-// Config shape that function produces for the same inputs.
+// registrydiscover.storeLookupConfig delegates to StoreConfig, so this pins
+// the exact Config shape each store lookup produces.
 func TestKinds_StoreConfigMatchesStoreLookupConfig(t *testing.T) {
 	facts := StoreFacts{
 		Host:            "registry.example.com",
@@ -171,10 +168,8 @@ func TestKinds_ReturnsCopy(t *testing.T) {
 	}
 }
 
-// restoreStorePaths puts every kindTable StorePath back at test end. If
-// clone() ever regresses, the mutations below land in the package's own
-// table, and without this the one real failure would cascade into every
-// later test in the package.
+// restoreStorePaths puts every kindTable StorePath back at test end, so a
+// clone() regression fails here instead of cascading into later tests.
 func restoreStorePaths(t *testing.T) {
 	t.Helper()
 	for i := range kindTable {
@@ -186,9 +181,8 @@ func restoreStorePaths(t *testing.T) {
 	}
 }
 
-// mutateStorePath overwrites the first path segment of key's row in kinds.
-// That write aliases straight through to kindTable unless the accessor
-// deep-copied StorePath.
+// mutateStorePath overwrites the first path segment of key's row in kinds,
+// aliasing through to kindTable unless the accessor deep-copied StorePath.
 func mutateStorePath(t *testing.T, kinds []Kind, key string) {
 	t.Helper()
 	for i, k := range kinds {
@@ -230,9 +224,8 @@ func TestKindTable_Invariants(t *testing.T) {
 		seen[k.storeSearchOrder] = k.SourceKey
 	}
 
-	// Both columns are looked up by first match, SourceKey through
-	// KindBySourceKey and FileFormat through New, so a duplicate row would
-	// be silently shadowed rather than reported.
+	// Both columns are looked up by first match, so a duplicate would be
+	// silently shadowed.
 	sourceKeys := map[string]bool{}
 	fileFormats := map[string]string{}
 	for _, k := range kindTable {

@@ -26,11 +26,10 @@ func TestFormatSpindriftOpDecision(t *testing.T) {
 	}
 }
 
-// A usage-decision signal op renders its own reason rather than falling
-// through to the default arm's accept rendering, which would drop the
-// client's usage error entirely (issue #3867). It spells the line the same
-// way the driver-exec verb's own printed line does -- "rejected (usage):" --
-// so the host log and the agent-visible line never drift apart.
+// A usage-decision signal op renders its own reason, not the default arm's
+// accept line, which would drop the client's usage error (issue #3867). It
+// spells "rejected (usage):" as the driver-exec verb's own line does, so the
+// host log and the agent-visible line never drift apart.
 func TestFormatSpindriftOpSignalUsage(t *testing.T) {
 	got := FormatSpindriftOp("7", hostop.SpindriftOp{Op: "signal", Kind: "pr-intent", Decision: "usage", Reason: "flag provided but not defined: -nonce"})
 	want := "signal pr-intent rejected (usage): flag provided but not defined: -nonce"
@@ -151,8 +150,7 @@ func TestFormatSpindriftOpPassStart(t *testing.T) {
 
 // A pass_start op names the pass's role (issue #2037) inline when Role is set,
 // so #2027's telemetry can tell a code-owned review pass apart from an
-// implement or fix pass. Unlike a legacy single-pass run, either may
-// legitimately end with no SPINDRIFT_OUTCOME of its own.
+// implement or fix pass.
 func TestFormatSpindriftOpPassStartWithRole(t *testing.T) {
 	got := FormatSpindriftOp("42", hostop.SpindriftOp{Op: "pass_start", Pass: 2, Role: "review"})
 	if !strings.Contains(got, "pass 2 (review) started") {
@@ -227,9 +225,8 @@ func TestFormatSpindriftOpPassUsageAgentTail(t *testing.T) {
 	}
 }
 
-// A pass_usage op with a nil Usage still renders a single line instead of
-// panicking: the case of a pass that crashes or produces no usage events
-// reaching the render path.
+// A pass that crashed or produced no usage events sends a nil Usage, which must
+// still render one line, not panic.
 func TestFormatSpindriftOpPassUsageNilUsage(t *testing.T) {
 	got := FormatSpindriftOp("42", hostop.SpindriftOp{Op: "pass_usage", Pass: 1})
 	if !strings.Contains(got, "pass 1 usage") {

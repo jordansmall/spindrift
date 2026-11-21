@@ -48,8 +48,8 @@ func TestValidateReadOnlyResearchPass(t *testing.T) {
 	}
 }
 
-// Pins the reviewer-verdict row: a rendered review
-// prompt missing VERDICT: must reject.
+// Pins the reviewer-verdict row: a rendered review prompt missing VERDICT:
+// must reject.
 func TestValidateReviewPromptReject(t *testing.T) {
 	e := Env{}
 	result := Result{

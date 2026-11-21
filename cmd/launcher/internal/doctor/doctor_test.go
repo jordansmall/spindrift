@@ -20,20 +20,15 @@ func defaultDoctorConfig() Config {
 		InProgressLabel: "agent-in-progress",
 		FailedLabel:     "agent-failed",
 		CompleteLabel:   "agent-complete",
-		// MergePolicy "manual" keeps the branch-protection row Advisory rather
-		// than Required (issue #2570). Most tests here build a forge.Fake that
-		// never scripts SetBranchProtected, so a Required tier would report a
-		// spurious failure. Tests that do exercise branch protection override
-		// MergePolicy and BaseBranch on the returned Config.
+		// "manual" keeps the branch-protection row Advisory (issue #2570): most
+		// tests' forge.Fake never scripts SetBranchProtected, so Required would
+		// fail spuriously. Branch-protection tests override MergePolicy and
+		// BaseBranch.
 		MergePolicy: "manual",
 		BaseBranch:  "main",
 	}
 }
 
-// TestAdvisoryLabelNames_MatchesTierFuncsConcatenatedInOrder pins
-// AdvisoryLabelNames as a flattening of the per-tier funcs in table order, so
-// a reordering of advisoryTiers or a divergence between the two would fail
-// here first.
 func TestAdvisoryLabelNames_MatchesTierFuncsConcatenatedInOrder(t *testing.T) {
 	var want []string
 	want = append(want, ResearchLabelNames()...)
@@ -47,9 +42,8 @@ func TestAdvisoryLabelNames_MatchesTierFuncsConcatenatedInOrder(t *testing.T) {
 	}
 }
 
-// TestRefSuffix pins refSuffix's empty-ref branch: an empty ref must produce
-// no leading space, so a table row with ref "" (ambiguous-spec) never leaves
-// a double space before the em dash in a report line.
+// An empty ref (ambiguous-spec's) must add no space, or a report line gets a
+// double space before the em dash.
 func TestRefSuffix(t *testing.T) {
 	cases := []struct {
 		ref  string
@@ -65,9 +59,7 @@ func TestRefSuffix(t *testing.T) {
 	}
 }
 
-// TestAllLabelsPresentMessage_ExactString pins the all-present success
-// sentence built from advisoryTiers against the golden report's exact wording
-// (cmd/launcher/testdata/golden/doctor-healthy-report.txt).
+// Pinned to cmd/launcher/testdata/golden/doctor-healthy-report.txt's wording.
 func TestAllLabelsPresentMessage_ExactString(t *testing.T) {
 	const want = "all triage, research, priority, ambiguous-spec, and butler labels present"
 	if got := allLabelsPresentMessage(); got != want {
@@ -105,14 +97,9 @@ func TestRun_ConnectivityAndRecoverableIssuesProbesSucceed(t *testing.T) {
 	}
 }
 
-// TestRun_MissingResearchLabelsAreAdvisoryNotFatal pins doctor's advisory
-// treatment of the research-label family (ADR 0022) directly, rather than
-// leaving it incidental to a test named for something else. This matters
-// beyond doctor itself: the daemon's startup preflight (issue #3544) reads
-// doctor's exit code before letting a daemon start at all, so if a research
-// label were ever promoted to Required here, that promotion alone would
-// start refusing daemon startups for a family ADR 0022 deliberately keeps
-// optional.
+// Research labels stay advisory (ADR 0022): the daemon's startup preflight
+// (issue #3544) gates on doctor's exit code, so promoting one to Required
+// would refuse daemon startups for a family ADR 0022 keeps optional.
 func TestRun_MissingResearchLabelsAreAdvisoryNotFatal(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -581,16 +568,15 @@ func TestRun_CreateLabelFailure_WrapsErrConnectivity(t *testing.T) {
 	}
 }
 
-// A CreateLabel failure on an advisory-tier label (here, research) must not
-// fail Run: accepting the create-labels prompt must never be worse than
-// declining it (issue #2569). Only a work-tier label failure is fatal, as the
-// test above pins.
+// A CreateLabel failure on an advisory-tier label (here, ambiguous-spec) must
+// not fail Run: accepting the create-labels prompt must never be worse than
+// declining it (issue #2569).
 func TestRun_CreateLabelFailure_AdvisoryLabelDoesNotFailRun(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
-	// Every label is present except the single ambiguous-spec one, so exactly
-	// one CreateLabel call happens — pinning the row's exact text needs a
-	// single deterministic miss rather than the whole research family.
+	// Only the ambiguous-spec and butler labels are missing: pinning the row's
+	// exact text needs a single deterministic ambiguous-spec miss rather than
+	// the whole research family.
 	f.Labels = append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"},
 		append(ResearchLabelNames(), PriorityLabelNames()...)...)
 	wantErr := errors.New("boom")
@@ -648,10 +634,8 @@ func TestRun_TTY_Decline_WrapsErrRequiredLabelsMissing(t *testing.T) {
 	if !errors.Is(err, ErrRequiredLabelsMissing) {
 		t.Errorf("want ErrRequiredLabelsMissing (issue #2569 exit-code vocabulary), got %v", err)
 	}
-	// A declined prompt writes one bare "\n" through Passthrough — no "ok:",
-	// "MISSING:", or "advisory:" prefix — right after the prompt's own
-	// trailing "] ". Pins that Passthrough adds no prefix and no extra
-	// newline of its own.
+	// A declined prompt writes one bare "\n" right after the prompt's "] ":
+	// Passthrough adds no prefix and no newline of its own.
 	if got := buf.String(); !strings.HasSuffix(got, "] \n") {
 		t.Errorf("want the declined prompt followed by a bare newline with no prefix, got tail: %q", got[max(0, len(got)-30):])
 	}
@@ -760,9 +744,8 @@ func TestRun_BranchProtection_RequiredTierUnprotected_StillOffersLabelCreation(t
 	}
 }
 
-// The precedence rule (issue #2798 coordinator decision): with both an
-// unprotected required base branch and missing work labels in non-interactive
-// mode, Run returns the branch-protection error, not ErrRequiredLabelsMissing.
+// The precedence rule (issue #2798): with both an unprotected required base
+// branch and missing work labels in non-interactive mode, Run returns the branch-protection error, not ErrRequiredLabelsMissing.
 func TestRun_BranchProtection_RequiredTierUnprotected_NonInteractivePrecedence(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -893,7 +876,7 @@ func TestRun_RecoverableIssuesRequiredFailure_PrecedesLaterListLabelsError(t *te
 // mixedMissingLabelsFake returns a forge.Fake missing two work-tier labels
 // and one label from each of the research, priority, ambiguous-spec, and
 // butler tiers, so a single fixture exercises the recap across every tier at
-// once (issue #3777 AC5; butler tier added ADR 0056).
+// once (issue #3777 AC5, ADR 0056).
 func mixedMissingLabelsFake() (f *forge.Fake, workMissing, advisoryMissing []string) {
 	f = forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -923,10 +906,8 @@ func mixedMissingLabelsFake() (f *forge.Fake, workMissing, advisoryMissing []str
 }
 
 // AC5 (issue #3777): quiet mode must never offer to create an advisory label
-// it never showed the operator. Immediately above the prompt, doctor must
-// recap every advisory label it is about to offer in the same "advisory:
-// label %q missing" form the (suppressed) Finding rows would have used, and
-// the work-tier MISSING rows must still be present.
+// it never showed: the prompt is preceded by an "advisory: label %q missing"
+// recap of each, and the work-tier MISSING rows still print.
 func TestRun_Quiet_Interactive_RecapsAdvisoryLabelsBeforePrompt(t *testing.T) {
 	f, workMissing, advisoryMissing := mixedMissingLabelsFake()
 
@@ -958,10 +939,8 @@ func TestRun_Quiet_Interactive_RecapsAdvisoryLabelsBeforePrompt(t *testing.T) {
 	}
 }
 
-// The verbose report is byte-for-byte unchanged by AC5 (issue #3777): each
-// advisory label row from the earlier Finding calls must still appear
-// exactly once, proving the quiet-only recap added in doctor.go never fires
-// under --verbose.
+// Under --verbose each advisory label row appears exactly once: the quiet-only
+// recap (issue #3777 AC5) never fires.
 func TestRun_Verbose_Interactive_NoDuplicateAdvisoryRecap(t *testing.T) {
 	f, _, advisoryMissing := mixedMissingLabelsFake()
 
@@ -1031,11 +1010,9 @@ func TestRun_Quiet_Interactive_Decline_SameExitPathAsVerbose(t *testing.T) {
 	}
 }
 
-// TestRun_Quiet_Interactive_StillMissingAfterCreation_AlwaysOn pins the
-// resolution of an AC3/AC5 tension: AC3 says advisory count summaries print
-// only under --verbose, but AC5 says the "still missing after creation"
-// lines stay always-on passthrough regardless. This locks that choice down
-// so a later reader does not "fix" it the other way (issue #3777).
+// Pins an issue #3777 AC3/AC5 tension on purpose: advisory count summaries
+// print only under --verbose, but the "still missing after creation" lines are
+// always-on passthrough. Do not "fix" it the other way.
 func TestRun_Quiet_Interactive_StillMissingAfterCreation_AlwaysOn(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -1061,11 +1038,10 @@ func TestRun_Quiet_Interactive_StillMissingAfterCreation_AlwaysOn(t *testing.T) 
 	}
 }
 
-// TestRun_NewAdvisoryTier_OneTableEntryIsEnough pins the design claim behind
-// advisoryTiers: appending one entry — with no other doctor.go edit — is
-// enough for Run to report a wholly new tier exactly like a shipped one. It
-// mutates the package-level table, which is safe only while no test in this
-// package calls t.Parallel — adding one anywhere would race this mutation.
+// Appending one advisoryTiers entry, with no other doctor.go edit, is enough
+// for Run to report a new tier like a shipped one. It mutates the
+// package-level table: safe only while no test in this package calls
+// t.Parallel.
 func TestRun_NewAdvisoryTier_OneTableEntryIsEnough(t *testing.T) {
 	cfg := defaultDoctorConfig()
 	f := forge.NewFake()

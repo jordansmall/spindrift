@@ -297,12 +297,11 @@ func TestRun_QuarantineFailureRetriesWithBackoffBeforeGivingUp(t *testing.T) {
 	}
 }
 
-// TestRun_RotateFailurePermanentErrnoFailsWithoutReclassifyingStaleLog verifies
-// a stale-log rotation failure on a retry attempt is a pre-dispatch failure
-// (issue #5444): attempt 2 never wrote a log of its own, so logPath still holds
-// attempt 1's transient-looking content and must not be classified again. ELOOP
-// is permanent (issue #5451), so the run fails at once with the rotate error on
-// Result.Err instead of retrying.
+// TestRun_RotateFailurePermanentErrnoFailsWithoutReclassifyingStaleLog: a
+// stale-log rotation failure on a retry is a pre-dispatch failure (issue
+// #5444), so attempt 1's transient-looking content at logPath must not be
+// classified again. ELOOP is permanent (issue #5451): the run fails at once
+// with the rotate error on Result.Err.
 func TestRun_RotateFailurePermanentErrnoFailsWithoutReclassifyingStaleLog(t *testing.T) {
 	var d *Dispatch
 	fr := runner.NewFake()
@@ -484,11 +483,10 @@ func TestQuarantinePriorRunLogs_HoldSleepBlindSpot(t *testing.T) {
 	}
 }
 
-// TestEnsureRunLineage_QuarantinesWhenMarkerAbsent verifies the fix for the
-// recover/adopt entry point's own quarantine gap (issue #2575):
-// quarantinePriorRunLogs only ever ran from Run's first attempt, so a
-// Dispatch built the way main.go's recoverByNumber builds one inherited an
-// unmarked leftover's spend. EnsureRunLineage quarantines it first.
+// TestEnsureRunLineage_QuarantinesWhenMarkerAbsent pins the recover/adopt
+// entry point's quarantine (issue #2575): a Dispatch built the way main.go's
+// recoverByNumber builds one never Runs, so without EnsureRunLineage it
+// would inherit an unmarked leftover's spend.
 func TestEnsureRunLineage_QuarantinesWhenMarkerAbsent(t *testing.T) {
 	dir := tempLogDir(t)
 
@@ -651,8 +649,7 @@ func TestRotateStaleLog_UsesFirstAvailableSuffix(t *testing.T) {
 // returns an error instead of spinning when os.Stat(logPath.N) fails with
 // something other than "not found" (issue #5444). A basename one byte under
 // NAME_MAX lets os.Stat(logPath) succeed while every logPath.N gets
-// ENAMETOOLONG, so no candidate is ever a free slot and only the error return
-// ends the probe.
+// ENAMETOOLONG.
 func TestRotateStaleLog_BoundedOnNonNotExistStatError(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, strings.Repeat("a", 254))
@@ -764,11 +761,9 @@ func TestRunOnce_RegistryProxyUpstreamURLSet_MountsListeningSocket(t *testing.T)
 }
 
 // TestRunOnce_RegistryProxyUnixTransport_SocketsHasProxyEntry verifies that
-// under a unix transport verdict, box.Sockets carries exactly one entry
-// whose Source is the same host path RegistryProxy.Endpoint.SocketPath()
-// mints and whose Target is runner.RegistryProxySocketTarget (issue #3723):
-// the mount layer reads Sockets, not RegistryProxy, so the registry proxy
-// socket must appear there or it never reaches the Box.
+// under a unix transport verdict, box.Sockets carries exactly one proxy
+// entry (issue #3723): the mount layer reads Sockets, not RegistryProxy, so
+// the socket must appear there or it never reaches the Box.
 func TestRunOnce_RegistryProxyUnixTransport_SocketsHasProxyEntry(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte("hello from upstream")) //nolint:errcheck
@@ -1449,10 +1444,9 @@ func TestRegistryProxySocketDir_TmpFallbackMkdirFails_ReturnsError(t *testing.T)
 }
 
 // TestRun_IssueTextForErrorFailsDispatch verifies that a Config.IssueTextFor
-// error reaches Run's Result as a failure instead of being warned and dropped
-// (issue #3445, blocking review finding on dispatch.go:168): every
+// error fails Run instead of being warned and dropped (issue #3445): every
 // *-prompt.md tells the Box its body is in the injected ISSUE_TEXT section,
-// so a Box launched without it would have no recourse.
+// so a Box launched without it has no recourse.
 func TestRun_IssueTextForErrorFailsDispatch(t *testing.T) {
 	fr := runner.NewFake()
 	sentinel := errors.New("boom: rate limited")

@@ -5,9 +5,6 @@ import (
 	"testing"
 )
 
-// TestWalkPages_CallsFetchUntilDone verifies WalkPages invokes fetch for
-// pages 1, 2, 3, ... in order, stopping exactly once fetch reports done,
-// with no call beyond that page.
 func TestWalkPages_CallsFetchUntilDone(t *testing.T) {
 	const wantCalls = 3
 	var gotPages []int
@@ -30,8 +27,6 @@ func TestWalkPages_CallsFetchUntilDone(t *testing.T) {
 	}
 }
 
-// TestWalkPages_PropagatesError verifies WalkPages stops and returns the
-// first error fetch produces, without calling fetch again afterward.
 func TestWalkPages_PropagatesError(t *testing.T) {
 	wantErr := errors.New("boom")
 	calls := 0

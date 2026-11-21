@@ -138,17 +138,11 @@ func TestParseWindowErrors(t *testing.T) {
 	}
 }
 
-// TestWindowOpenAndUntil is the pinned-instant table the acceptance
-// criteria call for. Every "now" is built as an unambiguous UTC instant
-// via time.Date(..., time.UTC); Open/Until then apply the window's own
-// location internally. Every subtest below whose name mentions the
-// missing or the duplicated hour pins a real transition date for
-// America/New_York in 2026: 2026-03-08 is the US spring-forward (02:00 EST
-// jumps to 03:00 EDT, an hour that never happens), and 2026-11-01 is the US
-// fall-back (01:00 EDT is immediately followed by a second 01:00, now EST,
-// so that hour happens twice). Offsets were verified against Go's own
-// tzdata (embedded via the awake.go time/tzdata import) before being
-// pinned here, not assumed from memory.
+// TestWindowOpenAndUntil is a pinned-instant table. Every "now" is an
+// unambiguous UTC instant. The missing/duplicated-hour subtests pin real
+// America/New_York transitions in 2026: 2026-03-08 spring-forward (02:00
+// EST jumps to 03:00 EDT) and 2026-11-01 fall-back (01:00 happens twice).
+// Offsets were verified against Go's embedded tzdata, not memory.
 func TestWindowOpenAndUntil(t *testing.T) {
 	mustWindow := func(t *testing.T, raw string) *Window {
 		t.Helper()
@@ -354,13 +348,9 @@ func TestWindowOpenAndUntil(t *testing.T) {
 			t.Fatalf("LoadLocation: %v", err)
 		}
 
-		// 02:30 EST never happens on 2026-03-08 -- the clock jumps
-		// straight from 01:59:59 EST to 03:00:00 EDT -- so the window
-		// becomes open at the transition instant itself, 03:00 EDT, not
-		// at some literal 02:30 the day rolls forward to. The real
-		// elapsed time from 00:30 EST to 03:00 EDT is 1h30m, not the 2h30m
-		// the wall-clock digits alone would suggest, because that hour is
-		// skipped rather than lived through.
+		// 02:30 EST never happens on 2026-03-08, so the window opens at
+		// the 03:00 EDT transition itself: 1h30m from 00:30 EST, not the
+		// 2h30m the wall-clock digits suggest.
 		now := time.Date(2026, 3, 8, 0, 30, 0, 0, loc)
 		if got, exhausted := w.Until(now); got != time.Hour+30*time.Minute || exhausted {
 			t.Errorf("Until(%v) = (%v, %v), want (%v, false)", now, got, exhausted, time.Hour+30*time.Minute)
@@ -393,13 +383,10 @@ func TestWindowOpenAndUntil(t *testing.T) {
 	})
 }
 
-// buildTZif assembles a minimal TZif v1 blob by hand per tzfile(5), rather
-// than pulling one from a real zone, so exhaustingWindow can pin an
-// offset-change schedule no real IANA zone has, over two fixed types: +0
-// "P0" and +1 "P1" (index 1, DST). isutcnt/isstdcnt/leapcnt are
-// left at 0: Go's own TZif reader (zoneinfo_read.go) treats those arrays as
-// optional and guards every read on the actual counts, so omitting them is
-// valid, not a shortcut that happens to parse.
+// buildTZif assembles a minimal TZif v1 blob per tzfile(5), so
+// exhaustingWindow can pin an offset schedule no real IANA zone has, over two
+// types: +0 "P0" and +1 "P1" (index 1, DST). isutcnt/isstdcnt/leapcnt are 0:
+// Go's TZif reader treats those arrays as optional, so this is valid.
 func buildTZif(transTimes []int32, transTypes []byte) []byte {
 	const abbrev = "P0\x00P1\x00"
 	offsets := []int32{0, 3600}
@@ -441,11 +428,9 @@ func buildTZif(transTimes []int32, transTypes []byte) []byte {
 // exhaustingWindow builds a synthetic zone (no real IANA zone behaves this
 // way) that jumps the local clock straight from 02:59:59 to 04:00:00 every
 // day (+0 -> +1 at 03:00Z) and repeats 11:00-11:59 on the way back (+1 -> +0
-// at 11:00Z). A 03:15-03:45 window's local minutes therefore never occur on
-// any day, so Until must walk every zone period out to untilHorizon and
-// report it exhausted rather than silently returning a plausible-looking
-// duration for a window that in fact never opens. Shared by awake_test.go
-// and pool_test.go so both exercise the same exhausting construction.
+// at 11:00Z). A 03:15-03:45 window therefore never occurs, so Until must
+// walk out to untilHorizon and report exhausted rather than return a
+// plausible-looking duration. Shared with pool_test.go and status_test.go.
 func exhaustingWindow(t *testing.T) (w *Window, now time.Time) {
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).Unix()
 	// days is well past now+untilHorizon (8d), with margin so the walk

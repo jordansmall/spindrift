@@ -7,12 +7,9 @@ import (
 )
 
 // Assemble's reviewer drop, for a kind with no reviewer prompt of its own: the
-// model and effort are extracted from the reviewer entry before the key is
-// deleted from the agents JSON (issue #2277), and the per-agent injection loop
-// still runs for every other agent. With no reviewer key, or no template at
-// all, the extraction stays empty (jq's `.reviewer.model // empty`) and
-// review-prompt.md still renders: it does not depend on a reviewer being
-// configured.
+// model and effort are extracted before the reviewer key is deleted (issue
+// #2277), and every other agent still gets its prompt. With no reviewer key or
+// no template, the extraction stays empty and review-prompt.md still renders.
 func TestAssembleOrchestratorReviewerKeyDrop(t *testing.T) {
 	cases := []struct {
 		name       string

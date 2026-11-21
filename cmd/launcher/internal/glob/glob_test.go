@@ -67,15 +67,11 @@ func TestOverlap_DifferentDepthNoWildcardNoOverlap(t *testing.T) {
 	}
 }
 
-// Patterns reach Overlap from untrusted prompt input, so a hostile issue
-// filer can write one with many "**" segments. Overlap must stay polynomial
-// in the segment count instead of backtracking exponentially the way a
-// recursive "** matches any suffix" check would.
+// Patterns are untrusted prompt input: Overlap must stay polynomial in the
+// "**" count rather than backtrack exponentially.
 func TestOverlap_ManyDoubleStarsDoesNotHang(t *testing.T) {
-	// Every "**" can match the run of "y" segments, so the mismatch only
-	// shows up at the final "x" against "y" comparison. Naive backtracking
-	// has to re-explore every star and segment split before it concludes
-	// there is no overlap.
+	// Every "**" can match the "y" run, so the mismatch shows only at the
+	// final "x": naive backtracking re-explores every split first.
 	pathological := strings.Repeat("**/", 20) + "x"
 	noTrailingX := strings.TrimSuffix(strings.Repeat("y/", 20), "/")
 

@@ -86,11 +86,9 @@ func TestClassify_ErrorEvent_StatusMarkers(t *testing.T) {
 	}
 }
 
-// This test pins the ordering within opencode's TransientPatterns: the status
-// 429 RateLimit marker precedes overloaded_error there, so an event carrying
-// both classifies as RateLimit on first match. Both are opencode markers, not
-// shared base (driverkit.BaseTransientPatterns holds only Network markers),
-// so reordering that list flips this to Overloaded (issue #2149).
+// The status 429 RateLimit marker precedes overloaded_error in opencode's
+// TransientPatterns (the shared base holds only Network markers), so an event
+// carrying both is RateLimit; reordering flips it to Overloaded (issue #2149).
 func TestClassify_ErrorEvent_Status429BeatsOverloaded(t *testing.T) {
 	logPath := opencode.WriteLog(t,
 		`{"type":"error","error":"overloaded_error: upstream returned status 429"}`,

@@ -573,12 +573,9 @@ func TestPoolReservationFloorsResearchAlongsideDemand(t *testing.T) {
 }
 
 // RESEARCH_RESERVATION keeps flooring research while the kinds are probed,
-// however plentiful the other kind's Demand: the reserved seats go to research
-// first, the rest to work. A single-kind Daemon is the same schedule over one
-// kind: the reservation cannot take a seat for a kind that is not configured,
-// and the one kind fills every slot. (A single kind starting from its own
-// Demand is also pinned by
-// TestLoopProbedKindStartsWithinOneIntervalOfDemandAppearing.)
+// however plentiful the other kind's Demand. In a single-kind Daemon the
+// reservation cannot take a seat for an unconfigured kind, and the one kind
+// fills every slot.
 func TestLoopReservationFloorsResearchAlongsideDemand(t *testing.T) {
 	for _, tt := range []struct {
 		name        string
@@ -1018,10 +1015,10 @@ func TestLoopJamLiftWakesParkedSiblings(t *testing.T) {
 }
 
 // requireOnlyProbeIntervalReparks is requireNoRepark for a test whose onStart
-// lowers Demand before announcing: a slot probing in the gap between that
-// label swap and the claim's fold reads the claimed item still in flight and
-// parks for the whole probe interval, which only the claim's wake ends. Any
-// wait past the first slots waits, the jam-backoff parks, must be exactly
+// lowers Demand before announcing: a slot probing between that label swap
+// and the claim's fold reads the claimed item still in flight and parks
+// for the whole probe interval, which only the claim's wake ends. Every
+// wait past the first slots waits (the jam-backoff parks) must be exactly
 // that interval.
 func requireOnlyProbeIntervalReparks(t *testing.T, clk *testClock, slots int, interval time.Duration) {
 	t.Helper()

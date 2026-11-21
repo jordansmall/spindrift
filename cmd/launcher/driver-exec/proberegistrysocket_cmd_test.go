@@ -11,11 +11,9 @@ import (
 	"spindrift.dev/launcher/internal/unixsocket"
 )
 
-// testSocketDir prefers t.TempDir() but falls back to a fresh dir directly
-// under /tmp when that path would already overflow AF_UNIX's sun_path cap
-// once a filename is joined onto it (issue #3077). A nix build sandbox's own
-// working directory can nest deep enough to trigger this, unlike an ordinary
-// `go test` invocation from a shell.
+// testSocketDir prefers t.TempDir() but falls back to a fresh dir under /tmp
+// when that path would overflow AF_UNIX's sun_path cap once a filename is
+// joined (issue #3077), as a nix build sandbox's deep working dir can.
 func testSocketDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()

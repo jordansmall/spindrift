@@ -22,9 +22,8 @@ func TestGitClient_ImplementsCodeForge(t *testing.T) {
 	var _ forge.CodeForge = NewGitClient("https://example.invalid/repo.git", "main", "Test Bot", "bot@example.com")
 }
 
-// The git Code Forge deliberately implements no PR, CI, or auto-merge calls.
-// A failed type assertion against forge.PRForge is what callers check for, in
-// place of the removed PushOnly() flag.
+// The git Code Forge deliberately implements no PR, CI, or auto-merge calls;
+// callers check for that with a type assertion against forge.PRForge.
 func TestGitClient_NoPRForgeConcept(t *testing.T) {
 	g := NewGitClient("https://example.invalid/repo.git", "main", "Test Bot", "bot@example.com")
 	if _, ok := g.(forge.PRForge); ok {
@@ -550,9 +549,9 @@ func TestGitClient_Probe_TimesOutOnHangingRemote(t *testing.T) {
 }
 
 // newBareRemoteWithHangingPush is newBareRemoteWithBranches plus a
-// pre-receive hook that sleeps forever, so the remote hangs partway through a
-// push rather than during the clone hangingRemoteURL covers. Local pushes
-// still run server-side hooks, so this needs no network listener.
+// pre-receive hook that sleeps forever, so the remote hangs mid-push rather
+// than mid-clone. Local pushes still run server-side hooks, so this needs no
+// network listener.
 func newBareRemoteWithHangingPush(t *testing.T) string {
 	t.Helper()
 	bare := newBareRemoteWithBranches(t)

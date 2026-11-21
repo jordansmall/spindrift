@@ -907,13 +907,10 @@ func TestWire_ComposedLoop_BroadTicketIssueExcludedFromOwnSeams(t *testing.T) {
 	}
 }
 
-// A broad ticket that has a real seam AND was itself dispatched with a
-// landing that goes stuck must still surface: #3439's exclusion drops the
-// broad ticket from its own seams group (the group keeps a real seam, so
-// #3439's drop-none fallback does not apply), so verdictFor's
-// stuck[s.Number] check in the per-seam loop never sees it, even though
-// reconcile — which walks every open issue, exclusion or not — reports it
-// stuck (issue #3440).
+// A broad ticket with a real seam whose own landing goes stuck must still
+// surface: #3439's exclusion drops it from its group (the real seam defeats
+// the drop-none fallback), so verdictFor never sees it as stuck, though
+// reconcile, walking every open issue, reports it stuck (issue #3440).
 func TestWire_ComposedLoop_StuckBroadTicketLandingSurfacesAnyway(t *testing.T) {
 	setGitIdentityEnv(t)
 	operatorDir := newOperatorCheckout(t)
@@ -1682,14 +1679,12 @@ func TestWire_ComposedLoop_CrossParentBlockerHoldsLoudly(t *testing.T) {
 }
 
 // Issue #4017: a status=already-resolved outcome has no bundle and no merged
-// PR for reconcile to key off -- the landing branch is recorded, but nothing
-// landed -- so settle closes the local issue directly (closeResolvedIssue's
-// IssueCloser fallback). This drives that outcome
-// through the real LocalTracker end to end: the issue file's frontmatter
-// lands Complete and closed:, the local status listing (ListOpenIssues)
-// drops it, and a subsequent reconcile+Surface sweep reports the parentless
-// ticket as never-landed rather than stuck or surfaced -- there is no bundle,
-// so its Integration branch never existed.
+// PR for reconcile to key off, so settle closes the local issue directly
+// (closeResolvedIssue's IssueCloser fallback). Through the real LocalTracker,
+// the issue lands Complete and closed:, ListOpenIssues drops it, and a later
+// reconcile+Surface sweep reports the parentless ticket never-landed rather
+// than stuck or surfaced: with no bundle, its Integration branch never
+// existed.
 func TestWire_ComposedLoop_AlreadyResolvedClosesIssue(t *testing.T) {
 	setGitIdentityEnv(t)
 	operatorDir := newOperatorCheckout(t)

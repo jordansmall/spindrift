@@ -24,9 +24,8 @@ var testDispatchLabels = forge.DispatchLabels{
 	Failed:       "agent-failed",
 }
 
-// testInProgressLabel replaces the Config.InProgressLabel field that moved
-// onto LabelClaimer's constructor (issue #2938). One constant covers every
-// waves test, since none varied it from baseConfig()'s default.
+// testInProgressLabel is the in-progress label LabelClaimer's constructor
+// takes (issue #2938); no waves test varies it.
 const testInProgressLabel = "agent-in-progress"
 
 // capsFor resolves capabilities the same way production does (issue #2946),
@@ -50,9 +49,8 @@ func baseConfig() Config {
 	return cfg
 }
 
-// dispatchLabels builds the DispatchLabels a fake forge adapter needs. The
-// dispatchable label comes from the caller as a local, no longer from
-// Config.Label (issue #2938).
+// dispatchLabels builds the DispatchLabels a fake forge adapter needs; the
+// dispatchable label comes from the caller (issue #2938).
 func dispatchLabels(cfg Config, label string) forge.DispatchLabels {
 	return forge.DispatchLabels{
 		Dispatchable: label,
@@ -91,11 +89,10 @@ func tempLogDir(tb testing.TB) string {
 // boxErr is the error a fake runner returns for a non-zero box exit.
 var boxErr = errors.New("exit 1")
 
-// fakePending replaces the Queue.Pending closure continuous_test.go's
-// stale-drain tests copy-pasted per call site (review finding on #2939). It
-// mirrors main.go's production closure: re-list, then filter through
-// CountReady, never a raw len(issues) (issue #2777). edges and failed may be
-// nil, and claimed passes through because fc.ListIssues filters by label.
+// fakePending is the stale-drain tests' Queue.Pending closure (#2939),
+// mirroring main.go's: re-list, then filter through CountReady, never a raw
+// len(issues) (issue #2777). edges and failed may be nil, and claimed passes
+// through because fc.ListIssues filters by label.
 func fakePending(fc *forge.Fake, c Config, edges map[string][]string, failed map[string]bool) func(map[string]bool) (int, error) {
 	return func(claimed map[string]bool) (int, error) {
 		raw, err := fc.ListIssues(forge.Dispatchable)
@@ -111,10 +108,8 @@ func fakePending(fc *forge.Fake, c Config, edges map[string][]string, failed map
 }
 
 // testFactory wires a dispatch.Factory to dir and r. RunContinuous takes a
-// concrete *dispatch.Factory, not an interface, so no fake can stand in: any
-// test that needs a Box to actually launch must call this. AC1's "no real
-// dispatch Factory" (issue #2940) covers only the tests where nothing ever
-// dispatches, and those pass nil for f and s instead.
+// concrete *dispatch.Factory, so any test that launches a Box needs this;
+// tests where nothing dispatches pass nil for f and s (issue #2940).
 func testFactory(t *testing.T, dir string, r runner.Runner) *dispatch.Factory {
 	t.Helper()
 	seamtest.RegisterDriver(t)

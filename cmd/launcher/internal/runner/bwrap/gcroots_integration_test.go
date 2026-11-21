@@ -10,12 +10,11 @@ import (
 	"testing"
 )
 
-// TestGenerationRootsProtectStoreArtifactsFromGC drives the production
-// register and reclaim paths against a real nix store and asks nix itself which
-// paths are collectable. The store is a throwaway chroot store, so the test
-// needs no daemon and never touches the host store. It runs the generation both
-// with a store-DB snapshot (nixInBox on) and as just a lock file and a roots dir
-// (nixInBox off, issue #5996): the roots must protect the artifacts either way.
+// Drives the production register and reclaim paths against a throwaway chroot
+// nix store (no daemon, never the host store) and asks nix which paths are
+// collectable. The roots must protect the artifacts both with a store-DB
+// snapshot (nixInBox on) and with just a lock file and roots dir (nixInBox
+// off, issue #5996).
 func TestGenerationRootsProtectStoreArtifactsFromGC(t *testing.T) {
 	for _, nixInBox := range []bool{true, false} {
 		name := "nixInBox-off"

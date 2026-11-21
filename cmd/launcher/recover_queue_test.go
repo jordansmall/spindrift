@@ -338,10 +338,8 @@ func TestRecoverQueueOne_AttemptsOnlyOneEligibleIssue(t *testing.T) {
 
 // On a status shared with failed, queue recover skips an ambiguous-halted
 // card: no claim, relay, label change or merge. Queue mode only: the hand-run
-// `spindrift recover <n>` never lists Failed (it fetches the named issue), and
-// recoverIssue's Failed re-list is queue mode's pre-claim check, which an
-// ambiguous card never reaches because the Strict gate declines before Begin.
-// Hand-running recover on one is an operator choice.
+// `spindrift recover <n>` fetches the named issue rather than listing Failed,
+// and running it on an ambiguous card is an operator choice.
 func TestRecoverQueueOne_SharedStatusAmbiguousCardIsSkipped(t *testing.T) {
 	cases := []struct {
 		name           string

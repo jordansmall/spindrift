@@ -21,12 +21,10 @@ import (
 	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
-// inspectJSONStdout builds the stdout inspectContainer now expects from
-// `inspect --format={{json .}}`: an object with Id, Created (RFC3339Nano,
-// what both podman and docker emit) and a nested State.Status. The field
-// stays spelled `Id` against production's `ID` on purpose — that mismatch is
-// what exercises encoding/json's case-insensitive match against the key the
-// runtimes actually emit, so do not "fix" it to match the Go initialism.
+// inspectJSONStdout builds `inspect --format={{json .}}` stdout: Id, Created
+// (RFC3339Nano) and a nested State.Status. `Id` against production's `ID` is
+// deliberate: it exercises encoding/json's case-insensitive match against the
+// key the runtimes emit, so do not "fix" it to the Go initialism.
 func inspectJSONStdout(t *testing.T, id, status string, created time.Time) string {
 	t.Helper()
 	body := struct {
@@ -215,12 +213,10 @@ func TestIsRuntimeUnusableError(t *testing.T) {
 	}
 }
 
-// looksLikeNameCollision gates the whole name-collision classification path
-// in Run, so its true/false boundary needs a direct pin rather than only the
-// end-to-end coverage the Run tests give it. Both short-circuit arms of the
-// pre-filter are pinned, including the substring over-match a bare
-// strings.Contains accepts — deliberate, since Run proves the collision with
-// a post-failure inspect and never trusts this on its own.
+// looksLikeNameCollision gates Run's name-collision path, so its boundary
+// gets a direct pin. Both short-circuit arms are pinned, including the
+// substring over-match a bare strings.Contains accepts: deliberate, since Run
+// proves the collision with a post-failure inspect.
 func TestLooksLikeNameCollision(t *testing.T) {
 	cases := []struct {
 		name string
@@ -1033,8 +1029,8 @@ func TestRegistryProxyTransport_ScriptedCapableExit_ReportsSocketCapable(t *test
 
 // registryprobe.ExitIncapable from the socket probe is a clean "incapable"
 // answer, not a Go error, so a stat-only or unconnectable socket degrades
-// cleanly, as long as the live TCP-reachability sub-probe (issue #3111 review
-// finding B) confirms the fallback route works. Scripts two calls: the socket
+// cleanly, as long as the live TCP-reachability sub-probe (issue #3111)
+// confirms the fallback route works. Scripts two calls: the socket
 // probe (ExitIncapable), then the TCP sub-probe (ExitCapable, reachable).
 func TestRegistryProxyTransport_ScriptedIncapableExit_ReportsIncapableWithTCPHost(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: registryprobe.ExitIncapable}, runnertest.Call{Exit: registryprobe.ExitCapable})
@@ -1082,11 +1078,10 @@ func TestRegistryProxyTransport_ScriptedIncapableExit_ReportsIncapableWithTCPHos
 	}
 }
 
-// When the socket probe reports incapable AND the live TCP-reachability
-// sub-probe (issue #3111 review finding B) reports the --add-host host-gateway
-// route is not reachable, RegistryProxyTransport must return a hard error
-// naming the CLI and the host. The old behavior trusted the TCP fallback
-// unconditionally, with nothing listening on the route the Box would dial.
+// When the socket probe reports incapable AND the TCP sub-probe (issue #3111)
+// finds the --add-host route unreachable, RegistryProxyTransport must return
+// a hard error naming the CLI and the host, not trust a route nothing listens
+// on.
 func TestRegistryProxyTransport_TCPReachabilitySubProbeIncapable_ReturnsError(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: registryprobe.ExitIncapable}, runnertest.Call{Exit: registryprobe.ExitIncapable})
 	a := &ociAdapter{cli: script, boxImg: imageSpec{tag: "spindrift:test"}}
@@ -1459,8 +1454,8 @@ func TestRegistryProxyTransport_ScriptedExitCode1_OldImageDrift_ReturnsError(t *
 	}
 }
 
-// The other half of issue #3120's contract change: plain exit 0 is no longer a
-// capable verdict on its own, only registryprobe.ExitCapable (90) is. A bare
+// The other half of issue #3120's contract: plain exit 0 is not a capable
+// verdict on its own, only registryprobe.ExitCapable (90) is. A bare
 // exit 0 must read as no-verdict, never as socket-capable. The single scripted
 // call repeats for the control probe too, so this is a no-verdict-from-both
 // outcome, matching the old-image-drift test's callCount shape.
@@ -1884,11 +1879,10 @@ func TestProbeRegistryTCPReachable_NonOneExitCode_ReturnsError(t *testing.T) {
 	}
 }
 
-// Pins issue #3120's fix to the TCP sub-probe: an old driver-exec exits 1 on an
-// unrelated flag-parsing path, not because the --add-host route was tested and
-// found unreachable. That used to read as "not reachable", so the code tried the
-// --add-host wiring and summarised both as unreachable, a claim about a route
-// never probed. The no-verdict error returns straight out, callCount stays at 1.
+// Pins issue #3120's fix to the TCP sub-probe: an old driver-exec exits 1 on a
+// flag-parsing path, not because the route was tested, so it must not read as
+// "not reachable" and get an unprobed --add-host route summarised as
+// unreachable. The no-verdict error returns straight out; callCount stays 1.
 func TestProbeRegistryTCPReachable_OldImageDrift_ShortCircuits(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1})
 	a := &ociAdapter{cli: script, boxImg: imageSpec{tag: "spindrift:test"}}
@@ -2139,12 +2133,10 @@ func TestRun_ReapsByIDNotByName(t *testing.T) {
 	}
 }
 
-// The headline regression: a sibling's container still being created (state
-// "created", not yet "running") must not be force-removed while it is still
-// within midCreationGrace of its creation timestamp. The guard keyed on the
-// literal "running" status before issue #3633, so a sibling mid-creation was
-// invisible to it, silently destroyed, and this launcher's own `run` collided
-// on the name anyway.
+// The headline regression (issue #3633): a sibling's container still
+// "created" within midCreationGrace must not be force-removed. A guard keyed
+// on "running" alone destroyed it, and this launcher's `run` collided on the
+// name anyway.
 func TestRun_RecentlyCreatedContainerSkipsLaunchWithoutReap(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t,
 		runnertest.Call{Stdout: inspectJSONStdout(t, "cid-created", "created", time.Now().Add(-5*time.Second))},
@@ -2162,10 +2154,8 @@ func TestRun_RecentlyCreatedContainerSkipsLaunchWithoutReap(t *testing.T) {
 }
 
 // A "created" container older than midCreationGrace was abandoned by a
-// launcher that died between `podman run`'s create and start, not owned by a
-// sibling about to start it. Pre-diff, an unconditional `rm -f <name>`
-// cleared exactly this; the fix must still clear it, or the issue becomes
-// permanently undispatchable (blocking finding, issue #3633).
+// launcher that died between `podman run`'s create and start; it must still be
+// cleared, or the issue becomes permanently undispatchable (issue #3633).
 func TestRun_StaleCreatedContainerReapedThenLaunches(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t,
 		runnertest.Call{Stdout: inspectJSONStdout(t, "stale-created-id", "created", time.Now().Add(-3*time.Hour))},
@@ -2189,12 +2179,10 @@ func TestRun_StaleCreatedContainerReapedThenLaunches(t *testing.T) {
 	}
 }
 
-// An inspect that exits 0 but whose Created field cannot parse must still be
-// treated as "container exists": a successful inspect proves that, regardless
-// of whether every field parsed. But with no usable created timestamp,
-// reapable's age check treats the age as infinite and reaps — restoring the
-// pre-#3633 behaviour of clearing a container this launcher cannot classify,
-// rather than wedging the issue permanently undispatchable (issue #3633).
+// An inspect that exits 0 with an unparseable Created still proves the
+// container exists; with no usable timestamp, reapable treats the age as
+// infinite and reaps rather than wedging the issue undispatchable (issue
+// #3633).
 func TestRun_UnparseableInspectOutputReapedThenLaunches(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t,
 		runnertest.Call{Stdout: `{"Id":"cid-only","Created":"not-a-timestamp","State":{"Status":"created"}}`},
@@ -2218,12 +2206,10 @@ func TestRun_UnparseableInspectOutputReapedThenLaunches(t *testing.T) {
 	}
 }
 
-// A body that does not decode at all leaves no ID to remove. Removing by name
-// instead would race a sibling launcher's in-flight create, so Run removes
-// nothing and launches; if the name really was taken, the runtime's own
-// refusal — confirmed by a fresh post-failure inspect finding the name still
-// live — surfaces as ErrAlreadyRunning, so the issue is skipped rather than
-// failed (issue #3633).
+// A body that does not decode leaves no ID; removing by name would race a
+// sibling's create, so Run removes nothing and launches. If the name was
+// taken, the refusal, confirmed by a post-failure inspect, surfaces as
+// ErrAlreadyRunning, so the issue is skipped rather than failed (issue #3633).
 func TestRun_UndecodableInspectBodyRemovesNothing(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t,
 		runnertest.Call{Stdout: "not json at all"},
@@ -2338,13 +2324,11 @@ func TestRun_LostCreateRaceDockerRefusalIsAlreadyRunning(t *testing.T) {
 	}
 }
 
-// The genuine-failure regression the blocking finding calls out: a Box that
-// starts, echoes attacker-controlled text quoting the runtime's own
-// "is already in use" refusal, and then exits non-zero must not be
-// reclassified as ErrAlreadyRunning on text alone. The post-failure inspect
-// proves this Box's own container ended up exited (reapable), not held live
-// by a sibling, so the collision text is exposed as forged and Run must
-// still surface a RunError.
+// The genuine-failure regression: a Box that echoes attacker-controlled text
+// quoting the runtime's "is already in use" refusal and exits non-zero must
+// not become ErrAlreadyRunning on text alone. The post-failure inspect finds
+// its own container exited, not held live by a sibling, so Run surfaces a
+// RunError.
 func TestRun_EchoedCollisionTextWithGenuineFailureIsRunError(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t,
 		runnertest.Call{Exit: 1}, // inspect: no pre-existing container
@@ -2513,7 +2497,7 @@ func TestReap_RemovesStaleCreatedContainer(t *testing.T) {
 // The common settle-phase case (CI watch, merge gate): the initial Box already
 // exited successfully and Run's own reapAfterSuccess already removed it, so
 // there is no container left to kill. Runner.Kill's contract treats that as
-// success, not a failure Terminate would otherwise misreport.
+// success, not a failure Reclaim would otherwise misreport.
 func TestKill_MissingContainer_ReturnsNilNotError(t *testing.T) {
 	// Matched on stderr text, not exit code: podman exits 125, docker 1.
 	for _, tc := range []struct {
@@ -2623,7 +2607,7 @@ func TestKill_RemovesByIDNotByName(t *testing.T) {
 }
 
 // A scripted rm failure against a container confirmed to exist is returned, not
-// swallowed: Terminate needs to know a genuine reap failure happened.
+// swallowed: Reclaim needs to know a genuine reap failure happened.
 func TestKill_RemovalFailureOnExistingContainer_ReturnsError(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t,
 		runnertest.Call{Stdout: inspectJSONStdout(t, "kill-failure-id", "running", time.Now())},
@@ -2747,12 +2731,10 @@ func TestIsRunning_ScriptedStatuses(t *testing.T) {
 	})
 }
 
-// container.reapable allowlists exited/stopped/dead as safe to rm -f
-// regardless of age; "running" is never safe; every other status —
-// recognised transient states and anything unrecognised — is safe only once
-// it has outlived midCreationGrace, so a sibling launcher's container that is
-// merely slow to start fails safe toward "do not destroy" while a genuinely
-// abandoned one is still cleared (issue #3633).
+// container.reapable allowlists exited/stopped/dead regardless of age;
+// "running" is never safe; any other status only once it has outlived
+// midCreationGrace, so a slow-starting sibling fails safe toward "do not
+// destroy" while an abandoned one is still cleared (issue #3633).
 func TestContainerReapable(t *testing.T) {
 	now := time.Now()
 	cases := []struct {

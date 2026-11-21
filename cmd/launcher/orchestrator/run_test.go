@@ -22,9 +22,7 @@ import (
 
 // writeHandoffFile writes h to dir/handoff.json and returns its path, the
 // shared static-config document every handoff fixture in this package points
-// at (issue #2975). driver-exec loads it for the driver/model/effort/devshell/
-// agents/argv-shape facts it once took as flags; the orchestrator forwards the
-// path verbatim to every pass.
+// at (issue #2975).
 func writeHandoffFile(t *testing.T, dir string, h promptassembly.Handoff) string {
 	t.Helper()
 	path := filepath.Join(dir, "handoff.json")
@@ -64,10 +62,10 @@ export DRIVER_LOG_PATH="$log_path"
 }
 
 // streamJSONVerdictLine appends a verdict the way a real claude turn surfaces
-// one, as a reviewer subagent's tool_result (issue #1998 review). Since issue
-// #2980 that tool_result counts only when it answers a recorded
-// reviewer-subagent spawn, so the fixture leads with that spawn event. A test
-// proving an UNTAGGED tool_result no longer counts must build its own raw JSON.
+// one, as a reviewer subagent's tool_result (issue #1998). That tool_result
+// counts only when it answers a recorded reviewer-subagent spawn (issue
+// #2980), so the fixture leads with that spawn event; a test of an UNTAGGED
+// tool_result must build its own raw JSON.
 func streamJSONVerdictLine(text string) string {
 	return `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"Agent","input":{"subagent_type":"reviewer"}}]}}` + "\n" +
 		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"` + text + `"}]}}` + "\n"
@@ -97,7 +95,7 @@ func streamJSONResultLine(inputTokens, outputTokens int, costUSD float64) string
 }
 
 // TestPassReportDegradesOnUnresolvableDriver verifies passReport's own
-// driver.New error path (issue #2694 review finding): an unregistered
+// driver.New error path (issue #2694): an unregistered
 // driver name degrades to the zero usage.Usage rather than panicking or
 // propagating an error the caller has no way to handle mid-loop.
 func TestPassReportDegradesOnUnresolvableDriver(t *testing.T) {
@@ -108,7 +106,7 @@ func TestPassReportDegradesOnUnresolvableDriver(t *testing.T) {
 }
 
 // TestPassReportDegradesOnMissingLog verifies passReport's ExtractUsage
-// not-found path (issue #2694 review finding): a log path that was never
+// not-found path (issue #2694): a log path that was never
 // written, an ordinary outcome for a pass cut short, degrades to the zero
 // usage.Usage silently, the same as an unresolvable driver name.
 func TestPassReportDegradesOnMissingLog(t *testing.T) {
@@ -217,11 +215,10 @@ exit 0
 		streamJSONFinalResult("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
 }
 
-// TestRunInvokesDriverExecOnceForwardingFlags verifies the orchestrator's S1
-// tracer-bullet behaviour (issue #1996): exactly one driver-exec invocation,
-// carrying every flag the box binary hands the orchestrator today, and the
-// scripted outcome line driver-exec would emit reaches the orchestrator's own
-// stdout unchanged.
+// TestRunInvokesDriverExecOnceForwardingFlags verifies the single-loop path
+// (issue #1996): exactly one driver-exec invocation carrying every flag the box
+// binary hands the orchestrator, and driver-exec's outcome line reaches the
+// orchestrator's own stdout unchanged.
 func TestRunInvokesDriverExecOnceForwardingFlags(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
@@ -338,8 +335,7 @@ func TestBuildDriverExecCmdForwardsHandoffFileAndPerPassPaths(t *testing.T) {
 
 // TestBuildDriverExecCmdNeverForwardsStateOrReviewPromptFile pins the real
 // mechanism behind AC4 and AC6: buildDriverExecCmd's argv assembly never reads
-// cfg.stateFile or cfg.reviewPromptFile into a flag for ANY cfg (issue #2059
-// review finding).
+// cfg.stateFile or cfg.reviewPromptFile into a flag for ANY cfg (issue #2059).
 func TestBuildDriverExecCmdNeverForwardsStateOrReviewPromptFile(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
@@ -368,8 +364,7 @@ func TestBuildDriverExecCmdNeverForwardsStateOrReviewPromptFile(t *testing.T) {
 
 // TestBuildDriverExecCmdForwardsTopLevelRoleFlag verifies buildDriverExecCmd
 // forwards cfg.topLevelRole as --top-level-role when set (issue #2092), and
-// omits the flag entirely, not just its value, when the field is "", keeping
-// the legacy run() path's argv byte-identical to before this field existed.
+// omits the flag entirely, not just its value, when the field is "".
 func TestBuildDriverExecCmdForwardsTopLevelRoleFlag(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
@@ -671,8 +666,7 @@ func TestRunEmitsRunStateErrorMarkerOnWriteFailure(t *testing.T) {
 
 // TestRunEmitsRunStateErrorMarkerOnReadFailure verifies run prints a
 // "spindrift_op" run_state_error marker to stdout when ReadRunState fails on a
-// corrupt --state-file (issue #2027). The read failure already degrades to a
-// cold start rather than blocking the pass, but was previously silent.
+// corrupt --state-file (issue #2027), on top of degrading to a cold start.
 func TestRunEmitsRunStateErrorMarkerOnReadFailure(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
@@ -701,7 +695,7 @@ func TestRunEmitsRunStateErrorMarkerOnReadFailure(t *testing.T) {
 }
 
 // TestRunPreservesDriverExitCodeWhenRunStateWriteFails verifies a run-state
-// persistence failure never masks the Driver's exit code (issue #1997 review):
+// persistence failure never masks the Driver's exit code (issue #1997):
 // the handoff artifact is a side channel to the pass's real outcome, not a gate
 // on it. The --state-file's parent directory is missing, so ReadRunState sees
 // "no prior state" while WriteRunState genuinely fails.
@@ -728,7 +722,7 @@ func TestRunPreservesDriverExitCodeWhenRunStateWriteFails(t *testing.T) {
 
 // TestRunProceedsOnCorruptRunState verifies a corrupt --state-file (a partial
 // write from a killed prior pass, or hand-edited garbage) never blocks the
-// Driver from running (issue #1997 review): the read side honors the same
+// Driver from running (issue #1997): the read side honors the same
 // "never gate the pass" contract the write side already does.
 func TestRunProceedsOnCorruptRunState(t *testing.T) {
 	dir := t.TempDir()
@@ -761,7 +755,7 @@ func TestRunProceedsOnCorruptRunState(t *testing.T) {
 
 // TestRunKeepsPriorScoutBriefPathWhenConfigOmitsIt verifies an empty
 // cfg.scoutBriefPath never clobbers a prior pass's recorded scout-brief path
-// with an empty string (issue #1997 review): only a caller that supplies a new
+// with an empty string (issue #1997): only a caller that supplies a new
 // path updates the field.
 func TestRunKeepsPriorScoutBriefPathWhenConfigOmitsIt(t *testing.T) {
 	dir := t.TempDir()
@@ -804,7 +798,7 @@ func TestRunKeepsPriorScoutBriefPathWhenConfigOmitsIt(t *testing.T) {
 // cfg.passSummaryPath into the run-state artifact after a pass that actually
 // wrote the file (issue #2549), mirroring cfg.scoutBriefPath. The fake
 // driver-exec writes the file itself: a configured path alone is not evidence
-// the pass wrote anything (issue #2549 follow-up review finding).
+// the pass wrote anything (issue #2549).
 func TestRunRecordsPassSummaryPathIntoRunState(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
@@ -882,7 +876,7 @@ func TestRunKeepsPriorPassSummaryPathWhenConfigOmitsIt(t *testing.T) {
 // TestRunClearsPassSummaryPathWhenPassDoesNotWriteFile verifies run clears
 // state.PassSummaryPath rather than carrying a PRIOR pass's value forward when
 // cfg.passSummaryPath is configured but this pass never wrote the file (issue
-// #2549 follow-up review finding): a killed-mid-turn pass must not hand the
+// #2549): a killed-mid-turn pass must not hand the
 // next pass a stale summary as if it were current.
 func TestRunClearsPassSummaryPathWhenPassDoesNotWriteFile(t *testing.T) {
 	dir := t.TempDir()
@@ -1166,7 +1160,7 @@ func TestRunClearsDecisionsPathWhenPassDoesNotWriteFile(t *testing.T) {
 
 // TestRunUnlinksStalePassSummaryPathBeforePass verifies seedAndInvokePass
 // unlinks any pre-existing file at cfg.passSummaryPath before invoking this
-// pass's driver-exec (issue #2549 follow-up review finding), so a file left by
+// pass's driver-exec (issue #2549), so a file left by
 // a pass killed mid-turn can never survive into a later pass's post-pass
 // os.Stat check.
 func TestRunUnlinksStalePassSummaryPathBeforePass(t *testing.T) {
@@ -1212,9 +1206,9 @@ func TestRunUnlinksStalePassSummaryPathBeforePass(t *testing.T) {
 
 // TestRecordPassSummaryLeavesPriorValueOnNonNotExistStatError verifies
 // recordPassSummary clears state.PassSummaryPath only when os.Stat fails
-// because the file does not exist, not on any other stat error such as ENOTDIR
-// (non-blocking review finding on run.go:886: treating every stat error as "the
-// pass wrote nothing" silently drops a valid handoff).
+// because the file does not exist, not on any other stat error such as ENOTDIR:
+// treating every stat error as "the pass wrote nothing" silently drops a valid
+// handoff.
 func TestRecordPassSummaryLeavesPriorValueOnNonNotExistStatError(t *testing.T) {
 	dir := t.TempDir()
 	// A regular file used as a path's directory component makes any stat
@@ -1237,7 +1231,7 @@ func TestRecordPassSummaryLeavesPriorValueOnNonNotExistStatError(t *testing.T) {
 // TestRunClearsPassSummaryPathWhenPassLeavesSeededFileUntouched verifies run
 // does not re-affirm state.PassSummaryPath when the seeded file comes out of
 // the pass byte-for-byte identical, which would hand the next pass a summary
-// two passes stale with no signal (non-blocking review finding on issue #2549).
+// two passes stale with no signal (issue #2549).
 // Seeding state.PassSummaryPath is what stops seedAndInvokePass unlinking it.
 func TestRunClearsPassSummaryPathWhenPassLeavesSeededFileUntouched(t *testing.T) {
 	dir := t.TempDir()
@@ -1775,8 +1769,7 @@ func reviewPassFakeDriverBody(callLog string) string {
 // reviewPassFakeDriverBodyWithDispositions is reviewPassFakeDriverBody plus one
 // step (issue #2550): call 3, the fix pass, writes dispositionsContent to
 // dispositionsPath the way a real fix pass would, so a caller can confirm round
-// 2's seeded review prompt carries it forward. Kept separate so the tests
-// already calling fakeReviewDriverBody verbatim are untouched.
+// 2's seeded review prompt carries it forward.
 func reviewPassFakeDriverBodyWithDispositions(callLog, dispositionsPath, dispositionsContent string) string {
 	return fmt.Sprintf(`: > "$DRIVER_LOG_PATH"
 n=$(wc -l < "%s")
@@ -2250,7 +2243,7 @@ func TestRunManifestPathEmptyWritesNoFile(t *testing.T) {
 // clobber fix: a nudge resume re-invokes the orchestrator as a fresh process,
 // whose in-memory manifest slice used to start nil and overwrite the entries an
 // earlier process had accumulated. A 2-entry manifest is pre-seeded; the new
-// entry must append as pass 3 with non-zero Usage (issue #2983 review finding).
+// entry must append as pass 3 with non-zero Usage (issue #2983).
 func TestRunNudgeResumePreservesExistingManifest(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
@@ -2747,7 +2740,7 @@ func TestRunWithReviewPassSeedsRoundTwoWithDeltaFocusFromRecordedAnchor(t *testi
 
 // TestRunWithReviewPassRoundOneNeverSeededEvenWithPriorState verifies the
 // reviewRounds > 0 guard itself keeps round 1's review prompt unseeded (issue
-// #2550 review finding). Every other loop test starts from a cold run-state, so
+// #2550). Every other loop test starts from a cold run-state, so
 // seedReviewPromptFromState no-ops regardless of the guard; pre-seeding a
 // non-empty ReviewFindings makes the guard the only thing that can hold.
 func TestRunWithReviewPassRoundOneNeverSeededEvenWithPriorState(t *testing.T) {
@@ -3211,8 +3204,8 @@ func TestRunWithReviewPassFirstPassPromptUnseededWhenStateStartsEmpty(t *testing
 }
 
 // TestRunWithReviewPassRemovesPriorRoundSeededReviewPromptButKeepsTheLast
-// verifies runWithReviewPass's prevSeededReviewPromptFile cleanup (issue #2550
-// review finding), the review-side mirror of
+// verifies runWithReviewPass's prevSeededReviewPromptFile cleanup (issue
+// #2550), the review-side mirror of
 // TestRunRemovesPriorPassSeededPromptFileButKeepsTheLast: over three rounds,
 // round 2's seeded file must be gone by the end and round 3's must remain.
 func TestRunWithReviewPassRemovesPriorRoundSeededReviewPromptButKeepsTheLast(t *testing.T) {
@@ -4108,10 +4101,9 @@ func TestRunWithReviewPassPromptNeverSeededWithPassSummary(t *testing.T) {
 }
 
 // TestRunWithReviewPassTerminatesOnMaxReviewRoundsCap verifies maxReviewRounds
-// (issue #2037) bounds the review-pass loop: a reviewer that BLOCKs every round
-// no longer stops the run outright once the cap is hit, since issue #2457
-// commits it to one more terminal land pass. This fake driver never emits an
-// outcome, so the run's one-land-pass bound stops it there.
+// (issue #2037) bounds the review-pass loop: once a reviewer that BLOCKs every
+// round hits the cap, issue #2457 commits the run to one terminal land pass.
+// This fake driver never emits an outcome, so that one-land-pass bound stops it.
 func TestRunWithReviewPassTerminatesOnMaxReviewRoundsCap(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
@@ -4230,8 +4222,8 @@ exit 0
 }
 
 // TestRunWithReviewPassTerminatesOnMaxBudgetUSDCap is the USD twin of
-// TestRunWithReviewPassTerminatesOnMaxBudgetTokensCap (issue #2694 review
-// finding), the only other coverage of the budget cap firing through a real
+// TestRunWithReviewPassTerminatesOnMaxBudgetTokensCap (issue #2694), the only
+// other coverage of the budget cap firing through a real
 // run() loop. Same fake driver and cadence, capped at $0.035, crossed by the
 // same 4th call that trips the token test's 350-token cap.
 func TestRunWithReviewPassTerminatesOnMaxBudgetUSDCap(t *testing.T) {
@@ -4660,7 +4652,7 @@ exit 0
 }
 
 // TestRunWithReviewPassStopsWithNoVerdictStopReason verifies a review pass that
-// produces no VERDICT line at all no longer stops the loop immediately: issue
+// produces no VERDICT line at all does not stop the loop immediately: issue
 // #2457 commits it to one terminal land pass instead, the same mechanism as the
 // caps. This fake driver never emits an outcome, so the one-land-pass bound
 // stops the run rather than looping or treating no verdict as an APPROVE.
@@ -5180,7 +5172,7 @@ func TestSeedReviewPromptFromStateIncludesDeltaFocusForValidAnchor(t *testing.T)
 }
 
 // TestSeedReviewPromptFromStateIncludesDeltaFocusForSixtyFourCharAnchor pins
-// seedblock.ValidReviewedCommitAnchor's upper boundary (issue #2551 review): a 64-character
+// seedblock.ValidReviewedCommitAnchor's upper boundary (issue #2551): a 64-character
 // anchor, a SHA-256 repo's full `git rev-parse HEAD` output, must still be
 // accepted. TestSeedReviewPromptFromStateOmitsDeltaFocusForInvalidAnchor covers
 // 65 as a reject; nothing pinned 64 as the accepted edge.
@@ -5238,8 +5230,7 @@ func TestSeedReviewPromptFromStateSeedsOnAnchorAlone(t *testing.T) {
 
 // TestSeedReviewPromptFromStateOmitsDeltaFocusForEmptyAnchor verifies
 // seedReviewPromptFromState (issue #2551) produces no delta-focus section when
-// state.ReviewedCommitAnchor is empty, behavior identical to before this anchor
-// existed.
+// state.ReviewedCommitAnchor is empty.
 func TestSeedReviewPromptFromStateOmitsDeltaFocusForEmptyAnchor(t *testing.T) {
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")
@@ -5653,7 +5644,7 @@ func TestSeedPromptFromStateIncludesDecisionsRecord(t *testing.T) {
 }
 
 // TestSeedPromptFromStateFencesDecisionsRecordContainingBackticks verifies
-// seedPromptFromState (issue #2695 review finding) wraps decisions-log content
+// seedPromptFromState (issue #2695) wraps decisions-log content
 // with promptfence.Block, so a payload carrying its own triple-backtick fence
 // cannot close the quoted block early and impersonate host-authored structure.
 // A containment check alone cannot tell fenced from unfenced content.
@@ -5731,7 +5722,7 @@ func TestSeedPromptFromStateDecisionsRecordMissingFileDegradesGracefully(t *test
 }
 
 // TestSeedPromptFromStateDegradesToUnseededWhenDecisionsLogPathIsOnlyFieldAndFileMissing
-// verifies seedPromptFromState (issue #2695 AC4 review finding) returns
+// verifies seedPromptFromState (issue #2695 AC4) returns
 // promptFile byte-for-byte unchanged, creating no temp file, when
 // DecisionsLogPath is the only field set and its file is missing, rather than
 // rendering a "## Run-state handoff" header with no bullets under it.
@@ -6050,7 +6041,7 @@ exit 0
 }
 
 // TestScanPassLogDetectsOutcomeThroughStreamJSONAndMarkdownWrap verifies
-// scanPassLog against a realistic claude stream-json log (issue #1998 review):
+// scanPassLog against a realistic claude stream-json log (issue #1998):
 // a bare-line scan of the raw JSONL would see neither marker, since both live
 // inside JSON string fields. It also covers claude wrapping its final message
 // in backticks (issue #1611), which outcome.StripResultText already strips.
@@ -6232,7 +6223,7 @@ func TestScanReviewLogExtractsVerdictAndFindings(t *testing.T) {
 }
 
 // TestScanReviewLogStopsFindingsAtTheNextRenderedEvent verifies scanReviewLog
-// (issue #2037 review) bounds findings to the verdict message itself: a review
+// (issue #2037) bounds findings to the verdict message itself: a review
 // pass that keeps talking after its verdict gets a second rendered line, marked
 // off by a fresh "[role] " prefix, and that trailing content must not leak into
 // the seeded fix-pass brief.
@@ -6353,8 +6344,8 @@ func TestScanReviewLogIgnoresQuotedVerdictInDiffHunk(t *testing.T) {
 }
 
 // TestRunRemovesPriorPassSeededPromptFileButKeepsTheLast verifies a multi-pass
-// loop does not accumulate one seeded-prompt temp file per pass (issue #1998
-// review): once a later pass has its own seeded file the previous one is
+// loop does not accumulate one seeded-prompt temp file per pass (issue
+// #1998): once a later pass has its own seeded file the previous one is
 // removed, while the last pass's is deliberately left on disk, since the box's
 // filesystem is destroyed with the container anyway.
 func TestRunRemovesPriorPassSeededPromptFileButKeepsTheLast(t *testing.T) {
