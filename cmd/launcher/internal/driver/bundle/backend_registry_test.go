@@ -1,6 +1,7 @@
 package bundle_test
 
 import (
+	"reflect"
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
@@ -16,7 +17,7 @@ func TestBackendStrategiesMatchNixRows(t *testing.T) {
 			t.Errorf("nix backend row %q has no registered Go Strategy", d.Name)
 			continue
 		}
-		if s.Descriptor != d {
+		if !reflect.DeepEqual(s.Descriptor, d) {
 			t.Errorf("backend %q: Strategy descriptor %+v differs from nix row %+v", d.Name, s.Descriptor, d)
 		}
 	}

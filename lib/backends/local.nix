@@ -16,6 +16,9 @@
   # ADR 0032: local is not reachable from inside the Box at all.
   inBoxUnreachableTracker = true;
   slugIssueRefTracker = true;
+  # ADR 0075: an issue file's frontmatter labels both filter and stamp a label
+  # route.
+  routeKinds = [ "label" ];
   relayCapable = true;
   hostPostingCapable = true;
   trackerAxisRead = "LOCAL";

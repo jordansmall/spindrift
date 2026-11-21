@@ -289,7 +289,7 @@ func butlerPatchForge(caps forge.Capabilities) butler.PatchForge {
 		caps.PRForge == nil || caps.BranchDeleter == nil {
 		return nil
 	}
-	if caps.TrackerDescriptor.Name == "" || caps.TrackerDescriptor != caps.ForgeDescriptor {
+	if caps.TrackerDescriptor.Name == "" || caps.TrackerDescriptor.Name != caps.ForgeDescriptor.Name {
 		return nil
 	}
 	return hostPatchForge{pr: caps.PRForge, BranchPusher: caps.BranchPusher, DraftPRCreator: caps.DraftPRCreator, IssueLabeler: caps.IssueLabeler, BranchDeleter: caps.BranchDeleter}

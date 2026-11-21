@@ -96,6 +96,13 @@
 # #7318), so it must not set goTestBuildsOn.
 # Like `knobs`, the generated Descriptor ignores all three.
 
+# routeKinds (optional list of strings) names the Issue route kinds the tracker
+# translates (ADR 0075 decision 1); each declared kind has both a filter op and
+# a stamp op. An omitted field means none, and mkHarness rejects a route kind
+# the tracker has not declared: a tracker that ignored the route would quietly
+# list the whole Tracker scope. The generated Descriptor carries it as
+# RouteKinds.
+
 # connectorOnly (optional bool) marks a backend whose only implementation is
 # its Connector: there is no native adapter for a Connector row's `primary` to
 # replace, so lib/flakeModule.nix leaves the name out of the set `primary` is

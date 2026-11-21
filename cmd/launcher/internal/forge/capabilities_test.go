@@ -1,6 +1,7 @@
 package forge
 
 import (
+	"reflect"
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
@@ -194,10 +195,10 @@ func TestResolveCapabilities_DescriptorPassthrough(t *testing.T) {
 
 	c := ResolveCapabilities(NewFake().AsPushOnly(), NewFake(), forgeDesc, trackerDesc)
 
-	if c.ForgeDescriptor != forgeDesc {
+	if !reflect.DeepEqual(c.ForgeDescriptor, forgeDesc) {
 		t.Errorf("ForgeDescriptor = %+v, want %+v", c.ForgeDescriptor, forgeDesc)
 	}
-	if c.TrackerDescriptor != trackerDesc {
+	if !reflect.DeepEqual(c.TrackerDescriptor, trackerDesc) {
 		t.Errorf("TrackerDescriptor = %+v, want %+v", c.TrackerDescriptor, trackerDesc)
 	}
 }

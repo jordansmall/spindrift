@@ -1204,6 +1204,7 @@ rec {
         (optional "trackerAxisFiler" "TrackerAxisFiler" "")
         (optional "forgeBackend" "ForgeBackend" "")
         (optional "quickstart" "Quickstart" null)
+        (optional "routeKinds" "RouteKinds" [ ])
       ];
       # A row attribute outside this set is a misspelling, not a new fact, and
       # must fail the build rather than render as if the field were never set.
@@ -1277,6 +1278,10 @@ rec {
         overrides.quickstart =
           goName: value:
           "\t${goName}: &QuickstartBlock{Hosts: []string{${renderGoStringSlice value.hosts}}, Axes: []string{${renderGoStringSlice value.axes}}},\n";
+        # The empty-list default must render nothing, like a false bool.
+        overrides.routeKinds =
+          goName: value:
+          if value == [ ] then "" else "\t${goName}: []string{${renderGoStringSlice value}},\n";
       };
       renderRow =
         row:

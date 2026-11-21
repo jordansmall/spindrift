@@ -132,6 +132,11 @@ type Descriptor struct {
 	// Quickstart is the backend's opt-in to the Quickstart wizard (ADR 0068
 	// decision 8); nil means hand-edit only, never offered by the wizard.
 	Quickstart *QuickstartBlock
+
+	// RouteKinds lists the Issue route kinds this tracker translates (ADR 0075
+	// decision 1). Each declared kind has both a filter op and a stamp op;
+	// empty means the tracker takes no route at all.
+	RouteKinds []string
 }
 
 // QuickstartBlock is a row's quickstart declaration: Hosts are the git remote
