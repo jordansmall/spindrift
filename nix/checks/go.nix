@@ -351,9 +351,13 @@ let
         '') ((rowFor name).goTestRepoFiles or [ ]);
       nativeBuildInputs = goTestInputs;
     };
+  # Bundled rows only (issue #7318): the core run (launcher-go-test) already
+  # runs the core rows' packages, carries the SPINDRIFT_CONNECTOR_HOST their
+  # tests need, which setupFor above lacks, and is cut from coreFiles, so a
+  # bundled edit never moves it. A per-row derivation would run them twice.
   backendGoTests = backendGoTestsFor {
     files = launcherDir;
-    names = backendNames;
+    names = bundledBackendNames;
   };
   # Packages the runner families' tests reach (go list -test -deps over every
   # family's package): the union of their closures, so one list serves every
@@ -779,7 +783,7 @@ driverGoTests
 // adapterRegistryChecks {
   prefix = "backends";
   testsFor = backendGoTestsFor;
-  names = backendNames;
+  names = bundledBackendNames;
 }
 // adapterRegistryChecks {
   prefix = "runners";
@@ -807,7 +811,7 @@ driverGoTests
     {
       prefix = "backends";
       testsFor = backendGoTestsFor;
-      names = backendNames;
+      names = bundledBackendNames;
     }
     {
       prefix = "runners";
@@ -1148,14 +1152,15 @@ driverGoTests
   # for backends: the core backends live in the core checks.
   #
   # No backend's go test source holds another backend's directory, bar the git
-  # backend's for `local` and forgejo (issue #5637). A fileset check for the
-  # backend-to-backend leaks, since a core backend edit still moves every
-  # backend's vendor drvPath. Editing a bundled backend (issue #5648) leaves the
-  # core checks' drvPaths unchanged, while editing a core backend moves every
-  # core check's. Editing a runner family leaves every backend's go test
-  # drvPath unchanged, as backends need only the runner root package; the
-  # family's own sensitivity is asserted by runners-go-test-independent. The
-  # sensitivity asserts keep it from passing vacuously.
+  # backend's for the bundled backends that build on it (issue #5637). A
+  # fileset check for the backend-to-backend leaks, since a core backend edit
+  # still moves every backend's vendor drvPath. Editing a bundled backend
+  # (issue #5648) leaves the core checks' drvPaths unchanged, while editing a
+  # core backend moves every core check's. Editing a runner family leaves
+  # every backend's go test drvPath unchanged, as backends need only the
+  # runner root package; the family's own sensitivity is asserted by
+  # runners-go-test-independent. The sensitivity asserts keep it from passing
+  # vacuously.
   backends-go-test-independent =
     let
       inherit (pkgs.lib) assertMsg concatStringsSep;
@@ -1182,14 +1187,22 @@ driverGoTests
           n: builtins.filter (c: !builtins.elem c (movedBy n)) allCoreChecks
         ) coreBackendNames
       );
-      backendDrvs = set: map (n: set.${adapterGoTestAttr "backends" n}.drvPath) backendNames;
+      backendDrvs = set: map (n: set.${adapterGoTestAttr "backends" n}.drvPath) bundledBackendNames;
       runnerMoved = builtins.filter (
         n:
         backendDrvs (backendGoTestsFor {
           files = afterRemoving (runnerDir n);
-          names = backendNames;
+          names = bundledBackendNames;
         }) != backendDrvs backendGoTests
       ) runnerNames;
+      coreDerived = builtins.filter (
+        n: backendGoTests ? ${adapterGoTestAttr "backends" n}
+      ) coreBackendNames;
+      allRowDerived = backendGoTestsFor {
+        files = launcherDir;
+        names = backendNames;
+      };
+      coreBuildsOn = builtins.filter (n: buildsOnFor n != null) coreBackendNames;
       sensitivityRows = builtins.filter (row: row ? goTestBuildsOn) backendRowList;
       leaks = concatStringsSep ", " (
         builtins.concatMap (
@@ -1200,9 +1213,17 @@ driverGoTests
               other != name && !allowed name other && held name other != [ ]
             ) "${name} holds ${other}"
           ) backendNames
-        ) backendNames
+        ) bundledBackendNames
       );
     in
+    assert assertMsg (coreBackendNames != [ ]) "no backend row is marked core; the check is inert";
+    assert assertMsg (coreDerived == [ ])
+      "core backends have a per-row go test derivation: ${concatStringsSep ", " coreDerived}; see backendGoTests";
+    assert assertMsg
+      (builtins.all (n: allRowDerived ? ${adapterGoTestAttr "backends" n}) coreBackendNames)
+      "backendGoTestsFor over every row yields no core backend derivation; the coreDerived assert is inert";
+    assert assertMsg (coreBuildsOn == [ ])
+      "core backends set goTestBuildsOn: ${concatStringsSep ", " coreBuildsOn}; they have no per-row derivation to read it";
     assert assertMsg (sensitivityRows != [ ]) "no backend row sets goTestBuildsOn; the check is inert";
     assert assertMsg (builtins.all (row: held row.name row.goTestBuildsOn != [ ])
       sensitivityRows
