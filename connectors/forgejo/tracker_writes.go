@@ -148,6 +148,10 @@ func createLabel(t tracker.Target, name, description, color string) error {
 // apply failing still answers the URL, since core reads ("", err) as nothing
 // filed and would refile (#4459).
 func fileIssue(t tracker.Target, r tracker.IssueRequest) (string, error) {
+	labels, err := tracker.StampRouteLabels(r.Labels, r.Route)
+	if err != nil {
+		return "", err
+	}
 	body := r.Body
 	if r.DedupMarker != "" {
 		if body == "" {
@@ -158,13 +162,13 @@ func fileIssue(t tracker.Target, r tracker.IssueRequest) (string, error) {
 	}
 	ids := []int64{}
 	var applyByName bool
-	if len(r.Labels) > 0 {
+	if len(labels) > 0 {
 		defined, orgUnreadable, err := labelUnion(t)
 		if err != nil {
 			return "", err
 		}
 		var missing []string
-		for _, n := range r.Labels {
+		for _, n := range labels {
 			i := slices.IndexFunc(defined, func(l rawLabel) bool { return l.Name == n })
 			if i < 0 {
 				missing = append(missing, n)
@@ -189,7 +193,7 @@ func fileIssue(t tracker.Target, r tracker.IssueRequest) (string, error) {
 		return "", errors.New("forgejo: create issue response carried no html_url")
 	}
 	if applyByName {
-		_ = setLabels(t, strconv.Itoa(created.Number), r.Labels)
+		_ = setLabels(t, strconv.Itoa(created.Number), labels)
 	}
 	return created.HTMLURL, nil
 }

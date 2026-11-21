@@ -235,3 +235,15 @@ func TestFileIssueEmptyURLIsAnError(t *testing.T) {
 		t.Fatalf("url = %q", u)
 	}
 }
+
+func TestFileIssueStampsTheRouteLabels(t *testing.T) {
+	got := labelStub(t, `[{"id":1,"name":"a"},{"id":2,"name":"orders-api"}]`, ok(`[]`),
+		map[string]connector.Response{repoAPI + "/issues": ok(`{"number":3,"html_url":"u"}`)})
+	route := []tracker.Selector{{Kind: "label", Value: "orders-api"}, {Kind: "label", Value: "a"}}
+	if _, err := fileIssue(ttgt, tracker.IssueRequest{Title: "T", Labels: []string{"a"}, Route: route}); err != nil {
+		t.Fatal(err)
+	}
+	if r := (*got)[len(*got)-1]; r.Body != `{"body":"","labels":[1,2],"title":"T"}` {
+		t.Fatalf("request = %#v", r)
+	}
+}
