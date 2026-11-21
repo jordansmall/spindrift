@@ -340,10 +340,11 @@ and in the in-box `box` program; the only bash left is the generated shim that
   in `lib/drivers/default.nix`, and `checks/drivers.nix` unions it in and
   runs the parity checks over every row — a row with no file fails
   evaluation (issue #5502). Its Go tests run in `drivers-<name>-go-test`,
-  which `checks/go.nix` generates from the same row; each backend row in
-  `lib/backends/default.nix` likewise yields `backends-<name>-go-test` over
-  its `internal/forge/<name>` package. Those root checks skip the Connector
-  conformance tests: the Connector's subflake
+  which `checks/go.nix` generates from the same row; each bundled (non-core)
+  backend row in `lib/backends/default.nix` likewise yields
+  `backends-<name>-go-test` over its `internal/forge/<name>` package, while
+  the core rows' packages run in the core `launcher-go-test`. Those root
+  checks skip the Connector conformance tests: the Connector's subflake
   (`connector-<name>-conformance`) exports
   `SPINDRIFT_BACKEND_CONNECTOR_WASM` and
   `SPINDRIFT_BACKEND_CONNECTOR_ROUTES`, so the backend's tests run the tracker
