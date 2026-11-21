@@ -236,6 +236,7 @@ func TestDecode_ResetAtHeaders(t *testing.T) {
 		{"retry-after http date", `{"retry-after":"` + date.Format(http.TimeFormat) + `"}`, &date},
 		{"negative is no reset", `{"retry-after":"-1"}`, nil},
 		{"non-string header drops the payload", `{"retry-after":60}`, nil},
+		{"case-colliding headers: last wins", `{"Retry-After":"9","retry-after":"8"}`, at(8 * time.Second)},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

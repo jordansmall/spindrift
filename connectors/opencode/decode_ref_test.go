@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"math"
 	"net/http"
 	"strconv"
@@ -14,9 +16,9 @@ import (
 
 // This file is a frozen encoding/json copy of the native opencode Decode, the
 // reference TestDecodeMatchesReference and FuzzDecodeMatchesReference compare
-// decode.go against, so it must not change alongside decode.go. It omits the
-// spindrift_op case: the host decodes those lines itself, and the guest
-// decoder only reads them for state.
+// decode.go against, so it must not change alongside decode.go: it follows
+// native, not decode.go. It omits the spindrift_op case: the host decodes those
+// lines itself, and the guest decoder only reads them for state.
 
 // refIsErrorEvent reports whether line is a type:"error" event, for ResolveExit.
 // It is deliberately narrower than Decode: it decodes only type and part.text,
@@ -177,6 +179,41 @@ func refDecodeStepFinish(part refLogPart, ts int64) []event.Event {
 	return events
 }
 
+// refResponseHeaders holds lower-cased header names. Decoding a plain map would
+// lose document order, so Retry-After and retry-after would race; walking the
+// tokens lets the last one win. encoding/json calls UnmarshalJSON once per
+// repeated (case-folded) key, in document order, so the win holds across them.
+type refResponseHeaders map[string]string
+
+func (h *refResponseHeaders) UnmarshalJSON(b []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(b))
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	if tok == nil {
+		return nil
+	}
+	if d, ok := tok.(json.Delim); !ok || d != '{' {
+		return errors.New("responseHeaders: not an object")
+	}
+	if *h == nil {
+		*h = refResponseHeaders{}
+	}
+	for dec.More() {
+		k, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		var v string
+		if err := dec.Decode(&v); err != nil {
+			return err
+		}
+		(*h)[strings.ToLower(k.(string))] = strings.TrimSpace(v)
+	}
+	return nil
+}
+
 // refResetFrom derives the rate-limit reset time from the response headers of a
 // NamedError payload, in the order opencode's own session/retry.ts reads them:
 // retry-after-ms, then retry-after as seconds, then retry-after as an HTTP date.
@@ -185,16 +222,13 @@ func refDecodeStepFinish(part refLogPart, ts int64) []event.Event {
 func refResetFrom(raw json.RawMessage, timestampMs int64) *time.Time {
 	var payload struct {
 		Data struct {
-			ResponseHeaders map[string]string `json:"responseHeaders"`
+			ResponseHeaders refResponseHeaders `json:"responseHeaders"`
 		} `json:"data"`
 	}
 	if json.Unmarshal(raw, &payload) != nil {
 		return nil
 	}
-	headers := map[string]string{}
-	for k, v := range payload.Data.ResponseHeaders {
-		headers[strings.ToLower(k)] = strings.TrimSpace(v)
-	}
+	headers := payload.Data.ResponseHeaders
 	relative := func(value string, unit time.Duration) *time.Time {
 		// MaxInt32 keeps n*unit inside time.Duration's int64 range for either unit.
 		n, err := strconv.ParseFloat(value, 64)
