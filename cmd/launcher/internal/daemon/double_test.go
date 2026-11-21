@@ -99,6 +99,9 @@ type scriptedRunner struct {
 	// onPrebuild answers Prebuild: call is its 1-based index. Unset means
 	// success.
 	onPrebuild func(ctx context.Context, call int, tip Tip) error
+	// onSweep answers SweepLateMerges the way onPrebuild answers Prebuild,
+	// after the revision is recorded; unset means success.
+	onSweep func(ctx context.Context, revision string) error
 
 	// Demand scripting: demand/demandErr are set (and may change) during a
 	// test through setDemand/setDemandErr, so they live under mu with the
@@ -119,6 +122,7 @@ type scriptedRunner struct {
 	resolveCalls int
 	selfCalls    int
 	prebuildTips []Tip
+	sweepRevs    []string
 	runCalls     []runCall
 	kindCalls    map[Kind]int
 	inFlight     int
@@ -1500,6 +1504,24 @@ func (r *scriptedRunner) Prebuild(ctx context.Context, tip Tip) error {
 		return r.onPrebuild(ctx, call, tip)
 	}
 	return nil
+}
+
+// SweepLateMerges records the revision, then answers through onSweep.
+func (r *scriptedRunner) SweepLateMerges(ctx context.Context, revision string) error {
+	r.mu.Lock()
+	r.sweepRevs = append(r.sweepRevs, revision)
+	r.mu.Unlock()
+	if r.onSweep != nil {
+		return r.onSweep(ctx, revision)
+	}
+	return nil
+}
+
+// sweeps returns a copy of every revision SweepLateMerges was called with.
+func (r *scriptedRunner) sweeps() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.sweepRevs)
 }
 
 // prebuildCount is how many times Prebuild was called.

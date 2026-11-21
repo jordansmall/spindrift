@@ -1159,6 +1159,33 @@ func (r *hostRunner) RunDoctor(ctx context.Context, revision string) (exit int, 
 	return 0, "", waitErr
 }
 
+// runnerSweepCommand is SweepLateMerges's exec seam, the runnerDoctorCommand
+// gesture for the sweep.
+var runnerSweepCommand = exec.CommandContext
+
+// SweepLateMerges shells out to the pinned launcher's hidden late-merge sweep
+// verb (issue #7342), so the forge reads run outside every pool slot. Its
+// output goes to the daemon's stderr (stdout is the JSON event stream), and a
+// non-zero exit is an error carrying the exit — the caller only warns.
+func (r *hostRunner) SweepLateMerges(ctx context.Context, revision string) error {
+	sweepCmd, err := daemon.LateMergeSweepCommand(daemon.LateMergeSweepSpec{RepoPath: r.repoPath, AppAttr: r.appAttr, Revision: revision, Env: r.env, Knobs: r.knobs, FeatureBranch: r.featureBranch})
+	if err != nil {
+		return err
+	}
+	cmd := runnerSweepCommand(ctx, sweepCmd.Argv[0], sweepCmd.Argv[1:]...)
+	cmd.Env = sweepCmd.Env
+	// Own process group, as StartChild's: a terminal Ctrl-C halts the pool and
+	// lets the sweep finish; only ctx cancel (hard abort, or a committed
+	// in-place handoff) ends it.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// The default cancel kills only the direct PID, orphaning whatever the
+	// sweep forked (a Connector subprocess); pgid == pid under Setpgid.
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
 // maxMarkerLine bounds the partial line markerLineWriter holds, so a doctor
 // that never prints a newline cannot grow the daemon's memory.
 const maxMarkerLine = 4096

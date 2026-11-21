@@ -53,6 +53,9 @@ type pool struct {
 	// no event follows its return.
 	bg sync.WaitGroup
 
+	// rev is the late-merge sweeper's revision source; see revisionFeed.
+	rev *revisionFeed
+
 	// demandFlights holds each kind's in-flight Demand probe, so slots that
 	// all find the same kind stale share one Runner.Demand call. Guarded by
 	// p.mu but kept off state: it is coordination, not published pool state.
@@ -398,6 +401,7 @@ func newPool(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) 
 		clk:     clk,
 		cancel:  cancel,
 		abandon: make(chan struct{}),
+		rev:     newRevisionFeed(),
 		st: state{
 			slots:     slots,
 			lastStart: make([]childStartPin, cfg.Slots),
@@ -1380,6 +1384,9 @@ func (p *pool) idleSleep(ctx context.Context, slot int) (wantResolve bool) {
 func (p *pool) resolveTip(ctx context.Context, slot int) (Tip, error) {
 	p.setPhase(slot, PhaseResolving)
 	tip, err := p.r.ResolveTip(ctx)
+	if tip.Revision != "" {
+		p.rev.set(tip.Revision)
+	}
 	if tip.Moved {
 		p.noteTipMoved(slot, tip.Revision)
 	}
