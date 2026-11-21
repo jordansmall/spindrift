@@ -75,7 +75,7 @@ func TestNewGatedContext_ResearchKind_AppliesKindAndLabel(t *testing.T) {
 
 // newGatedContext must thread selfContained through for research's no-repo
 // sub-mode (issues #2944 slice 1, #2202). REPO_SLUG and GH_TOKEN stay unset on
-// purpose: repoRequirementExempt (internal/launcherchecks) exempts exactly this
+// purpose: noRepoResearch (internal/launcherchecks) exempts exactly this
 // combination, so setting them would hide a regression in that exemption.
 func TestNewGatedContext_SelfContainedResearch_SetsSelfContainedField(t *testing.T) {
 	setKnob(t, "ISSUE_TRACKER", "local")

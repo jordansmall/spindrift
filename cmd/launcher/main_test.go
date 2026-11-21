@@ -249,8 +249,8 @@ func TestMainRun_Dispatch_ContinuousSetsEnv(t *testing.T) {
 }
 
 // The #2032 repro: CODE_FORGE=local with ISSUE_TRACKER at its github default
-// is not the fully-local exemption (repoRequirementExempt), which needs both
-// axes local, so REPO_SLUG stays required. `dispatch` surfaces that as
+// is not the fully-local exemption (launcherchecks.repoSlugRequired), which
+// needs both axes local, so REPO_SLUG stays required. `dispatch` surfaces that as
 // exitcode.ConfigInvalid rather than a bare 1 (issue #2568 slice 2).
 func TestMainRun_Dispatch_MissingRepoSlugUnderLocalForge_ExitsConfigInvalid(t *testing.T) {
 	setKnob(t, "CODE_FORGE", "local")

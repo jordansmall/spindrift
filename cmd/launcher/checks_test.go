@@ -101,7 +101,7 @@ func TestLauncherChecks_RepoSlug_Fails(t *testing.T) {
 	if err == nil {
 		t.Fatal("repo-slug Probe() must fail when the repo slug is empty")
 	}
-	if err.Error() != "pass --repo-slug owner/repo or set forge.repoSlug (the target GitHub repository)" {
+	if err.Error() != "pass --repo-slug owner/repo or set forge.repoSlug (the target repository)" {
 		t.Errorf("repo-slug Probe() error = %q, want exact validate() text", err.Error())
 	}
 }

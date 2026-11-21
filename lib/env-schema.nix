@@ -510,7 +510,7 @@ withRowKnobs {
     group = "forge";
     required = true;
     placeholder = "owner/repo";
-    doc = "target GitHub repository the agents work on; required unless CODE_FORGE and ISSUE_TRACKER are both local";
+    doc = "target repository the agents work on; required unless CODE_FORGE and ISSUE_TRACKER are both local and no ISSUE_ROUTE is set";
     flakeOption = true;
     boxEnv = true;
   };
