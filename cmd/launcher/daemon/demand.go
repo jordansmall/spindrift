@@ -85,7 +85,7 @@ func buildTrackerSources(doc *inputdoc.Document, probed []*dispatchkind.Descript
 	shared := backendkit.Shared{RepoSlug: childKnob(doc, "REPO_SLUG", os.Getenv("REPO_SLUG"))}
 	// A route the child would refuse must not leave the daemon counting the
 	// tracker's whole scope.
-	route, err := forge.ResolveRoute(childKnob(doc, "ISSUE_ROUTE", os.Getenv("ISSUE_ROUTE")), name, strat.RouteKinds)
+	route, err := forge.ResolveRoute(issueRoute(doc), name, strat.RouteKinds)
 	if err != nil {
 		return nil, allMissing(probed, err.Error())
 	}
@@ -274,6 +274,47 @@ func warnUnprobedKinds(missing missingSources, stderr io.Writer, em *daemon.Emit
 		fmt.Fprintf(stderr, "daemon: kind %s has no Demand source: %s; scheduling it from child exits instead\n", k, missing[k])
 		em.Emit(daemon.Event{Event: report.EventDemandSourceMissing, Kind: k, Reason: missing[k]})
 	}
+}
+
+// probeRoute runs each tracker-probed kind's composed ready query once, fresh,
+// when ISSUE_ROUTE is set, and logs how many issues the route matches (zero is
+// logged, not an error). A tracker that rejects the query fails startup naming
+// the route, before the pool exists, rather than starving silently on every
+// probe. Unrouted, it does nothing. A route is not a secret, so the error may
+// carry its value.
+func probeRoute(demand demandSources, kinds []daemon.Kind, route string, stderr io.Writer) error {
+	route = strings.TrimSpace(route)
+	if route == "" {
+		return nil
+	}
+	for _, k := range kinds {
+		d, ok := dispatchkind.ByVerb(string(k))
+		counter := demand[k]
+		if !ok || counter == nil {
+			continue
+		}
+		// Exhaustive like buildDemandSources, so a new DemandSource cannot be
+		// skipped silently here.
+		switch d.DemandSource {
+		case dispatchkind.DemandTrackerProbe:
+		case dispatchkind.DemandHostOutbox, dispatchkind.DemandChildReported:
+			// Only a tracker counter runs the routed query.
+			continue
+		default:
+			panic(fmt.Sprintf("daemon: kind %s has unhandled DemandSource %d", k, d.DemandSource))
+		}
+		n, err := counter.CountReady(true)
+		if err != nil {
+			return fmt.Errorf("%s: ISSUE_ROUTE %q: tracker rejected the ready query: %w", k, route, err)
+		}
+		fmt.Fprintf(stderr, "daemon: %s: ISSUE_ROUTE %q matches %d ready issue(s)\n", k, route, n)
+	}
+	return nil
+}
+
+// issueRoute is the ISSUE_ROUTE a child resolves.
+func issueRoute(doc *inputdoc.Document) string {
+	return childKnob(doc, "ISSUE_ROUTE", os.Getenv("ISSUE_ROUTE"))
 }
 
 // issueTrackerName is the ISSUE_TRACKER a child resolves.

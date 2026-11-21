@@ -901,6 +901,18 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	// ReadStatus reports it stale, as a record of how this run ended.
 	statusWriter := daemon.NewStatusWriter(gitDirPath, clk.Now)
 
+	// After the lock and status writer so a bad route halts through finish;
+	// before the runner and preflight so no Box starts against a route the
+	// tracker rejects. A resumed image rolls back instead, like the other
+	// pre-pool refusals below.
+	if err := probeRoute(demand, args.Kinds, issueRoute(doc), stderr); err != nil {
+		h := daemon.Halt{Class: daemon.HaltInvalidConfig, Detail: err.Error()}
+		if tryRollBack(h.Diagnostic()) {
+			return 0
+		}
+		return finish(stderr, em, statusWriter, args.Kinds, h)
+	}
+
 	r, err = newHostRunner(hostRunnerConfig{
 		repoPath:      repoPath,
 		appAttr:       appAttr,
@@ -980,11 +992,12 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	}
 
 	// Validated here so every config-invalid halt from this binary goes
-	// through finish; Loop's invalidConfig is reached only by embedders and
-	// tests. A resumed image whose config cannot take the handoff (a dropped
-	// kind, MAX_PARALLEL below a handed-off slot) refuses like a failed
-	// preflight: before any halt event and before rootSelf. Without a
-	// rollback, the deferred wait-out drains the inherited children.
+	// through finish (the route probe above is the one earlier such halt);
+	// Loop's invalidConfig is reached only by embedders and tests. A resumed
+	// image whose config cannot take the handoff (a dropped kind,
+	// MAX_PARALLEL below a handed-off slot) refuses like a failed preflight:
+	// before any halt event and before rootSelf. Without a rollback, the
+	// deferred wait-out drains the inherited children.
 	if err := cfg.Validate(); err != nil {
 		h := daemon.Halt{Class: daemon.HaltInvalidConfig, Detail: err.Error()}
 		if tryRollBack(h.Diagnostic()) {

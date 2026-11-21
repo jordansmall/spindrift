@@ -4559,6 +4559,93 @@ func TestMainRun_HandoffFitRefusalAfterResumeRollsBack(t *testing.T) {
 	assertLockHeld(t, f.gitDir, false)
 }
 
+// routedLocalInput rewrites the fixture's input document to route the local
+// tracker at issuesDir. A path that is a regular file makes the tracker reject
+// the routed count; a missing one counts zero.
+func (f *inPlaceFixture) routedLocalInput(t *testing.T, issuesDir string) {
+	t.Helper()
+	doc := validKnobDocument()
+	doc.Settings["DAEMON_SELF_APP"] = ".#dogfood"
+	doc.Settings["ISSUE_TRACKER"] = "local"
+	doc.Settings["ISSUE_ROUTE"] = "label=orders-api"
+	doc.Settings["LOCAL_ISSUES_DIR"] = issuesDir
+	data, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f.input, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestMainRun_RoutedTrackerRejectionHaltsConfigInvalid pins that a fresh
+// routed start whose tracker rejects the startup count halts config-invalid
+// before any Box, naming the route.
+func TestMainRun_RoutedTrackerRejectionHaltsConfigInvalid(t *testing.T) {
+	f := newInPlaceFixtureT(t, inPlaceNewSelf)
+	issues := filepath.Join(t.TempDir(), "issues")
+	writeFileT(t, issues, "not a directory")
+	f.routedLocalInput(t, issues)
+	code, out := f.start([]string{"--input", f.input, "dispatch"})
+	if got := waitCode(t, code, out); got != 1 {
+		t.Fatalf("image exited %d, want 1; output:\n%s", got, out.String())
+	}
+	ev, ok := findEvent(eventsIn(out), "halt", "")
+	if !ok || !strings.Contains(ev.Reason, "config-invalid") {
+		t.Errorf("halt event = %+v (found %v), want reason config-invalid; output:\n%s", ev, ok, out.String())
+	}
+	if !strings.Contains(out.String(), `ISSUE_ROUTE "label=orders-api"`) {
+		t.Errorf("output does not name the route:\n%s", out.String())
+	}
+	if len(f.execCalls()) != 0 {
+		t.Errorf("a refused start exec'd %+v", f.execCalls())
+	}
+	assertLockHeld(t, f.gitDir, false)
+}
+
+// TestMainRun_RoutedTrackerRejectionAfterResumeRollsBack pins that a resumed
+// image whose routed startup count is rejected rolls back like a failed
+// preflight instead of halting.
+func TestMainRun_RoutedTrackerRejectionAfterResumeRollsBack(t *testing.T) {
+	f := newInPlaceFixtureT(t, inPlaceNewSelf)
+	issues := filepath.Join(t.TempDir(), "issues")
+	// A ready issue on the route, or the first image would have no demand to
+	// start the child it hands off.
+	if err := os.Mkdir(issues, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFileT(t, filepath.Join(issues, "a.md"), "---\ntitle: a\nstate: ready-for-agent\nlabels: [orders-api]\ncreated: 2024-01-01T00:00:00Z\n---\nbody\n")
+	writeFileT(t, filepath.Join(issues, "b.md"), "---\ntitle: b\nstate: ready-for-agent\nlabels: [other]\ncreated: 2024-01-01T00:00:00Z\n---\nbody\n")
+	f.routedLocalInput(t, issues)
+	call, first := f.handOff(t)
+	if want := `ISSUE_ROUTE "label=orders-api" matches 1 ready issue(s)`; !strings.Contains(first.String(), want) {
+		t.Errorf("first image output lacks %q:\n%s", want, first.String())
+	}
+	if err := os.RemoveAll(issues); err != nil {
+		t.Fatal(err)
+	}
+	writeFileT(t, issues, "not a directory")
+	code, out := f.start(f.resumeArgv(call))
+	if got := waitCode(t, code, out); got != 0 {
+		t.Fatalf("image exited %d, want 0 (rolled back); output:\n%s", got, out.String())
+	}
+	calls := f.execCalls()
+	if len(calls) != 2 || calls[1].path != inPlaceOldSelf {
+		t.Fatalf("exec calls = %+v, want the handoff then a rollback to the old program", calls)
+	}
+	if _, ok := findEvent(eventsIn(out), "halt", ""); ok {
+		t.Errorf("a rolled-back image left a halt event behind; output:\n%s", out.String())
+	}
+	r, err := daemon.ReadStatus(f.gitDir)
+	if err != nil {
+		t.Fatalf("ReadStatus: %v", err)
+	}
+	if r.Status != nil && r.Status.State == daemon.StateHalted {
+		t.Errorf("a rolled-back image left a halted status: %+v", r.Status)
+	}
+	assertLockHeld(t, f.gitDir, true)
+}
+
 // TestMainRun_HandoffFitRefusalWithoutRollbackHaltsAndDrains pins that with no
 // rollback possible the same refusal halts config-invalid (exit 1, not the
 // preflight's 11) and waits out the inherited child with the lock held.
