@@ -251,6 +251,11 @@ let
       prefix = "drivers";
       pkgFor = name: "internal/driver/${name}";
       sharedFor = _: driverGoTestShared;
+      # A Driver's shadow test replays its corpus through the divergent
+      # fixture Connector.
+      setupFor = _: ''
+        export SPINDRIFT_CONNECTOR_FIXTURES_DIR=${fixtures.connectorWasm}
+      '';
     };
   driverGoTests = driverGoTestsFor {
     files = launcherDir;
