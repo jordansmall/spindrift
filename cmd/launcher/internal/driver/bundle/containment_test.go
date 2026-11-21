@@ -213,7 +213,8 @@ func nonTestImports(t *testing.T, dir string) []string {
 // packageDirs lists root and every subdirectory under it that can hold a Go
 // package, pruning testdata (which may hold deliberately unparseable or
 // fixture .go files) and dot-prefixed directories, which hold tooling state
-// rather than source.
+// rather than source, and root's own vendor directory, where the Nix sandbox
+// copies third-party modules that are outside the guard's scope.
 func packageDirs(t *testing.T, root string) []string {
 	t.Helper()
 	var dirs []string
@@ -226,6 +227,9 @@ func packageDirs(t *testing.T, root string) []string {
 		}
 		name := d.Name()
 		if path != root && (name == "testdata" || strings.HasPrefix(name, ".")) {
+			return fs.SkipDir
+		}
+		if path == filepath.Join(root, "vendor") {
 			return fs.SkipDir
 		}
 		dirs = append(dirs, path)
@@ -610,5 +614,28 @@ func TestContainmentFindingsClassifiesPlantedLiterals(t *testing.T) {
 				t.Fatalf("findings = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestPackageDirsPrunesRootVendorTestdataAndDotDirs(t *testing.T) {
+	root := t.TempDir()
+	for _, d := range []string{"vendor/x", "internal/vendor/b", "testdata/t", ".hidden/h"} {
+		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := packageDirs(t, root)
+	if slices.Contains(got, filepath.Join(root, "vendor", "x")) || slices.Contains(got, filepath.Join(root, "vendor")) {
+		t.Errorf("packageDirs descended into module-root vendor: %v", got)
+	}
+	for _, want := range []string{root, filepath.Join(root, "internal", "vendor", "b")} {
+		if !slices.Contains(got, want) {
+			t.Errorf("packageDirs missing %s: %v", want, got)
+		}
+	}
+	for _, skipped := range []string{"testdata", ".hidden"} {
+		if slices.Contains(got, filepath.Join(root, skipped)) {
+			t.Errorf("packageDirs kept %s", skipped)
+		}
 	}
 }
