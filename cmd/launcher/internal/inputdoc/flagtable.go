@@ -28,12 +28,11 @@ type FlagEntry struct {
 	// (e.g. disables the limit); see EmptyIsSetting.
 	EmptyDisables bool
 	// BoxHostDerived marks a knob the schema declares both hostDerived and
-	// boxEnv (issue #5329). A test-only parity marker: no production path
-	// reads it; TestDispatchConfig_ResolveEnv_EveryBoxHostDerivedKnobGetsSnapshot
-	// pins it, and runtime forwarding reads BOX_ENV_VARS. Schema-drift's
-	// hostGitConfigKeyMismatch makes it equivalent to HostGitConfigKey != "";
-	// it stays as defence in depth, so that test still catches a keyless
-	// host-derived row in a regen that never ran schema-drift.
+	// boxEnv (issue #5329). Test-only: no production path reads it (runtime
+	// forwarding reads BOX_ENV_VARS). Schema-drift's hostGitConfigKeyMismatch
+	// makes it equal to HostGitConfigKey != "", but it stays so
+	// TestDispatchConfig_ResolveEnv_EveryBoxHostDerivedKnobGetsSnapshot still
+	// catches a keyless host-derived row in a regen that skipped schema-drift.
 	BoxHostDerived bool
 	// HostGitConfigKey is the host git config key (git config --get) a
 	// BoxHostDerived knob falls back to; read by cmd/launcher's

@@ -9,17 +9,13 @@ import (
 	"spindrift.dev/launcher/internal/hostop"
 )
 
-// HeartbeatWriter decodes the Pass log stream it is written and emits
-// per-issue heartbeat lines to out. It narrates at most once per decoded
-// line, from that line's first KindText event, sanitized and bounded by
-// TrimNarration. That event narrates only when it is top-level (not
-// InSubagent) and non-empty after trimming; a later text event never stands
-// in for an empty or subagent first one. It emits one line for each
-// KindHostOp event carrying a payload, rendered by FormatSpindriftOp, except
-// pass_model, which only the opencode decoder acts on. With
-// Track set it also groups tool calls into per-role phases and count lines,
-// and prints a turn line at each KindResult. Every byte is forwarded to raw
-// unchanged; the heartbeat is a side effect.
+// HeartbeatWriter forwards every byte to raw unchanged and, as a side effect,
+// decodes the stream into per-issue heartbeat lines on out. Each decoded line
+// narrates at most once, from its first KindText event, and only when that
+// event is top-level and non-empty after TrimNarration; a later text event
+// never stands in for it. Each KindHostOp payload gets one FormatSpindriftOp
+// line, except pass_model and shadow_divergence. With Track set it also emits
+// per-role phase and count lines, and a turn line at each KindResult.
 type HeartbeatWriter struct {
 	raw          io.Writer
 	issue        string

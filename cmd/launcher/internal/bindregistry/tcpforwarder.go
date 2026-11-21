@@ -49,10 +49,8 @@ func NewTCPForwarder(upstreamHost string, upstreamPort int, secret string) (http
 
 // SpawnHTTPForwarder starts a detached Forwarder on 127.0.0.1:port relaying
 // to upstreamHost:upstreamPort with secret attached via NewTCPForwarder. It
-// execs binary in its "forward-registry-tcp" subcommand mode because the image
-// carries no free-standing HTTP proxy binary the way it carries socat. binary
-// is a parameter because not every caller implements that subcommand itself:
-// only driver-exec does.
+// execs binary's "forward-registry-tcp" subcommand (only driver-exec has one)
+// because the image carries no standalone HTTP proxy the way it carries socat.
 func SpawnHTTPForwarder(binary, upstreamHost string, upstreamPort int, secret string, port int) (int, error) {
 	cmd := exec.Command(binary,
 		"forward-registry-tcp",
@@ -60,16 +58,14 @@ func SpawnHTTPForwarder(binary, upstreamHost string, upstreamPort int, secret st
 		"-upstream-host", upstreamHost,
 		"-upstream-port", fmt.Sprintf("%d", upstreamPort),
 	)
-	// The secret must never appear on the child's argv, which ps and /proc
-	// expose to any local user, so it rides the environment instead.
-	// os.Environ() may already carry this key, so drop any prior value and
-	// leave the child exactly one entry.
+	// The secret rides the environment, never argv, which ps and /proc expose
+	// to any local user. Drop any inherited value so the child gets exactly
+	// one entry.
 	cmd.Env = append(filterEnv(os.Environ(), "REGISTRY_PROXY_TCP_SECRET"), "REGISTRY_PROXY_TCP_SECRET="+secret)
 	return startDetached(cmd)
 }
 
-// filterEnv returns env with every entry for key removed, so a caller can
-// append a fresh value and leave a child exactly one entry for that key.
+// filterEnv returns env with every entry for key removed.
 func filterEnv(env []string, key string) []string {
 	prefix := key + "="
 	out := make([]string, 0, len(env))

@@ -25,45 +25,35 @@ import (
 	"spindrift.dev/launcher/internal/signalsocket"
 )
 
-// Chore is a one-shot butler run's key (ADR 0056, issue #3875), Factory.NewChore's
-// argument: unlike an issue-keyed Dispatch, it carries no tracker number or
-// issue text, only the Ledger Chore's name, its target branch, and the scan
-// Scope internal/chore computed for this run.
+// Chore is a one-shot butler run's key (ADR 0056, issue #3875),
+// Factory.NewChore's argument: no tracker number or issue text, only the
+// Ledger Chore's name, its target branch, and the scan Scope.
 type Chore struct {
-	// Name is the Chore's name, forwarded as CHORE_NAME and folded into the
-	// Dispatch's log/lock/cache key as "butler-"+Name (Factory.NewChore).
+	// Name is forwarded as CHORE_NAME and folded into the Dispatch's
+	// log/lock/cache key as "butler-"+Name.
 	Name string
-	// Branch is the branch this run's Box clones and scans, forwarded as
-	// BASE_BRANCH directly rather than through Config.ResolveEnv: a chore has
-	// no issue number for the local-forge BASE_BRANCH resolver to key off.
+	// Branch is forwarded as BASE_BRANCH directly rather than through
+	// Config.ResolveEnv: a chore has no issue number for the local-forge
+	// BASE_BRANCH resolver to key off.
 	Branch string
-	// Scope is this run's scan scope (internal/chore.NextScope): Head,
-	// DiffRange, and Slice forward as CHORE_HEAD, CHORE_DIFF_RANGE, and
-	// CHORE_SLICE.
+	// Scope forwards as CHORE_HEAD, CHORE_DIFF_RANGE, and CHORE_SLICE.
 	Scope chore.Scope
-	// PromotionClasses is the promotion-candidate class allow-list forwarded as
-	// CHORE_CLASSES (issue #3880), informational only: the Box never reads
-	// it back into a promotion decision, since the host re-checks a
-	// finding's class against its own allow-list at settle regardless of
-	// what the Box was told. The butler leaves this empty whenever today's
-	// promotion room is spent or off, so the Box never spends reviewer
-	// turns on candidates nothing can promote.
+	// PromotionClasses is forwarded as CHORE_CLASSES (issue #3880),
+	// informational only: the host re-checks a finding's class at settle
+	// regardless. Empty whenever today's promotion room is spent or off, so
+	// the Box never spends reviewer turns on candidates nothing can promote.
 	PromotionClasses []string
 	// ClassList is the Chore's closed finding-class list (issue #4766),
-	// forwarded as CHORE_CLASS_LIST. Unlike PromotionClasses it is not a promotion
-	// fact, so the butler forwards it whatever the promotion budget.
+	// forwarded as CHORE_CLASS_LIST whatever the promotion budget.
 	ClassList []string
-	// Input is the host-rendered Chore input forwarded as CHORE_INPUT: the
-	// tuning digest (ADR 0062), which a records-scoped Chore reasons from in
-	// place of the repo tree. Empty for a code Chore, which forwards nothing.
+	// Input is the host-rendered tuning digest (ADR 0062) a records-scoped
+	// Chore reasons from, forwarded as CHORE_INPUT; empty for a code Chore.
 	Input string
-	// PatchClasses is the patch-eligible class allow-list forwarded as
-	// CHORE_PATCH_CLASSES (issue #4072, ADR 0057), the patch-rung sibling of
-	// PromotionClasses: informational for the Box's prompt only. At settle,
-	// internal/butler's patchBlocker re-checks a finding's class against the
-	// host's own patch allow-list whatever the Box was told (ADR 0057). Empty
-	// whenever the rung is off or today's patch room is spent, among the
-	// conditions the butler's Runner.run checks before forwarding it.
+	// PatchClasses is forwarded as CHORE_PATCH_CLASSES (issue #4072, ADR
+	// 0057), informational for the Box's prompt only: internal/butler's
+	// patchBlocker re-checks a finding's class at settle whatever the Box was
+	// told. Empty whenever
+	// the rung is off or today's patch room is spent.
 	PatchClasses []string
 	// MaxFindings is this sweep's findings room (chore.Room.Findings): the
 	// most findings the Box may relay this run. Zero means no host limit.
@@ -112,84 +102,72 @@ type Config struct {
 	BoxEnvVars string
 
 	// ResolveEnv resolves one BoxEnvVars name for the issue being dispatched
-	// (num), defaulting to a num-ignoring os.Getenv when nil. main.go wires
-	// it to loadConfig()'s document/flag/env chain, so a document-baked value
-	// reaches the Box even when the operator sets it nowhere (ADR 0020). num
-	// lets each issue resolve its own BASE_BRANCH under local (issue #1734).
+	// (num), defaulting to os.Getenv when nil. main.go wires it to the
+	// document/flag/env chain, so a document-baked value reaches the Box even
+	// when the operator sets it nowhere (ADR 0020). num lets each issue
+	// resolve its own BASE_BRANCH under local (issue #1734).
 	ResolveEnv func(num, name string) string
 
-	// SeedMirror, when non-nil, runs before every Pass (Run, Fix and
-	// ResolveConflict alike) and returns the host path of the freshly seeded
-	// mirror to mount at /repo; an error fails the Pass. Nil means the dispatch
-	// needs no host-seeded mirror (self-contained research never clones), so
-	// the Box gets no /repo.
+	// SeedMirror, when non-nil, runs before every Pass and returns the host
+	// path of the freshly seeded mirror to mount at /repo; an error fails the
+	// Pass. Nil (self-contained research never clones) gives the Box no /repo.
 	// release is non-nil on success and runs once the Pass's Box has exited.
 	// The hook may hand each Pass its own mirror (github, forgejo: release
-	// removes it, and only that Pass's) or re-seed one shared mirror (local, git:
+	// removes only that Pass's) or re-seed one shared mirror (local, git:
 	// release is a no-op, and the hook must serialize itself).
 	SeedMirror func() (dir string, release func(), err error)
 
-	// Policy is the transient-retry tuning, built once by retryPolicy
-	// (issue #2928).
+	// Policy is the transient-retry tuning (issue #2928).
 	Policy retry.Policy
 
 	// DriverSessionCacheDir is the selected Driver's declared in-box
-	// session-cache mount target (ADR 0009). Empty when the Driver declares
-	// none, and then the Factory creates no per-issue cache directory at
-	// all, because there is nowhere in-box to mount it (issue #448).
+	// session-cache mount target (ADR 0009). Empty means no per-issue cache
+	// directory at all: there is nowhere in-box to mount it (issue #448).
 	DriverSessionCacheDir string
 
 	// RegistryProxyRoutes is the resolved registry-proxy route table (ADR
 	// 0044/0045, issue #3139). Each Route's Credential is the resolved value
-	// itself, never a file path or env var name: the launcher resolves those
-	// at startup, before it builds this Config. An empty slice turns the
-	// feature off, and runOnce then starts no proxy and mounts no socket.
+	// itself, never a file path or env var name. Empty turns the proxy off.
 	RegistryProxyRoutes []registryproxy.Route
 
 	// RegistryProxyRewriteRows are the response-rewrite rows the proxy
-	// applies, in the registered Strategies' order. Which response shapes get
-	// rewritten is static per-ecosystem knowledge, not something a run
-	// resolves per route the way RegistryProxyRoutes are; the launcher fills
-	// it so dispatch never reads the registry.
+	// applies, in the registered Strategies' order; the launcher fills it so
+	// dispatch never reads the registry.
 	RegistryProxyRewriteRows []registryvocab.RewriteRow
 
-	// Kind is the dispatch kind, a name from dispatchkind.All ("work",
-	// "research", "butler" or "recover"). Its descriptor's axes reach the Box as DISPATCH_KEYING and
-	// DISPATCH_ANNOUNCE_VERB (issue #3996); the name itself rides along as
-	// DISPATCH_KIND, which box resolves to its descriptor in-process (issue
-	// #3901). Empty defaults to "work".
+	// Kind is the dispatch kind, a name from dispatchkind.All. Its
+	// descriptor's axes reach the Box as DISPATCH_KEYING and
+	// DISPATCH_ANNOUNCE_VERB (issue #3996), the name itself as DISPATCH_KIND
+	// (issue #3901). Empty defaults to "work".
 	Kind string
 
 	// Stamp carries the deployment facts the launcher records in every Pass
 	// log's dispatch_start stamp (issue #4783): only Revision, RoleModels,
-	// DriverVersion and Knobs are read. The Dispatch fills in the rest (Record
-	// ID, kind, key, claim and log-start times, driver name).
+	// DriverVersion and Knobs are read; the Dispatch fills in the rest.
 	Stamp hostop.DispatchStart
 
 	// SelfContained forwards the research kind's no-repo sub-mode as
-	// SELF_CONTAINED=1 (issue #2202), so box skips the clone and
-	// repo exploration. Meaningful only when Kind == "research".
+	// SELF_CONTAINED=1 (issue #2202), so box skips the clone. Meaningful only
+	// when Kind == "research".
 	SelfContained bool
 
 	// ForgeDescriptor/TrackerDescriptor are the backend-registry rows for this
-	// run's CODE_FORGE/ISSUE_TRACKER pairing, read off the forge.Capabilities
-	// value ResolveCapabilities produced (issue #2945). Config carries only
-	// these plain-data rows, never that whole value, because dispatch must
-	// not hold its write-capable handles (issue #2947, narrowed by #3063).
+	// run's CODE_FORGE/ISSUE_TRACKER pairing (issue #2945). Config carries
+	// only these plain-data rows, never the whole forge.Capabilities value,
+	// because dispatch must not hold its write-capable handles (issues #2947,
+	// #3063).
 	ForgeDescriptor   backend.Descriptor
 	TrackerDescriptor backend.Descriptor
 
-	// SignalCarrier is the BOX_SIGNAL_CARRIER knob value (issue #3725). An
-	// empty or unrecognised value means the "log" carrier (fail-closed: only the
-	// exact string "socket" selects the socket carrier).
+	// SignalCarrier is the BOX_SIGNAL_CARRIER knob value (issue #3725). Only
+	// the exact string "socket" selects the socket carrier (fail-closed).
 	SignalCarrier string
 
-	// NetworkMode is the NETWORK_MODE knob value, read by startSignalSocket's
-	// transport-verdict gate inside the Dispatch (issue #3725).
+	// NetworkMode gates startSignalSocket's transport verdict (issue #3725).
 	NetworkMode runner.NetworkMode
 
-	// These are nix-resolved static prompt-gate values (issue #2533;
-	// ScoutProvisioned added by #3157), forwarded into the Box unmodified.
+	// Nix-resolved static prompt-gate values (issues #2533, #3157), forwarded
+	// into the Box unmodified.
 	TrackerAxisRead   string
 	TrackerAxisWrite  string
 	TrackerAxisFiler  string
@@ -199,28 +177,25 @@ type Config struct {
 	ScoutProvisioned  bool
 
 	// ReviewModelOverride/ReviewEffortOverride carry an operator's explicit
-	// dispatch-time REVIEW_MODEL/REVIEW_EFFORT (issue #3171), which the review
-	// pass binds over the baked roster entry. Empty forwards no var, skipping
-	// the document/schema default chain BoxEnvVars uses: a baked default would
-	// override the roster on every dispatch.
+	// dispatch-time REVIEW_MODEL/REVIEW_EFFORT (issue #3171), bound over the
+	// baked roster entry. Empty forwards no var, skipping the document/schema
+	// default chain BoxEnvVars uses: a baked default would override the roster
+	// on every dispatch.
 	ReviewModelOverride  string
 	ReviewEffortOverride string
 
 	// OpenPRForIssue reports whether an open PR already exists for the agent
-	// branch of a dispatch key (an issue number or a chore key), so a box
-	// whose work already landed a PR is never held and retried on a transient
-	// classification (issue #565), and answers BOX_HOST_OPEN_PR for a
-	// read-only Box (issues #7146, #6900). Callers may rely on it being
-	// non-nil: a push-only Code Forge resolves to false inside
-	// dispatchConfig's closure rather than leaving it nil.
+	// branch of a dispatch key, so a box whose work already landed a PR is
+	// never held and retried on a transient classification (issue #565), and
+	// answers BOX_HOST_OPEN_PR (issues #7146, #6900). Callers may rely on it
+	// being non-nil: dispatchConfig's closure resolves a push-only Code Forge
+	// to false rather than leaving it nil.
 	OpenPRForIssue func(number string) (bool, error)
 
 	// IssueTextFor resolves the subject issue's body, plus its recent
-	// comments when the tracker supports them, into the ISSUE_TEXT the Box
-	// receives (issue #3445). Every tracker backend goes through this one
-	// closure; the Factory memoizes it per Dispatch. A nil closure leaves
-	// ISSUE_TEXT absent; an error instead fails the dispatch (see
-	// buildBoxEnv's doc).
+	// comments when the tracker supports them, into the Box's ISSUE_TEXT
+	// (issue #3445). The Factory memoizes it per Dispatch. Nil leaves
+	// ISSUE_TEXT absent; an error fails the dispatch.
 	IssueTextFor func(number string) (string, error)
 
 	// IssueReader answers the Signal socket's issue read verb from this
@@ -234,10 +209,8 @@ type Config struct {
 }
 
 // signalCarrierSocket reports whether c selects the socket signal carrier.
-// The one spelling of the comparison inside this package, so no dispatch-side
-// caller re-spells it. cmd/launcher's own startup gate
-// (signalcarrier_gate.go) reads the value off its own config type across the
-// package boundary and does re-spell it.
+// cmd/launcher's signalcarrier_gate.go re-spells this comparison against its
+// own config type.
 func (c Config) signalCarrierSocket() bool {
 	return c.SignalCarrier == "socket"
 }
@@ -256,13 +229,10 @@ func (c Config) kindName() string {
 // templates promise the Box an injected ISSUE_TEXT section. It fires before any
 // box runs, so the empty-log check surfaces it on Result.Err (issue #3119).
 //
-// subj.key.IsChore() is true only for a Factory.NewChore Dispatch (ADR
-// 0056), and then this skips ISSUE_NUMBER/ISSUE_TITLE/ISSUE_TEXT and the
-// BASE_BRANCH entry of the ResolveEnv loop entirely (CODE_FORGE=local's
-// localBaseBranchResolver, the only ResolveEnv caller that reads the key,
-// would otherwise run an issue-tracker lookup against a chore key that names
-// no issue) and forwards CHORE_* plus BASE_BRANCH from the Chore directly
-// instead.
+// A Chore subject (ADR 0056) skips ISSUE_NUMBER/ISSUE_TITLE/ISSUE_TEXT and the
+// ResolveEnv BASE_BRANCH lookup -- localBaseBranchResolver would run an
+// issue-tracker lookup against a key that names no issue -- and forwards
+// CHORE_* plus BASE_BRANCH from the Chore.
 func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string, nonce string) (map[string]string, error) {
 	resolve := cfg.ResolveEnv
 	if resolve == nil {
@@ -355,9 +325,8 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 		env["CI_FAILURE_SUMMARY"] = ciFailureSummary
 	}
 	env["RUN_NONCE"] = nonce
-	// Forwarded so box's in-process outcome backstop keys its
-	// decision off explicit signals rather than a raw CODE_FORGE name
-	// comparison (issue #2267).
+	// Forwarded so box's outcome backstop keys off explicit signals rather
+	// than a raw CODE_FORGE name comparison (issue #2267).
 	forgeHostMediatedRemote := cfg.ForgeDescriptor.HostMediatedRemote
 	trackerInBoxUnreachable := cfg.TrackerDescriptor.InBoxUnreachableTracker
 	if forgeHostMediatedRemote {
@@ -366,19 +335,17 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 	if cfg.ForgeDescriptor.OutboxRelayCapable {
 		env["BOX_OUTBOX_RELAY_CAPABLE"] = "1"
 	}
-	// Both seams of this run are local (ADR 0033). main.go's
-	// resolveCapabilitySignals computes the same boolean over the same two
-	// fields for the FULLY_LOCAL prompt gate, so changing one without the
-	// other silently desyncs BOX_FULLY_LOCAL from FULLY_LOCAL.
+	// Both seams are local (ADR 0033). main.go's resolveCapabilitySignals
+	// computes the same boolean for the FULLY_LOCAL prompt gate; changing one
+	// without the other desyncs BOX_FULLY_LOCAL from FULLY_LOCAL.
 	if forgeHostMediatedRemote && trackerInBoxUnreachable {
 		env["BOX_FULLY_LOCAL"] = "1"
 	}
 	if trackerInBoxUnreachable {
 		env["BOX_IN_BOX_UNREACHABLE_TRACKER"] = "1"
 	}
-	// TrackerAxisWrite is legitimately empty for a local (read-only)
-	// tracker, so the uniform empty-string guard correctly leaves
-	// BOX_TRACKER_AXIS_WRITE absent there (issue #2533).
+	// TrackerAxisWrite is legitimately empty for a local (read-only) tracker,
+	// so its guard leaves BOX_TRACKER_AXIS_WRITE absent there (issue #2533).
 	if cfg.TrackerAxisRead != "" {
 		env["BOX_TRACKER_AXIS_READ"] = cfg.TrackerAxisRead
 	}
@@ -392,10 +359,10 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 		env["BOX_FORGE_BACKEND"] = cfg.ForgeBackend
 	}
 	// Per-route registry-proxy upstream hosts travel in
-	// REGISTRY_PROXY_MANIFEST (ADR 0045, runOnce/box.go), not here.
+	// REGISTRY_PROXY_MANIFEST (ADR 0045, box.go), not here.
 	//
-	// These prompt gates forward as a positive signal only: "1" when true,
-	// absent rather than "0" when false (issue #2533).
+	// Prompt gates forward "1" when true, absent rather than "0" when false
+	// (issue #2533).
 	if cfg.FilerEnabled {
 		env["BOX_FILER_ENABLED"] = "1"
 	}

@@ -15,24 +15,18 @@ var choreNameRe = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_-]*$`)
 // ChoreNameRule describes choreNameRe for error messages; keep the two in step.
 const ChoreNameRule = "must contain only letters, digits, '-', and '_', not starting with '-'"
 
-// ValidChoreName reports whether s is one or more letters, digits, dash, and
-// underscore, not starting with '-' -- the one shape a ChoreName must satisfy
-// before it can safely reach filepath.Join, and one that --chore can never
-// mistake for a flag (issue #4095). No path separator or ".." can ever cross
-// this gate before choreSection builds the chores/<name>.md lookup path
-// (ADR 0056, issue #3875). internal/chore bounds BUTLER_CHORE_CLASSES names
-// with it too.
+// ValidChoreName reports whether s matches choreNameRe: no path separator or
+// ".." can reach choreSection's filepath.Join (ADR 0056), and --chore can
+// never mistake it for a flag (issue #4095). internal/chore bounds
+// BUTLER_CHORE_CLASSES names with it too.
 func ValidChoreName(s string) bool {
 	return choreNameRe.MatchString(s)
 }
 
-// choreSection renders the ${CHORE_PROMPT} substitution value: the named
-// Chore's own prompt file under PromptsDir/chores/<name>.md. Every kind other
-// than the butler (Keying != ByChore) has no chores directory contract to
-// honor and renders "". Unlike issueTextSection's silent-empty default, a
-// ByChore kind with a malformed or unresolvable ChoreName fails assembly
-// outright: the butler always names exactly one Chore, so a missing prompt
-// file is a configuration error, never a legitimately empty case.
+// choreSection renders ${CHORE_PROMPT} from PromptsDir/chores/<name>.md, or
+// "" for a kind not keyed ByChore. Unlike issueTextSection, a bad or missing
+// ChoreName fails assembly: the butler always names exactly one Chore, so a
+// missing prompt file is a configuration error.
 func choreSection(e Env) (string, error) {
 	d := e.descriptor()
 	switch d.Keying {

@@ -3,20 +3,14 @@ package connectorhost
 import "context"
 
 // engine runs a Connector's module; the Connector speaks the protocol over it.
-// The in-process wazero runtime (wasmEngine) is the one engine today. Another,
-// such as an out-of-process host, can stand in without the Connector's callers
-// noticing, because a network Connector's Host-call policy (Routes, credentials,
-// audit, the response cap) stays in the Launcher behind hostCalls.
+// The in-process wazero runtime (wasmEngine) and the out-of-process host
+// (remoteEngine) are interchangeable because a network Connector's Host-call
+// policy (Routes, credentials, audit, the response cap) stays in the Launcher
+// behind hostCalls.
 //
 // An engine is built already instantiated and initialised. Its methods are
-// called with the Connector's mu held, except abort.
-//
-// A failure carries the same sentinels whatever the engine: ErrBudget when the
-// call ran past its budget, ErrTrap for a trap or exit, ErrMemoryCap,
-// ErrOutputTooLarge, ErrMalformedOutput (output the Launcher cannot take at
-// face value, or a Host call with bad arguments), ErrExport, the fatal error a
-// Host call failed closed with, and the ctx error when the caller's context cut
-// the call off.
+// called with the Connector's mu held, except abort. A failure carries the
+// same sentinels whatever the engine (see ErrCall).
 type engine interface {
 	// handshake returns connector_handshake's result, checked to be UTF-8 JSON
 	// within the output cap, for a call under limitsFor(0).

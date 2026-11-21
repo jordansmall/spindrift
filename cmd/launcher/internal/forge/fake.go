@@ -2,14 +2,13 @@ package forge
 
 // Fake is an in-memory IssueTracker, CodeForge, and PRForge for unit tests,
 // safe for concurrent use; the optional host-mediation interfaces are reachable
-// only through its As* wrappers (see HostMediationFake).
-// CheckState pops from a scripted RollupState queue, so polling tests need no
-// real sleeps. Fake embeds *core plus the four capability slices below, and no
-// two of those five may declare a name in common. Probe overrides the one
-// collision; a new one breaks the build or silently shadows the promoted field.
+// only through its As* wrappers (see HostMediationFake). CheckState pops a
+// scripted RollupState queue, so polling tests need no real sleeps.
 //
-// Every read and write crosses a network Connector and its Route table (see
-// fake_connector.go), RelayBundle excepted.
+// No two of *core and the four capability slices may declare a name in common:
+// Probe overrides the one collision; a new one breaks the build or silently
+// shadows the promoted field. Every read and write but RelayBundle crosses a
+// network Connector (see fake_connector.go).
 type Fake struct {
 	// Every capability slice below embeds core too, so Fake embeds it directly
 	// to keep the shallowest unambiguous path to core's fields.

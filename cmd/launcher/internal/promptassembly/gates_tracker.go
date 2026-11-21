@@ -11,18 +11,14 @@ import (
 func trackerGates(e Env) map[string]bool {
 	g := map[string]bool{}
 
-	// nix resolves the three axis names at eval time (issue #2533). They are
-	// dispatch-time-only forwards with no baked preamble default, so a host
-	// launcher predating #2533 leaves itRead empty; nothing else ever does.
-	// Fall back to e.IssueTracker's own arm, not to github, which would
-	// contradict itself for a local or forgejo tracker.
+	// Only a host launcher predating #2533 leaves itRead empty. Fall back to
+	// e.IssueTracker's own arm, not to github, which would contradict itself
+	// for a local or forgejo tracker.
 	itRead, itWrite := e.TrackerAxisRead, e.TrackerAxisWrite
 	if itRead == "" {
 		itRead, itWrite, _ = issueTrackerAxisFallback(e.IssueTracker)
 	}
 
-	// Env forwards IssueTracker as the empty string by default; resolve it to
-	// the default.
 	trackerName := e.IssueTracker
 	if trackerName == "" {
 		trackerName = defaultIssueTracker
@@ -124,8 +120,7 @@ func trackerGates(e Env) map[string]bool {
 }
 
 // issueTrackerAxisFallback maps a raw IssueTracker value onto its three axis
-// suffixes, the same mapping nix now performs at eval time. Used only by
-// trackerGates's version-skew fallback.
+// suffixes, as nix does at eval time, for the version-skew fallback.
 func issueTrackerAxisFallback(issueTracker string) (itRead, itWrite, itFiler string) {
 	tracker := issueTracker
 	if tracker == "" {

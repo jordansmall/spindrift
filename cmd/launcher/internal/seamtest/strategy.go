@@ -22,15 +22,13 @@ const fakeDriverName = "claude"
 
 // Strategy is the fake Driver: the compiled Connector seamtest-driver.wasm
 // loaded through connectorhost, so every core test crosses the real Connector
-// seam (see the package doc's Fake Driver section for its log grammar).
+// seam (the package doc's Fake Driver section gives its log grammar).
 //
-// The Connector loads once per test binary and is never closed: compiling the
-// module is the expensive part. Each call returns a copy of the Strategy, so a
-// caller may override host-only fields (Totals, Heartbeat, ...) without
-// affecting others; every copy still shares the one loaded Connector, its
-// mutex and funcs. It panics when the Connector cannot be loaded, because a
-// TestMain caller has no testing.TB and no core test may skip the seam (ADR
-// 0067).
+// The Connector loads once per test binary and is never closed: compiling is
+// the expensive part. Each call returns a copy, so a caller may override
+// host-only fields (Totals, Heartbeat, ...); copies share the one Connector.
+// It panics on a load failure: a TestMain caller has no testing.TB and no
+// core test may skip the seam (ADR 0067).
 func Strategy() driverkit.Strategy {
 	s, err := loadStrategy()
 	if err != nil {
@@ -77,10 +75,10 @@ func Millis(rfc3339 string) int64 {
 var registerMu sync.Mutex
 
 // registerIfAbsent registers the Strategy build returns under name unless a
-// Driver of that name is registered. build runs only then, so a linked bundle
-// never loads the Connector. The registry panics on a duplicate name and is not
-// synchronized: registerMu orders concurrent registrations only, so callers
-// register before any parallel test reads the registry.
+// Driver of that name is registered; build runs only then, so a linked bundle
+// never loads the Connector. The registry panics on a duplicate name and is
+// not synchronized: registerMu orders registrations only, so register before
+// any parallel test reads it.
 func registerIfAbsent(name string, build func() driverkit.Strategy) {
 	registerMu.Lock()
 	defer registerMu.Unlock()

@@ -56,10 +56,9 @@ func (s *server) events(w http.ResponseWriter, r *http.Request) {
 		case <-tick.C:
 		}
 
-		// Re-read and re-rendered every tick: the file is small, and a stat
-		// comparison would miss two rewrites inside one timestamp tick. A
-		// Daemon that dies without rewriting it only shows in the liveness
-		// check and the uptime clocks.
+		// Re-read every tick: the file is small, and a stat comparison would
+		// miss two rewrites inside one timestamp tick. A Daemon that dies
+		// without rewriting it only shows in the liveness check and uptime clocks.
 		st, raw, rerr = readStatus(s.statusPath)
 		if html := renderStatus(); html != lastStatus {
 			lastStatus = html

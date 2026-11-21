@@ -8,17 +8,12 @@ import (
 )
 
 // NewRepo builds a bare git repo with one commit on refs/heads/main, the
-// shared fixture every package that needs a Ledger store or a remote
-// stand-in builds against (issue #3995). With no paths the commit holds one
-// tracked file (a.go, content "package a\n"); given paths, the commit holds
-// exactly those paths instead (each blob's content is its own path), for
-// tests that care about the tree shape rather than a specific file's
-// content. gc.auto and receive.autogc are both off since a detached `git gc
-// --auto` can still be repacking when t.TempDir()'s RemoveAll runs (same
-// rationale as forgetest.NewGitRepoFixture). The git identity lives in
-// the repo's own config (user.name/user.email), so a caller's further plumbing
-// commands via `git -C <repo>` (e.g. a second commit-tree) inherit it. NewRepo
-// deliberately avoids t.Setenv, which panics under t.Parallel.
+// shared Ledger-store and remote stand-in fixture (issue #3995). With no paths
+// the commit holds a.go ("package a\n"); given paths, exactly those, each
+// blob holding its own path. gc.auto and receive.autogc are off because a
+// detached `git gc --auto` can still be repacking when t.TempDir()'s
+// RemoveAll runs. The identity is repo-local so later `git -C <repo>`
+// plumbing inherits it; t.Setenv is avoided since it panics under t.Parallel.
 func NewRepo(t *testing.T, paths ...string) string {
 	t.Helper()
 

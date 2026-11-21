@@ -11,17 +11,15 @@ import (
 )
 
 // eventsTail follows the current Events generation across the Daemon's
-// rotation, yielding each well-formed event to a callback. It holds the current
-// file open and the offset consumed through the last newline, so a rotation
-// (our file renamed to the older name, a fresh one created) is told apart from
-// an append by file identity, not by size.
+// rotation, yielding each well-formed event to a callback. A rotation is told
+// apart from an append by file identity, not size.
 type eventsTail struct {
 	path   string
 	f      *os.File // nil until the current generation exists
-	offset int64
-	// gen numbers the generation of the event fn is being handed: 0 for the
-	// older generation read by open, 1 from the current one on, and one more for
-	// each rotation poll crosses, bumped before the new file's events arrive.
+	offset int64    // consumed through the last newline
+	// gen numbers the generation of the event fn is handed: 0 for the older
+	// one read by open, 1 for the current, plus one per rotation poll crosses,
+	// bumped before the new file's events arrive.
 	gen int
 }
 

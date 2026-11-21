@@ -63,17 +63,16 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 				return Skipped()
 			}
 			if errors.Is(err, errKilled) {
-				// The abort already released this issue; waves' Box goroutine
-				// routes it through its abandon branch before it ever reads
-				// its Disposition (issue #3521).
+				// The abort already released this issue; waves abandons it
+				// before reading its Disposition (issue #3521).
 				return Failed(Result{})
 			}
 
 			var pErr preDispatchErr
 			if errors.As(err, &pErr) {
-				// The attempt failed before dispatching anything (issues #2575,
-				// #5444), so logPath may still hold earlier content: neither
-				// settledOutcome nor ClassifyTransient may be trusted against it.
+				// Nothing was dispatched (issues #2575, #5444), so logPath may
+				// hold earlier content: neither settledOutcome nor
+				// ClassifyTransient may be trusted against it.
 				if isPermanentPreDispatchErr(pErr) {
 					fmt.Fprintf(os.Stdout, "    !! #%s: pre-dispatch failed permanently\n", d.number)
 					return Failed(Result{Err: pErr})
@@ -114,10 +113,10 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 			if cls.Class == driver.Terminal {
 				result := Result{KilledBySignal: runner.KilledBySignal(err)}
 				if logIsEmpty(attemptLogPath, d.attemptStampLen) {
-					// A box that ran and failed left something in its log, so an
-					// empty log means it never launched (a pre-Box registry-proxy
-					// or outbox-setup error, issue #3119). Report that error
-					// rather than the reason-free "FAILED" a caller would print.
+					// A box that ran leaves something in its log, so an empty
+					// log means it never launched (a pre-Box registry-proxy or
+					// outbox-setup error, issue #3119): report that error
+					// rather than a reason-free "FAILED".
 					result.Err = err
 				}
 				return Failed(result)
@@ -193,10 +192,8 @@ func (d *Dispatch) successResult(logPath string) Result {
 
 // outcomeResult builds the fully populated Result for a parsed outcome,
 // gathering the comment, PR-intent and issue-intent signals from whichever
-// carrier this Dispatch's BOX_SIGNAL_CARRIER selects (issue #3725): the
-// log carrier's marker-line scanners in "log" mode, or d.signalBuffer in
-// "socket" mode. Shared by the zero-exit and non-zero-exit settled paths
-// (issue #2075) so both report identical signals.
+// carrier BOX_SIGNAL_CARRIER selects (issue #3725). Shared by the zero-exit
+// and non-zero-exit settled paths (issue #2075).
 func (d *Dispatch) outcomeResult(logPath string, resolved outcome.Resolved) Result {
 	var warnings []string
 	warn := func(format string, a ...any) {
@@ -216,16 +213,12 @@ func (d *Dispatch) outcomeResult(logPath string, resolved outcome.Resolved) Resu
 	if issueIntentsErr != nil {
 		warn("issue-intent scan: %v", issueIntentsErr)
 	}
-	// Under the socket carrier the log scan above still runs, but only to
-	// warn: a marker line surviving in the log means a Box or an untrusted
-	// echo wrote one anyway, which under this carrier is stale and must
-	// contribute no data -- neither the payload nor the *Rejected counts,
-	// which describe log-carrier lines only. d.signalBuffer, not the log
-	// scan, is the sole source of truth for all three fields here.
+	// Under the socket carrier the log scan only warns: a marker line in the
+	// log (a Box or an untrusted echo wrote one anyway) is stale and must
+	// contribute no data, rejected lines included. A line that failed to
+	// verify still warns: it is as stale as a verifying one. d.signalBuffer
+	// is the sole source of truth here.
 	if d.cfg.signalCarrierSocket() {
-		// A line that attempted the grammar and failed to verify is still a
-		// marker line on the log carrier, so it warns alongside a verifying
-		// one: under this carrier both are equally stale.
 		warnStaleMarker := func(channel string, found bool, rejected outcome.Rejections) {
 			if !found && rejected.Total() == 0 {
 				return
@@ -256,9 +249,8 @@ func (d *Dispatch) outcomeResult(logPath string, resolved outcome.Resolved) Resu
 
 // reclaimAttemptLog returns the path to settle this attempt from: logPath, or
 // wherever a rename moved the attempt's log mid-run -- e.g. another process's
-// quarantinePriorRunLogs renaming a live log to "<path>.prior-run.N" (issue
-// #3886), which left Settle reporting "no outcome in log" though the Box
-// printed one. os.SameFile tracks the file across the rename.
+// quarantinePriorRunLogs renaming a live log (issue #3886), which left Settle
+// reporting "no outcome in log" though the Box printed one.
 func (d *Dispatch) reclaimAttemptLog(logPath string) string {
 	if d.attemptLog == nil {
 		return logPath

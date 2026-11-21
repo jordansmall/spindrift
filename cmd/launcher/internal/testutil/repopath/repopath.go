@@ -1,13 +1,7 @@
-// Package repopath names shared on-disk test fixtures by absolute path.
-// Tests anywhere under cmd/launcher call these helpers instead of counting
-// "../" for their own package depth.
-//
-// A fixture read by more than one package gets a function here; a package
-// reading only its own testdata/ keeps opening it directly.
-//
-// The package must stay stdlib-only (pinned by its test): packages that
-// internal/testutil cannot serve without an import cycle, such as
-// internal/dispatchkey via internal/report, import it too.
+// Package repopath names, by absolute path, the on-disk test fixtures more
+// than one package reads, so tests need not count "../" for their depth. It
+// must stay stdlib-only (pinned by its test) because packages that testutil
+// cannot serve without an import cycle import it too.
 package repopath
 
 import (
@@ -34,13 +28,9 @@ func findModuleDir(start string) (string, error) {
 }
 
 // moduleDir walks up from the working directory rather than using
-// runtime.Caller, whose paths are module-relative under -trimpath. go test
-// runs each package with its own directory as cwd, so this works at any depth.
-// Callable from package-level var initializers, hence panic over testing.TB.
-//
-// The first call's os.Getwd() is cached for the process: a test that chdirs
-// out of the module before its first repopath call makes every later call
-// panic, so call repopath before any chdir.
+// runtime.Caller, whose paths are module-relative under -trimpath. It panics
+// rather than take a testing.TB so package-level vars can call it. The first
+// call's cwd is cached, so call repopath before any chdir.
 var moduleDir = sync.OnceValue(func() string {
 	wd, err := os.Getwd()
 	if err != nil {

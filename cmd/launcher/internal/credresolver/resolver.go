@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-// Resolver resolves a Credential reference (ADR 0044) to its value for a
+// Resolver resolves a Credential reference (ADR 0045) to its value for a
 // registry route's host. Only the env-var adapter consumes its source on
 // Resolve (os.Unsetenv, so the credential never reaches a Box's snapshotted
 // environment); Peek lets doctor check a route without consuming it.
@@ -38,12 +38,10 @@ func (r envResolver) Peek() (string, error) {
 	return v, nil
 }
 
-// ResolveUnsetsEnv reports whether resolving c consumes and unsets a process
-// environment variable (envResolver.Resolve's os.Unsetenv below). A caller
-// ordering resolves so every destructive source runs before any exec helper
-// (issue #3151) must ask this rather than re-deriving the "is this the
-// destructive source" fact from c.FromEnv itself, or a second env-consuming
-// source added here later would silently defeat that ordering.
+// ResolveUnsetsEnv reports whether resolving c unsets a process environment
+// variable. A caller ordering destructive sources before any exec helper
+// (issue #3151) asks this rather than testing c.FromEnv, so a second
+// env-consuming source cannot silently defeat that ordering.
 func ResolveUnsetsEnv(c Config) bool {
 	return c.FromEnv != ""
 }
@@ -59,7 +57,7 @@ func (r envResolver) Resolve() (string, error) {
 	return v, err
 }
 
-// Config is a Credential reference (ADR 0044) plus the route facts its file
+// Config is a Credential reference (ADR 0045) plus the route facts its file
 // formats key on: UpstreamURL for netrc's host match, RegistryName for
 // cargo-credentials' table match, PropertyKey for gradle-properties' key
 // lookup. MatchHost is npmrc's lookup key (ADR 0045; npmrc has no
@@ -83,17 +81,15 @@ func (c Config) NamesNoSource() bool {
 }
 
 // New selects the Resolver adapter for a Credential reference (ADR 0045):
-// c.FromEnv, then c.FromFile (c.FileFormat, where "" means "raw"), then
-// c.ExecArgv. registryroutes.Parse already rejects a route naming more than
-// one source, so that precedence only matters for a caller that skips the
-// validation. A Config naming no source resolves to ("", nil).
+// c.FromEnv, then c.FromFile ("" format means "raw"), then c.ExecArgv; the
+// precedence only matters to a caller skipping registryroutes.Parse. A Config
+// naming no source resolves to ("", nil).
 func New(c Config) Resolver {
 	if c.FromEnv != "" {
 		return envResolver{name: c.FromEnv}
 	}
 	if c.FromFile != "" {
-		// The unrecognized-format fallback below still names the caller's
-		// original (possibly empty) c.FileFormat, not this default.
+		// The unrecognized-format error names c.FileFormat, not this default.
 		format := c.FileFormat
 		if format == "" {
 			format = "raw"
@@ -188,8 +184,7 @@ func (r cargoFileResolver) Peek() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// The read comes first so a missing file always reports "reading ... file",
-	// never "registryName is unset", even when both are true.
+	// Read first, so a missing file always reports "reading ... file".
 	if r.registryName == "" {
 		return "", fmt.Errorf("registry proxy credential file %s is in cargo-credentials format but the route's credential has no registry-name key: it must be set when credential = { cargo-credentials = ... }", r.path)
 	}
@@ -197,8 +192,7 @@ func (r cargoFileResolver) Peek() (string, error) {
 }
 
 // npmrcFileResolver keys its "//<registry>/:_authToken=" lookup on the
-// route's match host (ADR 0045); npmrc has no upstream-URL concept to key on
-// the way netrc does.
+// route's match host (ADR 0045); npmrc has no upstream URL to key on.
 type npmrcFileResolver struct {
 	path      string
 	matchHost string
@@ -226,19 +220,17 @@ func (r gradlePropertiesFileResolver) Peek() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// Same missing-file-first ordering as cargoFileResolver.Peek above. Only
-	// the routes file reaches this format (ADR 0045), never a scalar
-	// REGISTRY_PROXY_* knob, so the error names the route, not a knob.
+	// Only the routes file reaches this format (ADR 0045), never a
+	// REGISTRY_PROXY_* knob, so the error names the route.
 	if r.propertyKey == "" {
 		return "", fmt.Errorf("registry proxy credential file %s is in gradle-properties format but the credential's \"key\" is unset", r.path)
 	}
 	return gradlePropertiesValue(b, r.path, r.propertyKey)
 }
 
-// unrecognizedFormatResolver is unreachable through normal configuration:
-// registryroutes.Parse is the only path that sets FileFormat (ADR 0045) and
-// assigns it from a fixed set. It is kept for a caller that skips that
-// validation.
+// unrecognizedFormatResolver is unreachable through registryroutes.Parse,
+// which sets FileFormat from a fixed set (ADR 0045); it covers a caller that
+// skips that validation.
 type unrecognizedFormatResolver struct {
 	path   string
 	format string
@@ -253,27 +245,19 @@ func (r unrecognizedFormatResolver) Peek() (string, error) {
 
 const execCredentialTimeout = 30 * time.Second
 
-// execCredentialWaitDelay bounds every execResolver run's Cmd.WaitDelay. Some
-// credential helpers (`pass` spawning gpg-agent, `op read` spawning its
-// daemon) leave a background process holding the inherited stdout; without
-// WaitDelay, Cmd.Output blocks forever on that pipe even after the direct
-// child exits, hanging doctor's route check and the launch gate.
+// execCredentialWaitDelay is every execResolver run's Cmd.WaitDelay. Helpers
+// like `pass` (gpg-agent) or `op read` leave a background process holding
+// stdout, and without it Cmd.Output blocks forever on that pipe.
 const execCredentialWaitDelay = 2 * time.Second
 
-// execCredentialEnvAllowlist is fixed and independent of any route's config,
-// so an exec helper's environment never depends on where its route sits in
-// the routes file. See ADR 0045's issue #3151 amendment for the rationale.
-// PATH is forwarded for the helper's own children, not argv[0] itself:
-// exec.CommandContext below resolves argv[0] via the launcher's own PATH at
-// construction time, before cmd.Env ever applies.
+// execCredentialEnvAllowlist is fixed, independent of route config (ADR 0045's
+// issue #3151 amendment). PATH is for the helper's own children: argv[0] is
+// resolved via the launcher's PATH before cmd.Env applies.
 var execCredentialEnvAllowlist = []string{"PATH", "HOME", "GNUPGHOME", "GPG_TTY", "SSH_AUTH_SOCK"}
 
-// execCredentialEnv builds the environment a credential helper child runs
-// with. It forwards a name only when set in the launcher's own environment,
-// so an unset allowlisted name never becomes an empty-valued var in the
-// child, and it always returns a non-nil slice (even when empty) because
-// exec.Cmd treats a nil Env as "inherit os.Environ() unconditionally" — the
-// one behavior this function exists to prevent.
+// execCredentialEnv builds a credential helper's environment, forwarding only
+// allowlisted names that are set. It never returns nil: exec.Cmd treats a nil
+// Env as "inherit os.Environ()", the one thing this exists to prevent.
 func execCredentialEnv() []string {
 	out := make([]string, 0, len(execCredentialEnvAllowlist))
 	for _, k := range execCredentialEnvAllowlist {
@@ -285,21 +269,16 @@ func execCredentialEnv() []string {
 }
 
 // execResolver runs argv as a credential helper: its trimmed stdout is the
-// credential. Peek runs the command deliberately, because doctor's route
-// check Peeks every route and skipping the run would leave exec routes with
-// no non-destructive check at all.
+// credential. Peek runs the command too, or exec routes would have no
+// non-destructive doctor check.
 type execResolver struct {
 	argv      []string
 	matchHost string
-	// timeout bounds the run, defaulting to execCredentialTimeout when zero so
-	// a directly-built execResolver is still bounded. Doctor Peeks every
-	// route, so a helper blocking on interactive input (`op read` waiting on
-	// biometric confirmation) would otherwise hang an unattended dispatch
-	// forever.
+	// timeout (zero: execCredentialTimeout) stops a helper blocked on
+	// interactive input (`op read` awaiting biometrics) from hanging an
+	// unattended dispatch.
 	timeout time.Duration
-	// waitDelay bounds how long Wait keeps reading the command's stdout pipe
-	// after the direct child exits or is killed, before force-closing it. Zero
-	// defaults to execCredentialWaitDelay, same reasoning as timeout above.
+	// waitDelay is Cmd.WaitDelay; zero means execCredentialWaitDelay.
 	waitDelay time.Duration
 }
 
@@ -328,9 +307,9 @@ func (r execResolver) Peek() (string, error) {
 		// failure path most likely to be logged verbatim.
 		return "", fmt.Errorf("running registry proxy credential command %q for route %q: %v", r.argv[0], r.matchHost, err)
 	}
-	// exec.ErrWaitDelay means the direct child exited 0 but WaitDelay
-	// force-closed the pipe a background child (gpg-agent) still held open.
-	// That is success, and out holds what the child wrote before exiting.
+	// exec.ErrWaitDelay: the direct child exited 0 but a background process
+	// (gpg-agent) held the pipe; that is success, and out holds what the child
+	// wrote.
 	v := strings.TrimSpace(string(out))
 	if v == "" {
 		return "", fmt.Errorf("registry proxy credential command %q for route %q produced no output", r.argv[0], r.matchHost)

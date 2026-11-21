@@ -18,7 +18,7 @@ var responseHeader = connector.ResponseHeader
 
 // countInterval is how often core re-asks count. A count is one small request,
 // but Forgejo sends no ETag or Last-Modified, so no conditional request makes
-// it free; it matches the native adapter's demandProbeInterval.
+// it free.
 const countInterval = 3 * time.Minute
 
 // trackerProbe is one authenticated read of the repository. A non-2xx is
@@ -34,11 +34,10 @@ func trackerProbe(t tracker.Target) (int, error) {
 
 // labelDefined reports whether label exists on the repository or its owner.
 // Forgejo resolves a labels= filter by name and silently drops it when none
-// resolve, answering every issue (native #3944, #3952), so the issue
-// queries below skip an undefined label. When the registry cannot rule the
-// label out (an unreadable repo or org lookup, or an org-only label the
-// token cannot see) it counts as defined and the client-side re-check
-// decides, as in the native adapter.
+// resolve, answering every issue (#3944, #3952), so the issue queries below
+// skip an undefined label. When the registry cannot rule the label out (an
+// unreadable repo or org lookup, or an org-only label the token cannot see)
+// it counts as defined and the client-side re-check decides.
 func labelDefined(t tracker.Target, label string) bool {
 	labels, orgUnreadable, err := labelUnion(t)
 	if err != nil {
@@ -97,10 +96,9 @@ func count(t tracker.Target, q tracker.Query, limit int, _ bool) (int, error) {
 
 // labeledPage returns one page of the issues in state carrying label, newest
 // first, with the close date of a closed one. Forgejo records no close reason,
-// so ClosedNotPlanned stays false, as in the native adapter. The cursor is the
-// page number ("" is page 1); next follows Forgejo's Link header, since an
-// instance may cap a page below limit, and falls back to a full page when the
-// header is absent.
+// so ClosedNotPlanned stays false. The cursor is the page number ("" is page
+// 1); next follows Forgejo's Link header, since an instance may cap a page
+// below limit, and falls back to a full page when the header is absent.
 func labeledPage(t tracker.Target, label, state, cursor string, limit int) ([]tracker.Issue, string, error) {
 	if limit < 1 {
 		return nil, "", fmt.Errorf("list labeled issues: limit %d < 1", limit)

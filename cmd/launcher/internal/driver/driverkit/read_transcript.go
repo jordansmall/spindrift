@@ -6,21 +6,16 @@ import "strings"
 // command's stdout) from dominating the transcript.
 const resultTextMaxLen = 200
 
-// RenderTranscript returns the Pass log at logPath as "[role]"-prefixed lines,
-// joined by "\n" in log order, in the claude Driver's transcript form: a tool
-// call renders "[role] Name(target)" and its result "[role]   -> summary",
-// tagged "[subagent] " when it carries a subagent's report. Every Driver's
-// non-empty transcript ends with one more "\n". The first physical
-// line of a text event is prefixed because the
-// orchestrator's verdict scan counts only "[role]"-prefixed lines and slices the
-// review findings from the lines that follow; embedded newlines stay verbatim
-// so continuation lines remain bare. Tool targets, results and subagent tags
-// are flattened to one line instead, so tool-controlled text cannot start a
-// line of its own. The role is the event's own, or
-// topLevelRole (defaulting to ImplementorRole) for an event with none. Text is
-// trimmed so a leading newline cannot push a VERDICT: line off the prefixed
-// first line. Returns ("", nil) when logPath does not exist, as the claude
-// Driver does.
+// RenderTranscript returns the Pass log at logPath as "[role]"-prefixed lines
+// in log order, ending in "\n" when non-empty: a tool call renders
+// "[role] Name(target)" and its result "[role]   -> summary", tagged
+// "[subagent] " when it carries a subagent's report. Only a text event's first
+// line is prefixed and its embedded newlines stay verbatim, because the
+// orchestrator's verdict scan counts only prefixed lines and slices review
+// findings from the bare lines after; text is trimmed so a leading newline
+// cannot push VERDICT: off the prefixed line. Tool-controlled text is
+// flattened to one line so it cannot start a line of its own. An event with
+// no role takes topLevelRole (default ImplementorRole). A missing log is "".
 func RenderTranscript(logPath string, newDecoder func() Decoder, topLevelRole string) (string, error) {
 	l, err := DecodeLog(logPath, newDecoder)
 	if err != nil {

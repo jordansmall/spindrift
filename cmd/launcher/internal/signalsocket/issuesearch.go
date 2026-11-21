@@ -13,11 +13,8 @@ import (
 	"spindrift.dev/launcher/internal/signalwire"
 )
 
-// IssueSearcher answers the issue-search verb from the Dispatch's tracker.
-// Like IssueReader, which tracker and repository it searches is fixed when the
-// Pass builds it, never taken from the request. The handler has already
-// validated the query; a returned Reject follows the package rule that Reason
-// names no path, token or host detail.
+// IssueSearcher answers the issue-search verb from the Dispatch's tracker,
+// scoped like IssueReader. The handler has already validated the query.
 type IssueSearcher interface {
 	// SearchIssues returns at most limit hits. The handler asks for one more
 	// than it will return, so truncation is detectable, and caps the reply
@@ -30,12 +27,11 @@ type trackerIssueSearcher struct {
 	warn io.Writer
 }
 
-// NewTrackerIssueSearcher searches through s, the Dispatch's tracker already
-// scoped to its repository. When a Connector serves the search its Route table
-// gates it (a refusal is a 403); a Connector that does not advertise
-// tracker.searchIssues falls through to the native adapter, which still
-// answers scoped to the Dispatch repo but is not gated by any Route table.
-// Failure detail goes to warn, never to the Box.
+// NewTrackerIssueSearcher searches through s, already scoped to the Dispatch's
+// repository. A Connector serving the search gates it by its Route table; one
+// not advertising tracker.searchIssues falls through to the native adapter
+// it wraps, if any, scoped but ungated. Failure detail goes to warn, never to
+// the Box.
 func NewTrackerIssueSearcher(s forge.IssueSearcher, warn io.Writer) IssueSearcher {
 	if warn == nil {
 		warn = io.Discard
@@ -91,8 +87,6 @@ func searchQuery(q url.Values) (text string, state forge.IssueState, label strin
 }
 
 // issueSearch serves GET /issue-search?text=<t>&state=open|closed[&label=<l>].
-// Like issue it is a read: nothing is buffered, so it takes the "read"
-// disposition.
 func (h *handler) issueSearch(w http.ResponseWriter, r *http.Request) {
 	rec := recordFrom(r)
 	if r.Method != http.MethodGet {

@@ -72,11 +72,10 @@ func RepointRegistryURL(value string, rc registryvocab.RewriteContext) (registry
 // SpliceTemplateRawPath re-splices a URL-template value's path from the
 // original's raw bytes: url.Parse drops RawPath for a path with a literal
 // brace, so RepointRegistryURL's re-encoding would escape the braces (a client
-// would then send them unsubstituted) and normalise other escapes. Only a value
-// whose path spells one of markers literally is touched; query, fragment and
-// bytes like a bare space are copied verbatim. LearnedPath narrows to just
-// above the first marker's segment. A declined edit (empty To) is returned
-// as-is.
+// would then send them unsubstituted) and normalise other escapes. Only a
+// path spelling one of markers literally is touched; query, fragment and bytes
+// like a bare space are copied verbatim. LearnedPath narrows to just above the
+// first marker's segment. A declined edit (empty To) is returned as-is.
 func SpliceTemplateRawPath(original string, edit registryvocab.RewriteEdit, rc registryvocab.RewriteContext, markers []string) registryvocab.RewriteEdit {
 	if edit.To == "" {
 		return edit

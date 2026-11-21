@@ -15,9 +15,9 @@ const depsOfConcurrency = 8
 
 // Sources maps an issue number to the source DepsOf resolved each of its
 // blockers from, keyed like the edges map a Readiness carries. Source as data
-// is what lets Jira (always native) and the local tracker (always body) render
-// without display-layer special cases. No current adapter mixes sources within
-// one issue; the per-blocker keying allows for an adapter that someday might.
+// lets Jira (always native) and the local tracker (always body) render
+// without display-layer special cases. Keying per blocker, not per issue,
+// allows a tracker that mixes sources within one issue.
 type Sources map[string]map[string]forge.DepSource
 
 // Readiness answers "may this issue dispatch now, and if not, why" ahead of a
@@ -145,11 +145,10 @@ func detectCycle(edges map[string][]string, nums []string) (string, bool) {
 }
 
 // cycleMember names a node on a cycle from the indegrees Kahn's pass left, or
-// reports false when none is residual. Residual nodes include ones merely
-// downstream of a cycle, but each has an undrained in-batch blocker, so walking
-// blockers from any of them must revisit a node, and the first revisit is on a
-// cycle. Residual indegree, not Kahn's drained count, is the cycle signal, so
-// duplicate entries in nums are harmless.
+// reports false when none is residual. A residual node merely downstream of a
+// cycle still has an undrained in-batch blocker, so walking blockers must
+// revisit a node, and the first revisit is on a cycle. Residual indegree, not
+// Kahn's drained count, is the signal, so duplicates in nums are harmless.
 func cycleMember(edges map[string][]string, indegree map[string]int, inBatch map[string]bool, nums []string) (string, bool) {
 	cur, found := "", false
 	for _, n := range nums {
@@ -178,8 +177,8 @@ func cycleMember(edges map[string][]string, indegree map[string]int, inBatch map
 // is nil when a merged or open PR, or a PRState error, settled readiness without
 // calling it.Issue (a closed-unmerged PR defers to the issue's state, #4893), so
 // blockerStatus can tell "no fetch happened" from "fetched and still open".
-// Both optional handles come from caps (#2946); a zero scope (no parent) keeps
-// an IntegrationRef-landed blocker unready (#2130).
+// A zero scope (no parent) keeps an IntegrationRef-landed blocker unready
+// (#2130).
 func blockerReady(it forge.IssueTracker, caps forge.Capabilities, branchPrefix, dep string, scope forge.SeedScope) (ready bool, fi *forge.Issue) {
 	closedReason, mergedReason := "no discoverable PR", "no discoverable agent branch"
 	if pr := caps.PRForge; pr != nil {

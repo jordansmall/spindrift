@@ -403,12 +403,10 @@ func (s Schedule) Observe(now time.Time, ev schedEvent) (Schedule, bool) {
 		if e.Claims == ks.claims {
 			ks.probedAt = now
 			ks.readyUnconfirmed = false
-			// More ready than when the jam was recorded means someone added
-			// work, which a fall or a steady count is no evidence of (an
-			// upper-bound kind also lifts on a new identity at any count).
-			// Strictly greater: the same count says the jam's cause is still
-			// there. An ended gate has nothing to lift, and a reset would wipe
-			// its streak.
+			// Only a count above the jam's means someone added work; a fall or
+			// the same count says the jam's cause is still there (an
+			// upper-bound kind also lifts on a new identity). An ended gate has nothing to
+			// lift, and a reset would wipe its streak.
 			switch {
 			case ks.jamBaselinePending:
 				// This probe is the baseline, not a rise against one. A genuine
@@ -603,13 +601,12 @@ func (s Schedule) with(kind Kind, ks kindSched) Schedule {
 // kindView is a read-only per-kind picture for status and events.
 type kindView struct {
 	// Gated reports the kind cannot start at now, with Until the instant that
-	// ends it: the backoff for an unprobed kind, the jam (or an upper-bound
-	// kind's no-work backoff) or the fresh-empty Demand for a probed one, the
-	// reported due instant for a child-reported one. Until is zero when not
-	// Gated, never a stale deadline, and also zero for a Gated kind waiting
-	// only on a tip move: no clock lifts it.
-	// A rate-limit pause also Gates, with Until the later of its end and any
-	// other gate's.
+	// ends it: the backoff for an unprobed kind; the jam, an upper-bound
+	// kind's no-work backoff, or the fresh-empty Demand for a probed one; the
+	// reported due instant for a child-reported one. A rate-limit pause also
+	// Gates, with Until the later of its end and any other gate. Until is zero
+	// when not Gated (never a stale deadline), and for a kind waiting only on
+	// a tip move, which no clock lifts.
 	Gated  bool
 	Until  time.Time
 	Jammed bool
@@ -681,16 +678,14 @@ func (ks kindSched) view(now time.Time) kindView {
 	return v
 }
 
-// restore folds a handoff's per-kind schedule state into s, so a successor
-// resumes the gates, backoff step, reported due and rate-limit pause its
-// predecessor had instead of re-probing every queue cold. The backoff's floor
-// and cap stay the new config's: a changed knob takes effect on restart, so a
-// carried step is clamped into the new range. A carried jam, or an upper-bound
-// kind's gate, holds its baseline pending for the successor's first probe (a
-// zero baseline would lift the gate and drop the carried step). Every probed
-// kind's ready stays unconfirmed until its first probe, carried or not, so an
-// inherited child's exit cannot take a zero baseline. An entry for a kind s
-// does not hold is skipped (Loop's validateHandoff has already refused one).
+// restore folds a handoff's per-kind state into s, so a successor resumes its
+// predecessor's gates, backoff step, due state and rate-limit pause rather
+// than re-probing cold. A carried step is clamped into the new config's
+// floor/cap. A carried jam, or an upper-bound kind's gate, holds its baseline
+// pending for the first probe (a zero baseline would lift the gate and drop
+// the step), and every probed kind's ready stays unconfirmed until then, so an
+// inherited child's exit cannot take a zero baseline. Unknown kinds are
+// skipped (validateHandoff has already refused them).
 func (s Schedule) restore(kinds []HandoffKind) Schedule {
 	for _, k := range s.kinds {
 		if ks := s.state[k]; ks.probed() {

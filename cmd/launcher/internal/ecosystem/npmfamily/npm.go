@@ -101,13 +101,11 @@ func addNpmFamilyDeclaration(out []ecosystem.Declaration, indexByURL map[string]
 }
 
 // npmFamilyBinding points one npm-family tool at the Forwarder through envVar,
-// searching every route for the one unscoped path tagged with tag and
-// binding that route's own prefix. Unlike BindHomes' routes[0] rule (#3142),
-// npm need not follow route order: the unscoped registry is identifiable once
-// scope is carried (#5720). Each Strategy computes its own var independently
-// (issue #3259): a route's tagged paths can differ across npm, pnpm, and yarn.
-// Unscoped registries only; these bind packument requests, and
-// streamNpmPackument (#3401) re-points embedded tarball URLs.
+// binding the prefix of the route holding the one unscoped path tagged tag.
+// Unlike BindHomes' routes[0] rule (#3142), route order does not matter: scope
+// identifies the unscoped registry (#5720). Each Strategy computes its own var
+// (#3259), since tagged paths differ across npm, pnpm and yarn. This binds
+// packument requests; streamNpmPackument (#3401) re-points tarball URLs.
 func npmFamilyBinding(port int, routes []registrymanifest.Route, envVar, tag string) ([]ecosystem.EnvExport, []string) {
 	var matches []npmFamilyMatch
 	for _, m := range boundTaggedPaths(routes, tag) {

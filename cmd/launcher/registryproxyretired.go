@@ -85,10 +85,10 @@ func validateRetiredRegistryProxyKnobs(knobs retiredRegistryProxyKnobs) error {
 func retiredRegistryProxyKnobsStanza(k retiredRegistryProxyKnobs) string {
 	matchHost := "<derived from REGISTRY_PROXY_UPSTREAM_URL>"
 	if k.upstreamURL != "" {
-		// A scheme-less "user:s3cr3t@host" parses without error into an opaque
-		// body with an empty Host, so demanding a Host keeps the operator's
-		// userinfo out of this error, which goes to stderr and CI logs. u.Host
-		// carries host[:port] only, never the inline userinfo a URL may embed.
+		// A scheme-less "user:s3cr3t@host" parses into an opaque body with an
+		// empty Host, so demanding a Host keeps the operator's userinfo out of
+		// this error, which goes to stderr and CI logs. u.Host carries
+		// host[:port] only, never the URL's inline userinfo.
 		if u, err := url.Parse(k.upstreamURL); err == nil && u.Host != "" {
 			matchHost = u.Host
 		}
@@ -143,12 +143,10 @@ func retiredRegistryProxyCredentialStanza(k retiredRegistryProxyKnobs) string {
 			}
 			return fmt.Sprintf("credential = { cargo-credentials = %q, registry-name = %q }", file, name)
 		default:
-			// The retired knob no longer validates this value, and an operator
-			// value like "npmrc" is a real routes-file source key with
-			// unrelated semantics (a per-host "//<registry>/:_authToken=" lookup
-			// keyed on the route's match host), so rendering it as "file"
-			// would be wrong in a way that still parses. Keep "file" so the
-			// stanza parses, and flag it.
+			// The retired knob no longer validates this value, and a value
+			// like "npmrc" is a real routes-file source key with unrelated
+			// semantics, so a silent "file" would be wrong in a way that still
+			// parses. Keep "file" so the stanza parses, and flag it.
 			return fmt.Sprintf("credential = { file = %q }\n# unrecognized REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT %q; the retired knob only ever accepted \"raw\", \"netrc\", or \"cargo-credentials\"", file, format)
 		}
 	default:

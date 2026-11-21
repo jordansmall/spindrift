@@ -28,11 +28,10 @@ func StripResultText(text string) string {
 // ExtractOutcomeLine returns the last line of strippedText (StripResultText's
 // output) that leads with the SPINDRIFT_OUTCOME token and carries both a
 // landing= and a status= field, with a colon after the token normalized to a
-// space (issue #2012), or "" when none does. Keys inside the trailing note do
-// not count. It does not reuse hasOutcomeFields: each key must follow a
-// literal space (fieldsPart space-prefixes its input), where
-// hasOutcomeFields splits on any whitespace. A near miss is deliberately not
-// returned here.
+// space (issue #2012), or "" when none does; a near miss is deliberately not
+// returned. Keys inside the trailing note do not count. It does not reuse
+// hasOutcomeFields, which splits on any whitespace: each key must follow a
+// literal space.
 func ExtractOutcomeLine(strippedText string) string {
 	var last string
 	for _, line := range strings.Split(strippedText, "\n") {

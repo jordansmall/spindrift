@@ -23,9 +23,8 @@ const RefPrefix = "refs/spindrift/butler/"
 const stateFile = "state.json"
 
 // Local implements Backend directly against a bare Accumulation repo on the
-// local forge (ADR 0056): the Ledger ref lives alongside refs/heads/ in the
-// same repo, but on its own refs/spindrift/butler/ namespace so it is never
-// mistaken for a branch.
+// local forge (ADR 0056). The Ledger ref sits beside refs/heads/ but in its
+// own namespace, so it is never mistaken for a branch.
 type Local struct {
 	// Repo is the bare Accumulation repo's filesystem path.
 	Repo string
@@ -138,9 +137,7 @@ func (l Local) History(chore string, since time.Time) ([]Entry, error) {
 }
 
 // commit writes s as a new state commit in l.Repo, parented on old (root
-// commit if old == ""), without touching any ref. Both Append and Remote's
-// push-based Append share this plumbing so the commit shape can't drift
-// between backends.
+// commit if old == ""), without touching any ref.
 func (l Local) commit(chore, old string, s State, at time.Time) (string, error) {
 	body, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {

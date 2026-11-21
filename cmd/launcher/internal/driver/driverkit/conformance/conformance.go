@@ -1,20 +1,15 @@
 // Package conformance is the kit a Driver's package calls from its own tests:
 // Run replays a corpus of recorded Pass logs against a driverkit.Strategy and
-// checks every observable output against the goldens beside each log, and that
-// the Strategy's batch decoder agrees with its per-line decoder. It takes
-// the Strategy and a directory, never the Driver registry or another Driver's
-// package, so a Driver proves itself over its own corpus alone (issue #5506).
-// RunConnector takes the compiled Connector (.wasm) form of a Driver instead,
-// so one corpus proves a Driver whether it is native or WASM.
+// checks every observable output against the goldens beside each log. It never
+// takes the Driver registry or another Driver's package, so a Driver proves
+// itself over its own corpus alone (issue #5506). RunConnector runs the same
+// corpus against the Driver's compiled Connector (.wasm) form.
 //
-// A corpus directory holds one subdirectory per case, each with a pass.jsonl,
-// an optional render.json ({"topLevelRole": "..."}), an optional stdout.raw
-// (the CLI's unfiltered stdout, which the stream-filter check replays; the
-// case's recorded pass.jsonl is the raw input when absent), and the
-// *.golden.* files the kit compares (or rewrites under UPDATE_GOLDENS).
-// RunStreamFilter runs the stream-filter check alone, for a Driver that proves
-// only its filter. Importing this package from non-test code pulls in testing;
-// only _test.go files should do so.
+// A corpus directory holds one subdirectory per case: a pass.jsonl, an
+// optional render.json ({"topLevelRole": "..."}), an optional stdout.raw (the
+// CLI's unfiltered stdout; pass.jsonl stands in when absent), and the
+// *.golden.* files (rewritten under UPDATE_GOLDENS). It imports testing, so
+// only _test.go files should import it.
 package conformance
 
 import (
@@ -349,14 +344,12 @@ func filterRun(
 	return out.Bytes()
 }
 
-// checkStream replays the case's raw stdout (stdout.raw, else the case's
-// recorded pass.jsonl, taken as raw input) through the Driver's stream
+// checkStream replays the case's raw stdout through the Driver's stream
 // filter. A Driver that declares a filter compares the whole-input output with
 // stream.golden.txt; one that does not must forward the input unchanged, and
-// UPDATE_GOLDENS deletes any stale stream.golden.txt (as it does
-// verdict.golden.json); a normal run never fails on one. Every chunking, flush
-// included, must reproduce the whole-input output; that comparison never
-// rewrites a golden.
+// UPDATE_GOLDENS deletes any stale stream.golden.txt (a normal run never fails
+// on one). Every chunking must reproduce the whole-input output; that
+// comparison never rewrites a golden.
 func checkStream(t testing.TB, r replay, dir string) {
 	t.Helper()
 	d, filtered, update := r.d, r.filtered, r.update

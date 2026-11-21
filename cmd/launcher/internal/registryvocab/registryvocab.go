@@ -1,8 +1,8 @@
 // Package registryvocab holds the vocabulary shared by every hop of the
 // registry pipeline: routes, path-set derivation, the proxy, and the Box-facing
-// manifest (ADR 0045). Each hop kept its own copy until ADR 0048 (issue #3398)
-// and they drifted. It stays stdlib-only so registryproxy, which must never
-// import registrypathset, can still import it.
+// manifest (ADR 0045), held once so the hops cannot drift (ADR 0048, issue
+// #3398). It stays stdlib-only so registryproxy, which must never import
+// registrypathset, can still import it.
 package registryvocab
 
 import (
@@ -44,17 +44,15 @@ type Subtree struct {
 // PathSet is a set of subtree roots, in the membership sense Admits defines.
 type PathSet []string
 
-// Admits reports whether requestPath falls inside any root in s. A path
-// containing ";" is refused whatever s holds: servlet containers (Tomcat, older
-// Jetty) strip ";" path parameters per segment before normalizing, so
-// "/index/..;/x" would resolve outside the root after path.Clean admitted it.
-// The trade-off is that Artifactory ";prop=value" matrix params are refused
-// too, which package-manager clients are not expected to send. Otherwise a root
-// matches itself or a path prefixed by the root plus "/", so "/index" admits
-// "/index/config.json" but not "/indexfoo"; "/" admits every other path and an
-// empty set admits nothing. requestPath is cleaned first, and must be the
-// decoded path (URL.Path, not EscapedPath), since path.Clean leaves an escaped
-// "%2e%2e" intact.
+// Admits reports whether requestPath falls inside any root in s: the root
+// itself or a path under root+"/", so "/index" admits "/index/config.json"
+// but not "/indexfoo"; "/" admits every other path. A path containing ";" is
+// refused whatever s holds: servlet containers (Tomcat, older Jetty) strip ";"
+// path parameters per segment before normalizing, so "/index/..;/x" would
+// resolve outside the root after path.Clean admitted it (Artifactory
+// ";prop=value" matrix params, which clients are not expected to send, are
+// refused too). requestPath must be the decoded path (URL.Path), since
+// path.Clean leaves "%2e%2e" intact.
 func (s PathSet) Admits(requestPath string) bool {
 	if strings.Contains(requestPath, ";") {
 		return false

@@ -46,12 +46,8 @@ type CodeForgeUnwrapper interface {
 }
 
 // AsCodeForge returns the outermost layer of cf, following UnwrapCodeForge,
-// that implements T.
-//
-// An optional capability on a CodeForge must be looked up with AsCodeForge,
-// never a bare type assertion: embedding the CodeForge interface hides every
-// capability of the wrapped forge, so a wrapper's own implementation shadows
-// the wrapped forge's and everything else shows through.
+// that implements T. Look up a CodeForge capability with it, never a bare type
+// assertion, for the reason As gives.
 func AsCodeForge[T any](cf CodeForge) (T, bool) {
 	for cf != nil {
 		if v, ok := cf.(T); ok {

@@ -24,10 +24,8 @@ type limitedListener struct {
 }
 
 // Accept takes a slot before accepting, so an over-cap connection waits in
-// the kernel's backlog rather than being accepted and then stalled. The wait
-// aborts on Close: otherwise a full cap would strand this goroutine on the
-// semaphore, and http.Server.Close -- which waits for Serve to return --
-// would deadlock behind it.
+// the kernel's backlog. The wait aborts on Close, or a full cap would strand
+// this goroutine and deadlock http.Server.Close, which waits for Serve.
 func (l *limitedListener) Accept() (net.Conn, error) {
 	acquired := false
 	select {

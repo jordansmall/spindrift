@@ -51,26 +51,20 @@ type Row struct {
 var ErrNotFirstParty = errors.New("Driver Connector is not first-party; the Box loads only the batteries flake's Connectors in-process")
 
 // Use applies the rows in raw, a JSON array of Row; empty raw is a no-op. Each
-// row replaces the Descriptor of the Driver it names.
-//
-// A row with a Module registers a lazily loaded Driver unless a native
-// Strategy already holds the name, which wins. A Primary row is the exception:
-// it registers its Module as the Driver in place of the native Strategy.
-//
-// These are errors: a row with neither Module nor native Strategy, a repeated
-// name, a Primary row without a Module or a native Driver, a Primary row that
-// is also Shadow, a Primary row and a Shadow row for one Driver (in either
-// order, even a Shadow row that would be skipped), and a row naming a native
-// Driver whose Descriptor differs from the one in force (native is
-// authoritative for the Descriptor as it is for the Strategy).
+// row replaces the Descriptor of the Driver it names. A row with a Module
+// registers a lazily loaded Driver unless a native Strategy already holds the
+// name; a Primary row registers its Module in place of the native Strategy. A
+// row naming a native Driver must carry its Descriptor unchanged: native is
+// authoritative for the Descriptor as for the Strategy. A Primary row and a
+// Shadow row for one Driver are an error in either order, even when the Shadow
+// row would be skipped.
 //
 // A Shadow row registers no Driver: it records its Module as the native
-// Driver's shadow, and may sit beside the native Driver's own row. Without a
-// native Strategy or a Module, repeated, or with a Descriptor other than the
-// native one, it is skipped, not an error, and driver-exec reports the reason
+// Driver's shadow and may sit beside the native Driver's own row. One that
+// cannot apply is skipped with a reason driver-exec reports, never an error
 // (shadow never fails a run). Rows are validated whole before any is applied.
 // Use is the Launcher's entry point and loads any Connector; UseFile is the
-// Box's, whose registered loader refuses a Connector row not marked FirstParty.
+// Box's, whose loader refuses a Connector row not marked FirstParty.
 func Use(raw json.RawMessage) error { return use(raw, hostLoads) }
 
 // loadPolicy is who applies the rows, which decides what it may load.

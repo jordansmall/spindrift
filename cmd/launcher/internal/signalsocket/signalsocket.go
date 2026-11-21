@@ -1,19 +1,14 @@
 // Package signalsocket holds the in-memory buffer behind the Box's Signal
 // socket (ADR 0052, issue #3724).
 //
-// Three rules shape every type here. The kind is the route, so no request
-// field can select one: signalwire.Kind exists to tag a receipt, never to be
-// parsed off the wire. Content is never destination — a signal carries only
-// prose, so an issue number, label, branch or target is unrepresentable rather
-// than merely rejected. And the buffer never acts: an accept stores the signal
-// in memory and nothing else, with the comment posted, PR opened, or issue
-// filed at settle, from the host, on the host's terms.
+// Three rules shape every type here. The kind is the route, never a request
+// field. Content is never destination: an issue number, label, branch or
+// target is unrepresentable, not merely rejected. And the buffer never acts:
+// the host posts, opens or files at settle, on its own terms.
 //
-// A signalwire.Receipt describes the content — Kind, Bytes, Hash — while a
-// Reject describes the verdict; the two are independent, so every Accept*
-// method returns both on a reject, computed the same way an accept would.
-// Sequence is the one field that means "buffered": it stays zero on a
-// reject, since nothing was stored.
+// A Receipt describes the content and a Reject the verdict; the two are
+// independent, so every Accept* method returns both on a reject. Sequence alone means "buffered": it stays
+// zero on a reject.
 package signalsocket
 
 import (
@@ -125,21 +120,15 @@ func (b *Buffer) AcceptPRIntent(p signalwire.PRIntent) (signalwire.Receipt, *sig
 	return r, nil
 }
 
-// AcceptIssueIntent validates i and appends it. A repeat identical in every
-// field once blank dedup terms are pruned, Cites and Metric included, is
-// accepted idempotently: it returns the stored receipt unchanged, sequence
-// included, and does not grow the list, so a Box that retries a signal it
-// never saw the receipt for is not punished with a duplicate issue -- nor
-// with a cap it did not actually consume -- and Status() never lists a
-// sequence the repeat's caller was told about but the buffer does not have.
+// AcceptIssueIntent validates i and appends it. A repeat identical once blank
+// dedup terms are pruned returns the stored receipt, sequence included,
+// without growing the list, so a Box retrying a signal whose receipt it never
+// saw gets no duplicate issue, spends no cap, and is never told a sequence
+// Status() does not list.
 func (b *Buffer) AcceptIssueIntent(i signalwire.IssueIntent) (signalwire.Receipt, *signalwire.Reject) {
-	// Filing is best-effort: a reject here loses the finding outright, while
-	// the relay path (settle/dedup.go's splitDedupTerms/buildDedupMarker)
-	// just drops a blank term and files normally. The two carriers must not
-	// disagree about whether a blank term is fatal, so drop whitespace-only
-	// terms up front -- before Bytes/Hash and before i.ValidateTypeRequired()
-	// -- and carry only the survivors into the stored intent. A non-blank
-	// term keeps every check it has today (UTF-8, oversize).
+	// The relay path (settle/dedup.go's splitDedupTerms) drops a blank term
+	// and files normally, so the socket must not reject one: prune first,
+	// before Bytes/Hash and validation.
 	i = i.PruneBlankDedupTerms()
 
 	// One field list feeds both Bytes and Hash, so a field added to the intent

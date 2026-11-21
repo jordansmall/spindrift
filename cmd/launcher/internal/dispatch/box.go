@@ -62,16 +62,12 @@ type Dispatch struct {
 	agentGeneration *runner.AgentGeneration
 
 	// killed is this issue's kill latch, minted by Factory.New and closed by
-	// Factory.Kill (issue #3521). Nil for a Dispatch built without a Factory,
-	// which then behaves exactly as it did before.
+	// Factory.Kill (issue #3521); nil for a Dispatch built without a Factory.
 	killed <-chan struct{}
 
 	// signalBuffer holds this attempt's Signal socket buffer (ADR 0052, issue
 	// #3725), set by runOnce only under BOX_SIGNAL_CARRIER=socket, for
-	// outcomeResult to read once the Box exits. runOnce resets it to nil before
-	// every attempt starts a listener, so a killed or retried attempt's buffer
-	// can never leak into a later attempt's Result; nil also covers the log
-	// carrier, where no buffer is ever minted.
+	// outcomeResult to read once the Box exits; nil under the log carrier.
 	signalBuffer *signalsocket.Buffer
 
 	// attemptLog is the identity of the log the current attempt created, so
@@ -79,10 +75,8 @@ type Dispatch struct {
 	attemptLog os.FileInfo
 
 	// subject is what this Dispatch's Box works (ADR 0056, issue #3875): a
-	// tracker issue, or a Factory.NewChore Dispatch's Chore, and the sole
-	// source of the Dispatch's key and title (issue #3954, #3988).
-	// buildBoxEnv reads subject.key.IsChore() to forward CHORE_*/BASE_BRANCH
-	// in place of the issue-keyed ISSUE_NUMBER/ISSUE_TITLE/ISSUE_TEXT trio.
+	// tracker issue or a Factory.NewChore Chore, and the sole source of the
+	// Dispatch's key and title (issue #3954, #3988).
 	subject subject
 
 	// releaseClaim drops the claim Run took; only Close calls it, so the
@@ -91,12 +85,12 @@ type Dispatch struct {
 	releaseClaim func()
 
 	// recordID and claimTime identify this Dispatch's Record (issue #4783),
-	// stamped into every Pass log and every box report so a retry's rotated
-	// log, a fix pass and a conflict resolve all land on one Record. Run mints
-	// them fresh, before quarantinePriorRunLogs moves aside the primary log of
-	// the Record being replaced. A Dispatch that never Ran (recover adopting an
-	// open PR) has Fix and ResolveConflict continue the prior Record from the
-	// primary log's stamp, minting fresh only when no stamped log survives.
+	// stamped into every Pass log and box report so a retry's rotated log, a
+	// fix pass and a conflict resolve all land on one Record. Run mints them
+	// fresh: the primary log on disk belongs to the Record being replaced,
+	// which quarantinePriorRunLogs moves aside. A Dispatch that never Ran
+	// (recover adopting an open PR) continues the prior Record from the
+	// primary log's stamp (ensureRecordID).
 	recordID  string
 	claimTime time.Time
 
@@ -207,9 +201,9 @@ func conflictLogPathFor(pwd, number string) string {
 // Run dispatches the initial box for this issue. It claims the issue before
 // touching disk (issue #3885): IsRunning cannot see another launcher's
 // container still being created, so without the claim a racing Run() would
-// quarantine that run's live log. The IsRunning guards still catch a container
-// orphaned by a killed launcher, whose claim died with it. The claim is held
-// past Run's return, through the caller's settle, until Close (issue #4364);
+// quarantine that run's live log. The IsRunning guards still catch a
+// container orphaned by a killed launcher, whose claim died with it. The
+// claim is held through the caller's settle until Close (issue #4364);
 // callers that Run must Close.
 func (d *Dispatch) Run() Disposition {
 	release, err := ClaimIssue(d.pwd, d.number)
@@ -227,10 +221,9 @@ func (d *Dispatch) Run() Disposition {
 	return d.dispatchWithRetry(logPath, func(resumeAfterHold bool) error {
 		d.announce(report.PhaseInitial, logPath)
 		if !resumeAfterHold && !d.runner.IsRunning(BoxName(d.number)) {
-			// Only on this Run()'s first attempt, and only when no live
-			// container owns this issue's log (the same guard
-			// quarantinePriorRunLogs makes, so a live run's log dir gets
-			// neither a rename nor a marker). Unconditional otherwise: a
+			// First attempt only, under the same guard as
+			// quarantinePriorRunLogs so a live run's log dir gets neither a
+			// rename nor a marker. An existing marker is no reason to skip: a
 			// fresh Run() makes any marker on disk stale.
 			if err := quarantinePriorRunLogs(d.pwd, d.number, d.runner); err != nil {
 				return preDispatchErr{err: fmt.Errorf("quarantine prior-run logs: %w", err)}
@@ -299,17 +292,11 @@ func (d *Dispatch) boxEnv(fixPass int, ciFailureSummary string) (map[string]stri
 
 // announce prints the human announce line for phase and emits the matching
 // report.Box record (issue #3627), so the two cannot drift apart. phase is
-// the report vocabulary spelled once in report.PhaseInitial,
-// report.PhaseConflictResolve, and report.PhaseFixPass; humanPhase maps it
-// onto announceLine's own vocabulary here rather than at the two call sites,
-// so a phase name only needs to be spelled once per caller.
+// report's vocabulary (report.PhaseInitial and friends).
 //
-// logPath is the Pass log the phase writes, absolute under d.pwd; the record
-// carries it relative to the checkout. It is the un-suffixed path even when a
-// stale log is rotated aside, since runOnce moves the old file to logPath.N.
-// A later Dispatch of the same issue (or Chore) reuses the path once
-// quarantinePriorRunLogs moves the earlier run's log to logPath.prior-run.N;
-// the name stays fixed per issue (see docs/reference.md).
+// The record carries logPath relative to the checkout. It is the un-suffixed
+// path even when a stale log is rotated aside: the name stays fixed per issue
+// (see docs/reference.md).
 func (d *Dispatch) announce(phase, logPath string) {
 	fmt.Fprint(os.Stdout, announceLine(d.number, humanPhase(phase), d.subject.title))
 	rel, err := filepath.Rel(d.pwd, logPath)
@@ -387,18 +374,11 @@ func humanPhase(phase string) string {
 	return phase
 }
 
-// announceLine builds the one line of human-facing output announcing a
-// dispatched Box for number, shared by Run, Fix, and ResolveConflict (via
-// announce) so the three call sites cannot drift out of sync with each other.
-// phase is the parenthesized suffix ("", "fix-pass-N", or "conflict-resolve")
-// — not a daemon.Kind, which the rest of this branch means by "kind"; ""
-// omits the parens entirely.
-//
-// This line is human output, not the machine channel: the daemon now relays
-// child stdout unchanged rather than parsing it (issue #3627), so this exact
-// wording is operator-visible text, not a wire format, and internal/daemon no
-// longer has a ParseAnnouncedIssue reader over it. The machine channel is the
-// report record announce emits alongside this line.
+// announceLine builds the human announce line for a dispatched Box. phase is
+// the parenthesized suffix ("", "fix-pass-N", or "conflict-resolve"); ""
+// omits the parens. The line is operator-visible text, not a wire format: the
+// machine channel is the report record announce emits alongside it (issue
+// #3627).
 func announceLine(number, phase, title string) string {
 	if phase == "" {
 		return fmt.Sprintf("    -> #%s: %s\n", number, title)
@@ -418,10 +398,9 @@ func (d *Dispatch) Close() {
 
 // runOnce opens logPath fresh, dispatches one box with env, and blocks until
 // it exits. A log already at logPath is rotated aside so os.Create cannot
-// truncate it away (issue #561). If a container or sandbox named for this
-// issue is already live per Runner.IsRunning's contract (issue #3633) — a
-// live run (possibly orphaned by a killed launcher) owns that log, so
-// runOnce returns ErrAlreadyRunning first (#562).
+// truncate it away (issue #561). A Box already live for this issue per
+// Runner.IsRunning (issue #3633) owns that log, so runOnce returns
+// ErrAlreadyRunning first (#562).
 func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir string) error {
 	// Reset before any listener starts: a killed or retried attempt's
 	// buffer must never leak into a later attempt's Result (issue #3725).
@@ -457,8 +436,7 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 		d.attemptLog = info
 	}
 
-	// Unconditional: the stream view is byte-transparent, so a log-carrier
-	// run writes exactly what it wrote before.
+	// Unconditional: the stream view is byte-transparent under the log carrier.
 	boxLog := newBoxLog(logFile)
 	defer func() { _ = boxLog.flush() }()
 
@@ -485,29 +463,22 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 	}
 
 	// The per-Box registry-credential proxy (ADR 0044, issue #2849) lives
-	// exactly as long as this Run call, never shared across Boxes the way
-	// the runner.Runner adapter is. An empty RegistryProxyRoutes leaves the
-	// feature off entirely: no directory, no listener, no probe, no socket
-	// path on box.
+	// exactly as long as this Run call, never shared across Boxes. An empty
+	// RegistryProxyRoutes leaves it off entirely: no directory, listener,
+	// probe, or socket.
 	var registryProxyLocation runner.RegistryProxyLocation
-	// boxSockets collects every Box-facing socket mount this Dispatch mints,
-	// under whichever transport verdict RegistryProxyTransport returns once
-	// below: the registry proxy's unix verdict appends here, and so does the
-	// Signal socket's (ADR 0052, issue #3725), both gated on the same probe.
+	// Unix-verdict socket mounts for both the registry proxy and the Signal
+	// socket (ADR 0052, issue #3725), gated on the one transport probe below.
 	var boxSockets []runner.SocketMount
-	// signalSocketLocation is the Signal socket's TCP-only counterpart to
-	// registryProxyLocation; the zero value covers the log carrier and the
-	// unix verdict alike, where the socket travels through boxSockets instead.
+	// TCP verdict only; under unix the socket travels through boxSockets.
 	var signalSocketLocation runner.SignalSocketLocation
 
 	needRegistryProxy := len(d.cfg.RegistryProxyRoutes) > 0
 	needSignalSocket := d.cfg.signalCarrierSocket()
 
-	// The routes are validated before the probe below, the order this had
-	// before the one-probe hoist: a malformed-routes value is a static
-	// configuration mistake, so it must not wait on -- or lose its error to
-	// -- a container-runtime probe subprocess that has nothing to say about
-	// it.
+	// Routes are validated before the probe: a malformed-routes value is a
+	// static configuration mistake, so it must not wait on -- or lose its
+	// error to -- a container-runtime probe subprocess.
 	var proxy *registryproxy.Proxy
 	if needRegistryProxy {
 		handler, err := registryproxy.New(d.cfg.RegistryProxyRoutes, d.cfg.RegistryProxyRewriteRows)
@@ -518,13 +489,9 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 	}
 
 	// The runner probes the transport live at most once per Dispatch (issue
-	// #3111; one-probe rule for the Signal socket too, ADR 0052): a unix
-	// socket that cannot cross into the guest (a remote-context
-	// docker/podman, a VM-backed runtime) needs the TCP fallback, so the
-	// transport can never be inferred from GOOS. The registry proxy and
-	// the Signal socket share this one verdict rather than probing twice.
-	// Neither feature configured takes no probe at all, exactly as before
-	// this knob existed.
+	// #3111, ADR 0052): a unix socket that cannot cross into the guest (a
+	// remote-context docker/podman, a VM-backed runtime) needs the TCP
+	// fallback, so the transport can never be inferred from GOOS.
 	var transport registrymanifest.Endpoint
 	var tcpAddHost bool
 	if needRegistryProxy || needSignalSocket {
@@ -542,12 +509,9 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 
 	if needRegistryProxy {
 		// manifestEndpoint is what REGISTRY_PROXY_MANIFEST carries, and is
-		// deliberately not always registryProxyLocation.Endpoint: that one is
-		// the host-side address, while a Box-side reader can only dial the
-		// mount TARGET, a host path being meaningless inside the Box. The
-		// mount SOURCE is the host socket path listed in boxSockets
-		// (Box.Sockets), which is what BuildMountSpecs reads. See
-		// runner.RegistryProxySocketTarget.
+		// deliberately not always registryProxyLocation.Endpoint (the host-side
+		// address): under unix a Box-side reader can only dial the mount
+		// TARGET, a host path being meaningless inside the Box.
 		var manifestEndpoint registrymanifest.Endpoint
 
 		switch {
@@ -564,8 +528,6 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 			}
 			registryProxyLocation = runner.RegistryProxyLocation{Endpoint: registrymanifest.NewUnixEndpoint(socketPath)}
 			manifestEndpoint = registrymanifest.NewUnixEndpoint(runner.RegistryProxySocketTarget)
-			// socketPath is the mount SOURCE on the host; only the unix
-			// verdict has one to mount at all, TCP dials directly.
 			boxSockets = append(boxSockets, runner.SocketMount{Source: socketPath, Target: runner.RegistryProxySocketTarget})
 		case transport.IsTCP():
 			// Backstop for a TCP verdict the probe never returns, nor its
@@ -577,17 +539,11 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 			}
 			tcpHost := transport.Host()
 			secret := newRegistryProxyTCPSecret()
-			// The listener binds every interface, not loopback (issue #3111
-			// review finding): the Box dials the host by name, resolved
-			// either by the runtime itself or by --add-host
-			// <host>:host-gateway (probeRegistryTCPReachable decides which),
-			// and on a plain Linux docker bridge that name resolves to the
-			// bridge IP (e.g. 172.17.0.1), so a loopback-only bind would
-			// leave nothing on the address the Box dials.
-			//
-			// Every-interface exposure is accepted, with
-			// registrymanifest.TCPSecretHeader as the sole access control;
-			// ADR 0044's issue #3772 amendment records why and what bounds it.
+			// Binds every interface, not loopback (issue #3111): on a plain
+			// Linux docker bridge the host name the Box dials resolves to the
+			// bridge IP (e.g. 172.17.0.1). registrymanifest.TCPSecretHeader is
+			// the sole access control; ADR 0044's issue #3772 amendment
+			// records why and what bounds it.
 			if err := proxy.ListenAndServeTCP("0.0.0.0:0", secret); err != nil {
 				return fmt.Errorf("registry proxy: %w", err)
 			}
@@ -600,16 +556,11 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 				TCPSecret:  secret,
 				TCPAddHost: tcpAddHost,
 			}
-			// The Box dials the TCP endpoint directly, no mount involved, so
-			// the bound host:port is what a Box-side reader connects to and
-			// the two endpoints agree.
 			manifestEndpoint = registryProxyLocation.Endpoint
 
-			// The host and port that bind-registry needs travel inside
-			// REGISTRY_PROXY_MANIFEST's endpoint field (ADR 0045), but
-			// REGISTRY_PROXY_TCP_SECRET stays its own env var: it is a
-			// bearer-token-shaped credential, so offargv.go's OffArgvKeys keeps
-			// it off argv and ADR 0045 keeps it out of the manifest.
+			// The secret stays its own env var, out of the manifest (ADR
+			// 0045): it is a bearer credential, which offargv.go's
+			// OffArgvKeys keeps off argv.
 			env["REGISTRY_PROXY_TCP_SECRET"] = secret
 		default:
 			return fmt.Errorf("registry proxy: transport probe returned neither a unix nor a tcp endpoint")
@@ -662,10 +613,8 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 }
 
 // newRegistryProxyTCPSecret mints a fresh per-run secret (issue #3111) gating
-// the registry proxy's every-interface TCP fallback
-// (registrymanifest.TCPSecretHeader): 16 crypto/rand bytes, hex-encoded. It
-// must never share a value with newNonce (factory.go, issue #1937), which has
-// a different security role. rand.Read fails only on a broken entropy source.
+// the registry proxy's every-interface TCP fallback. It must never share a
+// value with newNonce (issue #1937), which has a different security role.
 func newRegistryProxyTCPSecret() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
@@ -680,32 +629,21 @@ const registryProxySocketFile = "proxy.sock"
 
 const spindriftRegistryProxyDirPattern = "spindrift-registry-proxy-*"
 
-// signalSocketFile and spindriftSignalSocketDirPattern are the Signal
-// socket's counterparts (ADR 0052, issue #3725): the two mounted unix
-// sockets share the same over-long-sun_path fallback mechanism (issue #3077)
-// through mkSocketDir/socketDirWithFallback below, rather than a second
-// copy-pasted variant.
 const signalSocketFile = "signal.sock"
 const spindriftSignalSocketDirPattern = "spindrift-signal-socket-*"
 
-// socketDirMkdirTemp and socketDirRemoveAll are swappable in tests the way
-// statCgroupControllerFile is (runner/bwrap/bwrap_validate.go, issue #3103):
-// the RemoveAll failure branch below is reachable only through an
-// EACCES/EROFS/EBUSY-class error no test can provoke deterministically. Both
-// the registry proxy's and the Signal socket's directories are created
-// through socketDirMkdirTemp (via mkSocketDir below). socketDirRemoveAll
-// covers only socketDirWithFallback's removal of an over-long directory,
-// which both sockets share; every other removal of these directories calls
-// os.RemoveAll directly (runOnce, signal_socket.go).
+// socketDirMkdirTemp and socketDirRemoveAll are swapped in tests: the
+// RemoveAll failure branch in socketDirWithFallback is reachable only through
+// an EACCES/EROFS/EBUSY-class error no test can provoke deterministically.
+// socketDirRemoveAll covers only that branch; every other removal of these
+// directories calls os.RemoveAll directly.
 var (
 	socketDirMkdirTemp = os.MkdirTemp
 	socketDirRemoveAll = os.RemoveAll
 )
 
-// mkSocketDir creates a fresh, unique directory for one of this Dispatch's
-// launcher-owned unix sockets under base ("" means os.MkdirTemp's own
-// default, os.TempDir()). label names the caller in error text ("registry
-// proxy" or "signal socket").
+// mkSocketDir creates a fresh directory for a launcher-owned unix socket under
+// base ("" means os.TempDir()); label names the caller in error text.
 func mkSocketDir(base, pattern, label string) (string, error) {
 	dir, err := socketDirMkdirTemp(base, pattern)
 	if err != nil {
@@ -714,13 +652,11 @@ func mkSocketDir(base, pattern, label string) (string, error) {
 	return dir, nil
 }
 
-// socketDirWithFallback returns a fresh directory for label's unix socket
-// file named socketFile, preferring os.TempDir() but falling back to /tmp
-// when appending socketFile would overflow the platform's AF_UNIX sun_path
-// limit (issue #3077), as macOS's $TMPDIR under nix develop's
-// nix-shell.XXXXXX/ prefix does. Any other os.MkdirTemp failure is returned
-// as-is, never rerouted. registryProxySocketDir and signalSocketDir are both
-// thin callers of this one mechanism (ADR 0052).
+// socketDirWithFallback returns a fresh directory for socketFile, preferring
+// os.TempDir() but falling back to /tmp when the path would overflow the
+// AF_UNIX sun_path limit (issue #3077), as macOS's $TMPDIR under nix
+// develop's nix-shell.XXXXXX/ prefix does. Any other os.MkdirTemp failure is
+// returned as-is, never rerouted.
 func socketDirWithFallback(pattern, socketFile, label string) (string, error) {
 	dir, err := mkSocketDir("", pattern, label)
 	if err != nil {
@@ -746,7 +682,7 @@ func registryProxySocketDir() (string, error) {
 }
 
 // signalSocketDir returns a fresh directory for the Signal socket's unix
-// socket, mirroring registryProxySocketDir (ADR 0052, issue #3725).
+// socket (ADR 0052, issue #3725).
 func signalSocketDir() (string, error) {
 	return socketDirWithFallback(spindriftSignalSocketDirPattern, signalSocketFile, "signal socket")
 }
@@ -816,10 +752,9 @@ func renameToFirstFreeSuffix(path, stem string) error {
 
 // preDispatchErr marks an attempt that failed before writing a log of its own
 // (Run()'s quarantine and run-lineage steps, issue #2575; runOnce's stale-log
-// rotation, issue #5444), so
-// dispatchWithRetry (retry.go) can tell it apart from other once() failures
-// via errors.As: logPath may still hold earlier content, so the caller must
-// not consult settledOutcome or ClassifyTransient against it.
+// rotation, issue #5444): logPath may still hold earlier content, so
+// dispatchWithRetry must not consult settledOutcome or ClassifyTransient
+// against it.
 type preDispatchErr struct{ err error }
 
 func (e preDispatchErr) Error() string { return e.err.Error() }
@@ -829,12 +764,10 @@ func (e preDispatchErr) Unwrap() error { return e.err }
 // for this issue to "<path>.prior-run.N", a suffix its own "<path>.N" probe
 // never matches, so an earlier run's spend cannot fold into this run's usage
 // comment and budget gate (issue #2575). Skipped under the same IsRunning
-// guard as runOnce — live per Runner.IsRunning's contract (issue #3633) —
-// though IsRunning cannot see a run paused between attempts (issue #562).
+// guard as runOnce, though IsRunning cannot see a run paused between attempts
+// (issue #562).
 func quarantinePriorRunLogs(pwd, number string, r runner.Runner) error {
-	// A nil runner comes only from a test double that never wants the runner
-	// touched; treat it as nothing running so quarantine proceeds instead of
-	// panicking on a nil interface call.
+	// A nil runner comes only from a test double; treat it as nothing running.
 	if r != nil && r.IsRunning(BoxName(number)) {
 		return nil
 	}
@@ -866,11 +799,10 @@ func markRunLineage(pwd, number string) error {
 	return f.Close()
 }
 
-// warningsPath returns the per-issue sidecar holding the settle warnings
-// (scan and rejection) of the initial run plus each fix pass (issue #3744).
-// It is a sibling of the attempt logs, never a
-// suffix of one: appending to issue-<n>.log would feed the Box log's
-// outcome-line rescan, and AllAttemptLogPaths probes exact names.
+// warningsPath returns the per-issue sidecar holding the settle warnings of
+// the initial run plus each fix pass (issue #3744). It is a sibling of the
+// attempt logs, never a suffix of one: appending to issue-<n>.log would feed
+// the Box log's outcome-line rescan.
 func warningsPath(pwd, number string) string {
 	return filepath.Join(HostLogDirFor(pwd), "issue-"+number+".warnings")
 }
@@ -897,11 +829,10 @@ func (d *Dispatch) RecordWarnings(warnings []string) {
 }
 
 // EnsureRunLineage gives a Dispatch that reaches Fix, CumulativeUsage, or
-// UsageReport without Run() (main.go's recoverIssue adopting an open PR or
-// settling a relayed branch) the same guarantee Run's quarantinePriorRunLogs
-// call makes (issue #2575). The marker is normally already there. A missing one
-// (an orphaned PR, or a pre-#2575 log dir) quarantines everything so the count
-// starts from zero.
+// UsageReport without Run() (recover adopting an open PR or settling a
+// relayed branch) the same guarantee Run's quarantinePriorRunLogs call makes
+// (issue #2575). A missing marker (an orphaned PR) quarantines everything so
+// the count starts from zero.
 func (d *Dispatch) EnsureRunLineage() error {
 	if fileExists(runLineageMarkerPath(d.pwd, d.number)) {
 		return nil

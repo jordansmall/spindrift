@@ -2,12 +2,10 @@
 // #3724): the kinds, the request and reply shapes, and the byte limits both
 // ends of the socket agree on.
 //
-// It imports nothing outside the standard library, deliberately. Go links a
-// whole package, so a Box binary reaching for these shapes where they used to
-// live -- beside the listener in internal/signalsocket -- would link
-// internal/doctor, and behind it internal/runner, internal/forge and the
-// container backend, into the Box. internal/registrymanifest is the same move
-// for the registry proxy's Box-facing contract.
+// It imports only the standard library, deliberately: the Box binary links
+// it, and living beside the listener in internal/signalsocket would drag
+// internal/doctor, internal/runner and internal/forge into the Box.
+// internal/registrymanifest does the same for the registry proxy.
 package signalwire
 
 import (
@@ -29,15 +27,11 @@ const (
 )
 
 // UsageRoute is the diagnostics-only path segment a client-side usage
-// failure (a bad flag, a missing required one) posts to: "/K/usage" for a
-// kind K the client named, or "/usage" when it could not name one at all
-// (missing or unrecognised kind word). The route buffers nothing and is
-// never consumed at settle -- it exists only to be logged (ADR 0052).
+// failure posts to. It buffers nothing and is only logged (ADR 0052).
 const UsageRoute = "usage"
 
-// UsagePath returns the diagnostics-only usage route for kind, or the
-// kindless "/usage" route when kind is empty. Both the Box client and the
-// host handler call this so the two ends never drift on the path shape.
+// UsagePath returns the usage route for kind, or "/usage" when the client
+// could not name a kind. Both ends call it so the path shape cannot drift.
 func UsagePath(kind string) string {
 	if kind == "" {
 		return "/" + UsageRoute
@@ -45,38 +39,27 @@ func UsagePath(kind string) string {
 	return "/" + kind + "/" + UsageRoute
 }
 
-// MaxUsageReasonBytes bounds a usage report's Reason. A flag package error
-// line is well under this; the limit exists so the diagnostics-only route
-// stays bounded like every other request (ADR 0052).
+// MaxUsageReasonBytes bounds a usage report's Reason, so the diagnostics
+// route stays bounded like every other request (ADR 0052).
 const MaxUsageReasonBytes = 1024
 
-// UsageReport is a client-side usage failure's content -- a `driver-exec
-// signal` CLI/flag usage failure (unknown flag, missing required flag),
-// never a token-usage figure; that is dispatch.UsageReport / internal/usage,
-// an unrelated concept sharing only the word. The kind is the route, never a
-// request field, so this carries only the reason.
+// UsageReport is a `driver-exec signal` flag-usage failure, unrelated to
+// token usage (dispatch.UsageReport). The kind is the route, so this carries
+// only the reason.
 type UsageReport struct {
 	Reason string `json:"reason"`
 }
 
-// MaxBodyBytes bounds a signal's body. This package owns the limit
-// deliberately: internal/forge's text bound governs the opposite
-// direction (text carried into the Box through execve), so coupling the
-// two would tie an argv constraint to a socket one.
+// MaxBodyBytes bounds a signal's body. It is separate from internal/forge's
+// text bound, an argv (execve) constraint on text flowing into the Box.
 const MaxBodyBytes = 64 * 1024
 
-// MaxRequestBytes bounds a request body before it is decoded. It sits well
-// above MaxBodyBytes because a legal max-size field does not serialise to
-// MaxBodyBytes bytes: the JSON envelope adds braces, keys and quotes, and
-// string escaping can turn one content byte into six (a control byte encodes
-// as a six-character \u escape). Sized for two worst-case-escaped fields, not
-// one -- an issue-intent request can carry both a max-size body and a
-// max-size patch (ADR 0057, issue #4072) at once, so a single field's
-// six-times slack is not enough headroom. The slack carries that worst case,
-// so the buffer's own per-field limit -- which reports the precise "oversize"
-// fault naming the offending field -- stays the binding one for any request a
-// Box could legitimately send. The trade-off: every request kind, patch field
-// or not, may now buffer up to this doubled bound before decoding.
+// MaxRequestBytes bounds a request body before decoding. JSON escaping can
+// turn one content byte into six (\u escape), and an issue-intent can carry a
+// max-size body and a max-size patch at once (ADR 0057, issue #4072), so it is
+// sized for two worst-case fields. That keeps the per-field "oversize" reject,
+// which names the field, the binding limit for any legitimate request. The
+// cost: every request kind may buffer up to this doubled bound.
 const MaxRequestBytes = 12*MaxBodyBytes + 64*1024
 
 // SecretHeader is the signal socket's own TCP bearer header. It is
@@ -109,24 +92,19 @@ func (p PRIntent) Validate() *Reject {
 	return nil
 }
 
-// IssueIntent is an issue-intent finding's one wire shape, used end to end:
-// driver-exec's client builds it, the socket buffers it, and settle files
-// it. Type is the closed doctor.FindingTypeLabels vocabulary; the host
-// still picks labels, but DedupTerms is the Box's to supply (issue #3609)
-// -- only the Box knows the finding's site. Class and Concurrence are issue
-// #3880's auto-promotion gate: Class is the Box's own claim about the
-// finding's kind, checked against the host's allow-list only at settle, and
-// Concurrence is the in-Box reviewer subagent's one-line agreement, empty
-// when it dissented or never ran. Neither can promote anything by itself --
-// the host holds the allow-list and the daily budget, and the Box cannot
-// change either. Cites (digest anchors) and Metric (a slug) are a tuning
-// finding's evidence (issue #4952): their shape is checked for every
-// intent, but only a tuning Chore's Box requires them (driver-exec
-// demands both when CHORE_INPUT is set) and only the host's tuning
-// validation uses them. Patch (ADR 0057, issue #4072) is an optional
-// unified diff of modification hunks only, no binary content; the host
-// alone decides whether it is ever applied, and only for a finding whose
-// Class is on the host's own patch allow-list -- the Box merely carries it.
+// IssueIntent is an issue-intent finding's one wire shape, end to end:
+// driver-exec builds it, the socket buffers it, settle files it. Type is the
+// closed doctor.FindingTypeLabels vocabulary; DedupTerms is the Box's to
+// supply since only it knows the finding's site (issue #3609). Class (the
+// Box's own claim, checked against the host's allow-list only at settle) and
+// Concurrence (the in-Box reviewer's one-line agreement, empty when it
+// dissented or never ran) feed issue #3880's auto-promotion gate, but the host
+// holds the allow-list and daily budget, so neither promotes anything alone.
+// Cites (digest anchors) and Metric (a slug) are a tuning finding's evidence
+// (issue #4952): shape-checked on every intent, but only driver-exec requires
+// them, when CHORE_INPUT is set. Patch (ADR 0057, issue #4072) is an optional
+// unified diff of modification hunks only, no binary content; the host applies
+// it only for a Class on its own patch allow-list.
 type IssueIntent struct {
 	Title       string   `json:"title"`
 	Body        string   `json:"body"`
@@ -140,9 +118,8 @@ type IssueIntent struct {
 }
 
 // PruneBlankDedupTerms returns i with every whitespace-only DedupTerms entry
-// removed. It is the one place that rule lives -- Validate calls it before
-// building its field list, and the socket calls it before computing
-// Bytes/Hash, so the two carriers cannot drift on which terms survive.
+// removed. Validate and the socket's Bytes/Hash both use it, so the carriers
+// cannot drift on which terms survive.
 func (i IssueIntent) PruneBlankDedupTerms() IssueIntent {
 	i.DedupTerms = slices.DeleteFunc(slices.Clone(i.DedupTerms), func(t string) bool {
 		return strings.TrimSpace(t) == ""
@@ -159,10 +136,7 @@ func (i IssueIntent) Validate() *Reject {
 }
 
 // ValidateTypeRequired is Validate plus a non-blank Type, for the socket
-// route where Type is mandatory. Folding the check into the same field list
-// -- rather than checking it separately, before or after -- keeps the
-// "wrong in two ways always reports the same fault" contract CheckFields
-// gives every other field.
+// route. Type joins the same field list so CheckFields' fault order holds.
 func (i IssueIntent) ValidateTypeRequired() *Reject {
 	return i.validate(true)
 }
@@ -227,10 +201,9 @@ type Reject struct {
 	Code   int    `json:"-"`
 }
 
-// Field is one content field: its wire name and its value. Every field is
-// bounded by MaxBodyBytes -- title and type included, not just body --
-// because the alternative is a per-field guess: without it a title is held
-// only by MaxRequestBytes, thirteen times the limit any tracker accepts.
+// Field is one content field. Every field, title and type included, is
+// bounded by MaxBodyBytes; otherwise a title is held only by MaxRequestBytes,
+// thirteen times what any tracker accepts.
 type Field struct {
 	Name  string
 	Value string

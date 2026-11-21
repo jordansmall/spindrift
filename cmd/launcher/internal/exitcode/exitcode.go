@@ -1,14 +1,8 @@
 // Package exitcode is the exit-code contract between a launcher child and the
-// Daemon that drives it, plus doctor's separate one. Each code's meaning is one
-// row in the relevant table.
-//
-// The two tables are deliberately distinct types: doctor's exit codes share
-// small integers with a dispatched child's, so a Doctor can never be read as
-// a Dispatch (doctor's 4 is "required labels missing", a child's is
-// "image-stale").
-//
-// It is a leaf package: it states what each exit means, and the Daemon maps
-// that onto its own richer types (HaltClass, Halt).
+// Daemon that drives it, plus doctor's separate one, one table row per code.
+// The tables are distinct types because their integers overlap (doctor's 4 is
+// "required labels missing", a child's is "image-stale"). It is a leaf
+// package; the Daemon maps each exit onto its own richer types.
 package exitcode
 
 // Action is the daemon loop's next move after interpreting a child's exit
@@ -22,9 +16,7 @@ const (
 	// slot.
 	HaltPool
 	// Backoff means the exit is unclassified: back off this slot alone
-	// (Config.FailureBackoff) and refill it, rather than halting the whole
-	// pool — an unrecognised exit code from one child is not evidence the
-	// rest of the pool is broken.
+	// (Config.FailureBackoff) and refill it; see LookupDispatch.
 	Backoff
 )
 

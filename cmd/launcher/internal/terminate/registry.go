@@ -10,22 +10,20 @@ package terminate
 import "sync"
 
 // Registry tracks, per issue number, which dispatch generation the launcher
-// has terminated this session. A nil *Registry stays safe to call (Begin
-// returns 0, Mark is a no-op, Marked reports false), but every production
-// dispatch path builds or substitutes a non-nil one, so only tests reach the
-// nil receivers. A fresh NewRegistry's Marked likewise reports false until
-// something calls Mark -- e.g. Reclaim on a signalled abort, which on a
-// headless path marks generation 0 because no Begin bumped it.
+// has terminated this session. A nil *Registry is safe to call (Begin returns
+// 0, Mark is a no-op, Marked reports false); only tests reach it. On a
+// headless path, where no Begin bumped the generation, Reclaim marks
+// generation 0.
 type Registry struct {
 	mu sync.Mutex
-	// gen keys marks by generation instead of a plain per-number bool (the
-	// pre-#743 design): a re-pick's claim had to clear that bool so its own
-	// settle was not abandoned, and the clear raced an old still-polling
-	// settle goroutine's next checkpoint. Begin starts a new generation
-	// without touching any earlier generation's mark, closing that race.
+	// gen keys marks by generation rather than a per-number bool (#743): a
+	// re-pick's claim would have to clear that bool so its own settle was not
+	// abandoned, racing an old still-polling settle goroutine's next
+	// checkpoint. Begin starts a new generation without touching any earlier
+	// generation's mark.
 	gen map[string]uint64
-	// dead records every generation ever marked, not only the most recent, so
-	// a second Terminate does not forget an earlier generation's mark.
+	// dead records every generation ever marked, so a later Mark does not
+	// forget an earlier generation's.
 	dead map[string]map[uint64]bool
 }
 

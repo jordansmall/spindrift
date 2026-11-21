@@ -38,8 +38,7 @@ const (
 // enforcement path and doctor's reporting path. The runner family's launch
 // gates are excluded on purpose: they are Runner prerequisites, run at launch
 // by checkRunnerLaunchPrerequisites and reported by doctor through
-// prerequisiteChecks, with richer dynamic Tier and remedy semantics. The
-// routed github Connector write gate closes the list.
+// prerequisiteChecks, with richer dynamic Tier and remedy semantics.
 var gateRegistry = append([]launchGate{
 	{Name: "read-only-capability", Check: func(c config, _ io.Writer) error {
 		return checkReadOnlyCapabilityGate(c)

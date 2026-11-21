@@ -6,17 +6,15 @@ import "slices"
 // reached a clean moment: the build passed and the pool is waiting, nothing is
 // halting or stopping, the discovery baton is free, and every running child
 // has sent its first report. mutate calls it after every state change, so the
-// change that makes the moment clean also commits, in the same lock hold: no
-// slot starts a child between the two.
+// change that makes the moment clean commits in the same lock hold: no slot
+// starts a child between the two.
 //
 // Committing abandons every slot's wait (the children keep running) and
-// cancels the pool context so parked slots return. It records no halt: the pool
-// hands its children on rather than stopping. Closing and cancelling here is
-// safe under p.mu because neither calls back into the pool. A halt recorded
-// after this point (a child that exited with a halting code in the race
-// before its wait was abandoned, or a Stop the Stop watcher picks up late) is
-// dropped by recordHalt, with no halt event: the handoff stands, since the
-// other children are already abandoned and cannot be waited on again.
+// cancels the pool context so parked slots return. It records no halt: the
+// pool hands its children on rather than stopping. Closing p.abandon and
+// cancelling are safe under p.mu, as neither calls back into the pool. A halt recorded afterwards (a halting
+// exit racing the abandon, a late Stop) is dropped by recordHalt: the other
+// children are already abandoned, so the handoff stands.
 func (p *pool) commitHandoffIfClean(s *state) {
 	// Abort closing without Stop would refuse the handoff for good, leaving
 	// parked slots waiting on ctx alone. Production cannot reach that:

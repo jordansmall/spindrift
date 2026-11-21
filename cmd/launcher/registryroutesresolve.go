@@ -14,12 +14,10 @@ import (
 )
 
 // buildRegistryProxyRoutes resolves dispatch.Config's registry-proxy route
-// table (issue #3139) from the routes file (ADR 0045), the only input since
-// issue #3145 retired the scalar REGISTRY_PROXY_* knobs. AssignPrefixes runs
-// here, not in the file parser, so every production table carries a Prefix
-// (issue #3142) while the parser stays testable on its own.
-// rows is the registered Strategies to resolve over: production passes
-// ecosystem.Registered(), tests a synthetic Strategy.
+// table (issue #3139) from the routes file (ADR 0045). AssignPrefixes runs
+// here, not in the parser, so every production table carries a Prefix (issue
+// #3142) while the parser stays testable alone. rows is the Strategies to
+// resolve over: ecosystem.Registered() in production.
 func buildRegistryProxyRoutes(c config, rows []ecosystem.Strategy) ([]registryproxy.Route, error) {
 	if c.RegistryProxyRoutesFile == "" {
 		return nil, nil
@@ -98,22 +96,15 @@ func deriveHostRootedPathSets(c config, hostRootedHosts []string, rows []ecosyst
 }
 
 // resolveRegistryRoutesFromFile parses routesFile (ADR 0045) and resolves each
-// route's credential exactly once: resolving an env-var source is destructive
-// (os.Unsetenv on success), so a second resolve would find nothing. A failure
-// names the offending route's match-host.
+// route's credential exactly once: resolving an env-var source unsets it, so a
+// second resolve would find nothing. A failure names the route's match-host.
 //
-// Resolving parsed's credentials runs in two passes, both in file order
-// (issue #3151): pass 1 resolves (and so unsets) every route whose
-// credential consumes a process env var (credresolver.ResolveUnsetsEnv),
-// before pass 2 resolves everything else, including exec sources. A single
-// file-order pass would let an exec route listed before an env route run
-// while that env var was still set, so which secrets a credential helper can
-// observe would depend on where its route happened to sit in the routes
-// file. Pass 1 removes that dependency: every env var this file names is
-// gone from the process environment before any exec helper runs, whatever
-// order the routes appear in. One consequence: when both an env-sourced and
-// a non-env route would fail to resolve, the env route's failure always
-// surfaces first, because pass 1 runs to completion before pass 2 starts.
+// Resolution runs in two file-order passes (issue #3151): pass 1 resolves, and
+// so unsets, every route whose credential consumes a process env var
+// (credresolver.ResolveUnsetsEnv); pass 2 resolves the rest, exec sources
+// included. Every env var the file names is thus gone before any exec helper
+// runs, whatever the route order. As a consequence, when an env-sourced and a
+// non-env route would both fail, the env failure always surfaces first.
 func resolveRegistryRoutesFromFile(routesFile string, rows []ecosystem.Strategy) ([]registryproxy.Route, error) {
 	data, err := os.ReadFile(routesFile)
 	if err != nil {
@@ -130,8 +121,7 @@ func resolveRegistryRoutesFromFile(routesFile string, rows []ecosystem.Strategy)
 	}
 
 	// resolvePass resolves every route whose credresolver.ResolveUnsetsEnv
-	// matches unsetsEnv, skipping the rest; the two calls below are what
-	// give parsed its two file-order passes (see the doc comment above).
+	// matches unsetsEnv, skipping the rest.
 	resolvePass := func(unsetsEnv bool) error {
 		for i, r := range parsed {
 			if credresolver.ResolveUnsetsEnv(r.Credential) != unsetsEnv {

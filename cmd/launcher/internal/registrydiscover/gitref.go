@@ -15,18 +15,16 @@ import (
 )
 
 // MaterializeRef writes ref's committed ecosystem config files into a throwaway
-// directory the caller reads as a checkout. Reading committed content rather
-// than a working tree lets one helper serve both the bare Accumulation repo
-// (ADR 0033) and a non-bare one, whose uncommitted state must never leak in.
-// cleanup is always non-nil and a no-op on the error return, so defer it at once.
+// directory read as a checkout. Committed content serves both the bare
+// Accumulation repo (ADR 0033) and a non-bare one, whose uncommitted state must
+// never leak in. cleanup is always non-nil and a no-op on the error return,
+// so defer it at once.
 //
-// A symlink inside ref's tree, at the config path or at a parent directory,
-// resolves to its target's content, as a checkout's os.ReadFile would. Two
-// shapes deliberately part from a checkout and skip like a missing file: a
-// directory at the config path, which Extract hard-errors on, since a
-// snapshot has no failing read to report, only nothing to declare; and an
-// absolute or out-of-tree symlink, since a snapshot must never read the host
-// file it names. A dangling link skips too.
+// An in-tree symlink resolves to its target, as in a checkout. These skip like
+// a missing file: a directory at the config path (Extract hard-errors on it in
+// a checkout, but a snapshot has no failing read, only nothing to declare), an
+// absolute or out-of-tree symlink (a snapshot must never read the host file it
+// names), and a dangling link.
 func MaterializeRef(repoDir, ref string, rows []ecosystem.Strategy) (dir string, cleanup func(), err error) {
 	noop := func() {}
 
@@ -34,9 +32,7 @@ func MaterializeRef(repoDir, ref string, rows []ecosystem.Strategy) (dir string,
 		return "", noop, err
 	}
 
-	// Walking Strategies, the same Strategies Extract walks, keeps the materialized
-	// file set from drifting from the scanned one: a config path added to a Strategy
-	// is picked up here with no second list to maintain.
+	// Walking the same Strategies Extract walks keeps the file sets in step.
 	type candidate struct {
 		path string
 		row  int
@@ -102,12 +98,9 @@ func parseCatFileBatch(out []byte, n int) ([][]byte, error) {
 			return nil, fmt.Errorf("cat-file reply %d: %w", i, err)
 		}
 		// "<oid> <type> <size>" precedes an object; "<kind> <size>" precedes
-		// the path a dangling, loop, notdir, or out-of-tree symlink reply
-		// names; "<object> missing" and "<object> ambiguous" carry nothing.
-		// <object> is the ref:path string given on stdin, which can itself
-		// contain whitespace (e.g. a ref like "HEAD@{1 day ago}"), so the
-		// missing/ambiguous check matches the header's fixed suffix rather
-		// than splitting the whole line into fields.
+		// a dangling/loop/notdir/out-of-tree symlink's path; "<object>
+		// missing|ambiguous" carries nothing. <object> is the stdin ref:path,
+		// which can hold whitespace ("HEAD@{1 day ago}"), so match the suffix.
 		if strings.HasSuffix(header, " missing\n") || strings.HasSuffix(header, " ambiguous\n") {
 			continue
 		}
@@ -132,10 +125,8 @@ func parseCatFileBatch(out []byte, n int) ([][]byte, error) {
 }
 
 // ResolveRef confirms ref resolves to a tree in repoDir without materializing
-// anything, so a caller can skip the temp-dir cost of MaterializeRef. Checking
-// here rather than leaning on that function's batched read reports a broken
-// repoDir or a missing ref as itself, not as every config file being absent;
-// fixing the repo or ref and committing a config file are different responses.
+// anything. It reports a broken repoDir or missing ref as itself, not as
+// every config file being absent.
 func ResolveRef(repoDir, ref string) error {
 	// `git -C ""` is a documented no-op, so an empty repoDir would silently
 	// resolve ref against whatever repo the process cwd sits in.

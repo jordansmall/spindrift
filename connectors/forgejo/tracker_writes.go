@@ -26,8 +26,8 @@ func transition(tracker.Target, string, tracker.TransitionRequest) (tracker.Tran
 	return tracker.TransitionResult{Outcome: tracker.TransitionUnmapped}, nil
 }
 
-// setLabels replaces the issue's whole label set by name, as the native
-// adapter does; the empty set is [], never null.
+// setLabels replaces the issue's whole label set by name; the empty set is [],
+// never null.
 func setLabels(t tracker.Target, number string, names []string) error {
 	path, err := numberedPath(t, number, "/labels")
 	if err != nil {
@@ -146,7 +146,7 @@ func createLabel(t tracker.Target, name, description, color string) error {
 // names resolve against the label union first. With the org lookup unreadable,
 // an unresolved name files anyway and every name is then applied by name; that
 // apply failing still answers the URL, since core reads ("", err) as nothing
-// filed and would refile (native #4459).
+// filed and would refile (#4459).
 func fileIssue(t tracker.Target, r tracker.IssueRequest) (string, error) {
 	body := r.Body
 	if r.DedupMarker != "" {

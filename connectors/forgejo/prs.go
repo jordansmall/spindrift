@@ -144,11 +144,12 @@ func comment(t forge.Target, number, body string) error {
 	return call("POST", t.API, forgePath(t, "/issues/"+number+"/comments"), marshal(map[string]string{"body": body}), nil)
 }
 
-// postMerge always rebases: the protocol carries no method, and rebase is the
-// native adapter's default. A 405 or 409 is the forge refusing an unmergeable
-// PR, reported as NotMergeable: core re-reads the PR to tell why only for that
-// class, and retries only a Transient failure. enqueueAutoMerge shares it, so a
-// refused enqueue reports NotMergeable too; core branches on it only for merge.
+// postMerge always rebases: the protocol carries no method (core refuses any
+// other MERGE_METHOD, forgejo.ErrMergeMethod). A 405 or 409 is the forge
+// refusing an unmergeable PR, reported as NotMergeable: core re-reads the PR to
+// tell why only for that class, and retries only a Transient failure.
+// enqueueAutoMerge shares it, so a refused enqueue reports NotMergeable too;
+// core branches on it only for merge.
 func postMerge(t forge.Target, number string, extra map[string]any) error {
 	if _, err := parseNumber(number); err != nil {
 		return err

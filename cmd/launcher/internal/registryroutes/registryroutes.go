@@ -50,25 +50,21 @@ type Route struct {
 	// with nothing committed to scan. "" when omitted, and never has a path.
 	UpstreamOrigin string
 	Credential     credresolver.Config
-	// Ecosystems is the route's per-ecosystem [routes.ecosystems.<name>]
-	// declaration block (issue #3403), keyed by Strategy name. It
-	// holds every per-ecosystem declaration a route can make; downstream hops
-	// read them back out of this block, not through dedicated fields. Nil when
-	// the route declares nothing per-ecosystem, never an empty map.
+	// Ecosystems holds every per-ecosystem [routes.ecosystems.<name>]
+	// declaration (issue #3403), keyed by Strategy name; downstream hops read
+	// them from here, not dedicated fields. Nil, never empty, when none.
 	Ecosystems registryvocab.RouteEcosystems
-	// Allow names extra path patterns that extend a host-rooted route's derived
-	// enforced path-set (ADR 0047, issue #3258), for a path shape the Target
-	// repo's own manifests don't expose, such as an Artifactory sibling
-	// download endpoint. Every route is host-rooted (issue #3261), so this is
-	// the only recourse; it never gates enforcement itself. Nil or empty is valid.
+	// Allow extends a host-rooted route's derived enforced path-set (ADR 0047,
+	// issue #3258) for a path the Target repo's manifests don't expose, such as
+	// an Artifactory sibling download endpoint. Every route is host-rooted
+	// (issue #3261), so this is the only recourse; it never gates enforcement.
 	Allow []string
 }
 
-// rawFile is the strict TOML decode target for a routes file. Credential
-// decodes as a map, not a struct, so the exactly-one-source and unknown-key
-// checks can name the offending route and key, which DisallowUnknownFields
-// alone cannot. Its value type is `any` because the "exec" source's value is
-// a TOML array, so the string checks move to parseCredential.
+// rawFile is the strict TOML decode target for a routes file. A route's
+// credential decodes as map[string]any, not a struct: the source and
+// unknown-key checks name the offending route and key, which
+// DisallowUnknownFields alone cannot, and "exec"'s value is a TOML array.
 type rawFile struct {
 	Routes []rawRoute `toml:"routes"`
 }
@@ -89,11 +85,9 @@ type rawRoute struct {
 	Allow            []string       `toml:"allow"`
 	GradlePath       *string        `toml:"gradle-path"`
 	GoPath           *string        `toml:"go-path"`
-	// Ecosystems decodes [routes.ecosystems.<name>] (issue #3403), keyed by the
-	// ecosystem name the operator wrote. Each block stays a bare map so the
-	// per-ecosystem key checks can run by hand against the given Strategies and name
-	// the offending route, name, and key; a fixed struct would only ever know
-	// about "path", never a Strategy-specific key like cargo's "registries".
+	// Ecosystems decodes [routes.ecosystems.<name>] (issue #3403). Each block
+	// stays a bare map so the key checks can name the offending route, name and
+	// key, and a Strategy-specific key like cargo's "registries" decodes at all.
 	Ecosystems map[string]map[string]any `toml:"ecosystems"`
 }
 
@@ -197,11 +191,9 @@ const (
 )
 
 // retiredRouteKeys pairs each retired top-level key (ADR 0048, issue #3405)
-// with two readers: declared reports whether the route spells the key at all,
-// and block renders it as the [routes.ecosystems.<name>] block it stands for.
-// block returns nil for a declared-but-empty value, which binds as absent;
-// any other value is passed through for mergeRetiredRouteEcosystems to
-// validate. The fixed order keeps reporting deterministic.
+// with declared (does the route spell it at all) and block (the
+// [routes.ecosystems.<name>] block it stands for; nil for a declared-but-empty
+// value, which binds as absent). The fixed order keeps reporting deterministic.
 var retiredRouteKeys = []struct {
 	key      string
 	declared func(rawRoute) bool
@@ -240,10 +232,9 @@ var retiredRouteKeys = []struct {
 }
 
 // buildRouteEcosystems builds rr's Ecosystems block, validating each declared
-// block against the matching Strategy. It walks the Strategies in order, then any name
-// the Strategies don't know, sorted, so an unknown name is reported
-// deterministically. The result is nil, not empty, when rr declares nothing
-// per-ecosystem (registryvocab.RouteEcosystems' "absent is nil" convention).
+// block against the matching Strategy. Unknown names are sorted so the one
+// reported is deterministic. The result is nil, not empty, when rr declares
+// nothing per-ecosystem.
 func buildRouteEcosystems(label string, rr rawRoute, rows []ecosystem.Strategy) (registryvocab.RouteEcosystems, error) {
 	blocks := make(registryvocab.RouteEcosystems)
 
@@ -279,10 +270,9 @@ func buildRouteEcosystems(label string, rr rawRoute, rows []ecosystem.Strategy) 
 }
 
 // buildRouteDeclarationBlock validates one ecosystem's declaration block
-// (issue #3403) against row: "path" via the shared canonical-path rules
-// (validateDeclaredPath), every other key via row's own RouteDeclaration hook,
-// a nil hook rejecting every such key. Keys are walked in sorted order so a
-// block declaring two problems always reports the same one first.
+// (issue #3403) against row: "path" via validateDeclaredPath, every other key
+// via row's RouteDeclaration hook (a nil hook rejects them all). Keys are
+// sorted so a block with two problems always reports the same one first.
 func buildRouteDeclarationBlock(label string, row ecosystem.Strategy, raw map[string]any) (registryvocab.RouteDeclaration, error) {
 	keys := make([]string, 0, len(raw))
 	for key := range raw {
@@ -390,12 +380,11 @@ func retiredKeysVerb(keys []string) string {
 	return "is"
 }
 
-// retiredRouteStanza builds the replacement [[routes]] entry for a route that
-// still declares a retired key, so migrating is paste-this-back rather than
-// re-deriving the route from ADR 0047 or ADR 0048. A retired upstream-base-url
-// supplies upstream-origin only when it says something match-host cannot, and
-// its path is dropped: a host-rooted route derives the paths it serves. merged
-// is mergeRetiredRouteEcosystems' result for rr.
+// retiredRouteStanza builds the paste-back replacement [[routes]] entry for a
+// route still declaring a retired key (ADR 0047, ADR 0048). A retired
+// upstream-base-url supplies upstream-origin only when it says something
+// match-host cannot; its path is dropped, as a host-rooted route derives the
+// paths it serves. merged is mergeRetiredRouteEcosystems' result for rr.
 func retiredRouteStanza(rr rawRoute, merged map[string]map[string]any) string {
 	var b strings.Builder
 	b.WriteString("[[routes]]\n")
@@ -420,14 +409,12 @@ func retiredRouteStanza(rr rawRoute, merged map[string]map[string]any) string {
 	return b.String()
 }
 
-// mergeRetiredRouteEcosystems folds each retired top-level key's block into
-// rr's own [routes.ecosystems.<name>] blocks, so retiredRouteStanza renders one
-// block per ecosystem whichever spelling the route used. A name declared both
-// ways keeps the explicit block's keys and gains only what that block omits.
-// A retired value the new key refuses is left out of the result and returned
-// with its validation error, in retiredRouteKeys order. An explicit block
-// already declaring every key wins unvalidated: the retired value is never
-// echoed.
+// mergeRetiredRouteEcosystems folds each retired key's block into rr's own
+// [routes.ecosystems.<name>] blocks, so the stanza renders one block per
+// ecosystem. An explicit block's keys win; it gains only what it omits, and
+// one declaring every key wins unvalidated, since the retired value is never
+// echoed. A retired value the new key refuses is left out and returned with
+// its validation error, in retiredRouteKeys order.
 func mergeRetiredRouteEcosystems(label string, rr rawRoute, rows []ecosystem.Strategy) (map[string]map[string]any, []refusedRetiredValue) {
 	merged := make(map[string]map[string]any, len(rr.Ecosystems))
 	for name, block := range rr.Ecosystems {
@@ -484,10 +471,10 @@ func declaresAll(block, raw map[string]any) bool {
 }
 
 // retiredRouteEcosystemBlocks renders a route's [routes.ecosystems.<name>]
-// blocks (issue #3403) back as TOML sub-tables. A sub-table inside a
-// [[routes]] entry ends that entry's top-level keys, which is why
-// retiredRouteStanza appends these last. Names and keys are sorted, since go
-// randomizes map iteration and an operator is told to copy-paste this text.
+// blocks back as TOML sub-tables. A sub-table ends its [[routes]] entry's
+// top-level keys, so retiredRouteStanza appends these last. Names and keys
+// are sorted, since map iteration is random and an operator copy-pastes this
+// text.
 func retiredRouteEcosystemBlocks(ecosystems map[string]map[string]any) string {
 	names := make([]string, 0, len(ecosystems))
 	for name := range ecosystems {
@@ -512,13 +499,10 @@ func retiredRouteEcosystemBlocks(ecosystems map[string]map[string]any) string {
 	return b.String()
 }
 
-// retiredRouteCredentialInline renders a route's credential map back as the
-// TOML inline table it was written as, in a fixed order (the source key in
-// credresolver.Kinds() order, then its companion), since go randomizes map
-// iteration and an operator is told to copy-paste this text. Parse
-// validates the credential before reporting a retired key, so m is always a
-// map parseCredential accepted and every key in it is a known source or
-// companion. Returns "" for a route with no credential.
+// retiredRouteCredentialInline renders a route's credential map back as a TOML
+// inline table in credresolver.Kinds() order, source then companion, since an
+// operator copy-pastes this text. m is always one parseCredential accepted, so
+// every key is a known source or companion. Returns "" for no credential.
 func retiredRouteCredentialInline(m map[string]any) string {
 	if len(m) == 0 {
 		return ""
@@ -554,12 +538,11 @@ func tomlKey(key string) string {
 	return fmt.Sprintf("%q", key)
 }
 
-// tomlValue renders one decoded free-form value back as TOML: a credential
-// value or an ecosystem declaration's, each a string or an array of them.
-// Anything else renders as a quoted Go rendering rather than being dropped
-// silently, since the Strategy's own RouteDeclaration hook names it precisely once
-// the operator has migrated off the retired key; a credential value never gets
-// here, as Parse validates the credential before any stanza renders.
+// tomlValue renders one decoded value, a string or an array of them, back as
+// TOML. Anything else renders quoted rather than being dropped, since the
+// Strategy's RouteDeclaration hook names it precisely once the operator has
+// migrated off the retired key. A credential value never reaches that case:
+// Parse validates the credential before any stanza renders.
 func tomlValue(v any) string {
 	switch t := v.(type) {
 	case string:
@@ -616,10 +599,7 @@ func parseCredential(label, matchHost string, m map[string]any, upstreamURL stri
 		}
 	}
 
-	// Every key's value must be a string except "exec", whose TOML array value
-	// go-toml decodes into []interface{}, so it cannot share the string check
-	// below. seenSource records which sources the table named here, where each
-	// key is already classified, rather than repeating the exec special case.
+	// Every value must be a string except "exec"'s, a TOML array.
 	var execArgv []string
 	strs := make(map[string]string, len(m))
 	seenSource := make(map[string]bool, len(m))
@@ -646,9 +626,7 @@ func parseCredential(label, matchHost string, m map[string]any, upstreamURL stri
 		}
 	}
 
-	// Rebuilt in credresolver.Kinds() order rather than m's: go randomizes map
-	// iteration, and this order feeds the "names more than one source" error
-	// text below, which must stay deterministic for the same input.
+	// Kinds() order, not m's, keeps the "more than one source" error deterministic.
 	var present []credresolver.Kind
 	for _, kind := range credresolver.Kinds() {
 		if seenSource[kind.SourceKey] {
@@ -659,7 +637,6 @@ func parseCredential(label, matchHost string, m map[string]any, upstreamURL stri
 	case 0:
 		return credresolver.Config{}, fmt.Errorf("registryroutes: %s: credential names no source; exactly one of %s is required", label, strings.Join(credentialSourceKeys, ", "))
 	case 1:
-		// exactly one source: proceed below.
 	default:
 		keys := make([]string, len(present))
 		for i, k := range present {
@@ -802,27 +779,22 @@ func validateAllowPatterns(label string, patterns []string) error {
 	return nil
 }
 
-// urlDelimiterError is the shared message for a "?" or "#" in a declared value:
-// registryvocab.HasURLDelimiter in validateDeclaredPath and
-// registryvocab.ErrPatternURLDelimiter in validateAllowPatterns, so the two
-// cannot drift.
+// urlDelimiterError is the one message for a "?" or "#" in a declared path or
+// allow pattern, so the two cannot drift.
 func urlDelimiterError(label, field, value string) error {
 	return fmt.Errorf("registryroutes: %s: %s %q must not contain %q or %q", label, field, value, "?", "#")
 }
 
 // validateDeclaredPath validates the path key of one [routes.ecosystems.<name>]
-// block. It bans "$", "`", and "\" because a declared path can land in a
-// Groovy double-quoted literal, where "$" interpolates at load time, or in a
-// shell-sourced export line; it also bans whitespace (any Unicode space),
-// control characters, any other rune unicode.IsPrint refuses, "?", and "#". It
-// bans "," and "|" because Go reads
-// GOPROXY as a list split on them, so one would add a fallback past the Forwarder;
-// every ecosystem shares that ban, since no registry path needs either and a
-// Strategy's RouteDeclaration hook never sees this key to ban them for go alone.
-// The IsPrint ban exists because Go's %q writes an astral non-printable rune as
-// \UXXXXXXXX, which a Groovy literal rejects; with every rune printable and "\"
-// banned, %q emits no escape Groovy rejects.
-// It strips every trailing "/", so "//" cannot pass the bare-root check.
+// block. "$", "`" and "\" are banned because the path can land in a Groovy
+// double-quoted literal ("$" interpolates) or a shell-sourced export line.
+// Non-printable runes are banned because %q writes an astral one as
+// \UXXXXXXXX, which Groovy rejects; with every rune printable and "\" banned,
+// %q emits no escape Groovy rejects. "," and "|" are banned for every
+// ecosystem because GOPROXY splits on them, adding a fallback past the
+// Forwarder; no registry path needs either, and the RouteDeclaration hook
+// never sees this key to ban them for go alone.
+// Stripping every trailing "/" keeps "//" from passing the bare-root check.
 func validateDeclaredPath(label, field, value string) (string, error) {
 	if registryvocab.HasURLDelimiter(value) {
 		return "", urlDelimiterError(label, field, value)
@@ -852,9 +824,7 @@ func validateDeclaredPath(label, field, value string) (string, error) {
 	}
 	for i, seg := range strings.Split(normalized, "/") {
 		if i == 0 {
-			// normalized always starts with "/", so the split always yields a
-			// leading "" for that prefix: not a real segment, and not the
-			// doubled slash the empty-segment check below catches.
+			// The leading "/" splits off a "" that is not a doubled slash.
 			continue
 		}
 		switch seg {
@@ -879,11 +849,9 @@ func routeLabel(matchHost string, index int) string {
 }
 
 // ProxyRoute carries r's routes-file fields into the registryproxy.Route
-// production and the ecosystemtest kit both build from. Credential, Upstream,
-// EnforcedPaths, EnforcedSubtrees and Prefix stay unset: the caller resolves
-// the credential, registrypathset.ApplyToRoute fills Upstream and the
-// enforced paths from the host's path set, and registryproxy.AssignPrefixes
-// sets Prefix across the whole route slice.
+// production and the ecosystemtest kit both build from. The caller resolves
+// Credential, registrypathset.ApplyToRoute fills Upstream and the enforced
+// paths, and registryproxy.AssignPrefixes sets Prefix.
 func (r Route) ProxyRoute() registryproxy.Route {
 	return registryproxy.Route{
 		MatchHost:      r.MatchHost,

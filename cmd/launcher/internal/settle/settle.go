@@ -43,20 +43,19 @@ type Config struct {
 	MaxFixAttempts    int
 	MaxRebaseAttempts int
 
-	// Policy tunes transient retries (issue #2928); the rebase-push loops reuse
-	// dispatch's exit-retry policy (issue #2095). Policy.Max caps
-	// merge-transient and verifyMerged read retries (issue #2325);
-	// MaxRebaseAttempts is a separate merge-conflict budget.
+	// Policy tunes transient retries (issue #2928), the rebase-push loops'
+	// included (issue #2095); Policy.Max caps merge-transient and verifyMerged
+	// read retries (issue #2325), apart from the MaxRebaseAttempts
+	// merge-conflict budget.
 	Policy retry.Policy
 
 	// Clock is the sleep seam the rebase-push backoff sleeps through (issue
 	// #2095). Defaults to dispatch.RealClock() when its Sleep field is nil.
 	Clock dispatch.Clock
 
-	// MaxBudgetTokens and MaxBudgetUSD cap cumulative usage (issues #2001,
-	// #2575): selfHealGate sums every attempt dispatched so far and checks both
-	// caps before launching another fix pass. Reaching either one stops the run
-	// with a budget-exhausted status and never merges partial work. Zero
+	// MaxBudgetTokens and MaxBudgetUSD cap cumulative usage across every
+	// attempt, checked before each fix pass (issues #2001, #2575); reaching
+	// either stops the run budget-exhausted, never merging partial work. Zero
 	// disables that dimension.
 	MaxBudgetTokens int
 	MaxBudgetUSD    float64
@@ -66,11 +65,9 @@ type Config struct {
 	// a green-but-behind PR merges as-is (ADR 0028).
 	PreflightStaleBase bool
 
-	// OutboxDir resolves an issue number to its Box's writable outbox directory
-	// (CODE_FORGE=local, ADR 0033), which the Code Forge's BundleRelay hook
-	// reads the code-out bundle from before Merge, and which a merged landing
-	// then removes the bundle from (issue #4653). Nil disables both; the relay
-	// read happens only when the Code Forge implements forge.BundleRelay.
+	// OutboxDir resolves an issue number to its Box's outbox directory (ADR
+	// 0033), where forge.BundleRelay reads the code-out bundle and from which a
+	// merged landing removes it (issue #4653). Nil disables both.
 	OutboxDir func(num string) string
 
 	// LogPath resolves an issue number to its Dispatch's primary Pass log,
@@ -82,12 +79,11 @@ type Config struct {
 	// landing calls (ADR 0033, issue #1734): under CODE_FORGE=local each issue
 	// may key its Integration branch off a different parent, so RelayBundle,
 	// Merge, Rebase, and LandingRef must land through that instance. Nil
-	// returns New's cf, the only instance elsewhere.
+	// returns New's cf.
 	CodeForgeForIssue func(num string) forge.CodeForge
 
 	// BaseBranch is the branch hostMediateDraftPR opens against (issue #1919),
-	// since a read-only Box never runs the PR-create itself. Unused outside
-	// that path.
+	// since a read-only Box never runs the PR-create itself.
 	BaseBranch string
 
 	// Capabilities is this run's resolved backend capabilities. The caller
@@ -96,12 +92,11 @@ type Config struct {
 	Capabilities forge.Capabilities
 
 	// Unclaimed marks a PR whose issue was never claimed (a butler patch
-	// finding, ADR 0057, issue #4076): the issue carries no InProgress state
-	// to leave, so the gate commits no tracker state except Complete once the
-	// PR actually merged, and a red gate leaves the PR draft with a failure
-	// comment rather than agent-failed. New clamps MaxFixAttempts to 0
-	// whenever this is true, since there is no Dispatcher to run a fix pass
-	// with.
+	// finding, ADR 0057, issue #4076): with no InProgress state to leave, the
+	// gate commits no tracker state but Complete on a real merge, and a red
+	// gate leaves the PR draft with a failure comment rather than
+	// agent-failed. New clamps MaxFixAttempts to 0, since no Dispatcher exists
+	// to run a fix pass.
 	Unclaimed bool
 
 	// Progress receives the per-issue progress steps; New defaults nil to
@@ -113,10 +108,10 @@ type Config struct {
 // depends on: the waves engine and the launcher's selective list dispatch.
 type Settler interface {
 	// Settle interprets result and drives num to its terminal label. gen is the
-	// terminate.Registry generation (issue #743) this call's own dispatch was
-	// launched under, so a re-pick's later generation is never mistaken for it.
-	// Generation 0 is that of an issue no Begin has bumped, so a caller that
-	// never calls Begin (recover, headless waves) still matches a Mark on it.
+	// terminate.Registry generation (issue #743) this dispatch launched under,
+	// so a re-pick's later generation is never mistaken for it; a caller that
+	// never calls Begin (recover, headless waves) passes 0 and still matches a
+	// Mark.
 	Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) Settlement
 }
 
@@ -134,7 +129,7 @@ type MergeSettler interface {
 // Settle is the prod adapter, constructed once per top-level dispatch entry
 // point and reused across every issue in that invocation. Safe for concurrent
 // use by dispatchWave goroutines: the only mutable state beyond the
-// concurrency-safe it/cf is settledLatch, and that is mutex-guarded.
+// concurrency-safe it/cf is the per-issue maps settledMu guards.
 type Settle struct {
 	cfg Config
 	it  forge.IssueTracker
@@ -142,41 +137,31 @@ type Settle struct {
 	// lander is chosen once in New: prLander when the Code Forge has a PR forge,
 	// else pushOnlyLander.
 	lander lander
-	// pr is nil for the push-only git adapter. The lander keeps it out of the
-	// landing tail; the gate's merged arm and read-only delivery, and the
-	// relayed-branch adopt paths, still check it directly.
+	// pr is nil for a push-only forge. Outside the lander, the merged arm,
+	// read-only delivery and relayed-branch adopt paths check it directly.
 	pr forge.PRForge
-	// landing is nil for github/jira, which do not implement it (ADR 0029).
+	// landing is nil for every tracker but local (ADR 0029).
 	landing forge.LandingRecorder
 	// landingPass is nil for every tracker but local (issue #2983).
 	landingPass forge.LandingPassRecorder
 	// ciRun is nil for forges that cannot report a CI run URL.
 	ciRun forge.CIRunReporter
-	// Every CI-watch, fix-pass, and merge-gate checkpoint checks term, so a
-	// Terminate that lands mid-settle (ADR 0024, issue #649) abandons the settle
-	// instead of corrupting issue state Terminate already reclaimed.
-	// New builds it and nothing ever writes it again, so the settle goroutines
-	// reading it concurrently need no lock and no later caller can displace it
-	// mid-run (issue #3522).
+	// Every CI-watch, fix-pass and merge-gate checkpoint checks term, so a
+	// Reclaim mid-settle (ADR 0024, issue #649) abandons the settle instead of
+	// corrupting state it already reclaimed. Written once in New, so readers
+	// need no lock and no caller can displace it mid-run (issue #3522).
 	term *terminate.Registry
 	// cfForNum defaults to returning cf when Config.CodeForgeForIssue is nil
 	// (issue #1734).
 	cfForNum func(num string) forge.CodeForge
 	// clock defaults to dispatch.RealClock() when Config.Clock is unset.
 	clock dispatch.Clock
-	// settledMu guards settledLatch (issue #3627): dispatchWave goroutines
-	// settle different issues on the same *Settle concurrently, so the map
-	// itself needs a lock even though each issue's own read-modify-write
-	// (transitionState latching, then flushSettled popping) happens
-	// sequentially on one goroutine.
+	// settledMu guards the per-issue maps below (issue #3627): dispatchWave settles
+	// different issues concurrently, though each issue's own latch and flush
+	// run on one goroutine.
 	settledMu sync.Mutex
 	// settledLatch holds each in-flight issue's most recent terminal
-	// transition, last write wins. One issue's own settle path can reach
-	// transitionState twice for two different terminal states — e.g. a green
-	// completeLanding (Complete) that verifyMerged then demotes to Failed
-	// after a merge re-check (pr_lander.go) — and only the tracker's final
-	// decision should ever reach the daemon as a settled record, once
-	// (issue #3627).
+	// transition, last write wins; see transitionState (issue #3627).
 	settledLatch map[string]settledLatch
 	// prLatch holds the PR each in-flight issue's gate is working, apart from
 	// settledLatch because transitionState overwrites that entry and the PR

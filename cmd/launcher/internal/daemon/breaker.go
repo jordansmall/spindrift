@@ -5,18 +5,12 @@ import (
 	"time"
 )
 
-// breaker counts unclassified failures across the whole pool (not per
-// slot): one slot backing off on its own is routine, but failures piling
-// up across several slots inside a short window is the signature of a
-// systemic fault (an expired token, a forge outage) that no per-slot retry
-// clears.
+// breaker counts unclassified failures across the whole pool, not per slot:
+// failures piling up across slots inside a short window signal a systemic
+// fault (an expired token, a forge outage) no per-slot retry clears.
 //
-// A plain value, not a mutex-guarded object (issue #3623): the pool holds
-// its one breaker as a field under p.mu, so recordAndCheck reads the
-// receiver and returns the updated value for the caller to store back,
-// rather than mutating in place. That single p.mu hold is also what keeps
-// the "exactly one caller sees the threshold crossing" property below
-// intact — see recordAndCheck.
+// A plain value (issue #3623): the pool holds it under p.mu, and
+// recordAndCheck returns the updated value for the caller to store back.
 type breaker struct {
 	threshold int
 	window    time.Duration
@@ -30,18 +24,12 @@ func newBreaker(threshold int, window time.Duration) breaker {
 	return breaker{threshold: threshold, window: window}
 }
 
-// recordAndCheck notes a failure at now, evicting any failures older than
-// window (relative to now) as it goes — so a breaker that never trips also
-// never grows unbounded over a long night — and returns the updated
-// breaker alongside the resulting in-window count and whether this call is
-// the one that crossed threshold. The caller must store the returned
-// breaker back (under p.mu; see pool.backoffOrHalt): that single lock hold
-// around the whole read-modify-write is what makes recording and checking
-// atomic together, so the count advances by exactly one per call, and
-// exactly one caller can ever see it step from under threshold to at or
-// over. That is what keeps a concurrent crossing — several slots failing
-// at once, the systemic fault this breaker exists for — reported as one
-// breaker_trip rather than one per slot.
+// recordAndCheck notes a failure at now, evicting failures older than window
+// so the breaker never grows unbounded, and returns the updated breaker, the
+// in-window count, and whether this call crossed threshold. The caller must
+// store it back under the same p.mu hold (pool.backoffOrHalt): that makes
+// the read-modify-write atomic, so exactly one caller sees the crossing and
+// several slots failing at once report one breaker_trip, not one per slot.
 func (b breaker) recordAndCheck(now time.Time) (breaker, int, bool) {
 	b.times = b.evict(now)
 	before := len(b.times)
@@ -51,12 +39,10 @@ func (b breaker) recordAndCheck(now time.Time) (breaker, int, bool) {
 	return b, count, crossed
 }
 
-// evict returns b.times with anything older than window (relative to now)
-// dropped. Reuses b.times' backing array in place via times[:0] — safe
-// only because the pool stores the breaker value this returns straight
-// back into its own state.b field under p.mu, the array's single owner; a
-// value receiver otherwise reads as copy-safe, but this one call writes
-// through the shared backing array.
+// evict returns b.times with anything older than window dropped. It reuses
+// b.times' backing array via times[:0] — safe only because the pool stores
+// the result straight back under p.mu, the array's single owner; despite
+// the value receiver, this writes through the shared array.
 func (b breaker) evict(now time.Time) []time.Time {
 	cutoff := now.Add(-b.window)
 	kept := b.times[:0]
@@ -68,14 +54,14 @@ func (b breaker) evict(now time.Time) []time.Time {
 	return kept
 }
 
-// restore seeds the breaker with the failure times a handoff carried. The
-// slice is copied: the document's backing array must not be shared with the
-// one evict reuses in place. Only the newest threshold-1 are kept (the slice is
-// in append order, as snapshot leaves it): recordAndCheck crosses only from
-// below threshold, so a carried count at or above threshold (a successor's
-// lowered threshold) would never trip. Times outside the window fall away at
-// the next recordAndCheck, so a stale one may hold a kept slot; the in-window
-// count stays below threshold either way.
+// restore seeds the breaker with the failure times a handoff carried, copied
+// so the document does not share the array evict reuses. Only the newest
+// threshold-1 are kept (the tail: snapshot leaves the slice in append
+// order): recordAndCheck crosses only from below threshold, so a carried
+// count at or above a successor's lowered threshold would never trip. Times
+// outside the window fall away only at the next recordAndCheck, so a stale
+// one may hold a kept slot; the in-window count stays below threshold
+// either way.
 func (b breaker) restore(times []time.Time) breaker {
 	keep := b.threshold - 1
 	if len(times) > keep {

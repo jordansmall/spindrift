@@ -249,13 +249,11 @@ func RecordID(kind, key string, claim time.Time) string {
 // ParseLog infers a Record from the pass log at path. A log whose first event
 // is a dispatch_start stamp yields a stamped Record, whatever its name; any
 // other log must be named like a ChainKey file (else ErrUnstamped) and yields an
-// inferred one. An unstamped satellite log parses like a primary one; its
-// Record's claim time is the log's own start, which the store uses to window it
-// into the Dispatch it belongs to. A log with no non-blank line yields
-// ErrEmptyLog. The claim time of an inferred Record is the first timestamped
-// event in file order, which later appends cannot move. provisional reports
-// that no event carried a timestamp, so the claim time fell back to the file
-// mtime and appended output can still move the ID.
+// inferred one, whose claim time is the first timestamped event in file order
+// so later appends cannot move it; for a satellite that is its own start, which
+// the store windows into its Dispatch. A log with no non-blank line yields
+// ErrEmptyLog. provisional reports that no event carried a timestamp, so the
+// claim time fell back to the file mtime and appended output can move the ID.
 func ParseLog(path string) (rec Record, provisional bool, err error) {
 	rec, provisional, _, err = parseLog(path)
 	return rec, provisional, err
@@ -466,11 +464,9 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 	case dispatchkey.IsChoreKey(key):
 		kind = choreKeyedKind()
 	case announced != "" && announcedDesc != dispatchkind.Work:
-		// Only the work kind's verb is ambiguous: logs before #734
-		// announce research as "implementing" too, so a kind-unique status
-		// must outrank that verb.
-		// A frozen quirk of old logs, not a descriptor axis, so it names
-		// Work itself: an unset kind's Default has nothing to do with it.
+		// Only the work kind's verb is ambiguous: logs before #734 announce
+		// research as "implementing" too, so a kind-unique status outranks it.
+		// A frozen quirk of old logs, not a descriptor axis, so it names Work.
 		kind = announced
 	case sk != KindUnknown:
 		kind = sk
@@ -564,12 +560,11 @@ func nonNil(s []string) []string {
 // conflict-resolve log, or a hold/backoff retry of the primary), and the CLI
 // reports that session's cumulative totals, so its first result must be
 // rebased against the last of them (issue #6706). Research and butler retries
-// re-pin the same session id instead; seeding them is still right, since the
-// transcript is cached within a Run so the counters continue, and a genuine
-// restart is caught by the counter-decrease rule. The earlier logs are those
-// of the same stamped Dispatch (by record_id, since quarantine suffixes are
-// numbered per file) that started before this one. Keep in step with
-// dispatch.attemptReports.
+// re-pin the same session id; seeding is still right, since the transcript is
+// cached within a Run so the counters continue, and a genuine restart trips the
+// counter-decrease rule. The earlier logs are the same stamped Dispatch's that
+// started before this one, matched by record_id (quarantine suffixes are
+// numbered per file). Keep in step with dispatch.attemptReports.
 func sessionSeed(path string, stamp hostop.DispatchStart, stamped bool, d driver.Driver) (driverkit.SessionBaselines, error) {
 	dir, name := filepath.Split(path)
 	key, _ := logKey(name)

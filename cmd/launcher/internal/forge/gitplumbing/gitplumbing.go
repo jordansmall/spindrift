@@ -54,13 +54,10 @@ var sharedTransientMarkers = []string{
 
 // mergeTransientMarkers' "http 5xx" entries anchor on gh's status-line prefix,
 // since bare digits match PR numbers, branch names and URLs. The EOF and
-// timeout entries are specific phrases from Go net/http transport errors
-// (`Post "<url>": EOF`, which carries no status line) and the GraphQL timeout
-// text GitHub's API returns, never the bare words. Residual exposure: a PR
-// title or branch echoed into stderr that contains a full phrase (e.g.
-// "unexpected EOF"), or ends a line in ": eof" (a branch named "eof"), still
-// matches. The ": eof\n" entry is end-anchored on an LF line ending;
-// IsMergeTransient appends the newline.
+// timeout entries are full phrases from Go net/http errors (`Post "<url>":
+// EOF` has no status line) and GitHub's GraphQL timeout text. A PR title or
+// branch echoing one of those phrases still matches. ": eof\n" is
+// end-anchored; IsMergeTransient appends the newline.
 var mergeTransientMarkers = slices.Concat(sharedTransientMarkers, []string{
 	"http 502",
 	"http 503",

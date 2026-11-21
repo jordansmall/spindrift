@@ -1,9 +1,8 @@
 // Package dispatchkey declares one Dispatch key sum type (issue #3988): a
 // Dispatch is keyed by exactly one of a tracker issue number or a butler
-// Chore name (ADR 0056), never both. report and daemon both need this type —
-// daemon must not pull dispatch's heavy graph (see internal/dispatchkind's
-// doc for the same leaf rationale) — so it lives here rather than in
-// internal/dispatch, which imports internal/report and would cycle.
+// Chore name (ADR 0056), never both. It is a leaf because report and daemon
+// both need it: daemon must not pull dispatch's heavy graph, and report cannot
+// import dispatch, which imports report.
 package dispatchkey
 
 import (

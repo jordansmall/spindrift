@@ -19,15 +19,11 @@ func WarnPageMayTruncateBacklog(source string, count int) {
 	}
 }
 
-// DedupScanLimit bounds the github adapter's per-label LabeledBacklogLister
-// page and each Connector tracker.labeled page (issue #3609 review; a
-// Connector pages on past it by cursor); forgejo, jira and local paginate
-// uncapped instead. It is larger than ResultPageLimit: the label filter already
-// keeps the scanned population small (only review/research finding issues,
-// not the whole backlog), and a truncated dedup scan that drops the newest
-// finding issues files the exact duplicate the scan exists to prevent --
-// worse than ResultPageLimit's "rerun to drain" tradeoff, which just delays
-// triage.
+// DedupScanLimit bounds each Connector tracker.labeled page (issue #3609); the
+// Connector pages on past it by cursor. It is larger than ResultPageLimit: the
+// label filter already keeps the scanned population small, and a truncated
+// dedup scan files the exact duplicate the scan exists to prevent, worse than
+// ResultPageLimit's "rerun to drain", which only delays triage.
 const DedupScanLimit = 500
 
 // WarnDedupScanMayTruncate warns when a single label's page of dedup-scan
@@ -49,10 +45,10 @@ func WarnDedupScanStopped(source, label, bound string, pages, count int) {
 }
 
 // FullyPaginated is the optional IssueTracker interface for adapters that walk
-// every page of the forge API (forgejo, jira) instead of returning one page
-// capped at ResultPageLimit. When WalksAllPages reports true, a caller such as
-// issueInState's page-limit fail-safe (#707/#986) can treat a result of
-// len >= ResultPageLimit as complete rather than truncated.
+// every page of the forge API instead of returning one page capped at
+// ResultPageLimit. When WalksAllPages reports true, a page-limit fail-safe
+// (#707/#986) may treat a result of len >= ResultPageLimit as complete rather
+// than truncated. The Connector tracker reports false.
 type FullyPaginated interface {
 	// WalksAllPages reports whether this tracker's list results are always
 	// a complete, non-truncated set.

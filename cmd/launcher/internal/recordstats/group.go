@@ -29,9 +29,8 @@ func GroupRecords(records []dispatchrecord.Record, key func(dispatchrecord.Recor
 
 // GroupPasses splits claim-time-sorted Records into groups by a pass-level
 // key. A Record is copied into every group one of its passes belongs to,
-// carrying only those passes; a Record with no passes lands whole in the
-// (none) group so it never vanishes. Groups keep first-appearance order, (none)
-// last.
+// carrying only those passes; one with no passes lands whole in (none) so it
+// never vanishes. Groups keep first-appearance order, (none) last.
 func GroupPasses(records []dispatchrecord.Record, key func(dispatchrecord.Pass) string) []Group {
 	g := splitPasses(records, func(p dispatchrecord.Pass, add func(string, dispatchrecord.Pass)) {
 		add(key(p), p)
@@ -196,21 +195,17 @@ func MeanChurnPercent(records []dispatchrecord.Record) (pct float64, filled int)
 	return 100 * sum / float64(filled), filled
 }
 
-// GroupAgents splits claim-time-sorted Records into groups by agent. Like
-// GroupPasses, a Record is copied into every group one of its passes belongs
-// to, but each pass is projected onto that agent: its token and API-call
-// figures become the agent's own row. USD, durations, turns and the verdict
-// have no per-agent source, so they stay whole on the main loop's projection
-// and are cleared on a subagent's, so they sum across groups to the ungrouped
-// total, as do output tokens and API calls. Input and cache tokens sum to the
-// agent rows instead, which can exceed it: a Driver's own pass totals may leave
-// a subagent's input and cache tokens out (claude's result usage covers only
-// the main loop's input and cache tokens). Under claude the main loop's
-// output is its own and named subagents' is 0, since no per-role figure exists;
-// the rest of the session's output sits on a (subagents) row. A pass
-// with no Agents lands whole in the (none) group, as does a Record with no
-// passes. The main loop comes first, then agents in first-appearance order,
-// (none) last.
+// GroupAgents splits claim-time-sorted Records into groups by agent, like
+// GroupPasses but projecting each pass onto the agent's own token and
+// API-call figures. USD, durations, turns and the verdict have no per-agent
+// source, so they stay on the main loop's projection only and, like output
+// tokens and API calls, sum across groups to the ungrouped total. Input and
+// cache tokens can sum above it: a Driver's pass totals may omit subagents'
+// (claude's result usage covers only the main loop). Under claude, named
+// subagents' output is 0 (no per-role figure exists) and output beyond the
+// main loop's sits on the (subagents) row. A pass with no Agents, or a Record
+// with no passes, lands whole in (none). Order: main loop, then first
+// appearance, (none) last.
 func GroupAgents(records []dispatchrecord.Record) []Group {
 	g := splitPasses(records, func(p dispatchrecord.Pass, add func(string, dispatchrecord.Pass)) {
 		if len(p.Agents) == 0 {

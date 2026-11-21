@@ -26,12 +26,10 @@ type SpindriftOp struct {
 	// Op names the operation kind, one of the Op* constants.
 	Op   string `json:"op"`
 	Pass int    `json:"pass,omitempty"`
-	// Role names the pass's own role on a pass_start op (issue #2037):
-	// "implement", "review", "fix", "land", or "delta-review". The land pass
-	// (issue #2457, #2654) runs exactly once per run and cannot re-enter the
-	// review cycle, but a run-once delta-review pass (issue #3246) can follow
-	// it. Empty on every other op kind, and on a pass_start from the legacy
-	// single-loop path that never distinguishes roles.
+	// Role names the pass's role on a pass_start op (issue #2037):
+	// "implement", "review", "fix", "land" (once per run, issues #2457,
+	// #2654), or "delta-review" (once, after land, issue #3246). Empty on every
+	// other op kind, and on the single-loop path's roleless pass_start.
 	Role    string `json:"role,omitempty"`
 	Verdict string `json:"verdict,omitempty"`
 	// Model and Effort name the exact model id and effort the pass runs with
@@ -47,15 +45,11 @@ type SpindriftOp struct {
 	// "sha256:"-prefixed hex, on a "signal" op.
 	Size int    `json:"size,omitempty"`
 	Hash string `json:"hash,omitempty"`
-	// Decision is "continue" or "stop" on a "decision" op, "fire" or
-	// "skip" on a "delta_review_trigger" op (issue #3246), or "accept",
-	// "reject", "read", or "usage" on a "signal" op (issue #3724, #3867)
-	// -- "read" for the status and issue routes, which never accept or reject
-	// content and so carries no Reason; "usage" for the diagnostics-only
-	// route a Box-side client usage failure reports on, Reason carrying
-	// the client's error, never buffered. The op kinds share the field
-	// because each names a small, fixed set of outcomes, normally paired
-	// with a Reason.
+	// Decision is "continue" or "stop" on a "decision" op, "fire" or "skip" on
+	// a "delta_review_trigger" op (issue #3246), or "accept", "reject", "read",
+	// or "usage" on a "signal" op (issues #3724, #3867). "read" (the status and
+	// issue routes) carries no Reason; "usage" is a diagnostics-only route
+	// whose Reason is a Box-side client's usage error, never buffered.
 	Decision string `json:"decision,omitempty"`
 	Reason   string `json:"reason,omitempty"`
 	Phase    string `json:"phase,omitempty"` // "read", "write", "findings_log", "dispositions_log", "dispositions_budget", "decisions_log", or "decisions_budget", for run_state_error
@@ -65,9 +59,8 @@ type SpindriftOp struct {
 	Usage *PassUsage `json:"usage,omitempty"`
 	// Delta carries the land pass's post-approval tree delta on a
 	// "land_delta" op (issue #3244); nil on every other op kind. It is
-	// landdelta.Delta itself, not a package-local copy, so the orchestrator's
-	// emission and settle's PR body agree on Summary()'s wording and on the
-	// counted/zero/unknown split.
+	// landdelta.Delta itself so the orchestrator's emission and settle's PR
+	// body agree on Summary()'s wording and the counted/zero/unknown split.
 	Delta *landdelta.Delta `json:"delta,omitempty"`
 	// Start carries a Dispatch's identity on a "dispatch_start" op; nil on
 	// every other op kind.
@@ -197,10 +190,7 @@ type PassUsage struct {
 func EncodeSpindriftOp(op SpindriftOp) string {
 	b, err := json.Marshal(Event{Type: TypeSpindriftOp, SpindriftOp: &op})
 	if err != nil {
-		// Every field is a string, number, time, or a map/struct of those,
-		// so json.Marshal cannot practically fail. This is an observability
-		// path, so a failure degrades to "no marker emitted" rather than
-		// crashing the orchestrator's loop.
+		// Observability only: degrade to no marker rather than crash the loop.
 		return ""
 	}
 	return string(b) + "\n"
@@ -208,14 +198,12 @@ func EncodeSpindriftOp(op SpindriftOp) string {
 
 // ShadowDivergence is the payload of a "shadow_divergence" SpindriftOp: the
 // Box replays a Pass log through the native Strategy and a Connector's, and
-// reports each mismatch. Like PromptHashes it is Box-reported, so a consumer
-// must treat it as untrusted. Check is "events" (the decoded events of one
-// line), "resolveExit" or "resultEvent". Neither of the last two has a LineNo,
-// so line_no is absent from the op; resolveExit has no Line either, while
-// resultEvent's Line is the native result text it encoded. Native and Shadow
-// are each side's result, JSON-encoded. A backend read shadow reports through
-// the same op: Check is then the read operation's name and Line its
-// JSON-encoded inputs.
+// reports each mismatch. Like PromptHashes it is Box-reported, so untrusted.
+// Check is "events" (one line's decoded events), "resolveExit" (no LineNo, no
+// Line) or "resultEvent" (no LineNo; Line is the native result text). Native
+// and Shadow are each side's JSON-encoded result. A backend read shadow uses
+// the same op, with Check the read operation's name and Line its JSON-encoded
+// inputs.
 type ShadowDivergence struct {
 	Driver string          `json:"driver"`
 	Check  string          `json:"check"`
@@ -227,19 +215,16 @@ type ShadowDivergence struct {
 
 // ShadowSummary is the payload of a "shadow_summary" SpindriftOp, the last op
 // of a shadow run and Box-reported (see ShadowDivergence). Loaded is false
-// when the Connector never loaded; Error set with Loaded true means it failed
+// when the Connector never loaded; Error with Loaded true means it failed
 // closed mid-run and the counts are those so far. Diverged counts every
-// mismatch, Recorded only the ones emitted as shadow_divergence ops. A Pass-log
-// replay counts Compared lines; a backend read shadow uses the same op with
-// Compared counting compared calls, the *_ns_per_line fields meaning per
-// compared call, and the counters below it alone fills: Forbidden (shadow calls
-// answered 403 that were not a rate limit), RateLimited and
-// SecondaryRateLimited (primary and secondary rate limits), and Skipped
-// (sampled calls dropped rather than delay the native path). The Sandbox*
-// fields are the run's Connector sandbox, shared by every Connector the run
-// hosts, so run-wide totals when the summary is written; only the host-side
-// read shadow sets them, and only when a sandbox started. Replayed is set only
-// by a replay of an archived Pass log, never by a live shadow.
+// mismatch, Recorded only those emitted as shadow_divergence ops.
+//
+// A backend read shadow counts compared calls rather than lines (so
+// *_ns_per_line is per call) and alone fills Forbidden (non-rate-limit 403s),
+// RateLimited, SecondaryRateLimited, Skipped (sampled calls dropped rather
+// than delay the native path), and the Sandbox* fields: run-wide totals for
+// the Connector sandbox all the run's Connectors share, set only when one
+// started. Replayed is set only by a replay of an archived Pass log.
 type ShadowSummary struct {
 	Driver               string `json:"driver"`
 	Loaded               bool   `json:"loaded"`

@@ -30,10 +30,8 @@ type Driver interface {
 	ClassifyTransient(logPath string) (Classification, error)
 
 	// NewHeartbeatWriter wraps raw with a writer that emits coarse status
-	// lines to out, forwarding all bytes to raw unchanged.
-	// opts.TopLevelRole is the role attributed to top-level (empty
-	// parent_tool_use_id) messages; an empty value means the implementor's
-	// own default (issue #2092).
+	// lines to out, forwarding all bytes to raw unchanged. An empty
+	// opts.TopLevelRole means the implementor's own default (issue #2092).
 	NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer, opts driverkit.RenderOptions) io.Writer
 
 	// NewStreamFilter wraps w with the filter a Pass log's stdout tee goes
@@ -51,9 +49,7 @@ type Driver interface {
 	ExtractUsageAfter(logPath string, base driverkit.SessionBaselines) (usage.Report, driverkit.SessionBaselines, error)
 
 	// RenderTranscript renders the box log's assistant turns and tool calls.
-	// opts.TopLevelRole is the role attributed to top-level (empty
-	// parent_tool_use_id) messages; an empty value means the implementor's
-	// own default (issue #2092).
+	// opts.TopLevelRole is read as in NewHeartbeatWriter.
 	RenderTranscript(logPath string, opts driverkit.RenderOptions) (string, error)
 
 	// ResolveExit returns the exit code the launcher should treat as
@@ -272,7 +268,6 @@ func DescriptorFor(name string) (Descriptor, bool) {
 	return descriptor(name)
 }
 
-// descriptor returns the generated Descriptor for an exact Driver name.
 func descriptor(name string) (Descriptor, bool) {
 	for _, d := range descriptors {
 		if d.Name == name {

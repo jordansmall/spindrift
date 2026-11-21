@@ -10,14 +10,11 @@ import (
 // (#1547). Every production caller sets Terminated. A nil Session is
 // tests-only; see the field docs.
 type Session struct {
-	// Terminated tells RunContinuous, and Dispatch's one-shot wave (#3522),
-	// after a Box exits, that the issue was terminated (a signalled abort or a
-	// drain decline), so it is neither failed nor settled; Reclaim already
-	// returned it to Dispatchable (ADR 0024, issue #649). Every production
-	// caller passes a non-nil one (main's launchContext.terminated), so nil is
-	// tests-only: dispatchWave and RunContinuous then substitute a fresh
-	// registry, which a signalled abort's Reclaim can still mark, so an issue
-	// can still come back terminated.
+	// Terminated tells RunContinuous and Dispatch's wave (#3522), after a Box
+	// exits, that the issue was terminated (a signalled abort or a drain
+	// decline), so it is neither failed nor settled; Reclaim already returned
+	// it to Dispatchable (ADR 0024, issue #649). Nil is tests-only: both
+	// substitute a fresh registry, which an abort's Reclaim can still mark.
 	Terminated *terminate.Registry
 
 	// Tally folds the Settlement each of this session's settles returns,
@@ -25,8 +22,7 @@ type Session struct {
 	Tally *settle.Tally
 
 	// BoxFailed, when non-nil, is called after a Box that exited non-zero was
-	// transitioned to Failed: an optional observer hook (issue #705). Nil means
-	// no observer.
+	// transitioned to Failed (issue #705).
 	BoxFailed func(num string, gen uint64)
 }
 

@@ -60,13 +60,13 @@ func sameDir(a, b string) bool {
 	return errA == nil && errB == nil && ra == rb
 }
 
-// fillInferredRevisions sets Revision on each inferred Record from the Events
-// file, where the Record's own log predates the dispatch_start stamp. The Box
-// event is announced before the Box runs, so the Dispatch's event is the
-// latest initial-phase box event for its kind and key at or before its claim
-// time. An event followed by another Record of that kind and key claiming
-// before this one belongs to that earlier Dispatch instead: a manual dispatch
-// writes no event, and must not inherit a stale one. Nothing is persisted.
+// fillInferredRevisions sets Revision on each inferred Record (whose log
+// predates the dispatch_start stamp) from the Events file. The Box event is
+// announced before the Box runs, so a Dispatch's event is the latest
+// initial-phase box event for its kind and key at or before its claim time.
+// If another Record of that kind and key claimed in between, that event is the
+// earlier Dispatch's and this Record gets none: a manual dispatch writes no
+// event and must not inherit a stale one. Nothing is persisted.
 func fillInferredRevisions(records []dispatchrecord.Record, events []daemon.Event) {
 	type boxEvent struct {
 		at  time.Time

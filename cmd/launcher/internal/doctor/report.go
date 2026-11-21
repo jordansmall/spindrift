@@ -9,35 +9,29 @@ import (
 	"spindrift.dev/launcher/internal/backendkit"
 )
 
-// Reporter owns every line doctor writes to its report stream and
-// classifies each one at its call site: a success row, a finding keyed on
-// Tier, or a passthrough line that fits neither shape. verbose is the one
-// stored flag driving the quiet/verbose split (issue #3777); same-package
-// code (the quiet-only recap in doctor.go) also reads it directly.
+// Reporter owns every line doctor writes to its report stream: a success
+// row, a finding keyed on Tier, or a passthrough line. verbose drives the
+// quiet/verbose split (issue #3777); doctor.go's quiet-only recap reads it
+// directly.
 type Reporter struct {
 	w       io.Writer
 	verbose bool
 }
 
-// NewReporter returns a Reporter that writes to w. verbose true reproduces
-// today's full report; false suppresses Success rows and Advisory-tier
-// Finding rows (issue #3777).
+// NewReporter returns a Reporter that writes to w. verbose false suppresses
+// Success rows and Advisory-tier Finding rows (issue #3777).
 func NewReporter(w io.Writer, verbose bool) *Reporter {
 	return &Reporter{w: w, verbose: verbose}
 }
 
 // NewDiscardReporter returns a Reporter that drops every row it is handed.
-// It takes no verbose bool: the quiet/verbose split is moot when the
-// destination is io.Discard regardless.
 func NewDiscardReporter() *Reporter {
 	return NewReporter(io.Discard, false)
 }
 
-// AdvisoryWriter returns the writer for a sub-component (e.g. a launch
-// gate's Check) that writes operator-facing prose straight to a raw
-// io.Writer, bypassing Success/Finding. Reporter picks that writer — r.w
-// when verbose, io.Discard otherwise — so the sub-component's raw prose
-// obeys the same quiet gate as an advisory: row (issue #3777).
+// AdvisoryWriter returns the writer for a sub-component (e.g. a launch gate's
+// Check) that writes raw operator-facing prose, so that prose obeys the same
+// quiet gate as an advisory: row (issue #3777).
 func (r *Reporter) AdvisoryWriter() io.Writer {
 	if r.verbose {
 		return r.w
@@ -45,10 +39,8 @@ func (r *Reporter) AdvisoryWriter() io.Writer {
 	return io.Discard
 }
 
-// visible reports whether a row at Tier t should print: a Required row
-// always does (that's the whole point of a blocking failure); an Advisory
-// one only under --verbose. Finding and Results both route through this so
-// the quiet/verbose line never drifts between the two.
+// visible reports whether a row at Tier t should print: Required always,
+// Advisory only under --verbose.
 func (r *Reporter) visible(t Tier) bool {
 	return t == Required || r.verbose
 }
@@ -66,9 +58,8 @@ func (r *Reporter) Success(format string, a ...any) {
 
 // Finding writes a "MISSING: " (Required) or "advisory: " (Advisory) row,
 // followed by a newline. The prefix is keyed on t, not on any Check's own
-// Tier — a caller demoting a row (e.g. for ErrDegraded) passes the demoted
-// tier here. Advisory is suppressed unless verbose (issue #3777); Required
-// always writes since a quiet run must still surface what's blocking it.
+// Tier, so a caller demoting a row (e.g. for ErrDegraded) passes the demoted
+// tier. Advisory is suppressed unless verbose (issue #3777).
 func (r *Reporter) Finding(t Tier, format string, a ...any) {
 	if !r.visible(t) {
 		return
@@ -94,19 +85,16 @@ func (r *Reporter) remedyLine(remedy, msg string) {
 	}
 }
 
-// Passthrough writes text verbatim, with no prefix and no added newline —
-// for lines that are neither a success row nor a finding (the interactive
-// create-label prompt, "created:" lines, the still-missing-after-creation
-// lines).
+// Passthrough writes text verbatim, with no prefix and no added newline, for
+// lines that are neither a success row nor a finding (e.g. the create-label
+// prompt).
 func (r *Reporter) Passthrough(format string, a ...any) {
 	line := fmt.Sprintf(format, a...)
 	fmt.Fprint(r.w, line)
 }
 
-// rowPrefix returns the status-line prefix for a Tier: "MISSING" for Required,
-// "advisory" for Advisory. Finding and the quiet-mode advisory recap in
-// doctor.go share it, so the recap's rows match real advisory rows; reporters
-// outside this package spell their own prefixes.
+// rowPrefix returns the status-line prefix for a Tier. doctor.go's quiet-mode
+// recap shares it so its rows match real advisory rows.
 func rowPrefix(t Tier) string {
 	if t == Advisory {
 		return "advisory"

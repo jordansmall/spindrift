@@ -1,8 +1,7 @@
 // Package launcherchecks holds the doctor.Check row definitions for
 // launcher-startup validation, shared between cmd/launcher and
-// cmd/launcher/quickstart. Both are package main and Go forbids a
-// main-to-main import, so the rows live here, parameterized on the narrow
-// Config below plus a Deps bundle of caller-supplied seams (issue #2725).
+// cmd/launcher/quickstart: both are package main, and Go forbids a
+// main-to-main import (issue #2725).
 package launcherchecks
 
 import (
@@ -48,10 +47,9 @@ type Signals struct {
 	FullyLocal              bool
 }
 
-// Backend is one backend-registry row (the embedded Descriptor) plus the
-// validators a cross-knob row needs. The validators arrive already bound to the
-// caller's own config, so no config type crosses this seam; a nil validator
-// means no validation beyond axis membership.
+// Backend is one backend-registry row plus the validators a cross-knob row
+// needs, already bound to the caller's own config so no config type crosses
+// this seam. A nil validator means no validation beyond axis membership.
 type Backend struct {
 	backend.Descriptor
 
@@ -93,9 +91,8 @@ func ghTokenRequired(c Config, d Deps) bool {
 }
 
 // requiredValue builds a Required-tier Check row whose Remedy and Probe error
-// are both msg. It calls errors.New because fmt.Errorf with the
-// caller-supplied non-constant msg trips go vet's non-constant-format-string
-// check.
+// are both msg. errors.New, not fmt.Errorf: a non-constant msg trips go
+// vet's format-string check.
 func requiredValue(name, msg string, missing func() bool) doctor.Check {
 	return doctor.Check{
 		Name:   name,
@@ -135,9 +132,9 @@ func RequiredKnobChecks(c Config, d Deps) []doctor.Check {
 			Probe: func() (any, error) {
 				rules, ok := driver.CredentialRules(c.Driver)
 				if !ok {
-					// A live guardrail, not dead code (#2534 AC4 removed this
-					// arm; 21a260db reverted it): DRIVER is an operator-set env
-					// var nix eval never sees, and driver.New falls back to the
+					// Not dead code (#2534 removed this arm; it was reverted):
+					// DRIVER is an operator-set env var nix eval never sees,
+					// and driver.New falls back to the
 					// claude Driver on its own error, so an unrecognised DRIVER
 					// would otherwise produce a silent wrong-Driver run.
 					_, err := driver.New(c.Driver)
@@ -251,8 +248,7 @@ func JoinOxford(words []string) string {
 // withoutRepoSlugError drops a blank-REPO_SLUG failure from fn: the repo-slug
 // row owns it, so one root cause shows on one row. It matches only the error
 // RequireRepoSlug returns, not errors.Is, so a joined error never hides a
-// non-slug failure. A nil fn must stay nil: crossKnobCheck reads nil as "no
-// validation".
+// non-slug failure. A nil fn stays nil ("no validation").
 func withoutRepoSlugError(fn func() error) func() error {
 	if fn == nil {
 		return nil

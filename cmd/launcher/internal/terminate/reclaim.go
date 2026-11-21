@@ -7,10 +7,9 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// Reaper is the Box-side half of Reclaim: dispatch.Factory satisfies it. The
-// interface stays local so terminate need not import dispatch, which would
-// drag the runner, driver, and registry-proxy trees into settle and every
-// other importer of this package.
+// Reaper is the Box-side half of Reclaim: dispatch.Factory satisfies it. It
+// stays local so terminate need not import dispatch, which would drag the
+// runner, driver, and registry-proxy trees into every importer.
 type Reaper interface {
 	Kill(number string) error
 	AppendTerminalLine(number, note string) error
@@ -67,12 +66,10 @@ func (t Trigger) wording() wording {
 // for trigger: it marks reg so an in-flight settle abandons at its next
 // checkpoint, reaps any running Box via reaper, resolves a dangling branch/PR
 // note, transitions the issue back to Dispatchable (never Failed, since
-// nothing failed), and comments. Every step logs its own note to stderr and is
-// otherwise best-effort; only the reap's error is returned. reaper and cf are
-// interfaces rather than concrete types: pass a nil interface when there is
-// none, never a typed nil boxed into one (a nil *dispatch.Factory, say), or
-// the nil guards below will not see it as nil. branchPrefix is BRANCH_PREFIX,
-// naming num's agent branch.
+// nothing failed), and comments. Every step is best-effort and logs to
+// stderr; only the reap's error is returned. Pass a nil interface for an
+// absent reaper or cf, never a typed nil boxed into one, or the nil guards
+// will not see it. branchPrefix is BRANCH_PREFIX.
 func Reclaim(tracker forge.IssueTracker, cf forge.CodeForge, branchPrefix string, reaper Reaper, reg *Registry, num string, trigger Trigger) error {
 	reg.Mark(num)
 
@@ -97,10 +94,10 @@ func Reclaim(tracker forge.IssueTracker, cf forge.CodeForge, branchPrefix string
 		}
 	}
 
-	// The issue's current label depends on which phase Terminate caught:
+	// The issue's current label depends on which phase Reclaim caught:
 	// InProgress for a running Box, a CI watch, or anywhere on the landing path,
 	// since selfHeal holds the swap to Complete until landing settles (issue
-	// #757, ready.go); Complete if Terminate lands just after settling.
+	// #757, settle/ready.go); Complete if Reclaim lands just after settling.
 	// TransitionState has no compare-and-swap, so both calls run regardless.
 	if err := tracker.TransitionState(num, forge.InProgress, forge.Dispatchable); err != nil {
 		forge.CommentRefusal(tracker, num, err)

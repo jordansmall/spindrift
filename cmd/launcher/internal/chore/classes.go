@@ -8,16 +8,12 @@ import (
 	"spindrift.dev/launcher/internal/signalwire"
 )
 
-// parseClasses parses one of two host-side class allow-lists sharing this
-// grammar: BUTLER_CHORE_CLASSES (ADR 0056, the promotion allow-list) or
-// BUTLER_PATCH_CLASSES (ADR 0057, the patch-rung allow-list) -- a
-// space-separated list of "<chore>=<class>[,<class>...]" entries. Neither
-// input reaches the Box as-is: BUTLER_CHORE_CLASSES itself never crosses
-// (schema key butlerChoreClasses has boxEnv = false), while
-// BUTLER_PATCH_CLASSES's parsed result is re-rendered and forwarded as
-// CHORE_PATCH_CLASSES only under the conditions internal/butler's
-// Runner.run checks. "" parses to an empty map. Load cross-checks the result
-// against BUTLER_CHORES.
+// parseClasses parses BUTLER_CHORE_CLASSES (ADR 0056, promotion) or
+// BUTLER_PATCH_CLASSES (ADR 0057, patch rung): space-separated
+// "<chore>=<class>[,<class>...]" entries. Neither reaches the Box as-is:
+// BUTLER_CHORE_CLASSES never crosses (butlerChoreClasses has boxEnv = false),
+// and BUTLER_PATCH_CLASSES is re-rendered as CHORE_PATCH_CLASSES only under
+// the conditions internal/butler's Runner.run checks.
 func parseClasses(s string) (map[string][]string, error) {
 	out := map[string][]string{}
 	for _, entry := range strings.Fields(s) {

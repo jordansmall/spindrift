@@ -48,12 +48,10 @@ type Issue struct {
 	Number string
 	Title  string
 
-	// Generation is the terminate.Registry generation this issue's claim was
-	// launched under (#743). Headless dispatch paths leave it zero, which
-	// matches the Mark any Reclaim takes on that never-Begun issue. A caller
-	// that Begins the issue in a terminate.Registry sets it so the eventual
-	// Settle checks this incarnation only, not whichever one last held the issue
-	// number.
+	// Generation is the terminate.Registry generation this claim was launched
+	// under (#743). Headless paths leave it zero, matching any Reclaim's Mark
+	// on a never-Begun issue; a caller that Begins the issue sets it so Settle
+	// checks this incarnation only.
 	Generation uint64
 
 	// Priority is the issue's agent-priority-{critical,high,low} tier (ADR
@@ -68,10 +66,9 @@ type Batch struct {
 	Edges   map[string][]string
 	Sources Sources
 
-	// Failed names issues whose own NewReadiness/DepsOf call errored (#752,
-	// #1103). Such a transient tracker hiccup looks identical to a confirmed
-	// zero-blocker issue in Edges alone, so drainMaxJobs holds these issues for
-	// retry instead of reading the missing Edges entry as ready.
+	// Failed names issues whose own DepsOf call errored (#752, #1103). In
+	// Edges alone they look like confirmed zero-blocker issues, so the
+	// engine holds them for retry.
 	Failed map[string]bool
 }
 
@@ -118,56 +115,44 @@ type Config struct {
 	BranchPrefix string
 
 	// IgnoreBlockers skips blocker-edge gating for the advise-only dispatch
-	// kinds (research, ADR 0022; butler): they land no code, so they are never
-	// held on an unmerged dependency, a sibling's Failed label never cascades
-	// to them, the touch-overlap gate never defers them, and OriginClaimed
-	// never writes .spindrift/logs/blocked.txt. Caps still apply.
+	// kinds (research, ADR 0022; butler): they land no code, so no dependency
+	// holds them, no Failed label cascades, no touch overlap defers them, and
+	// OriginClaimed never writes blocked.txt. Caps still apply.
 	IgnoreBlockers bool
 
-	// Verb is the CLI subcommand a selective wave's rerun hint tells the operator
-	// to re-invoke (e.g. "spindrift research --yes <nums>"). Empty means dispatch.
+	// Verb is the CLI subcommand a selective wave's rerun hint names. Empty
+	// means dispatch.
 	Verb string
 
-	// SeedScopeOf resolves a dependent issue number to the SeedScope its blocker
-	// gate is checked against: the seed branch a blocker's landed work must have
-	// reached before the dependent is ready. Set only under CODE_FORGE=local;
-	// nil elsewhere, where a blocker is judged solely by its PR/issue state.
+	// SeedScopeOf resolves a dependent issue to the seed branch a blocker's
+	// landed work must reach before the dependent is ready. Set only under
+	// CODE_FORGE=local; nil elsewhere, where PR/issue state alone decides.
 	SeedScopeOf func(num string) forge.SeedScope
 
-	// pollInterval overrides RunContinuous's background refill-poll cadence
-	// (#1637). Every production site leaves it zero, which means
-	// defaultPollInterval.
+	// pollInterval overrides RunContinuous's refill-poll defaultPollInterval
+	// when nonzero (#1637); tests only.
 	pollInterval time.Duration
 
-	// now overrides RunContinuous's clock, which #2678's stale-drain report reads
-	// to accumulate free-slot-seconds. Nil means time.Now; only same-package
-	// tests inject a sequence that makes freeSlotSecs exactly assertable.
+	// now overrides time.Now for the stale-drain report's free-slot-seconds
+	// (#2678); tests only.
 	now func() time.Time
 
-	// Policy is retry.Policy's transient-retry tuning (#2928). Only Max and Unit
-	// are read here: waves' re-discover retry has never held or jittered, so
-	// Policy.Jitter is deliberately unused in this package.
+	// Policy tunes the re-discover retry (#2928). Only Max and Unit are read:
+	// that retry never holds, so Jitter is unused here.
 	Policy retry.Policy
 
-	// Clock is the injectable sleep seam a rate-limited re-discover retry backs
-	// off through. When unset, it defaults to retry.RealClock().
+	// Clock is the rate-limited re-discover retry's sleep seam; unset means
+	// retry.RealClock().
 	Clock retry.Clock
 
-	// Stop is the operator wind-down seam (#3520). The headless callers (run,
-	// selectiveListDispatch, and runContinuousDispatch) hand it a channel that
-	// closes on the first SIGTERM/SIGINT; nil means a test. On
-	// close, RunContinuous drains and Dispatch's one-shot wave stops
-	// launching, while in-flight Boxes finish. Tests close this channel
-	// directly.
+	// Stop closes on the first SIGTERM/SIGINT (#3520): RunContinuous drains
+	// and Dispatch's wave stops launching while in-flight Boxes finish. Nil
+	// only in tests.
 	Stop <-chan struct{}
 
-	// Abort is the operator second-signal escalation seam (#3521): the same
-	// headless callers hand it a channel that closes on a second
-	// SIGTERM/SIGINT, after Stop has already closed. nil means a test. Closing
-	// it makes RunContinuous and Dispatch's one-shot wave stop launching
-	// further Boxes (the same guard Stop trips) and additionally
-	// terminate.Reclaim every in-flight issue rather than waiting for it to
-	// finish on its own. Tests close this channel directly.
+	// Abort closes on a second SIGTERM/SIGINT (#3521): launches stop as for
+	// Stop, and every in-flight issue is terminate.Reclaimed rather than
+	// awaited. Nil only in tests.
 	Abort <-chan struct{}
 }
 
@@ -175,7 +160,7 @@ type Config struct {
 // ModeDrain (ADR 0019 / #524): one selection pass gates each issue, the
 // selected set dispatches as a single wave, and the invocation exits.
 // MAX_JOBS=0 means an uncapped drain batch. A dependency cycle in in.Edges is
-// reported as an error here, the one place that decision is made.
+// reported as an error.
 func NewPlan(cfg Config, in Input) (Plan, error) {
 	if len(in.Edges) > 0 {
 		if node, cycle := detectCycle(in.Edges, forge.Numbers(in.Issues, func(i Issue) string { return i.Number })); cycle {

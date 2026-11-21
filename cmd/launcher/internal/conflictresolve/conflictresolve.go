@@ -30,10 +30,9 @@ type Config struct {
 // Actions are the side effects the decision drives.
 type Actions struct {
 	// RunPass runs the sessionless resolve agent and returns the Driver's
-	// result text (the agent's final message under claude), which Resolve
-	// narrates as the pass summary (empty when there is none). The agent's own failure is the caller's to swallow: a non-nil
-	// error means the pass could not be set up (prompt rendering, handoff
-	// writing) and aborts the Box.
+	// result text, which Resolve narrates as the pass summary. The agent's own
+	// failure is the caller's to swallow: a non-nil error means the pass could
+	// not be set up and aborts the Box.
 	RunPass func() (summary string, err error)
 	// RebaseInProgress reports whether a rebase is still unfinished.
 	RebaseInProgress func() bool
@@ -104,13 +103,11 @@ func SubstNames(reg promptassembly.Registry) []string {
 }
 
 // RenderPrompt renders conflict-resolve-prompt.md under promptsDir with
-// envsubst semantics: both $NAME and ${NAME} for NAME in names are substituted,
-// each read through lookup (empty when unset), and any other token passes
-// through. SKILLS_FOUND, SKILL_PREAMBLE and the baked-skill steps
-// (CAVEMAN_STEP, CHECK_HYGIENE_STEP, NIX_CHECKS_STEP) are computed here from
-// skillsDir and override lookup. A baked skill whose fragment is missing is an
-// error rather than a silently thinner prompt. A skill counts as baked by
-// promptassembly.SkillBaked, so a human-only skill renders no step.
+// envsubst semantics: $NAME and ${NAME} for NAME in names are read through
+// lookup, and any other token passes through. SKILLS_FOUND, SKILL_PREAMBLE and
+// the baked-skill steps are computed from skillsDir and override lookup. A
+// baked skill (promptassembly.SkillBaked) whose fragment is missing is an
+// error rather than a silently thinner prompt.
 func RenderPrompt(promptsDir, skillsDir string, names []string, lookup func(string) string) (string, error) {
 	rows := []struct{ skill, fragment, stepVar string }{
 		{"caveman", "caveman-default.md", "CAVEMAN_STEP"},

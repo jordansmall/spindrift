@@ -21,16 +21,15 @@ import (
 var errRecoverIneligible = errors.New("recover: issue not eligible for queue recovery")
 
 // recoverQueueOne is `spindrift recover` with no issue number: it walks the
-// agent-failed issues and lands the first one carrying the same evidence a
-// hand-run recover trusts, through recoverIssue's relayed-branch arm, doing in
-// process the label work agent-recover.yml does around a manual recover. At
-// most one issue is attempted per call. It returns errQueueEmpty when none
-// qualified, and waves.ErrSignalledStop on an operator stop; a drain stop
-// during a settle that fails still parks the issue first, as does an abort
-// that reclaimed nothing (the settle already finished or landed it); an abort
-// that took the issue is left to the watcher's reclaim. A tracker or forge
-// outage during the scan is returned as an error rather than read as "nothing
-// eligible", as is a failed restore or park that would leave the issue on
+// agent-failed issues and lands the first one carrying the evidence a hand-run
+// recover trusts, through recoverIssue's relayed-branch arm, doing in process
+// the label work agent-recover.yml does around a manual recover. At most one
+// issue is attempted. It returns errQueueEmpty when none qualified and
+// waves.ErrSignalledStop on an operator stop; a drain stop during a failing
+// settle, or an abort that reclaimed nothing, still parks the issue first; an
+// abort that took the issue is left to the watcher's reclaim. A
+// tracker or forge outage during the scan is an error, never "nothing
+// eligible", as is a failed restore or park that would strand the issue on
 // agent-in-progress.
 func recoverQueueOne(c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, pwd string, f *dispatch.Factory, s settle.MergeSettler, terminated *terminate.Registry, stdout, stderr io.Writer) error {
 	if caps.PRForge == nil {
@@ -79,17 +78,16 @@ func finishQueueSettle(c config, it forge.IssueTracker, pwd, num string, rec rec
 }
 
 // parkQueueFailure parks an issue queue mode claimed but could not land back on
-// agent-failed, records the failed attempt, and reports the attempt as made
-// (nil): an issue was tried, so the run exits 0, unless the record cannot be
-// saved or the park itself fails (the issue would sit on agent-in-progress,
-// which queue mode never revisits); either or both are returned, after the park
-// is attempted. Only the attempt that reaches c.MaxRecoverAttempts, or fails for
-// a Workflows-permission refusal a retry cannot fix (issue #5411), comments,
-// once, saying auto-recover gave up (issue #4655); earlier failures stay
-// silent and are retried after a backoff. The comment names the last attempt's
-// cause (settleErr, kept in the record for a later pass; a nil settleErr keeps
-// the earlier cause); a merge-gate failure is parked by the settler itself and
-// never reaches here.
+// agent-failed and records the failed attempt. It returns nil (an issue was
+// tried, so the run exits 0) unless the record save or the park fails; a
+// failed park leaves the issue on agent-in-progress, which queue mode never
+// revisits. Only the
+// attempt reaching c.MaxRecoverAttempts, or a Workflows-permission refusal a
+// retry cannot fix (issue #5411), comments once that auto-recover gave up
+// (issue #4655); earlier failures stay silent and retry after a backoff. The
+// comment names the last attempt's cause; a nil settleErr keeps the earlier
+// one. A merge-gate failure is parked by the settler itself and never reaches
+// here.
 func parkQueueFailure(c config, it forge.IssueTracker, num string, rec recoverrecord.Record, settleErr error, now time.Time, stdout, stderr io.Writer) error {
 	note := "queue recover could not land the outbox bundle"
 	if settleErr != nil {

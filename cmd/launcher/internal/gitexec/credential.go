@@ -21,10 +21,10 @@ func (c Credential) GoString() string { return c.String() }
 
 // SplitCredential splits the userinfo off an http or https URL, returning the
 // credential-free URL and the credential. A username-only URL is split too:
-// the username may itself be the token (the Forgejo and Gitea shape). Every
-// other input (a local path, file://, ssh://, scp-style git@host:path, an
-// unparseable string) comes back unchanged with the zero Credential: an ssh
-// user is not a secret and git needs it in the URL.
+// the username may be the token (the Forgejo and Gitea shape). Any other input
+// (a local path, file://, ssh://, scp-style, unparseable) comes back unchanged
+// with the zero Credential: an ssh user is not a secret and git needs it in
+// the URL.
 func SplitCredential(rawURL string) (string, Credential) {
 	u, err := url.Parse(rawURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.User == nil {
@@ -47,17 +47,13 @@ const (
 )
 
 // Apply makes cmd's git authenticate with c and returns cmd. The secret
-// travels only as an environment value read by an inline credential helper:
-// it is in no argv, no URL, and no config git writes to disk. Helpers from
-// config files and the environment are always reset, so none can store or see
-// it (git offers every helper the credential on success, and a
-// token-as-username would land in ~/.git-credentials). A `-c
-// credential.helper` on the same command's argv is not reset (git reads
-// GIT_CONFIG_PARAMETERS after GIT_CONFIG_COUNT), so a caller must not pair a
-// non-zero Credential with one. With an empty password the helper answers an
-// empty one, the token-as-username shape. Both fields are emitted, or git
-// would prompt and GIT_TERMINAL_PROMPT=0 would fail the call. An existing
-// GIT_CONFIG_COUNT is extended, not overwritten.
+// travels only as an environment value read by an inline credential helper,
+// never in argv, a URL, or on-disk config. Ambient helpers are reset first:
+// git offers every helper the credential on success, so one could store it
+// in ~/.git-credentials. A `-c credential.helper` on cmd's argv is not reset
+// (git reads GIT_CONFIG_PARAMETERS after GIT_CONFIG_COUNT), so callers must
+// not pair one with a non-zero Credential. Both fields are always emitted, or
+// git would prompt and fail under GIT_TERMINAL_PROMPT=0.
 func (c Credential) Apply(cmd *exec.Cmd) *exec.Cmd {
 	if c == (Credential{}) {
 		return cmd

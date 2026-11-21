@@ -18,15 +18,11 @@ import (
 // selectiveListDispatch dispatches a hand-picked list of issues, bypassing the
 // ready-for-agent label filter as an operator override. Dependency edges still
 // hold: in-list blockers are ordered ahead, and unmet external blockers evict
-// dependents. caps is the caller's resolved forge.Capabilities (issue #2946),
-// safe to reuse because cf is fixed for this whole call.
-// interactive reports whether stdin is a terminal; without one, unlabeled
-// issues need forceYes.
+// dependents. caps is safe to reuse because cf is fixed for the whole call
+// (issue #2946). Without an interactive stdin, unlabeled issues need forceYes.
 func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, pwd string, f *dispatch.Factory, s settle.Settler, terminated *terminate.Registry, nums []string, forceYes, interactive bool, stdin io.Reader, stdout io.Writer) error {
-	// Installed once, ahead of the first fetch, the same placement run uses
-	// (#3522): every pre-wave early return below checks
-	// waves.SignalledStopAlready so a signal that already fired wins over any
-	// of them.
+	// Installed once, ahead of the first fetch, as run does (#3522), so a
+	// signal that already fired wins over every pre-wave early return below.
 	stopCh, abortCh, stopCleanup := installStopSignal()
 	defer stopCleanup()
 
@@ -152,7 +148,7 @@ func evictUnmetBlockers(it forge.IssueTracker, caps forge.Capabilities, branchPr
 		return readiness.Ready(it, caps, branchPrefix, blocker, seedScopeFor(dependent))
 	}
 
-	// Iterate the issues slice (not the map) to produce stable output order.
+	// Iterate the issues slice, not the map, for stable output order.
 	for {
 		var toEvict []string
 		for _, iss := range issues {

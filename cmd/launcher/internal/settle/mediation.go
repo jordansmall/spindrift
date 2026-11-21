@@ -79,16 +79,14 @@ type Mediation struct {
 // Mediation every host-mediated hand-off call site shares.
 func (s *Settle) mediationFor(num string, gen uint64) (branch string, m *Mediation) {
 	cf := s.cfForNum(num)
-	// s.cfForNum resolves cf fresh per num (ADR 0033's per-issue wiring under
-	// CODE_FORGE=local), so the receiver state must come from cf, not from
-	// s.cfg.Capabilities: the read tier resolved that once against whichever cf
-	// New was built with, so it holds the wrong per-issue state for every other
-	// num. Only the descriptors are config-time and safe to reuse.
+	// Resolved from num's own cf (ADR 0033), not s.cfg.Capabilities, which
+	// was resolved once against New's cf and is wrong for every other num;
+	// only its descriptors are config-time and safe to reuse.
 	caps := forge.ResolveCapabilities(cf, s.it, s.cfg.Capabilities.ForgeDescriptor, s.cfg.Capabilities.TrackerDescriptor)
 	m = NewMediation(caps, s.it, s.cfg.OutboxDir, s.cfg.BaseBranch)
 	// Wrapped here, not in NewMediation, so Open and relayBlockedWork's direct
-	// push-only relay share the one retry policy (issue #4649), and the draft-PR
-	// create retries the same way (issue #5146).
+	// relay share one retry policy (issue #4649), as does the draft-PR create
+	// (issue #5146).
 	m.br = s.retryingRelay(num, gen, m.br)
 	m.dpc = s.retryingDraftPR(num, gen, m.dpc, caps.PRForge, func() { m.adoptedOwn = true })
 	m.onOpen = func(url string) { s.latchPR(num, url) }
@@ -185,11 +183,9 @@ func landDeltaLine(passes []passmanifest.Entry) string {
 	return sanitizeLandDeltaLine(passes[idx].LandDelta.Summary())
 }
 
-// sanitizeLandDeltaLine defends against a manifest.json a Box wrote by hand
-// rather than through landdelta.Compute (issue #3244), where Delta.Reason
-// carries arbitrary Box-authored text. Collapsing newlines stops a crafted
-// Reason from forging extra PR-body sections, and defuseClosingKeywords stops
-// it from smuggling in a reference that auto-closes an unrelated issue.
+// sanitizeLandDeltaLine defends against a hand-written manifest.json whose
+// Delta.Reason is arbitrary Box text (issue #3244): collapsing newlines stops
+// forged PR-body sections, and defusing stops a smuggled closing reference.
 func sanitizeLandDeltaLine(s string) string {
 	s = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(s)
 	return defuseClosingKeywords(s)

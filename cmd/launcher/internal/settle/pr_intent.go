@@ -22,10 +22,8 @@ import (
 func (s *Settle) hostMediateDraftPR(num string, gen uint64, result dispatch.Result) (string, error) {
 	branch, m := s.mediationFor(num, gen)
 
-	// The startup capability gate (main.go, issue #1916) guarantees a
-	// read-only PR-shaped Code Forge implements both BundleRelay and
-	// DraftPRCreator, so Open's own nil checks are unreachable outside a
-	// misconfigured test double.
+	// The startup gate (issue #1916) guarantees BundleRelay and
+	// DraftPRCreator here, so Open's nil checks only catch test doubles.
 	url, created, source, err := m.Open(num, branch, result, FallbackReconstruct)
 	if err != nil {
 		if errors.Is(err, errAbandoned) {
@@ -41,21 +39,16 @@ func (s *Settle) hostMediateDraftPR(num string, gen uint64, result dispatch.Resu
 		}
 		return "", err
 	}
-	// created is false when Open adopted a pre-existing box-authored PR (issue
-	// #2407), which never received the reconstructed title and body, so
-	// announcing a reconstructed hand-off there would be false. It is also false
-	// when the retry wrapper adopted the host's own earlier attempt (issue
-	// #5173), which did carry that text. Residual edge: any failed first attempt
-	// that did not itself create a PR (pre-POST connection error, 5xx, rate-limit
-	// 403, timeout) followed by adopting a PR already open on the branch (box-
-	// authored, or a prior dispatch's) is misread as the host's own; an
-	// OpenPRForBranch before every first attempt isn't worth that.
+	// created is false for an adopted box-authored PR (issue #2407), which
+	// never got the reconstructed text, and for the host's own earlier attempt
+	// (issue #5173), which did: hence adoptedOwn. Accepted edge: a failed
+	// first attempt that created nothing, then adopting a foreign PR already
+	// on the branch, is misread as the host's own; an OpenPRForBranch before
+	// every first attempt is not worth it.
 	if source == TextSourceReconstructed && (created || m.adoptedOwn) {
 		s.cfg.Progress.Step(Step{Key: num, Landing: branch, Status: StatusReconstructed, Detail: "note=no PR-intent line found in the box's log; description derived host-side from the relayed branch's commits"})
-		// An operator reading only the issue, never the launcher's stdout,
-		// must still see that the box's hand-off was incomplete (issue #2447,
-		// AC5). Best-effort, like postUsageComment: a failure here must not
-		// undo the draft PR already opened above.
+		// An operator reading only the issue must still see the hand-off was
+		// incomplete (issue #2447). Best-effort: the draft PR stays open.
 		if commentErr := s.it.Comment(num, "This PR was reconstructed host-side: the box's own hand-off was incomplete (no usable PR-intent line found in its log), so the title/body above were derived from the relayed branch's own commits instead of the box's own description."); commentErr != nil {
 			fmt.Fprintf(os.Stderr, "    ?? #%s: could not post reconstructed-hand-off comment: %v\n", num, commentErr)
 		}
@@ -64,13 +57,12 @@ func (s *Settle) hostMediateDraftPR(num string, gen uint64, result dispatch.Resu
 }
 
 // relayBlockedWork relays a blocked Box's branch so the work is not lost, then
-// opens a draft PR if the Box left a PR-intent line (issue #1933). Failures
-// only log: the caller's blocked transition already recorded the outcome.
-// branch comes from forge.AgentBranchName, never o.Landing (issue #1949). A push-only
-// forge cannot use Open, which requires DraftPRCreator, so it relays directly.
+// opens a draft PR if the Box left a PR-intent line (issue #1933). branch comes
+// from forge.AgentBranchName, never o.Landing (issue #1949). A push-only forge
+// lacks the DraftPRCreator Open requires, so its branch is relayed directly.
 // It returns errAbandoned when a stop landed during the relay's backoff, so the
-// caller must post nothing on the issue the operator stopped (issue #3523);
-// every other failure is logged and returns nil.
+// caller posts nothing (issue #3523); any other failure only logs, since the
+// caller's blocked transition already recorded the outcome.
 func (s *Settle) relayBlockedWork(num string, gen uint64, result dispatch.Result) error {
 	branch, m := s.mediationFor(num, gen)
 	if m.br == nil || s.cfg.OutboxDir == nil {
@@ -134,10 +126,9 @@ func logBlockedHandoffRelayFailure(num string, err error) {
 
 // blockHandoff posts a merge-blocked comment for a hostMediateDraftPR failure
 // other than an exhausted relay or a draft-PR create failure, and leaves the
-// issue in agent-in-progress rather than transitioning it (issue #2046):
-// agent-complete reads as merged and green (issue #2036), and agent-failed
-// would send the operator to `spindrift recover`, which has no bundle to land
-// here (unlike parkRelayFailure and parkDraftPRFailure).
+// issue agent-in-progress (issue #2046): agent-complete reads as merged and
+// green (issue #2036), and agent-failed would send the operator to `spindrift
+// recover`, which has no bundle to land here, unlike in those two cases.
 func (s *Settle) blockHandoff(num, branch string, err error) {
 	s.cfg.Progress.Step(Step{Key: num, Landing: branch, Status: StatusMergeBlocked, Detail: fmt.Sprintf("!! %v", err)})
 	s.it.Comment(num, fmt.Sprintf("merge blocked: %v", err))
@@ -276,13 +267,10 @@ func followedByRef(rest, num string) bool {
 
 // closeOnlyOwnIssue leaves body closing only the dispatched issue: body may
 // be Box-authored, so every closing keyword is defused (issue #7079) except
-// each one naming "#<num>" (followedByRef), and "Closes #<num>" is appended
-// when none did.
-// backend.ClosesRef is a positive allow-list (issues #2341, #7058), not
-// "anything but local": a Closes keyword only auto-closes when the forge
-// shares the tracker's issue namespace, so without it the own "#<num>" is
-// defused too and nothing is appended. It is the same predicate the prompt's
-// PR_BODY_CLOSES gate reads, so the Box and the host agree.
+// those naming "#<num>", and "Closes #<num>" is appended when none did. Unless
+// backend.ClosesRef (issues #2341, #7058) says the forge shares the tracker's
+// issue namespace, even those are defused and nothing is appended; the
+// prompt's PR_BODY_CLOSES gate reads the same predicate.
 func closeOnlyOwnIssue(body, num string, forgeRow, trackerRow backend.Descriptor) string {
 	if !backend.ClosesRef(forgeRow, trackerRow) {
 		return defuseClosingKeywords(body)

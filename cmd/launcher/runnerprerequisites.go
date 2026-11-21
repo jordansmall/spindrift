@@ -47,16 +47,14 @@ func runtimePrerequisiteProbe(c config) func() (any, error) {
 }
 
 // prerequisiteChecks splits c's runner prerequisites into the classify half
-// (the doctor-only ones) and the report half (all but the LaunchWithConfig
-// ones, in declaration order). A doctor-only prerequisite's Required failure
-// must fail doctor because doctor is its only enforcement -- the daemon's
-// startup preflight reads doctor's exit code (issue #3544). The Advisory
-// bwrap-cgroup-delegation row joins classify too but never blocks, since
-// doctor.Blocking ignores Advisory. A launch gate is in report only: the
-// launch enforces it, and a host missing pasta is an installation fault, not
-// a configuration one (issue #2671). A LaunchWithConfig prerequisite (the
-// runtime row) is in neither half: validate enforces it, and doctor.Run
-// renders it on its own advisory line.
+// (the doctor-only ones) and the report half (all but LaunchWithConfig, in
+// declaration order). A doctor-only Required failure must fail doctor, its
+// only enforcement: the daemon's startup preflight reads doctor's exit code
+// (issue #3544). An Advisory doctor-only row joins classify but never blocks.
+// A launch gate is in report only: the launch enforces it, and a missing
+// pasta is an installation fault, not a configuration one (issue #2671). A
+// LaunchWithConfig row is in neither: validate enforces it and doctor.Run
+// renders it on its own line.
 func prerequisiteChecks(c config) (classify, report []doctor.Check) {
 	ps := runnerPrerequisites(c)
 	all := make([]doctor.Check, len(ps))

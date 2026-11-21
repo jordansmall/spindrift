@@ -6,8 +6,8 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkind"
 )
 
-// checkEnvGuards is the env preamble entrypoint.sh ran under `set -e`, in its
-// order. An empty value counts as missing, like bash's `${X:?}`.
+// checkEnvGuards checks the Box's required env. An empty value counts as
+// missing, like bash's `${X:?}`.
 func checkEnvGuards(getenv func(string) string) error {
 	set := func(name string) bool { return getenv(name) != "" }
 	// The launcher's validate() made the fully-local call and forwards it as

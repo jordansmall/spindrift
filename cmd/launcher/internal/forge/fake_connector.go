@@ -82,12 +82,11 @@ const (
 )
 
 // fakeWriteRoutes are the Routes the Fake's forge and tracker writes cross,
-// mirroring the finalised forge and tracker axes of the Connector protocol,
-// except that RecordLanding and RecordLandingPass borrow the comment Route and
-// FlagAbandoned borrows the editLabels Route. The rebase Route is fixture-only:
-// a composed forge rebases in core's git, not over a Connector; the Fake keeps
-// Rebase crossing so its calls stay audited. The close Route is fixture-only
-// too: sdk/tracker has no close primitive yet.
+// mirroring the Connector protocol's forge and tracker axes, except that
+// RecordLanding and RecordLandingPass borrow the comment Route and
+// FlagAbandoned the editLabels Route. The rebase Route is fixture-only (a
+// composed forge rebases in core's git); the Fake keeps Rebase crossing so
+// its calls stay audited.
 var fakeWriteRoutes = []struct{ method, path string }{
 	{http.MethodPost, pathMerge},
 	{http.MethodPost, pathRebase},
@@ -269,10 +268,9 @@ var (
 )
 
 // seam is the one Connector shared by every Fake in the test binary. It panics
-// when the Connector cannot load, because no core test may skip the seam (ADR
-// 0067). A failed call (a route refusal, a blown budget) closes a Connector for
-// good, so read retires it and the next read loads a fresh one: one bad read
-// must not fail every later test in the binary.
+// when the Connector cannot load: no core test may skip the seam (ADR 0067).
+// A failed call closes a Connector for good, so read retires it and the next
+// read loads a fresh one, lest one bad read fail every later test.
 func seam() *connectorhost.Connector {
 	seamMu.Lock()
 	defer seamMu.Unlock()

@@ -43,10 +43,8 @@ func (l *Limiter) TryAcquire() bool {
 }
 
 // Release frees one slot claimed by a prior Acquire or TryAcquire. Every
-// Release must match exactly one successful claim; an unmatched one panics.
-// Clamping it silently would permanently widen the concurrency bound with no
-// visible symptom. The panic crashes the launcher on purpose: an unbalanced
-// release means the bound is already wrong.
+// Release must match exactly one successful claim; an unmatched one panics on
+// purpose, since clamping would silently widen the bound for good.
 func (l *Limiter) Release() {
 	l.mu.Lock()
 	if l.live == 0 {

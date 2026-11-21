@@ -177,15 +177,15 @@ func (r *reader) customSection() {
 
 // checkDeclaredSizes refuses a module that declares tables, function frames, or
 // vectors beyond what the host will allocate for, reading them off the binary
-// before CompileModule. wazero's decoder trusts the guest's counts and sizes: it
-// sizes a slice or loops on a count before reading the entries, never bounds a
-// read by its section's or body's declared size, and allocates tables in full at
-// instantiation. None of that shows on the CompiledModule (imported tables
-// cannot link, WASI exporting none). The binary is unvalidated, so the scan fails
-// closed: leaving a structural problem for CompileModule to report would let the
-// decoder act on the same lie first. It walks only what sizes an allocation (a
-// function body for the operand stack it can grow), so the module's semantics
-// stay CompileModule's to judge.
+// before CompileModule. wazero's decoder trusts the guest's counts: it sizes a
+// slice before reading the entries, never bounds a read by its section's
+// declared size, and allocates tables in full at instantiation, none of which
+// shows on the CompiledModule (imported tables cannot link, WASI exporting
+// none). The binary is unvalidated, so the scan fails closed on a structural
+// problem rather than leave it to CompileModule, whose decoder would act on the
+// same lie first. It walks only what sizes an allocation (a function body for
+// the operand stack it can grow), so the module's semantics stay
+// CompileModule's to judge.
 func checkDeclaredSizes(wasm []byte) (err error) {
 	defer func() {
 		if p := recover(); p != nil {

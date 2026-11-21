@@ -89,17 +89,13 @@ func Write(path string, manifest []Entry) {
 	}
 }
 
-// Read parses the manifest file at path, distinguishing "no manifest ever
-// written" from "a manifest was written but is corrupt" so the caller can log
-// the latter (issue #2983 AC2). A missing file returns (nil, nil), same as an
-// empty one; a file that exists but fails to parse, including one that is not
-// a regular file, returns (nil, err) for the caller to log and proceed anyway.
+// Read parses the manifest file at path. A missing file returns (nil, nil);
+// one that exists but fails to parse or is not a regular file returns an
+// error for the caller to log and proceed anyway (issue #2983 AC2).
 func Read(path string) ([]Entry, error) {
-	// path is Box-authored, so an Lstat before the open leaves a TOCTOU window
-	// for the Box to swap the object at path. O_NOFOLLOW fails the open on a
-	// symlink rather than redirecting the read to a host file; O_NONBLOCK
-	// returns immediately on a FIFO instead of freezing the launcher or wedging
-	// settle. Stat on the descriptor reports the object that was opened.
+	// path is Box-authored: Stat the descriptor, not the path, to avoid a
+	// TOCTOU swap. O_NOFOLLOW refuses a symlink to a host file; O_NONBLOCK
+	// keeps a FIFO from wedging settle.
 	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -133,15 +129,14 @@ func Read(path string) ([]Entry, error) {
 
 // UnreviewedReady reports whether a run that reported status=ready got that
 // ready from a review-loop pass other than its land pass (issue #5973). The
-// caller has already established that the resolved self-report is ready, so a
-// land-pass outcome of any status settles the question: a blocked land makes
-// the resolved self-report blocked, and this is never consulted. The last
-// implement, fix or land entry (L) is the loop's last work pass; review,
-// delta-review and legacy entries never set it. No L (legacy loop, advise-only
-// kinds, older manifests) fails open. Implement or fix at L means the loop
-// stopped before land (true). Land at L is reviewed only if an outcome appears
-// at or after it: the land pass itself, or a legacy nudge resume or host fix
-// pass; otherwise land crashed and the ready is a stale earlier one.
+// caller has already established the resolved self-report is ready, so a land
+// outcome of any status settles it: a blocked land would have made the
+// self-report blocked. Let L be the last implement, fix or land entry. No L
+// (legacy loop, advise-only kinds, older manifests) fails open; implement or
+// fix at L means the loop stopped before land (true). Land at L counts as
+// reviewed only if an outcome appears at or after it (the land pass, or a
+// legacy nudge resume or host fix pass); otherwise land crashed and the ready
+// is stale.
 func UnreviewedReady(entries []Entry) bool {
 	last := lastWork(entries)
 	if last < 0 {

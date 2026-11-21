@@ -35,12 +35,11 @@ type retryingDraftPRCreator struct {
 
 // CreateDraftPR retries every failure whatever its class. The create POST is
 // not idempotent and a gateway timeout can fire after the forge made the PR
-// (#4994's 504), so after every failed attempt, the last included, the
-// branch is looked up and an open PR there is adopted rather than duplicated
-// or parked. When a non-final lookup itself fails, the next attempt's
-// adapter-side adopt-on-already-exists is the backstop; after a failed final
-// lookup only a later `spindrift recover` is. An operator stop during a
-// backoff returns errAbandoned wrapping the last error, with no lookup.
+// (#4994's 504), so after every failed attempt, the last included, an open PR
+// on the branch is adopted rather than duplicated. When a lookup fails, the
+// next attempt's adopt-on-already-exists is the backstop, and after the last
+// attempt only `spindrift recover` is. A stop during a backoff returns
+// errAbandoned.
 func (r *retryingDraftPRCreator) CreateDraftPR(title, body, base, head string) (string, bool, error) {
 	var url string
 	var created bool

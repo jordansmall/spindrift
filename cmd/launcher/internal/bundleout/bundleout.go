@@ -33,11 +33,11 @@ type Config struct {
 	PriorOutcomeLine string
 }
 
-// Run bundles Base..Branch from Repo into OutboxDir/seambundle.FileName.
-// An empty range after the Agent claimed status=ready is a contradiction: Run
-// writes no bundle and prints a corrective status=blocked SPINDRIFT_OUTCOME
-// line to w, which the launcher's last-line-wins log scan (outcome.Resolve)
-// picks up. An empty range after any other status is already consistent.
+// Run bundles Base..Branch from Repo into OutboxDir/seambundle.FileName. An
+// empty range after the Agent claimed status=ready writes no bundle and
+// prints a corrective status=blocked SPINDRIFT_OUTCOME line to w, which
+// outcome.Resolve's last-line-wins scan picks up; after any other status it
+// writes nothing.
 func Run(cfg Config, w io.Writer) error {
 	// Base and Branch interpolate into a `base..branch` range spec, so guard
 	// them even though the harness controls both today.

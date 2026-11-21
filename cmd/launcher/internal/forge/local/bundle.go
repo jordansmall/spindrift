@@ -74,13 +74,12 @@ func createBranch(repoPath, branch, sha string) error {
 	return fmt.Errorf("local: create branch %s: %w: %s", branch, err, out)
 }
 
-// rebaseLand rebases branch onto integrationBranch's tip in repoPath and
-// fast-forwards integrationBranch to the result, keeping Integration linear
-// with no merge commits (ADR 0033, issue #1889). It works through a throwaway
-// clone because a rebase needs a working tree the bare repo lacks. Any rebase
-// failure returns forge.ErrMergeConflict and leaves integrationBranch untouched.
-// A sibling land that moves integrationBranch mid-land returns
-// forge.ErrMergeTransient, so the caller re-lands from the fresh tip.
+// rebaseLand rebases branch onto integrationBranch's tip and fast-forwards
+// integrationBranch to the result, keeping Integration linear (ADR 0033,
+// issue #1889), via a throwaway clone since the bare repo has no working
+// tree. A rebase failure returns forge.ErrMergeConflict and leaves
+// integrationBranch untouched; a sibling land moving it mid-land returns
+// forge.ErrMergeTransient so the caller re-lands from the fresh tip.
 func rebaseLand(repoPath, branch, integrationBranch, userName, userEmail string) error {
 	if branch == "" || strings.HasPrefix(branch, "-") {
 		return fmt.Errorf("local: invalid ref %q", branch)
@@ -136,12 +135,11 @@ func rebaseLand(repoPath, branch, integrationBranch, userName, userEmail string)
 }
 
 // fastForward points integrationRef at newRef only while it still sits at
-// oldTip. update-ref exits 128 for a CAS mismatch and a bad SHA alike and only
-// its locale-dependent stderr tells them apart, so a failure is classified by
-// re-reading the ref: moved off oldTip means a concurrent land won the race.
-// Any failure with the ref moved is classed transient even if the race was not
-// the cause, which is harmless as settle's retries are bounded and each
-// re-reads the tip.
+// oldTip. update-ref exits 128 for a CAS mismatch and a bad SHA alike, told
+// apart only by locale-dependent stderr, so a failure is classified by
+// re-reading the ref: moved off oldTip means a concurrent land won, and is
+// classed transient even when the race was not the cause, harmless as settle's
+// retries are bounded and each re-reads the tip.
 func fastForward(repoPath, integrationRef, newRef, oldTip string) error {
 	out, err := exec.Command("git", "-C", repoPath, "update-ref", integrationRef, newRef, oldTip).CombinedOutput()
 	if err == nil {

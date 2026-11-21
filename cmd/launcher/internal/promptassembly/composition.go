@@ -95,9 +95,8 @@ type passDef struct {
 // Passes both read it, so a caller choosing carried-block targets sees exactly
 // the passes Compose will accept.
 func passDefs(bodies promptBodies) []passDef {
-	// A review body exists only for fresh,
-	// non-research work, where the cell renders all five orchestrator pass
-	// kinds rather than a single legacy or research pass.
+	// A review body exists only for fresh, non-AdviseOnly work, where the cell
+	// renders all five orchestrator pass kinds rather than a single pass.
 	orchestratorOnFreshWork := bodies.review != nil
 
 	switch {
@@ -154,9 +153,7 @@ func Compose(e Env, reg Registry, carried []CarriedText) (Composition, error) {
 	}
 
 	// A carried block naming a pass kind this cell doesn't render would
-	// otherwise vanish silently from every pass's Sources. Validating here
-	// rather than in the per-pass loop runs the check once regardless of
-	// len(defs).
+	// otherwise vanish silently from every pass's Sources.
 	knownPasses := make([]string, len(defs))
 	knownPass := make(map[string]bool, len(defs))
 	for i, d := range defs {

@@ -9,18 +9,12 @@ import (
 	"spindrift.dev/launcher/internal/report"
 )
 
-// Record is a type alias, not a copy, of internal/report.Record: internal/
-// report is the writing half of this wire shape (one JSON line per event,
-// piped from the child over SPINDRIFT_REPORT_FD), this package is the
-// reading half, and aliasing means there is only one struct definition for
-// the two halves to (dis)agree about — a field added on one side is visible
-// on the other by construction, not by a parity test someone has to remember
-// to keep passing. The alias does not make the two halves ship together: after
-// an in-place restart (ADR 0063) an inherited child can be older than the
-// daemon reading it, so the reader must keep decoding the shape older children
-// wrote (pinned by TestParseRecord_OlderChildShapesStillDecode). See issue
-// #3627's review finding: this alias is what replaced the deleted parity test
-// (TestAnnounceLine_ParsesBack).
+// Record is an alias of internal/report.Record, the writing half of this
+// wire shape (one JSON line per event over SPINDRIFT_REPORT_FD), so both
+// halves share one struct definition (issue #3627). The alias does not make
+// them ship together: after an in-place restart (ADR 0063) an inherited child
+// can be older than the daemon, so the reader must keep decoding older shapes
+// (TestParseRecord_OlderChildShapesStillDecode).
 type Record = report.Record
 
 // maxIssueLen caps a parsed issue number's digit run: generous enough for
@@ -28,10 +22,8 @@ type Record = report.Record
 // line can't hand the rest of the daemon an unbounded string.
 const maxIssueLen = 10
 
-// maxChoreLen caps a parsed Chore name's length: generous for any real
-// butler Chore (bugs, refactor, docs-drift), tight enough that a malformed
-// or hostile line can't hand the rest of the daemon an unbounded string —
-// the Chore-keyed counterpart of maxIssueLen.
+// maxChoreLen caps a parsed Chore name's length, maxIssueLen's Chore-keyed
+// counterpart.
 const maxChoreLen = 64
 
 // ErrKindMismatch wraps ParseRecord's error for a well-formed record whose
@@ -40,19 +32,14 @@ const maxChoreLen = 64
 var ErrKindMismatch = errors.New("record key does not match child kind")
 
 // ParseRecord decodes one line of the report protocol, emitted by a child of
-// the given kind. An unknown event name or a blank line is not an error —
-// it's ignored, since a forward-compatible reader must tolerate an event it
-// doesn't understand yet — and reports (Record{}, false, nil). Malformed
-// JSON reports (Record{}, false, err), as does a record naming both issue
-// and chore (report.Record's decoder rejects it). So does a known event
-// with no key, an invalid one, or one whose shape doesn't match kind: a
-// Chore-keyed record from a non-butler child, or an issue-keyed record from
-// a butler child. A not_due record with a missing or unparseable next_due
-// (report.ParseNextDue) is malformed too, as are a model record with no model
-// and a ci_wait record with no pr_url. An image_build record is keyless — the
-// child sends it from bootstrap, before any Dispatch key exists — so it skips
-// the key checks and is malformed if it carries a key or a state other than
-// started or finished.
+// the given kind. A blank line or unknown event reports (Record{}, false,
+// nil), so the reader stays forward-compatible. Malformed JSON (including a
+// record naming both issue and chore, which report.Record's decoder
+// rejects), a missing or invalid key, a key shape that doesn't match kind
+// (wrapping ErrKindMismatch), or a field the event requires being absent is
+// an error. image_build is keyless: the child sends it from bootstrap,
+// before any Dispatch key exists, so a key or a state other than started or
+// finished is an error.
 func ParseRecord(line string, kind Kind) (Record, bool, error) {
 	if line == "" {
 		return Record{}, false, nil
@@ -104,10 +91,8 @@ func ParseRecord(line string, kind Kind) (Record, bool, error) {
 	return rec, true, nil
 }
 
-// validIssue reports whether s is a plain non-empty run of ASCII digits no
-// longer than maxIssueLen — never a sign, separator, or leading/trailing
-// space, since the wire shape has no use for anything but a bare issue
-// number.
+// validIssue reports whether s is a non-empty run of ASCII digits no longer
+// than maxIssueLen.
 func validIssue(s string) bool {
 	if s == "" || len(s) > maxIssueLen {
 		return false

@@ -6,17 +6,13 @@ import (
 )
 
 // removedFragmentVars lists fragment variables a past release deleted or is
-// retiring, with the issue that did so. substitute passes an unknown ${...}
-// token through verbatim, so a Consumer prompt override still writing a
-// removed one ships the literal token to the model. A "deprecated" row is
-// still a live var that renders as before; it only warns, naming replacement.
-// The Nix registry lib/removed-fragment-vars.nix is the source of truth; this
-// table is pinned to it, and a parity check greps this source for each row's
-// exact `{"NAME", NNNN, "severity", "REPLACEMENT"}` form, so keep one row per
-// line in that form (replacement is "" for a removed row); rows spell
-// severity as a literal, not severityRemoved/severityDeprecated. The header
-// there explains why the list is targeted rather than a reject of every
-// unknown ${...}.
+// retiring. substitute passes an unknown ${...} through verbatim, so an
+// override still writing a removed one ships the literal token to the model;
+// a "deprecated" row is still live and only warns. A parity check pins this
+// table to lib/removed-fragment-vars.nix (whose header says why the list is
+// targeted) by grepping each row's exact form,
+// `{"NAME", NNNN, "severity", "REPLACEMENT"}`: keep one row per line, severity
+// as a literal, replacement "" on a removed row.
 var removedFragmentVars = []struct {
 	name        string
 	issue       int
@@ -165,12 +161,10 @@ func (s *removedVarScan) check(label string, b body) {
 }
 
 // CheckRemovedVars errors when operator-authored text references a removed
-// fragment variable as a braced ${NAME}, labelling the hit with label. A
-// deprecated variable is not removed yet, so it is not an error here; the prompt
-// assembler warns about it instead. Callers must pass only template, fragment,
-// or contract bytes, never a substituted value. Bundled defaults are scanned
-// too; the equivalence parity check keeps them free of removed tokens, so a hit
-// always means an override.
+// (not merely deprecated) fragment variable as a braced ${NAME}. Callers must
+// pass only template, fragment, or contract bytes, never a substituted value.
+// The equivalence parity check keeps bundled defaults clean, so a hit always
+// means an override.
 func CheckRemovedVars(label, text string) error {
 	for _, r := range removedFragmentVars {
 		if r.severity != severityRemoved {

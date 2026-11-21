@@ -28,10 +28,10 @@ type inProgressTouches struct {
 
 // waveOverlapCheck binds the overlap check to one snapshot of InProgress issues
 // and their open PRs, fetched once per wave/drain call rather than once per
-// candidate. Any gate setting other than "defer", or a failed fetch, yields a
-// check that always reports no overlap, leaving dispatch unaffected. So does
-// IgnoreBlockers: an advise-only run lands no code, and a research claim
-// has no release step, so a deferral would strand the issue.
+// candidate. A gate setting other than "defer", or a failed fetch, yields a
+// never-overlapping check. So does IgnoreBlockers: an advise-only run lands no
+// code, and a research claim has no release step, so a deferral would strand
+// the issue.
 func waveOverlapCheck(cfg Config, it forge.IssueTracker, cf forge.CodeForge) func(num string) (string, bool) {
 	noOverlap := func(string) (string, bool) { return "", false }
 	if cfg.OverlapGate != "defer" || cfg.IgnoreBlockers {
@@ -43,10 +43,9 @@ func waveOverlapCheck(cfg Config, it forge.IssueTracker, cf forge.CodeForge) fun
 	}
 	entries := make([]inProgressTouches, len(inProgress))
 	for i, fi := range inProgress {
-		// TouchesOf refetches the full issue because ListIssues' summary carries
-		// no body. A failed fetch is non-fatal and falls back to the PR's changed
-		// files alone, but it prints so operators see the gap instead of a silent
-		// degradation.
+		// TouchesOf refetches the full issue: ListIssues' summary has no body.
+		// A failed fetch falls back to the PR's files, but prints so the gap is
+		// visible.
 		touches, err := forge.TouchesOf(it, fi.Number)
 		prFiles := prTouchesOf(cf, cfg.BranchPrefix, fi.Number)
 		if err != nil {

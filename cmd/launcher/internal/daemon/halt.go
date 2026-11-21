@@ -6,31 +6,23 @@ import (
 	"spindrift.dev/launcher/internal/report"
 )
 
-// HaltClass distinguishes the reasons the daemon loop can halt: distinct
-// enough that String() and ExitCode() can pick documented grammar and a
-// wire exit code by class alone, without re-deriving either from a raw
-// string prefix.
+// HaltClass distinguishes the reasons the daemon loop can halt, so
+// Halt.String() and Halt.ExitCode() pick grammar and exit code by class alone.
 type HaltClass int
 
 const (
 	// HaltNone is the zero value: no halt was recorded. Halt.String()
-	// renders it as "", the same empty reason the loop's halt carried
-	// back when it was a bare string.
+	// renders it as "".
 	HaltNone HaltClass = iota
 	HaltOperatorStop
 	HaltChildSignalled
 	HaltChildHostTainted
 	HaltChildConfigInvalid
 	// HaltSelfChanged: the daemon attribute's store path at the fetched tip
-	// no longer matches the daemon's own running build (Config.SelfProgram,
-	// whose doc holds the full self-update model). Recorded in drain mode
-	// (the default) only, once the successor's prebuild and smoke test pass
-	// (issue #5012). A failing build records a blocked self-update instead.
-	// The pool then starts no fresh Box from stale code and finishes what is
-	// already running, and exit 10 plus a service restart policy loads the
-	// new build. Under Config.RestartInPlace (--restart-in-place, ADR 0063)
-	// a self-change records no halt: the daemon execs the new build in place
-	// once the pool reaches a clean moment.
+	// no longer matches the running build (see Config.SelfProgram).
+	// Recorded in drain mode only, once the successor's prebuild passes
+	// (issue #5012); exit 10 plus a service restart policy loads the new
+	// build. Under --restart-in-place (ADR 0063) no halt is recorded.
 	HaltSelfChanged
 	HaltSelfBuild
 	HaltBreaker
@@ -43,36 +35,29 @@ const (
 	// a checkout another daemon already holds — see
 	// cmd/launcher/daemon/main.go's mainRun.
 	HaltInstanceLock
-	// HaltFeatureBranchGone: Runner.ResolveTip came back with a definitive
-	// answer that the daemon's --feature-branch no longer exists on the
-	// remote (see FeatureBranchGoneError) — the campaign the branch stood
-	// for is over, not a blip a retry could still fix, so the pool halts
-	// instead of backing off and retrying a branch that will never come
-	// back. The operator's own fix is to restart the daemon without
-	// --feature-branch, or with a new one.
+	// HaltFeatureBranchGone: the remote definitively answered that the
+	// daemon's --feature-branch no longer exists (FeatureBranchGoneError).
+	// The campaign is over, not a blip a retry could fix, so the pool halts
+	// rather than backing off.
 	HaltFeatureBranchGone
 
-	// haltClassCount sits after every real class so a class added above it
-	// (and only above it) is covered by the completeness check on
-	// haltRenderings — TestHaltRenderings_CoversEveryClass fails the moment
-	// a new class lands with no row. A missing row still compiles, so that
-	// test is the only thing standing between it and a silent "" / exit 1
-	// at runtime.
+	// haltClassCount sits after every real class so
+	// TestHaltRenderings_CoversEveryClass catches a new class with no
+	// haltRenderings row, which would otherwise compile and render a silent
+	// "" / exit 1.
 	haltClassCount
 )
 
-// haltRendering is one HaltClass's documented rendering: its Go identifier
-// name (for HaltClass.String()), the reason text, whether that text is a
-// prefix joined to Halt.Detail with ": " or the whole reason on its own,
-// whether the daemon's stderr diagnostic is the bare Detail, and the wire
-// exit code. Halt.String(), Halt.Diagnostic() and Halt.ExitCode() all read
-// this one table so they can't drift the way parallel switches can.
+// haltRendering is one HaltClass's documented rendering. Halt.String(),
+// Halt.Diagnostic() and Halt.ExitCode() all read this one table so they
+// can't drift the way parallel switches can.
 type haltRendering struct {
-	// name is the class's own Go identifier, kept in step by hand:
-	// nothing asserts the two match, so renaming a class means editing
-	// its row too or HaltClass.String() misnames it in a test failure.
-	name     string
-	reason   string
+	// name is the class's Go identifier, kept in step by hand: nothing
+	// asserts the two match.
+	name   string
+	reason string
+	// detailed: reason is a prefix joined to Halt.Detail with ": ", not
+	// the whole reason.
 	detailed bool
 	// bareDiagnostic: the daemon prints Detail alone on stderr instead of
 	// String()'s prefixed form, while the halt event still carries the prefix.
@@ -95,10 +80,9 @@ var haltRenderings = map[HaltClass]haltRendering{
 	HaltFeatureBranchGone:  {name: "HaltFeatureBranchGone", reason: "feature-branch-gone", detailed: true, bareDiagnostic: false, exit: ExitFeatureBranchGone},
 }
 
-// String returns c's Go identifier name (e.g. "HaltSelfChanged") — not the
-// operator-facing grammar, which is Halt.String()'s job on the (Class,
-// Detail) pair. It has no production caller by design: it exists so a %v in
-// a test failure names the class instead of printing a bare integer.
+// String returns c's Go identifier name (e.g. "HaltSelfChanged"), not the
+// operator-facing grammar (Halt.String()). It exists so a %v in a test
+// failure names the class.
 func (c HaltClass) String() string {
 	if row, ok := haltRenderings[c]; ok {
 		return row.name
@@ -144,14 +128,11 @@ func (h Halt) Diagnostic() string {
 }
 
 // ExitCode maps h to this process's exit code. HaltOperatorStop and
-// HaltChildSignalled are the only two clean stops (0) — every other child
-// halt (host-tainted, config-invalid) is a real failure despite also
-// coming from a child exit. HaltSelfChanged, HaltPreflight, and
-// HaltFeatureBranchGone carry dedicated codes (ExitSelfChanged,
-// ExitPreflightFailed, ExitFeatureBranchGone) so a supervisor can tell
-// them apart. Every other class exits 1, HaltNone included: a zero Halt
-// reaching ExitCode is a halt that was never classified, not a clean
-// stop, so it must not silently exit 0.
+// HaltChildSignalled are the only clean stops (0); the other child halts
+// (host-tainted, config-invalid) are real failures. HaltSelfChanged,
+// HaltPreflight, and HaltFeatureBranchGone carry dedicated codes so a
+// supervisor can tell them apart. Every other class exits 1, HaltNone
+// included: an unclassified halt must not silently exit 0.
 func (h Halt) ExitCode() int {
 	row, ok := haltRenderings[h.Class]
 	if !ok {
@@ -160,34 +141,23 @@ func (h Halt) ExitCode() int {
 	return row.exit
 }
 
-// Event renders h as the daemon's "halt" event record. Kind/Revision are
-// omitempty on Event, so a pre-pool halt (h.Kind/h.Revision left zero)
-// marshals identically to today's pre-pool halt events.
+// Event renders h as the daemon's "halt" event record; a pre-pool halt's
+// zero Kind/Revision are omitted.
 func (h Halt) Event() Event {
 	return Event{Event: report.EventHalt, Kind: h.Kind, Revision: h.Revision, Reason: h.String()}
 }
 
-// ExitSelfChanged is the daemon's own exit code for the one halt an
-// operator may want to act on automatically: its build changed at the
-// fetched tip. It is deliberately distinct from every other code this
-// binary returns (see Halt.ExitCode) so a service unit can restart on it
-// alone: in drain mode, exit 10 plus a restart policy is how the new
-// build loads (see HaltSelfChanged for the in-place alternative). It sits
-// outside the 0-7 band the *child* launcher's exit codes occupy
-// (Interpret, cmd/launcher/internal/daemon/outcome.go) so the two
-// taxonomies cannot be confused when both appear in one log.
+// ExitSelfChanged is the daemon's exit code for a build changed at the
+// fetched tip, distinct from every other code so a service unit can restart
+// on it alone. It sits outside the child launcher's 0-7 band (Interpret) so
+// the two taxonomies cannot be confused in one log.
 const ExitSelfChanged = 10
 
-// ExitPreflightFailed is the daemon's own exit code for a refused start: the
-// startup doctor preflight found a Required-tier failure (missing triage
-// labels, an invalid config) or could not run at all. It is 11, not a
-// pass-through of doctor's own 1/2/3/4 (a different table where the same
-// integers mean something else) nor of the *child* launcher's 0-7 band
-// (Interpret) — sharing either would let a reader misattribute this halt to
-// the wrong process's contract. Unlike ExitSelfChanged (10), which an
-// operator deliberately composes with a restart policy, a restart cannot
-// clear this one: nothing the daemon does fixes a missing label or an
-// undersized VM, so a supervisor must not treat this code as retryable.
+// ExitPreflightFailed is the daemon's exit code for a refused start: the
+// startup doctor preflight found a Required-tier failure or could not run.
+// It is 11, sharing neither doctor's 1-4 nor the child launcher's 0-7 band,
+// so it cannot be misattributed. A restart cannot clear it (a missing label,
+// an undersized VM), so a supervisor must not treat it as retryable.
 const ExitPreflightFailed = 11
 
 // ExitFeatureBranchGone is the daemon's own exit code for a --feature-branch

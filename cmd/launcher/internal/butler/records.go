@@ -89,11 +89,8 @@ func (p Policy) loadSnapshot(chore, recordID string) (snap dispatchrecord.Snapsh
 }
 
 // recordsSnapshot is a records-scoped sweep's digest. chore and ref.Sweep key
-// the stored row; ref goes on the Done commit; rendered is the text of that
-// row, filled by load at settle; digest is the Strategy whose hooks judge the
-// findings and knobs the values it read, so Render and Validate see the same
-// sample floor; policy and tree reach the store and the scanned HEAD's
-// tracked files.
+// the stored row; rendered is filled by load at settle; knobs are the values
+// digest read, so Render and Validate see the same sample floor.
 type recordsSnapshot struct {
 	chore    string
 	ref      ledger.Snapshot

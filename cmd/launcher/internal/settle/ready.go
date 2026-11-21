@@ -14,11 +14,10 @@ import (
 )
 
 // errAbandoned marks a settle that stopped because another actor now owns the
-// issue: the operator's Terminate (ADR 0024, issue #649), which already did the
-// transition, comment, and log line, or a fix-pass or conflict-resolve Box
-// skipped because the issue's own Box is already in flight (issue #3655), where
-// the live run owns the issue's state. The caller must take no further action:
-// no merge-blocked print or comment, no usage comment, no tracker commit.
+// issue: a Reclaim (ADR 0024, issue #649), which already did the transition,
+// comment and log line, or the issue's own live Box, which made a fix-pass or
+// conflict-resolve Box skip (issue #3655). The caller must post, print and
+// commit nothing further.
 var errAbandoned = errors.New("settle: abandoned (terminated, or a live run owns the issue)")
 
 // selfHeal lands num through the Lander New chose.
@@ -35,20 +34,17 @@ func (s *Settle) selfHealAdopted(d dispatch.Dispatcher, num string, gen uint64, 
 }
 
 // completeLanding is the single Complete-commit gate for the gateGreen arm and
-// the push-only Lander. The arm's top-of-switch check catches a mark that
-// lands before MarkReady, but the Registry mark is sticky
-// (terminate/registry.go), so re-checking here also catches one that lands
-// during the forge round-trip before it (MarkReady and applyMergeMode, or
-// pushOnlyLander.applyMode): Reclaim already moved num to Dispatchable by then,
-// and a Complete commit here would leave the issue wearing agent-complete on
-// top, which Reconcile's InProgress-only sweep never clears (issue #3523).
+// the push-only Lander. The Registry mark is sticky, so re-checking here
+// catches a mark that landed during the forge calls before it (MarkReady and
+// applying the merge mode): Reclaim already moved num to Dispatchable, and a
+// Complete commit on top would leave agent-complete that Reconcile's
+// InProgress-only sweep never clears (issue #3523).
 func (s *Settle) completeLanding(num string, gen uint64, landed landingResult, reason string) (landingResult, error) {
 	if s.terminated(num, gen) {
 		return landingFailed, errAbandoned
 	}
-	// An unclaimed issue (issue #4076) only ever reaches Complete on an actual
-	// merge; manual/auto/guard-hit/merge-blocked leave it untouched since
-	// there was never an InProgress state to move out of.
+	// An unclaimed issue (issue #4076) has no InProgress state to leave, so
+	// only an actual merge commits Complete.
 	if s.cfg.Unclaimed && landed != landingMerged {
 		return landed, nil
 	}
@@ -78,13 +74,12 @@ func wearsFindingLabel(row chore.Row, labels []string) bool {
 // across its respondToConflict calls.
 type rebaseBudget struct{ attempts, pushRetries int }
 
-// rebaseOnConflict is the Code Forge half of a conflict response, shared by the
-// PR and push-only Landers so neither path needs s.pr: spend one of budget's
-// rebase attempts on ref (conflictErr unchanged once it is spent), retrying a
-// transient push failure. A rebase that itself conflicts runs resolve when it
-// is non-nil (the PR path's conflict-resolve dispatch) and reports resolved;
-// any other failure is logged and returned. A clean rebase returns (false,
-// nil) and leaves the caller to wait out whatever the force-push reset.
+// rebaseOnConflict is the Code Forge half of a conflict response, shared by
+// both Landers so neither needs s.pr: spend one of budget's rebase attempts
+// on ref (returning conflictErr once spent), retrying a transient push
+// failure. A rebase that itself conflicts runs resolve when non-nil and
+// reports resolved. A clean rebase leaves the caller to wait out whatever the
+// force-push reset.
 func (s *Settle) rebaseOnConflict(num, ref string, cf forge.CodeForge, conflictErr error, budget *rebaseBudget, resolve func() error) (resolved bool, err error) {
 	if budget.attempts >= s.cfg.MaxRebaseAttempts {
 		return false, conflictErr

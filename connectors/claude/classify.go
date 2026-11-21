@@ -59,12 +59,10 @@ var TransientPatterns = []driver.Pattern{
 // operator. These run through the same self-poison guard as TransientPatterns, so
 // a box editing this string in its own content is not blamed (issues #579, #818).
 var TerminalPatterns = []driver.Pattern{
-	// A claude-code build predating the --agents flag rejects it outright
-	// (issue #1552). Naming that instead of the generic TaskFailed bucket tells
-	// the operator to bump claude-code (the Consumer's nixpkgs input), or blank
-	// every subagent model knob (agents.drivers.<name>.models.scout/review/
-	// filer/worker, or the roster) in the Consumer config and rebuild the image,
-	// rather than retry.
+	// A claude-code build predating --agents rejects it outright (issue
+	// #1552). Naming the failure tells the operator to bump claude-code (the Consumer's
+	// nixpkgs input) or blank every subagent model knob
+	// (agents.drivers.<name>.models) and rebuild, rather than retry.
 	{Substr: "unknown option '--agents'", Reason: driver.UnsupportedFlag},
 }
 

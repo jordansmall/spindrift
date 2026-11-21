@@ -29,12 +29,10 @@ type logStatus struct {
 	named, finished, superseded bool
 	// owned is set when the status was read for a Dispatch (a non-nil owner).
 	owned bool
-	// namedAt is when the latest naming event that set named happened, and
-	// finishedAt when the slot event (a child_finish, or a later child_start)
-	// that set finished did. Event times are second-precision RFC3339; either is
-	// zero when unset or unparsable. finishedAt is also zero when finished is
-	// inferred from a naming with no slot, or one that aged out of the Events
-	// file; a zero finishedAt skips the modified-after-finish check.
+	// namedAt and finishedAt are the times of the events that set named and
+	// finished, second-precision; zero when unset or unparsable. finishedAt is
+	// also zero when finished is inferred (a slotless or aged-out naming),
+	// which skips the modified-after-finish check.
 	namedAt, finishedAt time.Time
 }
 
@@ -51,23 +49,20 @@ func eventTime(ev Event) time.Time {
 // write to its Pass log may land: event times are truncated to the second.
 const finishSlack = time.Second
 
-// priorRunInfix joins a Pass log's path to the N of the copy a later Dispatch's
-// launcher moves it to. The launcher owns the naming: quarantinePriorRunLogs in
-// cmd/launcher/internal/dispatch/box.go passes the ".prior-run" stem to
-// renameToFirstFreeSuffix.
+// priorRunInfix joins a Pass log's path to the N of the copy a later
+// Dispatch's launcher moves it to; the launcher owns the naming
+// (quarantinePriorRunLogs in cmd/launcher/internal/dispatch/box.go).
 const priorRunInfix = ".prior-run."
 
 // modifiedAfterFinish reports whether a Dispatch's tab must answer superseded
 // for the file open at info: another Dispatch named the path, or the file was
-// modified past this owner's finish. A finished owner never writes its Pass log
-// again (assuming the launcher of a finish inferred from a later child_start
-// died with its Daemon; an orphan still writing would read as superseded), so
-// such a file is a later run's that recreated the path before its box event
-// reached the Events file. A nil owner never reports superseded.
+// modified past this owner's finish. A finished owner never writes its Pass
+// log again (an orphan launcher still writing would read as superseded), so
+// such a file is a later run's whose box event has not yet reached the Events
+// file.
 //
-// Residual: a newer run whose writes all land within finishSlack of the old
-// finish passes this check, so those newer bytes can stream to the old tab,
-// until the file grows past its open size and the tab hears superseded.
+// Residual: a newer run writing only within finishSlack of the old finish
+// streams to the old tab until the file grows past its open size.
 func (st logStatus) modifiedAfterFinish(info os.FileInfo) bool {
 	if !st.owned {
 		return false
@@ -77,15 +72,12 @@ func (st logStatus) modifiedAfterFinish(info os.FileInfo) bool {
 }
 
 // movedAside reports whether a Dispatch's tab must answer superseded for the
-// missing file at full: another Dispatch named the path, or a later Dispatch's
-// launcher moved every prior Pass log of the issue aside as <path>.prior-run.N.
-// The rename keeps mtime, so a sibling written at or after this owner named the
-// path is its own copy, while siblings left by earlier Dispatches are older. A
-// nil owner never reports superseded.
+// missing file at full: another Dispatch named the path, or a later launcher
+// moved the issue's Pass logs aside as <path>.prior-run.N. The rename keeps
+// mtime, so a sibling written at or after this owner named the path is its own.
 //
-// Residual: namedAt is truncated to the second, so an earlier Dispatch's copy
-// last written in the same second as this owner's box event also matches and
-// answers superseded rather than pruned (very unlikely).
+// Residual: namedAt is second-truncated, so an earlier copy last written in
+// the same second also answers superseded rather than pruned.
 func (st logStatus) movedAside(full string) bool {
 	if !st.owned {
 		return false
@@ -122,22 +114,18 @@ func (st logStatus) movedAside(full string) bool {
 	return false
 }
 
-// logState reports whether the Daemon announced path, and whether the child
-// that owns it has finished. A child_start names it as its child_log and a box
-// as its pass_log; only a path the Daemon announced is served, so the query
-// string cannot be used to read arbitrary files under the checkout. The child
-// finished once its slot saw a child_finish, or a later child_start (a Daemon
-// that died without one). The latest naming wins, and a naming that carries no
-// slot cannot be followed to a finish, so it counts as finished already.
-// namedAt and finishedAt are the times of the events that set named and
-// finished.
+// logState reports whether the Daemon announced path (a child_start's
+// child_log or a box's pass_log), and whether its child has finished. Only an
+// announced path is served, so the query string cannot read arbitrary files.
+// The child finished once its slot saw a child_finish or a later child_start
+// (its Daemon died without a child_finish). The latest naming wins; a slotless
+// naming cannot be followed to a finish, so it counts as finished already.
 //
-// Pass log paths are fixed per issue or Chore, so a later Dispatch reuses the
-// path an earlier one named. With a non-nil owner the answers are that
-// Dispatch's own: named means one of its events named path, finished means its
-// slot has since finished, and superseded means a different Dispatch (on any
-// slot) named path after it, so the file at path is no longer its run's. A nil
-// owner never reports superseded.
+// Pass log paths are fixed per issue or Chore, so later Dispatches reuse
+// them. With a non-nil owner the answers are that Dispatch's own, and
+// superseded means a different Dispatch (on any slot) named path after it, so
+// the file at path is no longer its run's. A nil owner never reports
+// superseded.
 func (s *server) logState(path string, owner *logOwner) logStatus {
 	st := logStatus{owned: owner != nil}
 	var slot *int
@@ -182,17 +170,12 @@ func (s *server) logState(path string, owner *logOwner) logStatus {
 // its path (a retried Pass rotating the old one aside); either way the
 // client's reconnect opens whatever file the path names now.
 //
-// A Pass log tab also passes its Dispatch (slot, at and n, as the dispatch page
-// takes them but with at required), because the path is reused by later
-// Dispatches of the same issue.
-// Once another Dispatch has named the path, the stream sends what its open
-// file held and a single superseded frame, never the newer run's bytes. A
-// finished Dispatch never writes again (a finish inferred from a later
-// child_start assumes the Daemon's launcher died with it), so a later run's file
-// may reach the path before its box event reaches the Events file; superseded
-// also covers that Dispatch's file moved to <path>.prior-run.N, a file modified
-// after it finished (none of its bytes sent), and a file that grows past its
-// size when the tab opened (the tab never reads past that size).
+// A Pass log tab also passes its Dispatch (slot, at and n, with at required),
+// because later Dispatches of the issue reuse the path. Once another Dispatch
+// has named it, the stream sends what its open file held and one superseded
+// frame, never the newer run's bytes. Superseded also covers the file moved to
+// <path>.prior-run.N, a file modified after the finish (none of it sent), and
+// a file grown past its size when a finished tab opened.
 func (s *server) serveLog(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", "GET")
@@ -319,11 +302,9 @@ func (s *server) serveLog(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for drain() {
-		// A retried Pass rotates its log aside and creates a fresh one at the same
-		// path; ending the stream lets the client reconnect onto the new file. A
-		// missing path is the gap between rename and create while the child runs, so
-		// keep following; once it has finished the path is gone for good, and drain
-		// has already sent what the open file held.
+		// A retried Pass rotates its log aside and creates a fresh one; ending
+		// the stream lets the client reconnect onto it. A missing path while
+		// the child runs is the gap between rename and create, so keep following.
 		if capped {
 			if fi, err := f.Stat(); err == nil && fi.Size() > openInfo.Size() {
 				send("superseded", path)

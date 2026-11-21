@@ -185,11 +185,10 @@ func (d *decoder) decodeLine(line string, root driver.Value, top *topLevel) []ev
 	return d.resultEvents(line, root, top)
 }
 
-// resultEvents decodes a type:"result" line. A type error anywhere fails a
-// whole struct decode, so the text, is_error, totals and num_turns read
-// separately, as the pre-decoder readers did: a mistyped total must not cost
-// the result text or the echo check, and a mistyped is_error must cost neither
-// the text nor the totals.
+// resultEvents decodes a type:"result" line. A type error fails a whole struct
+// decode, so the text, is_error, totals and num_turns read separately: a
+// mistyped total must not cost the result text or the echo check, and a
+// mistyped is_error must cost neither the text nor the totals.
 func (d *decoder) resultEvents(line string, root driver.Value, top *topLevel) []event.Event {
 	var text string
 	textOK := top.Result.Kind() == driver.Invalid || top.Result.DecodeString(&text) // a non-string result leaves text ""
@@ -420,16 +419,12 @@ func (m *message) merge(obj driver.Value) bool {
 
 // contentEvents decodes an assistant or user line of the given type: for an
 // assistant line one KindModel, then its content blocks, then one KindUsage.
-// The envelope is strict: a type error in it (a mistyped usage field, say)
-// yields no events, as the pre-decoder readers dropped such a line. Only the
-// content is lenient: a user turn whose content is a string, or a block that
-// fails to decode, yields no events for that part rather than losing the line.
-// An assistant line whose content is a string, or which holds a block that
-// fails to decode, still yields its KindModel (so OnModel and the model/role
-// switch fire) and its valid blocks, where the pre-decoder heartbeat and usage
-// readers dropped it whole: one bad block should not cost the line's model,
-// narration and tool calls (issue #5454). Task spawns are recorded here and
-// nothing is deduplicated; the usage reader dedups by MessageID.
+// A type error in the envelope (a mistyped usage field, say) yields no events.
+// The content is lenient: string content, or a block that fails to decode,
+// costs only that part, and an assistant line still yields its KindModel and
+// valid blocks, so one bad block does not cost the line's model, narration
+// and tool calls (issue #5454). Nothing is deduplicated; the usage reader
+// dedups by MessageID.
 func (d *decoder) contentEvents(root driver.Value, typ string, synthetic bool) []event.Event {
 	parent, msg, ok := readMessage(root)
 	if !ok || msg == nil {

@@ -43,9 +43,7 @@ func toolKind(name string) string {
 	}
 }
 
-// toolToPhase maps a tool name and its input to the current work phase. It
-// is the only tool-to-phase mapping for claude: the native Strategy that once
-// carried it is gone (issue #6799).
+// toolToPhase maps a tool name and its input to the current work phase.
 func toolToPhase(name string, input json.RawMessage) string {
 	if isSubagentSpawnTool(name) {
 		in, _ := driver.Scan(string(input)) // unscannable input reads as no subagent_type

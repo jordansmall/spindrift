@@ -35,10 +35,10 @@ type localCodeForge struct {
 }
 
 // RelayBundle imports ref from the bundle the Box left in outboxDir into the
-// Accumulation repo. The Box's repo mount is read-only, so the branch was
+// Accumulation repo: the Box's repo mount is read-only, so the branch was
 // never pushed and Merge's fetch from repoPath would miss it. It also creates
-// IntegrationBranch from baseBranch's tip when this is the parent's first seam
-// to land, since Merge assumes its base branch already exists.
+// IntegrationBranch from baseBranch's tip on the parent's first seam, since
+// Merge assumes its base branch already exists.
 func (l *localCodeForge) RelayBundle(outboxDir, ref string) error {
 	if err := relayBundle(l.repoPath, outboxDir, ref); err != nil {
 		return err

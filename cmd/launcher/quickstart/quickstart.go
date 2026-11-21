@@ -387,9 +387,8 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 		return v
 	}
 	prompt := func(label string) string { return promptDefault(label, "") }
-	// promptValidated re-prompts on an invalid answer. Once stdin runs out
-	// (ok == false) there is no more input to retry with, so it errors out
-	// instead of spinning forever on the exhausted scanner.
+	// promptValidated re-prompts on an invalid answer, but errors once stdin
+	// is exhausted rather than spinning forever.
 	promptValidated := func(label, def string, validate func(string) error) (string, error) {
 		for {
 			v, ok := readLine(label, def)
@@ -458,10 +457,9 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 		return fmt.Errorf("backend %q declares no AcquireToken hook, so quickstart cannot set up its token", strategy.Name)
 	}
 	shared := quickstartShared(repoSlug, gitUserName, gitUserEmail)
-	// Quickstart installs no Connector sandbox, so a backend whose tracker or
-	// Code Forge reads through a Connector cannot build both here: the token
-	// probe defers when the tracker is itself the Connector, and the
-	// finish-line checks run under `spindrift doctor`. The false arguments
+	// Quickstart installs no Connector sandbox, so a Connector-read tracker or
+	// Code Forge defers its finish-line checks to `spindrift doctor`, and the
+	// token probe too when the tracker is the Connector. The false arguments
 	// mean "not primary".
 	deferChecks := !connectorsandbox.Installed() &&
 		(backendkit.TrackerReadsThroughConnector(strategy.Name, false) ||
@@ -514,11 +512,9 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 		return err
 	}
 
-	// Backup runs only here, after every prompt and abort point above has
-	// succeeded, so an operator who aborts earlier never loses a file to a
-	// rename with nothing written to replace it. A failed rename reverses
-	// everything in backedUp, so the transcript lines come from a second pass
-	// after the loop: printing inline would falsify a line a rollback undoes.
+	// Backup runs only after every abort point, so an earlier abort never
+	// loses a file to a rename. Lines print in a second pass: a failed rename
+	// rolls back every backup, which would falsify a line printed inline.
 	var backedUp []backupRecord
 	for _, name := range clobbered {
 		path := filepath.Join(dir, name)
@@ -928,9 +924,8 @@ func renderHarnessEnv(issueTracker, token string, credentials []credential) stri
 }
 
 // harnessEnvTokenEnvVar returns the env var name the wizard writes the
-// backend credential under, falling back to GH_TOKEN. Keep it the only source
-// of that name: renderHarnessEnv and quickstartCheckConfig both read it, and
-// a second copy would let the scaffold and the doctor row drift apart.
+// backend credential under, falling back to GH_TOKEN. Keep it the only source,
+// so the scaffold and the doctor row cannot drift.
 func harnessEnvTokenEnvVar(issueTracker string) string {
 	if desc, ok := backend.ByName(issueTracker); ok && desc.TokenEnvVar != "" {
 		return desc.TokenEnvVar
@@ -972,14 +967,12 @@ func toKebab(name string) string {
 	return strings.ReplaceAll(strings.ToLower(name), "_", "-")
 }
 
-// gatherCredentials walks the Driver's credential rules in order. A rule an
-// ambient variable already satisfies is reused; otherwise its setup command
-// is offered (with its SetupHint, if any), and if declined each remaining
-// variable is prompted for in turn, by its Labels entry when it has one,
-// until one is non-empty. When none is, the last variable is written blank so
-// harness.env still shows where the credential goes. A rule with no setup
-// command only prints its Remedy. Quickstart configures no models, so a
-// model-gated rule is mentioned rather than demanded.
+// gatherCredentials walks the Driver's credential rules in order, reusing an
+// ambient variable, else offering the setup command, else prompting for each
+// remaining variable until one is non-empty. With none, the last is written
+// blank so harness.env shows where it goes. A rule with no setup command only
+// prints its Remedy; quickstart configures no models, so a model-gated rule
+// is mentioned rather than demanded.
 func gatherCredentials(env Environment, rules []driver.CredentialRule, w io.Writer, prompt, promptMasked func(string) string, cmdRunner CommandRunner) ([]credential, error) {
 	var creds []credential
 	for _, rule := range rules {

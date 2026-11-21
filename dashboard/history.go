@@ -89,8 +89,7 @@ func (o dispatchOwners) claim(ev Event, e *historyEntry) {
 }
 
 // timeline maps each event worth a row to what it adds to the row; the rest
-// (heartbeats, demand probes, baton and awake bookkeeping) are noise in a
-// history. The .history .ev-* selectors in style.css repeat these names, so
+// are noise. The .history .ev-* selectors in style.css repeat these names, so
 // change both together.
 var timeline = map[string]func(ev Event, e *historyEntry, add func(string)){
 	"child_start": func(Event, *historyEntry, func(string)) {},

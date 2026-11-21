@@ -8,9 +8,8 @@ import (
 )
 
 // cargoCredentialsFile is the TOML decode target for a credentials.toml file.
-// An absent "token" key and an explicit empty one both decode to "", and
-// go-toml/v2 gives no signal to tell them apart, so both take the same
-// "no token field" branch below.
+// go-toml/v2 cannot tell an absent "token" from an empty one, so both take
+// the "no token field" branch.
 type cargoCredentialsFile struct {
 	Registries map[string]struct {
 		Token string `toml:"token"`
@@ -18,10 +17,9 @@ type cargoCredentialsFile struct {
 }
 
 // cargoCredentialsToken returns the token of the "[registries.NAME]" table
-// whose NAME exactly equals registryName. It does no I/O, and sourceName only
-// names the source in the returned error, never alongside a credential value.
-// A miss returns an error rather than an empty string with a nil error, so a
-// proxy cannot silently go on to run unauthenticated.
+// whose NAME exactly equals registryName. sourceName only names the source in
+// errors, never alongside a credential value. A miss is an error, so a proxy
+// cannot silently run unauthenticated.
 func cargoCredentialsToken(content []byte, sourceName, registryName string) (string, error) {
 	var parsed cargoCredentialsFile
 	if err := toml.Unmarshal(content, &parsed); err != nil {
@@ -33,8 +31,6 @@ func cargoCredentialsToken(content []byte, sourceName, registryName string) (str
 		return "", fmt.Errorf("cargo credentials file %s has no [registries.%s] table", sourceName, registryName)
 	}
 	if entry.Token == "" {
-		// TOML can represent an empty value, so an empty quoted string has to
-		// fail closed here.
 		return "", fmt.Errorf("cargo credentials file %s has table [registries.%s] but no token field", sourceName, registryName)
 	}
 	if hasDisallowedTokenChars(entry.Token) {

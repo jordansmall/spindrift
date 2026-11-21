@@ -53,16 +53,13 @@ type HostMediationFake struct {
 	PostIssueErr   error
 	PostIssueCalls []PostIssueCall
 	// PostIssueErrForTitle fails only the PostIssue call whose title is a key
-	// here, checked before the blanket PostIssueErr; a partial-filing-failure
-	// test scripts one intent among several to fail while its siblings still
-	// succeed (issue #3875), which PostIssueErr alone cannot express.
+	// here, checked before the blanket PostIssueErr, so one intent among
+	// several can fail while its siblings succeed (issue #3875).
 	PostIssueErrForTitle map[string]error
 	// PostIssueURLForTitle overrides PostIssueURL for the PostIssue call
-	// whose title is a key here, checked after PostIssueErrForTitle/
-	// PostIssueErr but before the blanket PostIssueURL: a test filing
-	// several findings in one sweep needs each its own URL to tell which
-	// finding a Ledger's Patched/Promoted entry names (issue #4074), which
-	// the single PostIssueURL field cannot express.
+	// whose title is a key here, checked after the error fields: a sweep
+	// filing several findings needs each its own URL to tell which one a
+	// Ledger's Patched/Promoted entry names (issue #4074).
 	PostIssueURLForTitle map[string]string
 	LandingRefValue      string
 	LandingRefErr        error

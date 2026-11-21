@@ -67,9 +67,8 @@ type IssueTrackerFake struct {
 	IssueErr error
 
 	// IssueErrs is a per-call queue drained before IssueErr is checked. A nil
-	// entry falls through to the normal issue lookup. forge.DepsOf and
-	// forge.TouchesOf read through Issue, so they record IssueCalls and drain
-	// both IssueErrs and IssueErr too.
+	// entry falls through to the normal issue lookup. DepsOf and TouchesOf read
+	// through Issue, so they record IssueCalls and drain both too.
 	IssueErrs []error
 
 	// NativeDepsCalls records each NativeDepsOf call's issue number, the native
@@ -202,8 +201,8 @@ func (tf *IssueTrackerFake) listState(state DispatchState) []Issue {
 			continue
 		}
 		// Resolved from Labels at read time, not stored, so a test that sets
-		// Labels without Priority cannot drift the two apart (#2281). The
-		// github adapter resolves at its own read edge for the same reason.
+		// Labels without Priority cannot drift the two apart (#2281).
+		// connectortracker resolves at its own read edge for the same reason.
 		iss.Priority = ResolvePriority(iss.Labels)
 		if !tf.Route.MatchesLabels(iss.Labels) {
 			continue
@@ -301,22 +300,17 @@ func (tf *IssueTrackerFake) Issue(num string) (Issue, error) {
 }
 
 // TransitionState swaps the from-state label for the to-state label on issue
-// num, best-effort on a missing issue (no error) to match the gh CLI. A claim
-// (to == InProgress) also strips the stale terminal labels
-// TransitionRemoveLabels names, as the github adapter does, so a test on the
-// Fake cannot pass while the real adapter misbehaves (#1985). A claim also
-// strips any research verdict label. A landing (to == Complete) also strips a
-// stale Failed, as the adapters do (#4651).
-//
-// A claim also errors on ErrAlreadyClaimed without mutating labels when num
-// already carries InProgress (#3887), so a test on the Fake pins the same
-// contract the real adapters must honor. The check is not atomic against a
-// concurrent claim, as for the real adapters. After that check, a target
-// state with no label is refused, as connectortracker does (#6995).
+// num, best-effort on a missing issue (no error) to match the gh CLI. It
+// mirrors the real adapters so a test on the Fake cannot pass while they
+// misbehave: a claim strips the TransitionRemoveLabels set (#1985) and any
+// verdict label, and errors on ErrAlreadyClaimed without mutating labels when
+// num already carries InProgress (#3887, not atomic, as for the adapters); a
+// landing strips a stale Failed (#4651); a target state with no label is
+// refused, as connectortracker does (#6995).
 //
 // That policy runs here in core, as for every Connector-backed tracker: the
-// backend only answers the transition primitive, serves the issue read, and
-// applies the editLabels it is sent.
+// backend only answers the transition primitive, the issue read, and
+// editLabels.
 func (tf *IssueTrackerFake) TransitionState(num string, from, to DispatchState) error {
 	tf.Fire("TransitionState")
 	// The transition primitive is a no-op carrying only the spy and scripted
@@ -358,14 +352,12 @@ func (tf *IssueTrackerFake) labelSets() (DispatchLabels, VerdictLabels) {
 }
 
 // CompleteVerdict swaps the InProgress label for verdict's terminal label on
-// issue num, best-effort on a missing issue like TransitionState. Unlike
-// TransitionState it first asserts num carries InProgress and errors without
-// mutating labels when it does not, the double-dispatch guard
-// forgetest.RunTrackerContract pins across every adapter (#701). The guard runs
-// here in core over the read and editLabels primitives. CompleteVerdictErr rides
-// the editLabels pre hook, so it is consulted only after the missing-issue,
-// no-verdict-label and not-in-progress checks: scripting it on an unseeded
-// issue yields nil.
+// issue num, best-effort on a missing issue like TransitionState. It first
+// errors without mutating labels unless num carries InProgress, the
+// double-dispatch guard forgetest.RunTrackerContract pins (#701).
+// CompleteVerdictErr rides the editLabels pre hook, so it is consulted only
+// after the missing-issue, no-verdict-label and not-in-progress checks:
+// scripting it on an unseeded issue yields nil.
 func (tf *IssueTrackerFake) CompleteVerdict(num string, verdict Verdict) error {
 	tf.mu.Lock()
 	tf.CompleteVerdictCalls = append(tf.CompleteVerdictCalls, CompleteVerdictCall{num, verdict})
@@ -462,11 +454,9 @@ func (tf *IssueTrackerFake) NativeDepsOf(num string) ([]string, error) {
 }
 
 // BlocksOf returns every issue number keyed in NativeDeps whose own deps name
-// num as a blocker, the reverse of DepsOf, which every BlockersLister adapter
-// can query because it stores the relationship both ways (issue #1744). It
-// is always DepSourceNative, sorted numerically only for
-// deterministic assertions: NativeDeps is an unordered map, so a real adapter
-// may order the set its way.
+// num as a blocker, the reverse of DepsOf (issue #1744), always
+// DepSourceNative. It sorts numerically only for deterministic assertions; a
+// real adapter may order the set its way.
 func (tf *IssueTrackerFake) BlocksOf(num string) ([]Dependency, error) {
 	var out []Dependency
 	err := tf.read(pathBlocks, &out, func() (any, error) {
@@ -562,10 +552,8 @@ func (tf *IssueTrackerFake) missingLabels(labels []string) []string {
 }
 
 // AddLabels implements the optional IssueLabeler interface (issue #4074). It
-// errors on an unknown num, unlike TransitionState's best-effort no-op: a
-// caller reaching for AddLabels always names an issue it just filed or
-// otherwise knows exists, so a missing issue is a real fake-setup bug, not a
-// benign double-dispatch the way a stale TransitionState can be.
+// errors on an unknown num, unlike TransitionState: its caller always names an
+// issue it just filed, so a missing one is a fake-setup bug.
 func (tf *IssueTrackerFake) AddLabels(num string, labels []string) error {
 	return tf.editLabels(num, labels, nil, func() error {
 		tf.mu.Lock()

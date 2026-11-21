@@ -14,8 +14,7 @@ import (
 var responseHeader = connector.ResponseHeader
 
 // notIntrospectableReason is the read-only gate's explanation for a token whose
-// grants GitHub does not expose. Core renders it verbatim, so it matches the
-// native adapter's wording.
+// grants GitHub does not expose. Core renders it verbatim.
 const notIntrospectableReason = "e.g. a fine-grained PAT, whose granted permissions GitHub exposes no endpoint to introspect"
 
 // writeScopes are the classic/OAuth scopes granting repository write access;
@@ -33,14 +32,13 @@ const viewerQuery = `{viewer{login}}`
 // repository's `permissions.push` for an App installation token. Any other
 // shape is not introspectable.
 //
-// The classic read goes over `POST /graphql`, which the Connector already
-// declares. The installation token's push comes from `GET
-// /installation/repositories`, a root that lets every load of the Connector
-// list the repositories the installation reaches, with their permissions (a
-// small widening beside what `POST /graphql` already admits): GraphQL's
-// viewerPermission is null for an App, and REST's `GET /user` and `GET
-// /repos/{repo}` would each need a subtree-admitting Route that every load of
-// the Connector would inherit.
+// The classic read rides the already-declared `POST /graphql`. The
+// installation token's push comes from `GET /installation/repositories`, a
+// root that lets every load of the Connector list the installation's
+// repositories and their permissions. That small widening is the narrowest
+// option: GraphQL's viewerPermission is null for an App, and REST's `GET
+// /user` or `GET /repos/{repo}` would each need a subtree-admitting Route
+// every load of the Connector would inherit.
 func tokenGrant(t forge.Target, prefix string) (forge.Grant, error) {
 	switch prefix {
 	case "ghp_", "gho_":
@@ -72,9 +70,7 @@ func tokenGrant(t forge.Target, prefix string) (forge.Grant, error) {
 
 // installationPush walks the installation's repositories for t.Repo and returns
 // its `permissions.push`. A repository the installation does not list, or one
-// listed without a push permission, is an error rather than a guess; this
-// mirrors forge/github.TokenRepoPushPermission, which a wasip1 module cannot
-// import.
+// listed without a push permission, is an error rather than a guess.
 func installationPush(t forge.Target) (bool, error) {
 	type page struct {
 		Repositories []struct {

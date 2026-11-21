@@ -5,15 +5,12 @@ import (
 	"sync"
 )
 
-// boxLog is the line-atomic shared sink for the Box's raw output log. Two
-// producers write that one file concurrently: the driver's stream-json copy
-// (the claude heartbeat writer forwards every pipe chunk to raw verbatim) and
-// the Signal socket handler's spindrift_op mirror. A bare mutex is not enough -- a pipe
-// chunk can end mid-line, so a mirror line serialised between two chunks
-// still splices itself into the middle of a stream-json line. If that line is
-// the one carrying SPINDRIFT_OUTCOME, outcome.Resolve no longer finds a
-// token-leading fielded outcome and a clean Box exit settles as a no-outcome
-// run. So the mirror waits for a line boundary instead (ADR 0052, issue
+// boxLog is the line-atomic shared sink for the Box's raw output log, written
+// concurrently by the driver's stream-json copy and the Signal socket
+// handler's spindrift_op mirror. A bare mutex is not enough: a pipe chunk can
+// end mid-line, so a mirror line could splice into a stream-json line, and if
+// that line carries SPINDRIFT_OUTCOME a clean Box exit settles as a
+// no-outcome run. So the mirror waits for a line boundary (ADR 0052, issue
 // #3725).
 type boxLog struct {
 	mu sync.Mutex

@@ -33,14 +33,14 @@ var spawnHTTPForwarder = func(upstreamHost string, upstreamPort int, secret stri
 	return bindregistry.SpawnHTTPForwarder(self, upstreamHost, upstreamPort, secret, port)
 }
 
-// renderEnvExports renders exports as export NAME='VALUE' lines for callers that
-// source the verb's env file. Each value is single-quoted with embedded quotes escaped,
-// because nothing inside single quotes is special to the shell; %q alone left a
-// command-injection path for repo-controlled values (issue #3259). Names are
-// interpolated raw, so each Strategy must emit only shell-identifier names. Cargo
-// builds its names from a host route prefix and a Target repo registry name, which
-// validPrefixCharset and cargoBareKeyPattern limit to [A-Za-z0-9_-];
-// cargoRegistryEnvVarName then maps "-" to "_" behind a letter-led fixed prefix.
+// renderEnvExports renders exports as export NAME='VALUE' lines for callers
+// that source the verb's env file. Values are single-quoted with embedded
+// quotes escaped: %q alone left a command-injection path for repo-controlled
+// values (issue #3259). Names are interpolated raw, so each Strategy must emit
+// only shell-identifier names. Cargo builds its names from a route prefix and
+// a registry name, which validPrefixCharset and cargoBareKeyPattern limit to
+// [A-Za-z0-9_-]; cargoRegistryEnvVarName then maps "-" to "_" behind a
+// letter-led fixed prefix.
 func renderEnvExports(exports []ecosystem.EnvExport) string {
 	var rendered string
 	for _, e := range exports {
@@ -49,11 +49,11 @@ func renderEnvExports(exports []ecosystem.EnvExport) string {
 	return rendered
 }
 
-// runBindRegistryWithDeps parses the flags and runs whichever of three modes they
-// select: bindings, in-tree (issue #2932) and the lockfile scan. Any mode's flags may
-// be given alone or with another's. rows, probe, spawn, timeout and pollInterval are
-// injected so tests can exercise the readiness paths without a real socat or
-// listener. Bindings and in-tree apply share one gate, so neither respawns (#3141).
+// runBindRegistryWithDeps parses the flags and runs whichever of three modes
+// they select: bindings, in-tree (issue #2932) and the lockfile scan. Deps are
+// injected so tests exercise the readiness paths without a real socat or
+// listener. Bindings and in-tree apply share one gate, so neither respawns
+// (#3141).
 func runBindRegistryWithDeps(args []string, rows []ecosystem.Strategy, stdout io.Writer, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, lookPath bindregistry.LookPathFunc, timeout, pollInterval time.Duration) int {
 	fs := flag.NewFlagSet("bind-registry", flag.ContinueOnError)
 	fs.SetOutput(stdout)
@@ -79,10 +79,9 @@ func runBindRegistryWithDeps(args []string, rows []ecosystem.Strategy, stdout io
 		return 1
 	}
 	// apply's repo-aware home-config render must be the last writer of a
-	// repo-aware Strategy's HomeConfig file: bindings mode in the same invocation
-	// would re-render every HomeConfig Strategy from the base template afterward and
-	// clobber apply's replacement stanzas. revert renders nothing, so revert
-	// plus bindings stays legal.
+	// repo-aware Strategy's HomeConfig file: bindings mode would re-render it
+	// from the base template afterward. revert renders nothing, so revert plus bindings
+	// stays legal.
 	if *intreeAction == "apply" && *bindingsEnvOutput != "" {
 		fmt.Fprintln(stdout, "driver-exec bind-registry: -intree-action=apply and -bindings-env-output cannot be combined in one invocation — bindings mode would re-render the repo-aware rows' home configs from the base template and undo the apply")
 		return 1
@@ -96,11 +95,10 @@ func runBindRegistryWithDeps(args []string, rows []ecosystem.Strategy, stdout io
 		bindregistry.WarnStaleLockfiles(stdout, *lockfileScanWorkDir, rows, os.Getenv)
 	}
 
-	// Resolved only when a mode that needs a live Forwarder will run (issue
-	// #3141). A revert-only call never touches REGISTRY_PROXY_MANIFEST or
-	// the probe/spawn deps. A lockfile-scan-only call never resolves the
-	// gate or touches those deps; WarnStaleLockfiles reads the manifest
-	// only to decide whether the scan runs.
+	// Resolved only when a mode needing a live Forwarder will run (issue
+	// #3141): revert and lockfile-scan never touch the probe/spawn deps, and
+	// revert never reads REGISTRY_PROXY_MANIFEST; WarnStaleLockfiles reads it
+	// only to decide whether to scan.
 	var gate bindregistry.Gate
 	if *intreeAction == "apply" || *bindingsEnvOutput != "" {
 		gate = bindregistry.ResolveGate(stdout, bindregistry.GateDeps{

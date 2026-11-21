@@ -31,11 +31,10 @@ func recordLateMerges(caps forge.Capabilities, pwd string, w io.Writer) error {
 }
 
 // runReconcile is the standalone `spindrift reconcile` verb. It records late
-// merges whenever the Code Forge has PRs, whatever the tracker, since a PR
-// left open at settle and merged later is otherwise never counted as a landing
-// by `spindrift stats`, then always runs reconcileIssues: a stats-store
-// failure still exits non-zero (joined into the result) but never skips the
-// issue bookkeeping, which does not depend on it.
+// merges whenever the Code Forge has PRs, whatever the tracker (a PR merged
+// after settle is otherwise never counted as a landing by `spindrift stats`),
+// then always runs reconcileIssues: a stats-store failure is joined into the
+// result but never skips the issue bookkeeping.
 func runReconcile(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconcile.LivenessProbe, caps forge.Capabilities, pwd string, w io.Writer) error {
 	lateErr := recordLateMerges(caps, pwd, w)
 	return errors.Join(reconcileIssues(c, it, cf, lp, caps, pwd, w), lateErr)
@@ -44,8 +43,8 @@ func runReconcile(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconc
 // reconcileIssues drives reconcile.Run, reports the outcome to w, and on a
 // clean sweep runs surfaceAfterDispatch: closing a ticket's last seam is the
 // moment that can newly complete the ticket (ADR 0033, issue #1730). Only an
-// in-box-unreachable tracker reconciles any issues (ADR 0029), so the guard
-// below reads caps.TrackerDescriptor and is a no-op (issues #2946, #3064).
+// in-box-unreachable tracker reconciles issues (ADR 0029); any other gets a
+// one-line notice from the caps.TrackerDescriptor guard (issues #2946, #3064).
 func reconcileIssues(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconcile.LivenessProbe, caps forge.Capabilities, pwd string, w io.Writer) error {
 	if !caps.TrackerDescriptor.InBoxUnreachableTracker {
 		fmt.Fprintf(w, "reconcile: issue bookkeeping is an in-box-unreachable-tracker concern (ISSUE_TRACKER=%q) — no issues to close.\n", c.IssueTracker)
@@ -100,16 +99,13 @@ func sweepLateMergesThrottled(caps forge.Capabilities, pwd string, w io.Writer) 
 }
 
 // reconcileAfterDispatch runs the sweep at the end of a dispatch run (ADR
-// 0029). Unlike the standalone `spindrift reconcile` verb, it stays silent for
-// any other tracker unless a late merge was recorded, since a routine
-// github/jira run has nothing else to report. Late-merge recording is
-// best-effort on every tracker: a stats bookkeeping failure only warns, never
-// failing the dispatch run nor skipping the issue bookkeeping. The sweep is
+// 0029). Unlike the standalone verb, it stays silent for a tracker that is
+// not in-box-unreachable unless a late merge was recorded, and late-merge
+// recording is best-effort: a failure only warns. The late-merge sweep is
 // throttled to one per settle.LateMergeSweepInterval across processes sharing
-// pwd; the verb is not. A daemon pool child (daemon.PoolChildEnv) skips it
-// entirely: the daemon runs the sweep itself outside the pool's slots, so a
-// child never spends its slot on forge reads (issue #7342). The local-tracker
-// issue bookkeeping still runs for it.
+// pwd; the verb's is not. A daemon pool child skips
+// the sweep (the daemon runs it outside the pool's slots, issue #7342) but
+// still runs the local-tracker issue bookkeeping.
 func reconcileAfterDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconcile.LivenessProbe, caps forge.Capabilities, pwd string, w io.Writer) error {
 	if !daemon.InPoolChild() {
 		if err := sweepLateMergesThrottled(caps, pwd, w); err != nil {

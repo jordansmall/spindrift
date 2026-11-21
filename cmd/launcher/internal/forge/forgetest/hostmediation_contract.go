@@ -24,11 +24,10 @@ type HostMediationHarness interface {
 	// an ordinary head ref.
 	SeedDraftPRHead(failing bool) (head string)
 
-	// SeedExistingOpenPR pre-seeds an open PR (draft or not) for a head ref so
-	// that a later CreateDraftPR(head) hits the backend's own
-	// already-exists/409 refusal. CreateDraftPR must adopt that PR, returning
-	// its URL with no error, rather than surfacing the refusal as a failure
-	// (issue #2407 slices 1-3). Returns that head and the URL it must return.
+	// SeedExistingOpenPR pre-seeds an open PR (draft or not) for a head ref, so
+	// CreateDraftPR(head) hits the backend's already-exists/409 refusal and
+	// must adopt the PR instead (issue #2407 slices 1-3). Returns that head and
+	// the URL CreateDraftPR must return.
 	SeedExistingOpenPR() (head, wantURL string)
 }
 
@@ -206,8 +205,8 @@ func testBundleRelayLandsRef(t *testing.T, h BundleRelayHarness) {
 // testBundleRelayThenDraftPRCreate chains RelayBundle and CreateDraftPR
 // against the same just-relayed ref, the sequence settle.Mediation.Open
 // drives (issue #2501). SeedDraftPRHead(false)'s head is discarded on purpose:
-// the call only arms a fresh-create response on the Fake, whose CreateDraftPR
-// otherwise returns an empty URL. It is a no-op for the real backends.
+// it only arms the Fake's fresh-create response, which is otherwise an empty
+// URL.
 func testBundleRelayThenDraftPRCreate(t *testing.T, h HostMediationHarness) {
 	br := mustBundleRelay(t, h)
 	dpc := mustDraftPRCreator(t, h)
@@ -292,11 +291,10 @@ func testDraftPRCreationFails(t *testing.T, h HostMediationHarness) {
 	}
 }
 
-// testDraftPRCreationAdoptsExisting verifies a retried host-mediated create
-// for a branch an earlier call already opened a PR for settles idempotently
-// instead of blocking the seam on the already-exists refusal (issue #2407
-// slices 1-3), and reports created=false because this call did not open the
-// PR (issue #2447).
+// testDraftPRCreationAdoptsExisting verifies a retried create for a branch
+// that already has a PR settles idempotently rather than failing on the
+// already-exists refusal (issue #2407 slices 1-3), with created=false (issue
+// #2447).
 func testDraftPRCreationAdoptsExisting(t *testing.T, h HostMediationHarness) {
 	dpc := mustDraftPRCreator(t, h)
 	head, wantURL := h.SeedExistingOpenPR()

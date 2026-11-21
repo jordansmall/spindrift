@@ -28,7 +28,6 @@ func acquireToken(s backendkit.Shared, l backendkit.Lookup, p backendkit.TokenPr
 	// `spindrift doctor` owns the live token check.
 	if err := p.Probe(token); err != nil {
 		if errors.Is(err, connectorsandbox.ErrNoConnectorSandbox) {
-			// Quickstart installs no sandbox, so the live check moves to doctor.
 			fmt.Fprintln(p.Out, "the token check needs the Connector sandbox, which quickstart does not run — deferred to `spindrift doctor`.")
 			return token, nil
 		}

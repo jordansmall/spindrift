@@ -169,7 +169,7 @@ func listIssues(t tracker.Target, query tracker.Query, limit int) ([]tracker.Iss
 			if r.PullRequest != nil {
 				continue
 			}
-			// Native lists via `gh issue list --json number,title,labels`: no body or state.
+			// Matches `gh issue list --json number,title,labels`: no body or state.
 			i := r.issue()
 			i.Body, i.State = "", ""
 			out = append(out, i)
@@ -300,7 +300,7 @@ func search(t tracker.Target, text, state, label string, limit int) ([]tracker.I
 			if r.PullRequest != nil {
 				continue
 			}
-			// Native searches via `gh issue list --json number,title,state,labels`: no body.
+			// Matches `gh issue list --json number,title,state,labels`: no body.
 			i := r.issue()
 			i.Body = ""
 			out = append(out, i)
@@ -387,14 +387,11 @@ func commentsOf(t tracker.Target, number string) ([]tracker.Comment, error) {
 }
 
 // labeledPage returns one REST page of the issues in state carrying label,
-// newest first, with the close date and not-planned reason of a closed one:
-// core's dedup scan reads both. The cursor is GitHub's own page number at
-// per_page=min(limit, pageSize) ("" is page 1), so a walk must keep limit
-// constant. next is the following page while the raw page was full, so one
-// call is one request and a page is never cut short. A page may hold fewer
-// issues than that because pull requests are skipped. Native lists via
-// `gh issue list --json number,title,body,labels,stateReason,closedAt`, so
-// the body stays.
+// newest first, with the close date and not-planned reason core's dedup scan
+// reads. The cursor is GitHub's page number at per_page=min(limit, pageSize)
+// ("" is page 1), so a walk must keep limit constant. next is set while the
+// raw page was full, so one call is one request; a page may hold fewer issues
+// because pull requests are skipped. Unlike the list reads, the body stays.
 func labeledPage(t tracker.Target, label, state, cursor string, limit int) ([]tracker.Issue, string, error) {
 	if limit < 1 {
 		return nil, "", fmt.Errorf("list labeled issues: limit %d < 1", limit)

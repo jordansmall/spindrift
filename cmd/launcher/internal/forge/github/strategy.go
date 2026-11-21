@@ -27,8 +27,8 @@ var Strategy = backendkit.Strategy{
 	},
 	AcquireToken: acquireTokenWith(introspectToken),
 	// The tracker and Code Forge build without a row and fail each call with
-	// ErrNoRoute (routeRow), as the reads did since #6811: a build that failed
-	// here would take down every launch path that merely constructs one.
+	// ErrNoRoute (routeRow, #6811): a build that failed here would take down
+	// every launch path that merely constructs one.
 	NewIssueTracker: func(s backendkit.Shared, _ backendkit.Lookup) (forge.IssueTracker, error) {
 		return NewExecClient(s.RepoSlug, s.Labels, WithVerdictLabels(s.VerdictLabels)), nil
 	},

@@ -8,14 +8,10 @@ import (
 )
 
 // netrcCredential returns the password of the first netrc entry whose machine
-// token case-insensitively equals host, matching the first-match-wins rule of
-// curl and git. Quoting and escapes follow curl 7.84+ (git-credential-netrc's
-// Perl Net::Netrc differs). A miss returns an error rather than an empty
-// string, so a caller cannot silently run unauthenticated; so does an
-// unterminated quote on or before the matching line (the scan stops after the
-// line holding the first matching password, so later lines are never seen).
-// sourceName only names the source in errors; never log it beside a
-// credential value.
+// case-insensitively equals host, first match wins as in curl and git.
+// Quoting follows curl 7.84+ (git-credential-netrc's Perl Net::Netrc
+// differs). A miss, or an unterminated quote on or before the matching line,
+// is an error, so a caller cannot run unauthenticated. Never log sourceName beside a credential value.
 func netrcCredential(content []byte, sourceName, host string) (string, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(content))
 
@@ -53,57 +49,47 @@ func netrcCredential(content []byte, sourceName, host string) (string, error) {
 					currentMachine = fields[i]
 					inMachine = true
 					if strings.EqualFold(currentMachine, host) {
-						// Set on the machine token alone so the final
-						// error can distinguish "no entry for host" from
-						// "entry exists but has no password".
+						// Lets the final error tell "no entry" from "no
+						// password".
 						hostMatched = true
 					}
 				} else {
-					// A "machine" with no value is malformed; clearing
-					// the stanza stops a later password from being
+					// Clear the stanza so a later password is not
 					// misattributed to the preceding machine.
 					currentMachine = ""
 					inMachine = false
 				}
 			case "default":
-				// Ends the preceding machine stanza. "default" is never a
-				// fallback credential here, so a file with no machine
-				// entry always fails closed.
+				// "default" is never a fallback credential, so a file with
+				// no machine entry fails closed.
 				inMachine = false
 			case "macdef":
-				// Skip the rest of the line: tokens after the macro name
-				// are never login/password tokens (an unbalanced quote
-				// among them has already failed the lookup above).
+				// Tokens after the macro name are never login/password.
 				inMacro = true
 				i = len(fields)
 			case "password":
 				if i+1 < len(fields) {
 					i++
 					if inMachine && strings.EqualFold(currentMachine, host) && password == "" {
-						// The first password token wins: a second one
-						// later on the same line must not clobber it,
-						// and the break below only guards later lines.
+						// A second password on the same line must not
+						// clobber the first.
 						password = fields[i]
 					}
 				}
 			case "login", "account":
-				// Skip the value token so the parse stays aligned; the
-				// values themselves are unused.
+				// Skip the unused value so the parse stays aligned.
 				i++
 			}
 		}
 
 		if password != "" {
-			// First match wins: stop scanning so no later duplicate
-			// entry or macro body can overwrite it.
+			// First match wins.
 			break
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		// A non-nil error means a read or token-size failure cut the scan
-		// short rather than a clean EOF, so it must not fall through to
-		// the lookup-miss errors below.
+		// A cut-short scan must not read as a lookup miss.
 		return "", fmt.Errorf("reading netrc file %s: %w", sourceName, err)
 	}
 
@@ -122,12 +108,10 @@ func isNetrcSpace(c byte) bool {
 	return strings.IndexByte(" \t\r\v\f", c) >= 0
 }
 
-// netrcFields splits a line into netrc tokens on whitespace outside quotes and
-// truncates at the first unquoted token starting with "#", so a commented-out
-// record is never read as a live stanza. A token opening with `"` runs to the
-// next unescaped `"` and is unwrapped with curl's escapes (\" \\ \n \r \t; any
-// other escaped byte maps to itself); unquoted tokens stay verbatim. ok is false
-// when a quote is never closed.
+// netrcFields splits a line into netrc tokens, truncating at the first
+// unquoted "#" token so a commented-out record is never live. A quoted token
+// is unwrapped with curl's escapes (\" \\ \n \r \t; any other escaped
+// byte maps to itself). ok is false when a quote is never closed.
 func netrcFields(line string) (fields []string, ok bool) {
 	for i := 0; i < len(line); {
 		switch {

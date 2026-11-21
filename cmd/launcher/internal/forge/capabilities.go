@@ -47,8 +47,7 @@ type Capabilities struct {
 	DemandCounter         DemandCounter
 	IssueTypeChecker      IssueTypeChecker
 	StatusMappingChecker  StatusMappingChecker
-	// DepsOf and TouchesOf look these two up on the bare IssueTracker instead:
-	// their callers (waves) hold no Capabilities.
+	// DepsOf and TouchesOf look these two up on the bare IssueTracker instead.
 	NativeDepsReader NativeDepsReader
 	BodyGrammarer    BodyGrammarer
 

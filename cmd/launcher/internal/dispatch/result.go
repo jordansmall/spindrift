@@ -14,14 +14,12 @@ import (
 // best-effort transient Classification when the box wrote no outcome line.
 type Result struct {
 	// Comment is the decoded body of the box log's last nonce-verified
-	// SPINDRIFT_COMMENT line (ADR 0032, issues #1692 and #1940), how a local
-	// Dispatch's Box hands settle its verdict or blocked-note comment. The
-	// nonce separates a line the Box wrote from one an untrusted issue or
-	// comment author echoed into the log.
+	// SPINDRIFT_COMMENT line (ADR 0032, issues #1692 and #1940). The nonce
+	// separates a line the Box wrote from one an untrusted issue or comment
+	// author echoed into the log.
 	Comment string
-
 	// CommentFound reports whether a nonce-verified SPINDRIFT_COMMENT line was
-	// present. A mismatched nonce or an undecodable payload is ignored.
+	// present.
 	CommentFound bool
 
 	// CommentRejected splits, by cause, the SPINDRIFT_COMMENT lines that
@@ -31,13 +29,11 @@ type Result struct {
 	CommentRejected outcome.Rejections
 
 	// PRIntent is the decoded "title\n\nbody" payload of the box log's last
-	// nonce-verified SPINDRIFT_PR_INTENT line (issue #1919, single-line
-	// nonce-guarded form since issue #1938), how a read-only github or forgejo
-	// Box hands settle its draft-PR title and body.
+	// nonce-verified SPINDRIFT_PR_INTENT line (issues #1919, #1938), how a
+	// read-only Box hands settle its draft-PR title and body.
 	PRIntent string
-
 	// PRIntentFound reports whether a nonce-verified SPINDRIFT_PR_INTENT line
-	// was present. A mismatched nonce or an undecodable payload is ignored.
+	// was present.
 	PRIntentFound bool
 
 	// PRIntentRejected splits, by cause, the SPINDRIFT_PR_INTENT lines that
@@ -45,19 +41,15 @@ type Result struct {
 	// terms (issues #2089, #2976, split #3670).
 	PRIntentRejected outcome.Rejections
 
-	// Resolved is dispatch's single outcome.Resolve-seam result for this
-	// Result (issue #2268 slice 2).
+	// Resolved is dispatch's single outcome.Resolve-seam result (issue #2268).
 	Resolved outcome.Resolved
 
 	// IssueIntents holds the decoded payload of every nonce-verified
-	// SPINDRIFT_ISSUE_INTENT line, in encounter order (issue #2018). Filing is
-	// 1-to-many, unlike Comment and PRIntent's "last verifying line wins"
-	// slot, so every verifying line contributes an entry.
+	// SPINDRIFT_ISSUE_INTENT line, in encounter order (issue #2018): filing is
+	// 1-to-many, unlike Comment and PRIntent's "last verifying line wins".
 	IssueIntents []string
-
 	// IssueIntentsFound reports whether at least one nonce-verified
-	// SPINDRIFT_ISSUE_INTENT line was present. A mismatched nonce or an
-	// undecodable payload is dropped.
+	// SPINDRIFT_ISSUE_INTENT line was present.
 	IssueIntentsFound bool
 
 	// IssueIntentsRejected splits, by cause, the SPINDRIFT_ISSUE_INTENT lines
@@ -66,8 +58,8 @@ type Result struct {
 	IssueIntentsRejected outcome.Rejections
 
 	// ParseErr is non-nil when the box's log held an unparseable
-	// SPINDRIFT_OUTCOME line, as opposed to no line at all. Classification is
-	// not attempted in that case.
+	// SPINDRIFT_OUTCOME line, as opposed to no line at all; Classification is
+	// then not attempted.
 	ParseErr error
 
 	// Classification and ClassifyErr are populated only when Resolved.Found is
@@ -85,8 +77,7 @@ type Result struct {
 
 	// Passes is the pass manifest the Box wrote to its outbox (issue #2983),
 	// advisory only: Resolved's tier selection and settle never consult it.
-	// Nil when no manifest file exists or the file was malformed; both degrade
-	// to the pre-#2983 pass-blind behavior rather than an error.
+	// Nil when the manifest is missing or malformed, never an error.
 	Passes []passmanifest.Entry
 
 	// Warnings holds the settle-scan warnings outcomeResult printed, each the
@@ -103,22 +94,20 @@ type Result struct {
 }
 
 // Disposition is what Run and Fix return: a Result payload tagged as skipped,
-// failed or succeeded. It is opaque on purpose. Route is the only way to the
+// failed or succeeded. It is opaque on purpose: Route is the only way to the
 // payload and takes an arm for every kind, so omitting the skip arm is a
-// compile error (an explicit nil is not). A bare "if !success" check cannot
-// tell a skip from a failure, and a caller that conflated them took the
-// destructive failure path against a live run (issues #562, #3633, #3655,
-// #3705).
+// compile error (an explicit nil is not). A caller that conflated a skip with
+// a failure took the destructive failure path against a live run (issues
+// #562, #3633, #3655, #3705).
 //
 // The skip contract: another run already holds this issue (its container or
-// sandbox is live, or its claim is). A skip is a distinct successful no-op,
-// never a failure. The caller must not transition the issue's dispatch state
-// (the live run's in-progress claim stands), must not retry, and must not
-// comment.
+// sandbox is live, or its claim is). A skip is a successful no-op: the caller
+// must not transition the issue's dispatch state (the live run's in-progress
+// claim stands), must not retry, and must not comment.
 //
 // Skip surfaces in three channels, and only the first is compiler-enforced:
-//  1. Route's onSkip arm for Run and Fix, produced by runner.ErrAlreadyRunning
-//     in dispatchWithRetry and by ErrIssueClaimed from ClaimIssue in Run.
+//  1. Route's onSkip arm for Run and Fix, from runner.ErrAlreadyRunning in
+//     dispatchWithRetry and ErrIssueClaimed in Run.
 //  2. ResolveConflict's error return, which can be runner.ErrAlreadyRunning;
 //     callers must errors.Is it ahead of their generic error arm (settle's
 //     pr_lander.go does).
@@ -175,9 +164,9 @@ func (r Result) ReportFailureReason(num string) {
 	}
 }
 
-// FailureNote returns r.Err's text, or "" when unset, the same condition
-// ReportFailureReason gates on. Sharing that one source (issue #3627 review
-// finding) keeps the stderr line and the settled record's note from drifting.
+// FailureNote returns r.Err's text, or "" when unset: the same source
+// ReportFailureReason prints, so the stderr line and the settled record's note
+// cannot drift (issue #3627).
 func (r Result) FailureNote() string {
 	if r.Err == nil {
 		return ""
@@ -199,7 +188,7 @@ type Dispatcher interface {
 	// ResolveConflict dispatches a conflict-resolution box against pr. Not
 	// retried: a short-lived rebase-conflict box never runs the main agent
 	// prompt. Its error can be runner.ErrAlreadyRunning, a skip: see
-	// Disposition for that contract.
+	// Disposition.
 	ResolveConflict(pr string) error
 
 	// UsageReport returns the Markdown usage-summary comment body aggregated
@@ -207,10 +196,8 @@ type Dispatcher interface {
 	// rotated-aside retry within a pass.
 	UsageReport() string
 
-	// CumulativeUsage sums every usage field — tokens, cost, durations, and
-	// turns — across the same attempt logs UsageReport aggregates.
-	// selfHealGate's budget gate (issue #2001) reads it before dispatching
-	// another fix pass.
+	// CumulativeUsage sums every usage field across the same attempt logs
+	// UsageReport aggregates; selfHealGate's budget gate (issue #2001) reads it.
 	CumulativeUsage() usage.Usage
 
 	// RecordID returns the Dispatch's Record ID, "" until one is minted.
@@ -227,8 +214,7 @@ type Dispatcher interface {
 	RecordWarnings(warnings []string)
 
 	// Close evicts this issue's driver-cache entry and releases the claim
-	// Run took (issue #4364); the per-issue caller defers it once the
-	// Dispatch is done.
+	// Run took (issue #4364).
 	Close()
 }
 

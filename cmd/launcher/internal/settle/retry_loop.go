@@ -37,15 +37,13 @@ func (l retryLoop) fresh() *retryLoop {
 	return &l
 }
 
-// run calls attempt until it succeeds, fails with an error final reports (nil
-// final: none), or exhausts maxRetries, logging status=<status> before each
-// backoff. afterBackoff, when non-nil, runs after each backoff, and true from
-// it ends the loop with success. A non-empty finalStatus gives the exhausted
-// attempt one more logged backoff and afterBackoff call before its error is
-// returned, so Policy.Max=0 still waits once. An operator stop during a
-// backoff returns errAbandoned wrapping the last error. The maxRetries budget
-// belongs to the loop, not the call: successive runs on one loop share it, so
-// a caller wanting a fresh budget per call runs fresh().
+// run calls attempt until it succeeds, fails with an error final reports, or
+// exhausts maxRetries, logging status before each backoff. afterBackoff
+// returning true ends the loop with success. A non-empty finalStatus gives the
+// exhausted attempt one more backoff and afterBackoff call, so Policy.Max=0
+// still waits once. A stop during a backoff returns errAbandoned wrapping the
+// last error. The budget spans every run on the loop; fresh() gives a copy its
+// own.
 func (l *retryLoop) run(status, finalStatus Status, landing string, attempt func() error, final func(error) bool, afterBackoff func() bool) error {
 	for {
 		err := attempt()

@@ -40,10 +40,9 @@ type localFrontmatter struct {
 	// a cached merge-state.
 	Landing string
 	// LandingPass and LandingPassKind are advisory provenance for Landing
-	// (issue #2983). Zero or empty when never recorded, when Landing
-	// predates these fields, when settle recorded Landing without pass
-	// evidence, or when reconcile discovered Landing itself (re-keying a
-	// branch landing keeps the pass).
+	// (issue #2983), zero or empty whenever Landing was recorded without pass
+	// evidence, including when reconcile discovered it (re-keying a branch
+	// landing keeps the pass).
 	LandingPass     int
 	LandingPassKind string
 	// Abandoned means the landing PR closed without merging (ADR 0029).
@@ -341,14 +340,10 @@ func (lt *LocalTracker) Issue(num string) (forge.Issue, error) {
 	return toIssue(num, li), nil
 }
 
-// TransitionState rewrites issue num's frontmatter "state" marker to the label
-// for to. The local file has a single scalar state field, so the transition is
-// a plain overwrite rather than the GitHub adapter's label add/remove pair.
-//
-// A claim (to == InProgress) errors on forge.ErrAlreadyClaimed without
-// touching the file when the state field already reads InProgress (#3887).
-// The check is read-then-write, not atomic, so another claimer can still
-// land between the two.
+// TransitionState overwrites issue num's single frontmatter "state" marker
+// with the label for to. A claim (to == InProgress) errors on
+// forge.ErrAlreadyClaimed without touching the file when the state already
+// reads InProgress (#3887); the check is read-then-write, not atomic.
 func (lt *LocalTracker) TransitionState(num string, from, to forge.DispatchState) error {
 	li, err := lt.readIssueFile(num)
 	if err != nil {
@@ -363,10 +358,9 @@ func (lt *LocalTracker) TransitionState(num string, from, to forge.DispatchState
 
 // CompleteVerdict rewrites issue num's "state" marker to verdict's terminal
 // label. It errors without touching the file when verdict has no configured
-// state (the work-kind construction path) or when num is not InProgress, the
-// github adapter's #701 double-dispatch guard. Check-then-write narrows the
-// double-dispatch window without closing it, as github/exec_issues.go's
-// version also notes.
+// state (the work-kind construction path) or when num is not InProgress
+// (#701's double-dispatch guard; check-then-write narrows that window without
+// closing it).
 func (lt *LocalTracker) CompleteVerdict(num string, verdict forge.Verdict) error {
 	state := lt.verdictLabels.Label(verdict)
 	if state == "" {

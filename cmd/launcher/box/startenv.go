@@ -4,8 +4,8 @@ import "strings"
 
 // exportStartEnv puts the values the shell preambles hold unexported into
 // box's own environment, so the orchestrator and the Driver it spawns inherit
-// them as they did when entrypoint.sh exported them ahead of `exec box`.
-// Empty flag values export nothing: the preambles render them only when set.
+// them. Empty flag values export nothing: the preambles render them only when
+// set.
 func (r *boxRun) exportStartEnv() error {
 	set := func(k, v string) error {
 		if err := r.d.Setenv(k, v); err != nil {

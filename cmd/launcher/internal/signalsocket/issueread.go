@@ -16,11 +16,9 @@ import (
 	"spindrift.dev/launcher/internal/signalwire"
 )
 
-// IssueReader answers the issue read verb from the Dispatch's tracker. Which
-// tracker and repository it reads is fixed when the Pass builds the reader,
-// never taken from the request (ADR 0052): ref only names an issue within
-// that scope, and the reader refuses one outside it. A returned Reject
-// follows the package rule that Reason names no path, token or host detail.
+// IssueReader answers the issue read verb from the Dispatch's tracker. Its
+// scope is fixed when the Pass builds it, never taken from the request (ADR
+// 0052); a ref outside that scope is refused.
 type IssueReader interface {
 	ReadIssue(ref string) (signalwire.IssueSnapshot, *signalwire.Reject)
 }
@@ -34,8 +32,7 @@ func invalidRef(reason string) *signalwire.Reject {
 	return &signalwire.Reject{Status: "invalid_ref", Reason: reason, Code: http.StatusBadRequest}
 }
 
-// issue serves GET /issue?ref=<ref>. Like status it is a read, not an accept:
-// nothing is buffered, so it takes the "read" disposition.
+// issue serves GET /issue?ref=<ref>.
 func (h *handler) issue(w http.ResponseWriter, r *http.Request) {
 	rec := recordFrom(r)
 	if r.Method != http.MethodGet {
@@ -105,13 +102,11 @@ type trackerIssueReader struct {
 	warn  io.Writer
 }
 
-// NewTrackerIssueReader reads issues from t, which must already be scoped to
-// the Dispatch's repository or Jira project. scope names that repository
-// ("owner/repo") or project key; it comes from the Dispatch, never the
-// request, and a ref naming any other scope is refused before t is called.
-// t may be a native adapter or a Connector-backed one (connectortracker); on
-// the latter the Connector's Route table gates the read exactly as it gates a
-// host read. Failure detail goes to warn, never to the Box.
+// NewTrackerIssueReader reads issues from t, already scoped to the Dispatch's
+// repository ("owner/repo") or Jira project key, named by scope. A ref naming
+// any other scope is refused before t is called. On a Connector-backed t the
+// Route table gates the read as it gates a host read. Failure detail goes to
+// warn, never to the Box.
 func NewTrackerIssueReader(t forge.IssueTracker, scope string, warn io.Writer) IssueReader {
 	if warn == nil {
 		warn = io.Discard

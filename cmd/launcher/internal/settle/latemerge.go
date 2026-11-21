@@ -30,14 +30,12 @@ const LateMergeWindow = 14 * 24 * time.Hour
 const LateMergeSweepInterval = 15 * time.Minute
 
 // ClaimLateMergeSweep reports whether a throttled sweep may run now, and if so
-// stamps now as the last sweep. It is refused when the previous claim is
-// within LateMergeSweepInterval of now, or when another process holds the
-// flock on hostpaths.LateMergeSweepLock mid-claim; the stamp is written under
-// that lock before any sweep starts, so concurrent claimants never both win.
-// A sweep that crashes or fails after claiming still blocks others for the
-// full interval, which is acceptable as rate-limit back-off. A stamp in the
-// future (clock stepped back) counts as stale so the throttle heals itself.
-// With no log directory there is nothing to sweep and nothing is created.
+// stamps now as the last sweep. It is refused within LateMergeSweepInterval of
+// the last claim or while another process holds hostpaths.LateMergeSweepLock's
+// flock; the stamp is written under that lock, so concurrent claimants never
+// both win. A crashed sweep still blocks others for the interval, acceptable
+// as back-off. A future stamp (clock stepped back) counts as stale so the
+// throttle heals itself. With no log directory nothing is created.
 func ClaimLateMergeSweep(root string, now time.Time) (ok bool, err error) {
 	if _, err := os.Stat(hostpaths.LogDir(root)); errors.Is(err, fs.ErrNotExist) {
 		return false, nil
@@ -74,25 +72,16 @@ func ClaimLateMergeSweep(root string, now time.Time) (ok bool, err error) {
 }
 
 // LateMerges upgrades each Record settled with its PR left open
-// (dispatchrecord.ReasonLeavesPROpen) whose PR has since merged and whose claim
-// falls within LateMergeWindow of now. The host never re-settles such a PR, so
-// without this a landed change keeps the open-PR reason forever. The upgrade is
-// a second dispatch_settled op (reason merged) appended to the Record's primary
-// log, where the parser's last-wins rule picks it up; each appended log's chain
-// is re-ingested so the Record reads back upgraded. It returns the IDs it
-// upgraded.
+// (dispatchrecord.ReasonLeavesPROpen) whose PR has since merged, within
+// LateMergeWindow; the host never re-settles such a PR otherwise. The upgrade
+// is a second dispatch_settled op appended to the primary log, which the
+// parser's last-wins rule picks up, so concurrent sweeps appending twice is
+// harmless. It returns the upgraded IDs.
 //
-// A Record whose primary log is gone, or with no claim time (an older log
-// without a claim stamp), is skipped and stays as stored, and a PR
-// closed unmerged is not a landing. A PR URL that is not an absolute http(s)
-// URL is skipped unqueried, since the forge client takes it as a command-line
-// argument. A forge or append failure on one Record warns to warn and moves
-// on, except a rate limit, which ends the sweep with an error wrapping it.
-// A sequential re-run is a no-op: an upgraded Record's reason is merged, so it
-// is no longer a candidate. Two sweeps running at once can both append the op,
-// which is harmless since the parser keeps the last.
-// mc, when non-nil, fills the upgraded Record's merge commit; a failed read
-// warns and leaves it empty.
+// A Record with no primary log or claim time is skipped, as is a PR URL that
+// is not absolute http(s), since the forge client takes it as an argument. A
+// per-Record failure warns and moves on, except a rate limit, which ends the
+// sweep. mc, when non-nil, fills the merge commit.
 func LateMerges(root string, pr forge.PRForge, mc forge.MergeCommitReader, now time.Time, warn io.Writer) (merged []string, err error) {
 	// No log directory means nothing to upgrade; opening the store would
 	// create an empty one.

@@ -58,11 +58,9 @@ func registryProbeCachePath(pwd string) string {
 }
 
 // loadRegistryProbeCache returns the remembered transport decision for want,
-// or ok=false on any miss: no pwd, no file, an unreadable file, malformed
-// JSON, an unrecognised version or transport, a differing key, a tcp entry
-// with no host, or a tcp entry under a NETWORK_MODE that denies the host
-// loopback. Every miss path falls through to a fresh probe rather than
-// returning an error, so a damaged cache file can never fail a dispatch.
+// or ok=false on any miss, including a tcp entry with no host or under a
+// NETWORK_MODE that denies host loopback. A miss falls through to a fresh
+// probe rather than an error, so a damaged cache file never fails a dispatch.
 func loadRegistryProbeCache(pwd string, want registryProbeCacheKey) (endpoint registrymanifest.Endpoint, tcpAddHost bool, ok bool) {
 	path := registryProbeCachePath(pwd)
 	if path == "" {
@@ -98,10 +96,9 @@ func loadRegistryProbeCache(pwd string, want registryProbeCacheKey) (endpoint re
 
 // storeRegistryProbeCache remembers a fresh probe verdict for key. pwd == ""
 // is a silent no-op, and an endpoint that is neither unix nor tcp is
-// rejected. Given a non-empty pwd it writes unconditionally: whether to probe
-// at all is decided by RegistryProxyTransport's callers — see dispatch/box.go's
-// needRegistryProxy || needSignalSocket gate, which the doctor's two transport
-// rows mirror.
+// rejected. Whether to probe at all is decided by RegistryProxyTransport's
+// callers (dispatch/box.go's needRegistryProxy || needSignalSocket gate,
+// mirrored by doctor's transport rows).
 func storeRegistryProbeCache(pwd string, key registryProbeCacheKey, endpoint registrymanifest.Endpoint, tcpAddHost bool) error {
 	path := registryProbeCachePath(pwd)
 	if path == "" {
@@ -131,10 +128,9 @@ func storeRegistryProbeCache(pwd string, key registryProbeCacheKey, endpoint reg
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
 		return fmt.Errorf("registryprobecache: creating cache dir: %w", err)
 	}
-	// Rename into place rather than writing path directly: os.WriteFile
-	// truncates first, so a second dispatch reading mid-write, or a crash,
-	// leaves a torn file. The rename stays in one directory, so it is an
-	// atomic replace.
+	// Rename into place: os.WriteFile truncates first, so a concurrent
+	// reader or a crash would see a torn file. The temp file shares cacheDir
+	// so the rename is an atomic replace.
 	tmp, err := os.CreateTemp(cacheDir, ".registry-probe-cache-*.tmp")
 	if err != nil {
 		return fmt.Errorf("registryprobecache: creating temp file: %w", err)

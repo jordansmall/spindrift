@@ -1,8 +1,8 @@
 // Package backendrows applies the backend rows of the launcher input document
 // (ADR 0073, issue #6805): a network Connector's compiled module, Route table
 // and credential knob. A backend without a row here is built from the generated
-// registry as before. It is a package of its own because it imports
-// connectorhost, which must not import the registry.
+// registry. It is a package of its own because it imports connectorhost, which
+// must not import the registry.
 package backendrows
 
 import (
@@ -63,8 +63,7 @@ type Row struct {
 	ShadowEvery int  `json:"shadowEvery,omitempty"`
 	// Primary makes the Connector answer in place of the native adapter of the
 	// same name. Refused with Shadow; Nix evaluation (lib/flakeModule.nix) also
-	// refuses it on every backend row (forgejo, github, jira), which has no
-	// native adapter left to replace.
+	// refuses it on every shipped backend row, none having a native adapter.
 	Primary bool `json:"primary,omitempty"`
 }
 
@@ -80,10 +79,9 @@ const (
 // Widening returns the live Routes no accepted Route covers. An accepted Route
 // covers one with the same method and host, compared literally, no redirect
 // opt-in the accepted one lacks, and a path equal to or inside the accepted
-// path's subtree; so a new host, method or
-// path, or a broader path pattern, is a widening and a narrower one is not.
-// The subtree test is PathSet.Admits' request-path match, sound here because Use
-// validates both tables as canonical patterns (no blanket "/").
+// path's subtree. The subtree test is PathSet.Admits' request-path match,
+// sound here because Use validates both tables as canonical patterns (no
+// blanket "/").
 func (r Row) Widening() []connectorhost.Route {
 	var added []connectorhost.Route
 	for _, live := range r.Routes {
@@ -110,15 +108,13 @@ var (
 )
 
 // Use applies the rows in raw, a JSON array of Row, replacing any rows an
-// earlier call applied; empty raw applies none, so it clears them. A row with
-// no name, a repeated name, a row missing its module, credentialEnv or
-// routes, a name that is a built-in backend and an invalid Route table are
-// errors, as is an invalid non-empty accepted baseline. A row's BaseHost routes
+// earlier call applied; empty raw clears them. A row with no name, a repeated
+// or built-in name, no module, credentialEnv or routes, or an invalid Route
+// table or non-empty accepted baseline is an error. A row's BaseHost routes
 // are resolved from lookup(BaseEnv) first, so validation sees the concrete
 // table (resolveBase says when an unusable base is an error); BaseHost without
 // a BaseEnv is an error. The credential is only required at request time (see
-// Load).
-// Rows are validated whole before any is stored.
+// Load). Rows are validated whole before any is stored.
 func Use(raw json.RawMessage, lookup func(string) string) error {
 	var rows []Row
 	if len(bytes.TrimSpace(raw)) != 0 {
@@ -154,9 +150,9 @@ func Use(raw json.RawMessage, lookup func(string) string) error {
 var gates = map[string]func(lookup func(string) string) bool{}
 
 // RegisterGate has Use drop, after validating it, the row named name whenever
-// applies answers false for the run's settings. It is host selection by
-// configuration: a backend whose Routes cannot serve the settings leaves its
-// native adapter in charge, and no later reader sees a row. Call it from init.
+// applies answers false for the run's settings: a backend whose Routes cannot
+// serve the settings gets no row, so no later reader sees one. Call it from
+// init.
 func RegisterGate(name string, applies func(lookup func(string) string) bool) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -170,19 +166,17 @@ func gateAllows(name string, lookup func(string) string) bool {
 	return !ok || applies(lookup)
 }
 
-// unsetHost is the placeholder base host an unusable non-Shadow row
-// resolves against, so its routes still validate whole before it is dropped.
+// unsetHost is the placeholder base host an unusable plain row (neither
+// Shadow nor Primary) resolves against, so its routes still validate whole before it is dropped.
 const unsetHost = "unset.invalid"
 
 // resolveBase returns row with every BaseHost route host and path prefix
-// replaced from the base URL its BaseEnv names. It runs before validate so
-// ValidateRoutes judges the table the Connector will actually be held to.
-// A base is unusable when BaseEnv is unset or names anything but a bare https
-// URL. On a plain row, unusable carries that error: the row resolves against
-// unsetHost and the caller drops it, since a Consumer importing every
-// Connector need not configure a tracker it does not use. A Shadow or Primary
-// row opted in, so its base error is returned as the error instead. Use keeps
-// a dropped row's error for BaseError.
+// replaced from the base URL its BaseEnv names, so ValidateRoutes judges the
+// table the Connector will actually be held to. A base is unusable when
+// BaseEnv is unset or names anything but a bare https URL. On a plain row,
+// unusable carries that error and the caller drops the row, since a Consumer
+// importing every Connector need not configure a tracker it does not use. A
+// Shadow or Primary row opted in, so its base error is returned as the error.
 func resolveBase(row Row, lookup func(string) string) (_ Row, unusable, _ error) {
 	uses := func(routes []connectorhost.Route) bool {
 		return slices.ContainsFunc(routes, func(r connectorhost.Route) bool { return r.Host == BaseHost })
@@ -376,7 +370,7 @@ func Load(ctx context.Context, row Row, o Options) (*connectorhost.Connector, er
 
 // Snapshot captures the applied rows and registered gates and returns the
 // function that restores them, for a test that applies rows to the
-// process-global set. It is not in export_test.go because cmd/launcher's own
+// process-global set. It is not in export_test.go because cmd/launcher's
 // tests need it.
 func Snapshot() (restore func()) {
 	mu.Lock()

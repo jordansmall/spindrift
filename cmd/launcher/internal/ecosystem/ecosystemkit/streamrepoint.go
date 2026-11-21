@@ -68,16 +68,14 @@ func (r *streamRecorder) Read(p []byte) (int, error) {
 }
 
 // StreamRepointJSON copies the JSON document(s) in src to dst, repointing each
-// string value selects accepts at the Forwarder via RepointRegistryURL, and
-// passes every other byte through verbatim. It holds at most streamWindowBytes
-// unwritten. selects receives the container path from the root to the value
-// (valid only for the call; object keys are never offered). A foreign-host
-// value is a declined edit (empty To), and a selected string that is not an
-// absolute URL is left alone without one. Edits reach onEdit (which may be
-// nil) in document order, each before the bytes it edited reach dst. A body
-// that cannot be interpreted further is relayed byte-identical and reported as
-// registryvocab.ErrRewriteAbandoned (see finishStream). Concatenated documents
-// are each rewritten; trailing data after the first is not an abandonment.
+// string value selects accepts via RepointRegistryURL and passing every other
+// byte through verbatim, holding at most streamWindowBytes unwritten. selects
+// gets the container path to the value, valid only for the call; object keys
+// are never offered. Edits, including declined foreign-host ones, reach onEdit
+// (may be nil) in document order, each before its bytes reach dst; a non-URL
+// string yields none. An uninterpretable body is relayed byte-identical and
+// reported as registryvocab.ErrRewriteAbandoned. Concatenated documents are
+// each rewritten.
 func StreamRepointJSON(dst io.Writer, src io.Reader, rc registryvocab.RewriteContext, onEdit func(registryvocab.RewriteEdit), selects func(path []JSONPathStep) bool) error {
 	rec := &streamRecorder{src: src}
 	out := bufio.NewWriterSize(dst, streamWriteBufferBytes)

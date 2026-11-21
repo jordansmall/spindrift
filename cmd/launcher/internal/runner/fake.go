@@ -68,8 +68,8 @@ type Fake struct {
 
 	// RegistryProxyTransportEndpoint defaults to the zero Endpoint (neither
 	// IsUnix() nor IsTCP()), so a test opting into transport probing must set
-	// it explicitly rather than inherit a default shaped like a real runtime.
-	// It is one field, so a test cannot script a unix and a TCP answer at once.
+	// it rather than inherit a default shaped like a real runtime. One field,
+	// so a test cannot script a unix and a TCP answer at once.
 	RegistryProxyTransportEndpoint registrymanifest.Endpoint
 
 	// RegistryProxyTransportAddHost defaults to false: the runtime resolves
@@ -107,11 +107,11 @@ func (f *Fake) IsReady() error {
 }
 
 // Run records the box, then returns ErrAlreadyRunning, writing no output, if
-// box.Name is running (see IsRunning); else it writes WriteToOutput and returns
-// the scripted error for this call index, or calls RunFunc when it is set. A
-// Kill of box.Name while RunFunc runs ends the Run with an ExitSIGKILL
-// RunError, as a SIGKILLed box does. The refusal is not atomic with the
-// RunFunc Run becoming live, so concurrent same-name Runs can both proceed.
+// box.Name is running; else it writes WriteToOutput and returns the scripted
+// error for this call index, or calls RunFunc when set. A Kill of box.Name
+// mid-RunFunc ends the Run with an ExitSIGKILL RunError. The refusal is not
+// atomic with the RunFunc Run going live, so concurrent same-name Runs can
+// both proceed.
 func (f *Fake) Run(box Box) error {
 	f.mu.Lock()
 	i := len(f.RunCalls)

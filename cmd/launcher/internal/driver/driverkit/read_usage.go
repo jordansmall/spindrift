@@ -10,26 +10,19 @@ import (
 
 // UsageByModel returns per-model breakdowns from the KindUsage events in the
 // log at path, or (nil, nil) when the log is absent. Each event is one call's
-// own usage, not a running total, so these sum; a Driver whose CLI re-emits
-// lines sharing a MessageID gets the first occurrence only (an empty
-// MessageID is never deduplicated), so the sum runs over DISTINCT message.id:
-// claude-code re-emits a multi-block message once per block with identical
-// usage. The result event's own usage header covers one call only and is
-// ignored (issue #2078). A usage event naming no model lands under
-// usage.UnknownModel. Rows stay keyed by exact model id. They are ordered by
-// family rank (ascending) then exact id when family is non-nil, by id alone
-// when it is nil: family is the Driver's heartbeat hook, which supplies the
-// rank, so a Driver whose ids are not a ranked model family passes nil.
+// own usage, so they sum, deduped by non-empty MessageID: claude-code re-emits
+// a multi-block message once per block with identical usage. The result
+// event's own usage header covers one call only and is ignored (issue #2078).
+// A usage event naming no model lands under usage.UnknownModel. Rows are keyed
+// by exact model id, ordered by family rank then id, or by id alone when
+// family (the Driver's heartbeat hook) is nil.
 //
-// Under PerCallTotals OutputTokens are summed per call. Under SessionTotals
-// the per-call output is a placeholder (#3183) and is never used: a row's
-// OutputTokens is instead the sum of its model's per-model figure over the
-// KindResult events (issue #6269). That holds only when the log has a result
-// and every result carries per-model figures; otherwise every row is
-// OutputUnavailable. A row whose model no result names is OutputUnavailable
-// too (such as `<synthetic>` or unknown, which no result names), and a model
-// only a result names gets a row of its own. A NoTotals result is skipped
-// entirely, as sumTotals does.
+// Under SessionTotals the per-call output is a placeholder (#3183): a row's
+// OutputTokens is its model's per-model figure summed over the non-NoTotals
+// KindResult events (issue #6269). Unless the log has a result and every
+// result carries per-model figures, every row is OutputUnavailable, as is a
+// row no result names (`<synthetic>`, unknown); a model only a result names
+// gets a row of its own.
 func UsageByModel(path string, newDecoder func() Decoder, family ModelFamily, src TotalsSource) ([]usage.ModelUsage, error) {
 	l, err := DecodeLog(path, newDecoder)
 	if err != nil {
@@ -120,12 +113,11 @@ const (
 	// call and no session summary (opencode).
 	PerCallTotals TotalsSource = iota
 
-	// SessionTotals sums the KindResult events: the CLI reports a summary per
-	// session, which is the only ground truth for output tokens, cost, turns
-	// and durations (claude). Per-call KindUsage events then feed the
-	// breakdowns only. A result's cost, API time and per-model output are
-	// cumulative per session, so the readers must be fed through RebaseResults,
-	// which turns them into per-query increments before they are summed.
+	// SessionTotals sums the KindResult events: the CLI's per-session summary
+	// is the only ground truth for output tokens, cost, turns and durations
+	// (claude), and per-call KindUsage events feed the breakdowns only. A
+	// result's cost, API time and per-model output are session-cumulative, so
+	// the readers must be fed through RebaseResults first.
 	SessionTotals
 )
 
@@ -203,14 +195,11 @@ func sumPerCall(l *Log) (usage.Usage, EventSpan, bool) {
 }
 
 // sumSession reports found only for a log with a KindResult that has totals.
-// Each result's subagent residual (resultResidual) is added to OutputTokens
-// and returned apart.
-//
-// Wall time is not additive across sessions: they can overlap (issue #2058) or
-// idle between runs, so with several results DurationMs is the span of every
-// non-zero event Timestamp, floored by the longest session's own DurationMs
-// (the floor also covers a log with no timestamps, or a span narrower than a
-// session that provably ran longer). One result reports its own DurationMs.
+// Each result's subagent residual is added to OutputTokens and returned apart.
+// Wall time is not additive across sessions, which can overlap (issue #2058)
+// or idle between runs, so with several results DurationMs is the event
+// Timestamp span floored by the longest session's own DurationMs (covering a
+// log with no timestamps too).
 func sumSession(l *Log) (usage.Usage, EventSpan, bool, int) {
 	var u usage.Usage
 	var span EventSpan
@@ -245,11 +234,9 @@ func sumSession(l *Log) (usage.Usage, EventSpan, bool, int) {
 }
 
 // resultResidual is the output a session result reports beyond its main loop:
-// the modelUsage outputTokens sum (subagents included) less usage.output_tokens.
-// A result without a per-model figure has none, so it counts only its own.
-// The max floor keeps the main-loop figure when the modelUsage sum falls below
-// the result's own usage.output_tokens, so the main row never goes negative
-// and the agent rows still sum to Totals.
+// the modelUsage outputTokens sum (subagents included) less usage.output_tokens,
+// 0 without per-model figures. The max floor keeps the main row non-negative
+// when the modelUsage sum falls short, so agent rows still sum to Totals.
 func resultResidual(ev Event) int {
 	if len(ev.ModelOutput) == 0 {
 		return 0
@@ -280,12 +267,10 @@ func addTokens(u *usage.Usage, t Tokens) {
 
 // UsageByAgent returns per-agent breakdowns from the KindUsage events in the
 // log at path, or (nil, nil) when the log is absent. A non-empty MessageID
-// counts once. The main loop is labelled usage.MainLoopAgent, the breakdown's
-// own name for it, not the Transcript's ImplementorRole default. An InSubagent
-// event's row is its Role; any other event is the main loop whatever pass Role
-// it carries. Under PerCallTotals OutputTokens are summed; under SessionTotals
-// they stay 0 on every row for ExtractUsage to patch from the session totals,
-// split between the main-loop row and a usage.SubagentsAgent row.
+// counts once. An InSubagent event's row is its Role; any other is the main
+// loop (usage.MainLoopAgent, not ImplementorRole) whatever pass Role it
+// carries. Under SessionTotals OutputTokens stay 0 for ExtractUsage to patch
+// from the session totals.
 func UsageByAgent(path string, newDecoder func() Decoder, src TotalsSource) ([]usage.AgentUsage, error) {
 	l, err := DecodeLog(path, newDecoder)
 	if err != nil {
@@ -330,20 +315,16 @@ func addAgentCall(agents map[string]*usage.AgentUsage, ev Event, src TotalsSourc
 
 // ExtractUsage returns the totals of the log at logPath (see sumTotals) with
 // its per-model and per-agent breakdowns as one usage.Report; Found is false
-// when the log has no totals or is absent. EarliestEventMs, LatestEventMs and
-// HasEventSpan carry the sumTotals span.
+// when the log has no totals or is absent.
 //
 // byModel and byAgent supply the breakdowns, normally UsageByModel and
-// UsageByAgent over the same decoder; a Driver passes its own so a test can
-// fail one or reorder it. An error degrades only that section to nil with a
-// stderr WARNING naming the path, not the totals already summed (issue #674).
+// UsageByAgent; a test passes its own to fail one. An error degrades only that
+// section to nil with a stderr WARNING, not the totals (issue #674).
 //
-// Under SessionTotals the result events are the only ground truth for output
-// tokens, so the main-loop row takes their usage.output_tokens; subagent
-// output beyond it lands on a usage.SubagentsAgent row. SkipOversized drops
-// lines over 4 MiB, so a run whose main-loop lines were all oversized arrives
-// with subagent rows only: the row is then synthesized, prepended to keep
-// main-loop first. A nil agents slice stays nil, with no row added.
+// Under SessionTotals the main-loop row takes the results' usage.output_tokens
+// and subagent output beyond it lands on a usage.SubagentsAgent row. A run
+// whose main-loop lines were all over SkipOversized's 4 MiB arrives with
+// subagent rows only, so the main row is then synthesized and prepended.
 func ExtractUsage(
 	logPath string,
 	newDecoder func() Decoder,

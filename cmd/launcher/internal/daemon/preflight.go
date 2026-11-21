@@ -33,10 +33,8 @@ func ClassifyPreflight(exit int) PreflightVerdict {
 	}
 }
 
-// Halt renders v as a typed Halt. The zero Halt (class HaltNone, which
-// String() renders "") on a healthy verdict keeps the same "never call this
-// on a healthy verdict" contract the string-returning version carried,
-// without a second special case.
+// Halt renders v as a typed Halt; a healthy verdict yields the zero Halt
+// (HaltNone, which String() renders "").
 func (v PreflightVerdict) Halt() Halt {
 	if v.Healthy {
 		return Halt{}

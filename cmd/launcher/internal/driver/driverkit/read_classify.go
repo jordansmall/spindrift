@@ -25,14 +25,12 @@ type ClassifyOptions struct {
 // Classify scans the Pass log at logPath through a fresh decoder and reports
 // whether the failure is transient (retryable) or terminal. Only KindError
 // text is matched against transientExtras (then terminalExtras), so a marker
-// quoted in the agent's own prose is not attributed as the cause. An error
-// followed by agent progress (see IsProgress) was recovered from and is
-// dropped; the last unrecovered error wins unless opts.FirstMatch. A Synthetic
-// event is the CLI's own content, not progress. KindUnparsed lines (stderr
-// shares the log) count only when they match a terminalExtras marker. A log with no
-// unrecovered error, or whose error text carries no known marker, classifies
-// as Terminal/TaskFailed, as does a missing log. ResetAt is the latched error's
-// own (see opts.FirstMatch), and only a RateLimit classification keeps it.
+// quoted in the agent's own prose is not the cause. An error followed by
+// non-Synthetic progress (see IsProgress) was recovered from; the last
+// unrecovered error wins unless opts.FirstMatch. KindUnparsed lines (stderr
+// shares the log) count only on a terminalExtras match. No unrecovered
+// marker-bearing error, or a missing log, is Terminal/TaskFailed. Only a
+// RateLimit keeps the latched ResetAt.
 func Classify(logPath string, newDecoder func() Decoder, transientExtras, terminalExtras []Pattern, opts ClassifyOptions) (Classification, error) {
 	decode := newDecoder()
 	c := &classifier{transientExtras: transientExtras, terminalExtras: terminalExtras, opts: opts}

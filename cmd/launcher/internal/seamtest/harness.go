@@ -59,8 +59,7 @@ var goBuild = func(root, pkg, out string) ([]byte, error) {
 }
 
 // withBuildDir runs runTests with a fresh shared build dir and removes it
-// afterwards. Main calls os.Exit, which skips defers, so the removal has to
-// happen here, before Main exits.
+// here, since Main's os.Exit skips defers.
 func withBuildDir(runTests func() int) int {
 	dir, err := os.MkdirTemp("", "seamtest-build-")
 	if err != nil {
@@ -83,9 +82,8 @@ func withBuildDir(runTests func() int) int {
 
 // buildBinary is the non-TB core of Build.
 func buildBinary(root, pkg string) (string, error) {
-	// One lock across the whole go build is deliberate: seam tests build only
-	// a couple of distinct packages, so serializing them costs little even
-	// under t.Parallel.
+	// One lock across the whole build: seam tests build only a couple of
+	// packages, so serializing costs little.
 	buildState.Lock()
 	defer buildState.Unlock()
 	key := filepath.Join(root, pkg)
@@ -118,12 +116,10 @@ func linkBinary(root, pkg string) builtBinary {
 	return builtBinary{path: out}
 }
 
-// Build compiles pkg (a path relative to the launcher module root, e.g. "."
-// or "./cmd/foo") and returns the binary's path. GOPROXY=off makes a missing
-// module fail instead of reaching the network; Go picks up vendor/ on its own
-// when the tree has one. Each package links once per test binary, into a dir
-// Main owns and removes on exit; a failed build is remembered too, so every
-// test that asks for that binary fails.
+// Build compiles pkg (relative to the launcher module root) and returns the
+// binary's path. GOPROXY=off makes a missing module fail instead of reaching
+// the network; Go picks up vendor/ on its own. Each package links once per
+// test binary, into a dir Main owns; a failed build is remembered too.
 func Build(tb testing.TB, pkg string) string {
 	tb.Helper()
 	wd, err := os.Getwd()
@@ -276,10 +272,9 @@ func (p *Proc) Wait(tb testing.TB) Result {
 }
 
 // Run executes c with a fresh temp HOME and PATH = PathDirs + parent PATH.
-// The rest of the parent environment is inherited (unless CleanEnv) so the Go toolchain and
-// nix-sandbox settings stay usable. Both streams are also logged to tb so a
-// failing test shows what the child said. A non-zero exit is a Result, not a
-// failure; only a failure to start fails tb.
+// The rest of the parent environment is inherited (unless CleanEnv) so the Go
+// toolchain and nix-sandbox settings stay usable. Both streams are logged to
+// tb. A non-zero exit is a Result; only a failure to start fails tb.
 func Run(tb testing.TB, c Cmd) Result {
 	tb.Helper()
 	return Start(tb, c).Wait(tb)

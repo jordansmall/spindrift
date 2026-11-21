@@ -12,19 +12,17 @@ import (
 )
 
 // NewStreamFilter drops the streaming deltas of every assistant message that
-// ends, since its message_end repeats the whole message: a Pass log otherwise
-// carries each token twice over (issue #6066). It also drops each subagent
-// tool_execution_update that the call's next update or its tool_execution_end
-// supersedes: updates are cumulative and the end carries every child in full
-// (issue #6383). A process killed without Flush loses the held update, where
-// the unfiltered log kept every one. Every other line passes through
-// byte-identical.
+// ends, since its message_end repeats the whole message (issue #6066), and
+// each subagent tool_execution_update a later update or the end supersedes:
+// updates are cumulative and the end carries every child in full (issue
+// #6383). A process killed without Flush loses the held update. Every other
+// line passes through byte-identical.
 //
-// The deltas of a message still open when the stream stops are the only record
-// of what it said, so Flush writes them back coalesced, one event per content
-// block, in the shape of the originals. It likewise writes the latest update
-// of each subagent call still running, in the order the calls were first seen;
-// an end that carries no results writes its call's update ahead of itself.
+// The deltas of a message still open when the stream stops are its only
+// record, so Flush writes them back coalesced, one event per content block, in
+// the shape of the originals. It likewise writes the latest update of each
+// still-running subagent call, in first-seen order. An end that carries no
+// results writes its call's update ahead of itself.
 func NewStreamFilter(w io.Writer) driverkit.StreamFilter {
 	return &streamFilter{w: w}
 }

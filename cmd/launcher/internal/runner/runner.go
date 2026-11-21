@@ -49,36 +49,28 @@ type Box struct {
 	// OutboxDir is a host path mounted writable at /outbox, empty-at-start and
 	// throwaway: a Box with no writable remote writes its finished branch here
 	// as a git bundle for the launcher to relay. Dispatch's needsOutbox alone
-	// decides whether it is set (issue #3957): for a host-mediated remote
-	// forge unconditionally, or for an outbox-relay-capable forge under the
-	// kind-effective read-only access (a butler Box is always read-only).
+	// decides whether it is set (backend.RelaysBundle; issues #3957, #6898).
 	// Empty omits the mount.
 	OutboxDir string
 
 	// MirrorDir is the host path of the bare repo (issue #1726) mounted
 	// read-only at /repo, which the Box clones from: local's Accumulation repo,
 	// a read-only git Box's scratch mirror, or a per-Pass host-fetched mirror
-	// for read-only github/forgejo.
-	// Dispatch seeds it fresh for each Pass, so the Box sees the base branch as
-	// it stands now.
-	// Empty omits the mount.
+	// for read-only github/forgejo. Seeded fresh each Pass, so the Box sees
+	// the base branch as it stands now. Empty omits the mount.
 	MirrorDir string
 
 	// RegistryProxy locates the launcher-side registry-credential proxy.
 	RegistryProxy RegistryProxyLocation
 
 	// Sockets lists launcher-owned unix sockets mounted read-write at fixed
-	// in-Box paths (issue #3723); empty mounts nothing. The caller takes the
-	// transport verdict once per Dispatch, so an entry exists only when that
-	// verdict was unix — dispatch lists the minted host socket path here,
-	// which is what the mount layer reads.
+	// in-Box paths (issue #3723); an entry exists only when the Dispatch's
+	// transport verdict was unix.
 	Sockets []SocketMount
 
 	// SignalSocket locates the launcher-side Signal listener (issue #3725)
 	// when it is reachable over TCP. A unix-verdict Signal socket travels as
-	// a Sockets entry instead, exactly as the registry proxy's does; this
-	// field's Endpoint is the zero value in that case, so it never
-	// contributes an --add-host mapping.
+	// a Sockets entry instead, leaving Endpoint zero so it adds no --add-host.
 	SignalSocket SignalSocketLocation
 
 	// ClosureGeneration optionally names the agent-closure generation this
@@ -104,10 +96,9 @@ type RegistryProxyLocation struct {
 	TCPSecret string
 
 	// TCPAddHost reports whether reaching Endpoint's TCP host requires an
-	// explicit --add-host <host>:host-gateway mapping. Plain Linux docker does
-	// not resolve host.docker.internal at all and needs it; on a VM-backed
-	// runtime (Docker Desktop, Rancher Desktop/Lima) the mapping overrides
-	// working resolution with the in-VM bridge gateway, so it is probed.
+	// explicit --add-host <host>:host-gateway mapping. It is probed: plain
+	// Linux docker needs it, but on a VM-backed runtime (Docker Desktop, Lima)
+	// it would override working resolution with the in-VM bridge gateway.
 	TCPAddHost bool
 }
 
@@ -155,21 +146,17 @@ type Runner interface {
 	RemoveHostTree(path string) error
 
 	// IsRunning reports whether a sandbox exists here that another launcher
-	// invocation may own: it is not terminal, and — under OCI — either
-	// "running" or still young enough that a sibling launcher could be
-	// mid-`podman run` with it (issue #3633). A caller uses this to skip a
-	// dispatch before touching its artifacts (issue #562). The name stays
-	// even as the contract widens; bwrap's implementation still checks
-	// literal resident PIDs.
+	// invocation may own: not terminal and, under OCI, either "running" or
+	// young enough that a sibling could be mid-`podman run` (issue #3633). A
+	// caller skips a dispatch on it before touching artifacts (issue #562).
+	// bwrap still checks literal resident PIDs.
 	IsRunning(name string) bool
 
 	// ListRunning returns the names of every sandbox running under this
 	// runtime, for reconcile's live-Box lookup and the Connector sandbox
-	// orphan sweep. It is narrower than IsRunning: a container merely created
-	// and not yet started is a candidate owner under IsRunning but not listed
-	// here. bwrap has no daemon tracking sandboxes by name, so that adapter
-	// uses the named per-Box cgroup (issue #2669) and returns nothing without
-	// cgroup v2.
+	// orphan sweep. Narrower than IsRunning: a created-not-started container
+	// is not listed. bwrap uses the named per-Box cgroup (issue #2669) and
+	// returns nothing without cgroup v2.
 	ListRunning() ([]string, error)
 
 	// RegistryProxyTransport reports how a Box reaches the registry proxy (ADR
@@ -205,12 +192,8 @@ type ConnectorSandbox struct {
 // ErrAlreadyRunning is returned by Run when a sandbox for this box is already
 // running. It is a dispatch outcome, not a failure: the caller skips the issue
 // with no failure transition, leaving the live run's claim and log untouched
-// (issue #562). A container merely created by a sibling launcher and not yet
-// started reports it too (issue #3633), as does the lost-create-race case
-// where the runtime itself refuses to create the container because the name
-// is taken (Run's inspect missed the sibling, but the runtime didn't), so an
-// issue whose Box never started keeps its in-progress claim untouched and is
-// never marked failed.
+// (issue #562). A sibling's created-not-started container (issue #3633) and a
+// lost create race (the runtime refuses the taken name) report it too.
 var ErrAlreadyRunning = errors.New("box: a container/sandbox for this issue is already running")
 
 // RunError wraps a non-zero exit from a box.
@@ -238,11 +221,9 @@ const (
 )
 
 // AsRunError translates an error that unwraps to *exec.ExitError into a
-// *RunError carrying the box process's exit code. Podman/docker report the
-// 128+N killed-by-signal convention as an ordinary exit code, but a child
-// signalled directly (bwrap's Kill) reaches Go as ExitCode() == -1, so the
-// signal is read from the WaitStatus and mapped to 128+N too. Other errors
-// pass through.
+// *RunError carrying the box process's exit code; other errors pass through. A
+// child signalled directly (bwrap's Kill) reaches Go as ExitCode() == -1, so
+// the signal is mapped to 128+N, matching what podman/docker report.
 func AsRunError(err error) error {
 	if err == nil {
 		return nil

@@ -95,9 +95,8 @@ func splitRepo(repo string) (owner, name string, err error) {
 }
 
 // prsForBranch reads one page: newest first, 100 PRs is far past any branch's history.
-// It matches same-repo heads only (head=owner:branch), unlike the native adapter's
-// `gh pr list --head`, which also returns a fork PR of the same branch name; a fork
-// PR is never ours to land, so shadow comparison should expect that difference.
+// It matches same-repo heads only (head=owner:branch): a fork PR of the same
+// branch name is never ours to land.
 func prsForBranch(t forge.Target, branch string) ([]forge.PR, error) {
 	owner, _, err := splitRepo(t.Repo)
 	if err != nil {
@@ -223,10 +222,10 @@ func checks(t forge.Target, number string) (forge.Rollup, error) {
 }
 
 // runURLRE matches a whole Actions run URL, with the /job/<id> segment a
-// CheckRun's detailsUrl carries optional. It is anchored over the raw string, as
-// the native adapter's is, so a query, fragment, userinfo or upper-case scheme
-// is refused rather than normalised away. Group 1 is the host, group 2
-// owner/repo, group 3 the run path.
+// CheckRun's detailsUrl carries optional. It is anchored over the raw string,
+// so a query, fragment, userinfo or upper-case scheme is refused rather than
+// normalised away. Group 1 is the host, group 2 owner/repo, group 3 the run
+// path.
 var runURLRE = regexp.MustCompile(`^https://([^/]+)/([^/]+/[^/]+)(/actions/runs/\d+)(?:/job/\d+)?/?$`)
 
 // ciRun is the URL of the head commit's Actions run: the first run with a

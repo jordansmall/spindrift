@@ -593,12 +593,11 @@ func resolveExitParams(log string, exitCode int) map[string]any {
 }
 
 // logWindow returns the newest lines of log whose resolveExit request fits under
-// maxRequest. A line too large to fit on its own is skipped and the walk
-// continues behind it, as the native resolvers skip an oversized line, so an
-// unrecovered error before it still reaches the resolver; the walk stops at the
-// first line that fits alone but not on top of those kept. Splitting at '\n' is
-// safe for sizing: it is ASCII, so each line escapes on its own and the sizes
-// add up.
+// maxRequest. A line too large on its own is skipped and the walk continues
+// behind it, as the native resolvers do, so an unrecovered error before it
+// still reaches the resolver; the walk stops at the first line that fits alone
+// but not on top of those kept. '\n' is ASCII, so each line escapes on its own
+// and the sizes add up.
 func logWindow(log []byte, exitCode int) (string, error) {
 	if len(log) <= maxRequest { // raw length is a lower bound on the encoded size
 		req, err := encodeRequest(resolveExitMethod, resolveExitParams(string(log), exitCode))

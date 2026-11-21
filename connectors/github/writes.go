@@ -224,8 +224,8 @@ func comment(t forge.Target, number, body string) error {
 	return err
 }
 
-// merge always rebases: the protocol carries no method, and rebase is the
-// native adapter's default. GitHub answers 405 both for a genuine refusal
+// merge always rebases: the protocol carries no method (core refuses any other
+// MERGE_METHOD for a routed row). GitHub answers 405 both for a genuine refusal
 // (failing checks, missing review, merge conflicts) and for a disallowed
 // method, so only a 405 whose message names the former is NotMergeable, the
 // class core re-reads the PR for; a repo with rebase disabled must fail fast

@@ -16,10 +16,9 @@ import (
 )
 
 // connectorCredentialRefresh is how often a `_CMD`-sourced Connector credential
-// is re-resolved. A GitHub App installation token lives 60 minutes, so this
-// keeps it fresh only when the command mints a new token per call: one reading
-// a cached token (a refresher file rewritten every 45 minutes) can already be
-// 45 minutes old.
+// is re-resolved. It keeps a 60-minute App token fresh only when the command
+// mints one per call: one read from a refresher file (rewritten every 45
+// minutes) can already be 45 minutes old.
 const connectorCredentialRefresh = 30 * time.Minute
 
 // secretCmdRunner runs a credential's `_CMD` form with no stdin, so a vault
@@ -28,22 +27,21 @@ var secretCmdRunner = func(cmd string) (string, error) {
 	return secretcmd.Run(cmd, false)
 }
 
-// resolveConnectorCredentials makes the credential env of each Connector row
-// the Daemon reads through hold a value, from `_CMD` or the SECRET_CMD
-// template as the Launcher does. refresh re-resolves those once, keeping the
-// old value on failure; it is nil when none were sourced.
+// resolveConnectorCredentials fills the credential env of each Connector row
+// the Daemon reads through, from `_CMD` or the SECRET_CMD template as the
+// Launcher does. refresh re-resolves them, keeping the old value on failure;
+// it is nil when none were sourced.
 //
-// `_CMD` wins over a plain value, and a template-sourced value is pinned as
-// `_CMD` too: a restart-in-place successor inherits the Setenv'd value, so a
-// plain-wins rule would freeze a stale token there. Basic-scheme rows'
-// IdentityEnv has no `_CMD` form and is not resolved. That pin exports the
-// command to every Launcher child, which runs an explicit `_CMD` without its
-// needed-this-run check (connectorCredentialNeededThisRun); harmless while
-// children share the Daemon's ISSUE_TRACKER and CODE_FORGE. A routed row of
-// the CODE_FORGE is included, though the Daemon's own probe reads only the
-// tracker: its children inherit the pinned `_CMD`, and refusing here fails fast.
-// A row counts when backendkit.{Forge,Tracker}ReadsThroughConnector: primary, or an
-// adapter that routes its non-shadow row itself (github), as flags.go gates it.
+// `_CMD` wins over a plain value and a template value is pinned as `_CMD`
+// too, or a restart-in-place successor would inherit a frozen Setenv'd token.
+// The pin makes Launcher children run `_CMD` without their
+// connectorCredentialNeededThisRun check, harmless while they share the
+// Daemon's ISSUE_TRACKER and CODE_FORGE.
+// The CODE_FORGE row is included, though the probe reads only the tracker:
+// children inherit its pinned `_CMD`, and refusing here fails fast. A row
+// counts when backendkit.{Forge,Tracker}ReadsThroughConnector holds and it is
+// not a shadow row. A Basic-scheme row's IdentityEnv has no `_CMD` form and is
+// not resolved.
 func resolveConnectorCredentials(doc *inputdoc.Document, kinds []daemon.Kind, stderr io.Writer) (refresh func(), err error) {
 	probes := false
 	for _, k := range kinds {
@@ -51,8 +49,7 @@ func resolveConnectorCredentials(doc *inputdoc.Document, kinds []daemon.Kind, st
 		if !ok {
 			continue
 		}
-		// Exhaustive like buildDemandSources, so a new DemandSource cannot be
-		// skipped silently here.
+		// Exhaustive, so a new DemandSource cannot be skipped silently.
 		switch d.DemandSource {
 		case dispatchkind.DemandTrackerProbe:
 			probes = true

@@ -9,23 +9,18 @@ import (
 )
 
 // podmanMachineInspectTimeout bounds the `podman machine inspect` shell-out,
-// never a real Box's runtime. It's a local metadata query against podman's
-// own state, not a container start, so it gets a much shorter budget than
-// registryProxyProbeTimeout: a wedged podman VM -- the very state this row
-// warns about -- must not hang doctor inside the probe meant to protect the
-// operator. A var, not a const, for the same reason registryProxyProbeTimeout
-// is one (oci.go): a probe budget a test can shorten in place.
+// a local metadata query, so it gets a much shorter budget than
+// registryProxyProbeTimeout: a wedged podman VM, the state the
+// podman-machine-memory row warns about, must not hang doctor. A var so a
+// test can shorten it.
 var podmanMachineInspectTimeout = 5 * time.Second
 
 // PodmanMachineMemoryMiB shells out to `podman machine inspect` and reads its
-// Resources.Memory field, which podman already reports in MiB. found is
-// false for every "no answer" case the doctor-side sizing check (issue
-// #3537, porting the driving loop's old shell preflight) must treat as not
-// applicable rather than a shortfall: podman missing from PATH, the command
-// failing (no active machine), empty output, a payload with no
-// Resources.Memory, or the command timing out (a wedged podman VM).
-// Lives here, not in cmd/launcher, because TestNoRunnerExecOutsidePackage
-// forbids `exec.Command("podman"` outside this package.
+// Resources.Memory field, which podman reports in MiB. found is false for
+// every "no answer" the sizing check (issue #3537) treats as not applicable
+// rather than a shortfall: podman missing, no active machine, no
+// Resources.Memory, or a timeout (a wedged VM). It lives here because
+// TestNoRunnerExecOutsidePackage forbids `exec.Command("podman"` elsewhere.
 func PodmanMachineMemoryMiB() (mib int, found bool) {
 	if _, err := exec.LookPath(cliPodman); err != nil {
 		return 0, false
@@ -42,9 +37,7 @@ func PodmanMachineMemoryMiB() (mib int, found bool) {
 }
 
 // parsePodmanMachineMemoryMiB decodes `podman machine inspect` JSON output,
-// isolated from the exec shell-out above so the field-binding and <= 0 rule
-// are exercised directly against fixtures rather than only through a live
-// podman binary.
+// apart from the shell-out so fixtures can exercise it.
 func parsePodmanMachineMemoryMiB(out []byte) (mib int, found bool) {
 	var machines []struct {
 		Resources struct {

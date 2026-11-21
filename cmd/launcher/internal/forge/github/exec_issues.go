@@ -23,11 +23,10 @@ func (e *execClient) ListOpenIssues() ([]forge.Issue, error) {
 	return e.listOpenIssuesViaConnector(row)
 }
 
-// ListIssuesWithLabels implements forge.LabeledBacklogLister (issue #3873,
-// building on the #3609 review). state scopes the scan to open or closed
-// issues -- a closed finding is a durable triage decision the host must not
-// refile. The Connector scans one label at a time and merges them
-// (forge.MergeLabeledIssues).
+// ListIssuesWithLabels implements forge.LabeledBacklogLister (issues #3873,
+// #3609). state scopes the scan to open or closed issues -- a closed finding
+// is a durable triage decision the host must not refile. The Connector scans
+// one label at a time and merges them (forge.MergeLabeledIssues).
 func (e *execClient) ListIssuesWithLabels(state forge.IssueState, labels []string) ([]forge.Issue, error) {
 	row, err := routeRow()
 	if err != nil {
@@ -62,17 +61,12 @@ func (e *execClient) StateLabels() forge.DispatchLabels {
 }
 
 // TransitionState swaps the from-state label for the to-state label on issue
-// num, removing the labels forge.TransitionRemoveLabels names. A claim
-// (to == InProgress) also strips the stale terminal labels, matching the
-// dispatch workflow's claim-remove-labels set (#1985), so a re-triggered or
-// recovered issue cannot run while still wearing a prior run's terminal label;
-// a landing (to == Complete) strips a stale Failed (#4651). A claim also
-// strips any research verdict label.
-//
-// A claim first reads num's labels and errors on forge.ErrAlreadyClaimed
-// without editing anything when InProgress is already present (#3887). The
-// check is read-then-edit, not atomic: another claimer can land between the
-// read and the edit.
+// num, also removing forge.TransitionRemoveLabels: a claim strips stale
+// terminal and research verdict labels, as the dispatch workflow does
+// (#1985), so a re-triggered or recovered issue cannot run still wearing a
+// prior run's terminal label; a landing strips a stale Failed (#4651). A
+// claim errors with forge.ErrAlreadyClaimed, editing nothing, when InProgress
+// is already present (#3887); the check is read-then-edit, not atomic.
 func (e *execClient) TransitionState(num string, from, to forge.DispatchState) error {
 	row, err := routeRow()
 	if err != nil {

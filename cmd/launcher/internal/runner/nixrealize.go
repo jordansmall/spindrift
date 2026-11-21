@@ -15,8 +15,8 @@ type NixRealizer struct{}
 // build. The child runs in its own process group, so a Ctrl-C hard-abort orphans
 // it. See "Background realize process isolation" in docs/reference.md.
 func (NixRealizer) Start(pwd, rev, attr string) (func() error, error) {
-	// nix build wants the derivation attr itself, not its output path, so there
-	// is no ".outPath" suffix here, unlike NixEvaluator.Eval's ref.
+	// No ".outPath" suffix, unlike NixEvaluator.Eval: nix build wants the
+	// derivation attr itself, not its output path.
 	ref := hermeticFlakeRef(pwd, rev, attr)
 	cmd := execCommand("nix", "build", ref, "--no-link")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

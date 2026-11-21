@@ -6,12 +6,9 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkey"
 )
 
-// def holds the process-wide default Reporter. A process-wide default
-// rather than threaded config exists because there is exactly one report
-// descriptor per process, and the call sites that need it span
-// internal/dispatch, internal/settle, internal/waves and main.go — a
-// parameter thread through all four would carry the same one value every
-// time, for no benefit over a package-level default.
+// def holds the process-wide default Reporter: there is exactly one report
+// descriptor per process, and threading it through every package that
+// reports would carry the same value everywhere.
 var def atomic.Pointer[Reporter]
 
 // Install sets the process-wide default Reporter and returns a restore

@@ -167,10 +167,8 @@ const (
 	// window is shut.
 	PhaseAwaitingWindow Phase = "awaiting_window"
 	// PhaseResolving means the slot is fetching the tip or evaluating the
-	// daemon's own self-build, ahead of a child of its own; this covers
-	// resolveOpportunistic's own mid-idle-wait resolve too, not just the
-	// per-iteration one — both are outside-world evaluations at the fetched
-	// tip.
+	// daemon's own self-build, including resolveOpportunistic's mid-idle-wait
+	// resolve.
 	PhaseResolving Phase = "resolving"
 	// PhaseRunning means the slot has a child in flight; this is the one
 	// phase Busy reports.
@@ -182,12 +180,10 @@ const (
 // KindCheck is one configured kind's next-poll status.
 type KindCheck struct {
 	Kind Kind `json:"kind"`
-	// NextCheck is RFC3339 UTC; empty means the kind is runnable now, or
-	// that it waits only on a tip move (then NextDue is "on_tip_move"). It
-	// is the later of the kind's own backoff deadline and the instant a
-	// shut Awake window reopens, so an asleep daemon never reports a kind
-	// as runnable now. In the walk-exhausted degraded case (see
-	// Status.Reason) that instant is only a re-check, not a real reopening.
+	// NextCheck is RFC3339 UTC; empty means runnable now, or waiting only on
+	// a tip move (NextDue "on_tip_move"). It is floored on a shut Awake
+	// window's reopening, so an asleep daemon never reports a kind runnable
+	// now; in the walk-exhausted case (Status.Reason) that is only a re-check.
 	NextCheck string `json:"nextCheck,omitempty"`
 	// Jammed is true when this kind's last check found open issues none of
 	// which were dispatchable (exit 3), and it is still gated on that
@@ -278,23 +274,18 @@ func NewStatusWriter(dir string, now func() time.Time) *StatusWriter {
 	}
 }
 
-// Write publishes s at seq 0, the unsequenced pre-pool path: it is called
-// only before any pool exists to allocate a real seq (via
-// Emitter.PublishHalted) and by tests. lastSeq starts at 0 and the
-// drop rule is strictly-older, so seq 0 always writes until the pool's
-// first sequenced Publish call takes over.
+// Write publishes s at seq 0, for the pre-pool path (Emitter.PublishHalted)
+// and tests. The drop rule is strictly-older, so seq 0 writes until the
+// pool's first sequenced Publish.
 func (w *StatusWriter) Write(s Status) error {
 	return w.Publish(0, s)
 }
 
-// Publish writes s if seq is not older than the last seq this writer has
-// written, and drops it (returning nil, untouched file) otherwise. seq is
-// the caller's ordering token, not sampled here: the caller (pool.publish)
-// must allocate seq in the same critical section it took the snapshot in,
-// or two callers could allocate seq 1/2 but snapshot in the opposite order,
-// and Publish would have no way to tell the resulting write from a correct
-// one. w.mu here only serializes the read-compare-write of lastSeq and the
-// file write itself, matching whatever seq order the caller already fixed.
+// Publish writes s unless seq is older than the last seq written, in which
+// case it returns nil and leaves the file untouched. The caller (pool.mutate,
+// via pool.publish) must allocate seq in the critical section that took the
+// snapshot, or two snapshots could land in the opposite order to their seqs;
+// w.mu only serializes this compare-and-write.
 func (w *StatusWriter) Publish(seq uint64, s Status) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -322,9 +313,8 @@ func (w *StatusWriter) Publish(seq uint64, s Status) error {
 		return fmt.Errorf("create temp status file in %s: %w", w.dir, err)
 	}
 	tmpPath := tmp.Name()
-	// Any failure past this point must not leave tmpPath behind — a
-	// leftover temp file next to the real status file would be at best
-	// litter and at worst mistaken for the published one by hand.
+	// Remove the temp file on any failure: a leftover beside the status file
+	// could be mistaken for it.
 	cleanup := true
 	defer func() {
 		if cleanup {
@@ -367,13 +357,9 @@ type StatusReport struct {
 }
 
 // ReadStatus reads dir's status file and probes dir's lock to tell a live
-// publisher from a dead one's leftover file. The lock is the liveness
-// truth and the status file is advisory data: a status file can only ever
-// corroborate what the lock already says, never override it. The lock
-// probe therefore runs first: on error the returned report still carries
-// whatever the lock probe established (LockHeld/Holder), even though the
-// error itself came from the status file's own parse — a caller must be
-// able to report liveness even when the advisory data is garbage.
+// publisher from a dead one's leftover file. The lock is the liveness truth;
+// the status file can only corroborate it. The lock probe runs first, so on a
+// status parse error the report still carries LockHeld/Holder.
 func ReadStatus(dir string) (StatusReport, error) {
 	var report StatusReport
 
@@ -391,14 +377,11 @@ func ReadStatus(dir string) (StatusReport, error) {
 	report.Status = status
 	report.Stale = status != nil
 
-	// holderPid > 0 closes the {}-shaped-file gap: an unparseable holder
-	// line and an empty status file both zero-value their pid, and 0 == 0
-	// would otherwise read as live. The host comparison closes the
-	// analogous shared-checkout gap — a coincidental pid match across two
-	// hosts must not read a dead remote daemon's file as live — and is
-	// safe unconditionally: an unparseable/absent host= yields "" via
-	// holderField, which can never equal a published Status.Host (always
-	// non-empty, see NewStatusWriter).
+	// holderPid > 0: an unparseable holder line and a "{}" status file both
+	// zero their pid, and 0 == 0 would read as live. The host comparison
+	// keeps a coincidental pid match across hosts from reading a dead remote
+	// daemon's file as live; an absent host= yields "", which never equals
+	// the always non-empty Status.Host.
 	//
 	// Issue #3597: between a new daemon's Flock and its identity truncate both
 	// files are the dead predecessor's and agree, so a same-host holder pid is
@@ -450,13 +433,11 @@ func readStatusFile(path string) (*Status, error) {
 	return &s, nil
 }
 
-// probeCheckoutLock reports whether the checkout lock at path is held,
-// without ever creating a lock file (O_CREATE would conjure one into a
-// checkout no daemon ever ran in) and without excluding a concurrent
-// reader (LOCK_SH, not LOCK_EX: it still conflicts with the holder's
-// LOCK_EX, so success proves no daemon holds it, but two probes never
-// refuse each other). This probe's own momentary LOCK_SH window is in
-// turn tolerated by AcquireCheckoutLock's retry — see its doc.
+// probeCheckoutLock reports whether the checkout lock at path is held. It
+// never creates the file (O_CREATE would conjure one into a checkout no
+// daemon ran in), and takes LOCK_SH, not LOCK_EX: that still conflicts with
+// the holder's LOCK_EX, but two probes never refuse each other.
+// AcquireCheckoutLock's retry tolerates this probe's momentary LOCK_SH.
 func probeCheckoutLock(path string) (held bool, holder string, holderPid int, holderHost string, err error) {
 	file, err := os.OpenFile(path, os.O_RDONLY, 0)
 	if err != nil {
@@ -477,17 +458,14 @@ func probeCheckoutLock(path string) (held bool, holder string, holderPid int, ho
 		holder := readHolderIdentity(file)
 		return true, holder, parseHolderPid(holder), holderField(holder, "host="), nil
 	}
-	// We took the lock ourselves, proving no daemon holds it — release at
-	// once, this was only ever a probe.
+	// We got the lock, so no daemon holds it; release at once.
 	_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
 	return false, "", 0, "", nil
 }
 
 // holderField extracts the value following prefix (e.g. "pid=" or "host=")
-// from an identity line shaped like "pid=%d host=%s kind=%s started=%s...",
-// stopping at the next space. Absent or malformed input yields "" rather
-// than panicking or guessing — parseHolderPid and probeCheckoutLock's host
-// extraction both fail closed on that empty value.
+// from a "pid=%d host=%s kind=%s started=%s..." identity line, up to the
+// next space. Absent input yields "", on which callers fail closed.
 func holderField(identity, prefix string) string {
 	idx := strings.Index(identity, prefix)
 	if idx < 0 {
@@ -500,12 +478,9 @@ func holderField(identity, prefix string) string {
 	return rest
 }
 
-// parseHolderPid extracts the pid from an identity line shaped like
-// "pid=%d host=... kind=... started=...". A line with no parseable pid=
-// yields 0, meaning only "no readable pid" — it is ReadStatus's
-// holderPid > 0 guard, not this zero value itself, that rejects the
-// unreadable case, since 0 is also a legitimate zero-valued Status.Pid on
-// an untrusted, unmarshalled file (e.g. a bare "{}").
+// parseHolderPid extracts the pid from an identity line, 0 when none parses.
+// 0 is also a "{}" file's Status.Pid, so ReadStatus's holderPid > 0 guard,
+// not this zero, rejects the unreadable case.
 func parseHolderPid(identity string) int {
 	pid, err := strconv.Atoi(holderField(identity, "pid="))
 	if err != nil {
@@ -520,10 +495,8 @@ func (su SelfUpdate) handingOff() bool {
 	return su.Phase == SelfUpdateWaiting || su.Phase == SelfUpdateRestarting
 }
 
-// working reports whether any slot's phase is running — projectStatus's
-// StateWorking predicate, one bool derived from the same per-slot phase
-// siblingsEngaged reads, rather than a second occupancy notion tracked
-// alongside it.
+// working reports whether any slot's phase is running: projectStatus's
+// StateWorking predicate, derived from the same phases siblingsEngaged reads.
 func (s *state) working() bool {
 	for _, ss := range s.slots {
 		if ss.phase == PhaseRunning {
@@ -640,23 +613,15 @@ func projectStatus(st *state, cfg Config, now time.Time) Status {
 		checks = append(checks, kc)
 	}
 
-	// Precedence, most urgent first: halted outranks everything, since the
-	// pool is already on its way out regardless of what else is true.
-	// Working outranks asleep, since a child started before the Awake
-	// window closed is still genuinely running even though the window has
-	// since shut — "working" is the honest state, not "asleep". Jammed vs
-	// waiting only applies once every kind is gated, and only jammedNow (a
-	// none-dispatchable result) tells them apart; checking is the default
-	// when nothing is gated and nothing is running.
+	// Precedence, most urgent first: halted; working, since a child started
+	// before the window closed is genuinely still running; asleep; then
+	// jammed vs waiting once every kind is gated (only jammedNow tells them
+	// apart); checking otherwise.
 	//
-	// Asleep is keyed off windowOpensAt (the same now-aware Awake.Until
-	// check nextCheck already floors on above), not st.awakeShut:
-	// awakeShut is edge-triggered by whichever slot's awaitWindow observes
-	// the close, so a pool built outside its window and snapshotted before
-	// any slot parks would still read awakeShut false and disagree with a
-	// nextCheck already naming the reopening. st.awakeShut therefore has
-	// no reader left outside the note*Awake* pair itself, which still needs
-	// it to edge-trigger awake_close/awake_open.
+	// Asleep keys off windowOpensAt, not st.awakeShut: that flag is
+	// edge-triggered by the slot that observes the close, so a pool built
+	// outside its window and snapshotted before any slot parks would read it
+	// false beside a nextCheck already naming the reopening.
 	computedState := StateChecking
 	reason := ""
 	switch {
@@ -678,9 +643,7 @@ func projectStatus(st *state, cfg Config, now time.Time) Status {
 		reason = walkExhaustedReason
 	}
 
-	// Copied, not aliased, matching the issues copy above: nothing
-	// mutates cfg.Kinds today, but a returned Status must never assume a
-	// future writer keeps that true.
+	// Copied: a returned Status must never alias cfg.Kinds.
 	kinds := make([]Kind, len(cfg.Kinds))
 	copy(kinds, cfg.Kinds)
 

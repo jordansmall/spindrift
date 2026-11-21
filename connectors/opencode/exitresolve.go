@@ -51,12 +51,11 @@ func ResolveExit(log []byte, exitCode int) (int, error) {
 	return 0, nil
 }
 
-// isErrorEvent reports whether root is a type:"error" event. It is deliberately
-// narrower than decodeRoot: it reads only type and part.text, so a malformed
-// field elsewhere on an error line (a fractional timestamp, a bad token count)
-// still counts as an error, where decodeRoot would drop the whole line to
-// KindUnparsed. part.text stays only for parity with the legacy decode: an
-// error line whose part.text is not a string is dropped, not counted.
+// isErrorEvent reports whether root is a type:"error" event. It reads only
+// type and part.text, so a malformed field elsewhere on an error line still
+// counts as an error, where decodeRoot would drop the line to KindUnparsed.
+// part.text stays only for parity with the native decode: an error line whose
+// part.text is not a string is dropped, not counted.
 func isErrorEvent(root driver.Value) bool {
 	if !objectOrNull(root) {
 		return false

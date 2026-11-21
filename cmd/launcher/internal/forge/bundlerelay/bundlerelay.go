@@ -55,19 +55,17 @@ func Relay(backend, outboxDir, ref string, cred gitexec.Credential, clone func(d
 	return gitplumbing.GitForcePush(ctx, dir, cred, "-u", "origin", ref)
 }
 
-// PushBranch fetches localRef from the git repo at srcDir into a fresh clone
-// of the target repo and pushes it to origin as branch, creating it (issue
-// #4071, ADR 0057; create-only per issue #4104). Unlike Relay, which fetches a
-// ref out of a one-shot bundle file, this fetches straight from a live local
-// repo. It refuses branch == base up front, and any branch that already
-// exists on origin at push time: its one caller, the butler patch rung, only
-// ever publishes a just-filed finding's fresh agent branch.
+// PushBranch fetches localRef from the live git repo at srcDir into a fresh
+// clone of the target repo and pushes it to origin as branch, create-only
+// (issues #4071, #4104, ADR 0057). It refuses branch == base up front, and
+// any branch that already exists on origin at push time: its one caller, the
+// butler patch rung, only ever publishes a just-filed finding's fresh agent
+// branch.
 func PushBranch(backend, srcDir, localRef, branch, base string, cred gitexec.Credential, clone func(dir string) error) error {
-	// Defense in depth, as prepareBundleFetch's ref guard: srcDir, localRef,
-	// and branch reach git as positional args, where a leading "-" would
-	// parse as an option. base never reaches git, but an empty or
-	// leading-"-" base names no real branch, so the guard below would pass
-	// every branch.
+	// srcDir, localRef, and branch reach git as positional args, where a
+	// leading "-" would parse as an option. base never does, but an empty or
+	// leading-"-" base names no real branch, so the equality guard below would
+	// pass every branch.
 	if invalidArg(srcDir) {
 		return fmt.Errorf("%s: push branch: invalid srcDir %q", backend, srcDir)
 	}
@@ -81,9 +79,7 @@ func PushBranch(backend, srcDir, localRef, branch, base string, cred gitexec.Cre
 		return fmt.Errorf("%s: push branch: invalid base %q", backend, base)
 	}
 	// The create-only lease below refuses the base branch too, but only after
-	// a clone and a fetch (issue #4104). Normalize both sides first: a
-	// "refs/heads/"-qualified branch must still compare equal to a bare
-	// base name.
+	// a clone and a fetch (issue #4104).
 	if strings.TrimPrefix(branch, "refs/heads/") == strings.TrimPrefix(base, "refs/heads/") {
 		return fmt.Errorf("%s: push branch: branch %q is the base branch", backend, branch)
 	}
@@ -163,10 +159,8 @@ func CommitSubjects(backend, outboxDir, base, ref string, clone func(dir string)
 }
 
 // cloneScratch mkdtemps a scratch dir, runs clone against it, and wires up a
-// gitIn helper bound to that dir, the preamble Relay, CommitSubjects, and
-// PushBranch all share; op prefixes its mkdtemp error to match the caller's. On
-// any error it has already cleaned up, so callers defer the returned cleanup
-// only once err is nil.
+// gitIn helper bound to that dir. On any error it has already cleaned up, so
+// callers defer the returned cleanup only once err is nil.
 func cloneScratch(backend, op string, clone func(dir string) error) (dir string, gitIn func(args ...string) *exec.Cmd, cleanup func(), err error) {
 	dir, err = os.MkdirTemp("", "spindrift-relay-*")
 	if err != nil {
@@ -194,14 +188,11 @@ func cloneScratch(backend, op string, clone func(dir string) error) (dir string,
 }
 
 // prepareBundleFetch is the shared preamble behind Relay and CommitSubjects:
-// validate ref, confirm the bundle at outboxDir/seambundle.FileName exists,
-// clone the target repo into a scratch dir, verify the bundle against that
-// clone, and fetch ref into refs/heads/ref. On any error it has already
-// cleaned up, so callers defer the returned cleanup only once err is nil.
+// clone the target repo into a scratch dir, verify the bundle against it, and
+// fetch ref into refs/heads/ref. Cleanup is as for cloneScratch.
 func prepareBundleFetch(backend, outboxDir, ref string, clone func(dir string) error) (dir string, gitIn func(args ...string) *exec.Cmd, cleanup func(), err error) {
-	// Defense in depth: callers derive ref from forge.AgentBranchName host-side,
-	// but it still interpolates into a refspec and, for CommitSubjects, a `git
-	// log` revision range, so guard it regardless of that holding upstream.
+	// Defense in depth: callers derive ref from forge.AgentBranchName, but it
+	// interpolates into a refspec and a `git log` revision range.
 	if invalidArg(ref) {
 		return "", nil, nil, fmt.Errorf("%s: relay bundle: invalid ref %q", backend, ref)
 	}

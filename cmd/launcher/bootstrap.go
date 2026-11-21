@@ -50,22 +50,20 @@ type launchContext struct {
 	// merge gate); verdict settles research. newSettlers sets exactly one.
 	merge   settle.MergeSettler
 	verdict *settle.ResearchSettle
-	// terminated is the merge settler's own registry, and every marker writes
-	// it: the waves and an abort's Reclaim. An abort
-	// and a settle goroutine already polling CI then agree on an issue's fate
-	// (#3521), and a recover cannot replace it and strand later
-	// marks where no settle looks (#3522). Under research no settler reads it
-	// (the verdict arm mints a fresh one); the waves still mark it.
+	// terminated is the merge settler's own registry, written by every marker
+	// (the waves and an abort's Reclaim), so an abort and a settle goroutine
+	// polling CI agree on an issue's fate (#3521) and a recover cannot replace
+	// it and strand later marks where no settle looks (#3522). Under research no
+	// settler reads it (the verdict arm mints its own); the waves still mark it.
 	terminated *terminate.Registry
 	cleanup    func()
 }
 
-// bootstrap wires the prologue shared by recover, dispatch, research,
-// and butler. ensureReady picks EnsureReady() over IsReady() (--no-build); kind
-// selects the label family, blocker handling, and Settle via applyDispatchKind
-// (ADR 0022); stdout receives the gate walk's output; selfContained is
-// research's no-repo sub-mode (issue #2202). The accumulation lock is the one
-// thing an early error return can leak, so a defer releases it.
+// bootstrap wires the prologue shared by recover, dispatch, research and
+// butler. ensureReady picks EnsureReady() over IsReady() (--no-build); kind
+// selects labels, blocker handling and Settle (ADR 0022); selfContained is
+// research's no-repo sub-mode (issue #2202). A defer releases the
+// accumulation lock, the one thing an early error return can leak.
 func bootstrap(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descriptor, selfContained bool) (lc *launchContext, err error) {
 	return bootstrapWith(stdout, ensureReady, kind, selfContained, false)
 }
@@ -250,11 +248,10 @@ func hostSeedsMirror(c config) bool {
 }
 
 // seedAccumulationRepoIfHostSeeded makes the bare Accumulation repo (ADR 0033)
-// from pwd's checkout at launch, holding an exclusive lock on it for the
-// caller (issue #2441). Host-side landing needs the repo before any Box runs
-// (issue #1726); each Pass then re-seeds the mirror through seedMirrorHook.
-// Only a HostMediatedRemote forge has an Accumulation repo: a forge that merely
-// seeds a mirror (git under read-only) lands on its remote.
+// from pwd's checkout at launch and holds an exclusive lock on it (issue
+// #2441): host-side landing needs it before any Box runs (issue #1726). Only a
+// HostMediatedRemote forge has one; a forge that merely seeds a mirror (git
+// under read-only) lands on its remote.
 func seedAccumulationRepoIfHostSeeded(c config, pwd string) (*local.AccumulationLock, error) {
 	row, _ := backendkit.ByName(c.CodeForge)
 	if !row.HostMediatedRemote || c.selfContained {
@@ -309,19 +306,15 @@ func newScratchMirrorDir(pwd string) (string, error) {
 	return filepath.Join(d, "repo.git"), nil
 }
 
-// seedMirrorHook is dispatch.Config.SeedMirror: it prepares the dir to mount
+// seedMirrorHook is dispatch.Config.SeedMirror: it prepares the dir mounted
 // read-only at /repo before each Pass, so a Box clones the base as it stands
-// now rather than as of launch (issue #6896). Nil only for a self-contained
-// Box, which clones nothing, or a forge that is neither host-seeded nor a
-// forge.MirrorSeeder.
-//
-// Two arms. A host-seeded backend (local, git) re-seeds one shared mirror
-// through the forge Strategy's SeedMirror: the Accumulation repo for a forge
-// with a HostRepoDir, else a per-process scratch dir. It does not take the
-// Accumulation lock, because bootstrap's flock stays held for the whole run
-// and a second open file would conflict with it. Otherwise the Box, which has
-// no forge credential to clone with, gets a fresh bare mirror the launcher
-// fetches with its own credential through seeder (issue #6897).
+// now (issue #6896). Nil for a self-contained Box or a forge that is neither
+// host-seeded nor a forge.MirrorSeeder. A host-seeded backend (local, git)
+// re-seeds one shared mirror via the forge Strategy's SeedMirror (the
+// Accumulation repo, else a per-process scratch dir) without taking the
+// Accumulation lock: bootstrap's flock holds it all run and a second open
+// would conflict. Otherwise the launcher fetches a fresh bare mirror with its
+// own credential through seeder, since the Box has none (issue #6897).
 func seedMirrorHook(c config, pwd string, seeder forge.MirrorSeeder) func() (string, func(), error) {
 	if hostSeedsMirror(c) {
 		row, _ := backendkit.ByName(c.CodeForge)

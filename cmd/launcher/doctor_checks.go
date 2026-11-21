@@ -9,15 +9,12 @@ import (
 
 // doctorCheckSets builds the classify and report halves (issue #3144).
 // memoizeCheckProbes shares one *sync.Once per row, so a credential Peeks at
-// most once across the one set this call builds -- run-wide that holds only
-// at readContext.validation(), the single call site building one set and
-// running both halves over it. classify omits the drift and profile rows, the
-// transport rows (both the registry-proxy and signal-socket transport rows) and
-// the runner's launch-gate prerequisites and the Connector Route rows (issue
-// #6806), which must never make validateConfig exit 2 (issue #2671, ADR 0045,
-// issue #3114, issue #3728); the per-route rows stay, so a bad credential still
-// exits 2. The runner's doctor-only prerequisites join classify (issue #3544;
-// see prerequisiteChecks).
+// most once per set; readContext.validation() is the one caller running both
+// halves over one set. classify leaves out the drift, profile, transport and
+// Connector Route rows (issue #6806) and the runner's launch-gate
+// prerequisites, which must never make validateConfig exit 2 (issues #2671,
+// #3114, #3728, ADR 0045); per-route rows stay, so a bad credential still exits
+// 2, and the runner's doctor-only prerequisites join classify (issue #3544).
 func doctorCheckSets(c config) (classify, report []doctor.Check) {
 	extra := doctorExtraChecks(c)
 	var perRoute, advisory []doctor.Check

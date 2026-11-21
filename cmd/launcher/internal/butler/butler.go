@@ -45,10 +45,10 @@ type Policy struct {
 	// PromotionMaxFiles is BUTLER_PROMOTION_MAX_FILES, the host limit on how
 	// many files an auto-promoted finding may touch.
 	PromotionMaxFiles int
-	// PromotionLabel is the Consumer's configured work dispatch label
-	// (LABEL), captured before the butler kind's own (label-less) family
-	// swapped it out -- the label a promoted finding must carry for the work
-	// path to pick it up (issue #3880).
+	// PromotionLabel is the Consumer's work dispatch label (LABEL), captured
+	// before the butler kind's own (label-less) family swapped it out: the
+	// label a promoted finding must carry for the work path to pick it up
+	// (issue #3880).
 	PromotionLabel string
 	// FindingLabel is the butler kind row's provenance label, worn by every
 	// filed finding.
@@ -73,8 +73,8 @@ type Policy struct {
 	// Chore is never due.
 	RecordsRoot string
 	// Knobs resolves a row-owned knob's env name (BUTLER_TUNING_MIN_RECORDS and
-	// the like) to its resolved value (ADR 0068). The butler holds no per-Chore
-	// knob field: the records adapter reads the min-records knob the Chore's row
+	// the like) to its value (ADR 0068). The butler holds no per-Chore knob
+	// field: the records source reads the min-records knob the Chore's row
 	// names, and a Digest reads its own through Strategy.Knobs. Nil resolves
 	// none, so every row knob takes its row default.
 	Knobs recordsdigest.Lookup
@@ -85,13 +85,10 @@ type Policy struct {
 const DefaultPatchPaths = "docs/**,*.md,!docs/adr/**,!**/CLAUDE.md,!**/CONTEXT.md,!**/CONTRIBUTING.md,!**/AGENTS.md,!skills/**,!templates/**,!fragments/**,!.github/**"
 
 // PatchForge is the host capability the patch rung needs to land a finding
-// as a draft PR (ADR 0057, issue #4074, #4112): push plus draft-PR create,
-// forge.IssueLabeler to fall a failed landing back to promote, and
-// forge.PRForge's OpenPRForBranch plus forge.BranchDeleter to check a
+// as a draft PR (ADR 0057, issue #4074, #4112): IssueLabeler falls a failed
+// landing back to promote, and OpenPRForBranch plus BranchDeleter check a
 // failed create for a PR the server made anyway before deleting the pushed
-// branch. See butlerPatchForge (cmd/launcher/butler.go) for when the rung
-// is on. A Runner built with a nil PatchForge never reaches decide's patch
-// branch at all -- see WithPatchForge.
+// branch.
 type PatchForge interface {
 	forge.BranchPusher
 	forge.DraftPRCreator
@@ -101,13 +98,12 @@ type PatchForge interface {
 }
 
 // PatchGate is the work merge gate a landed patch PR is handed to once its
-// finding issue's Done Ledger commit has landed (ADR 0057, issue #4076): the
-// same CI-watch/merge machinery a normal work dispatch settles through, but
-// entered through its adopt-an-open-PR seam since the finding issue was
-// never claimed by a Dispatcher. owner is the Chore's key, the one the
-// daemon parses a butler child's records under (issue #4966). Production hands
-// it a *settle.Settle built with Unclaimed true (settle.Config.Unclaimed),
-// which means no fix passes for an issue nothing is dispatched against.
+// Chore's Done Ledger commit has landed (ADR 0057, issue #4076), entered
+// through its adopt-an-open-PR seam since the finding issue was never
+// claimed. owner is the Chore's key, the one the daemon parses a butler
+// child's records under (issue #4966). Production hands it a *settle.Settle
+// built with settle.Config.Unclaimed: no fix passes for an issue nothing is
+// dispatched against.
 type PatchGate interface {
 	SettlePatch(owner dispatchkey.Key, num, prURL string) settle.Settlement
 }
@@ -166,21 +162,17 @@ func New(backend ledger.Backend, tree Tree, it forge.IssueTracker, newBox func(d
 	return &Runner{backend: backend, tree: tree, it: it, newBox: newBox, policy: policy, now: now, warn: os.Stderr, out: os.Stdout, progress: settle.StdoutProgress{}}
 }
 
-// WithPatchForge opts r into the patch rung (ADR 0057, issue #4074): f backs
-// decide's patch branch for every subsequent Sweep call, and gate is the
-// work merge gate a landed patch PR is handed to once its Done Ledger commit
-// lands (issue #4076). Returns r so a caller can chain it onto New. A non-nil
-// f must come with a non-nil gate -- Runner.run calls gate.SettlePatch
-// unguarded once f lands a patch. If WithPatchForge is never called,
-// r.patchForge stays nil -- see Runner.run for what that gates.
+// WithPatchForge opts r into the patch rung (ADR 0057, issue #4074) and
+// returns r. A non-nil f must come with a non-nil gate: settle calls
+// gate.SettlePatch unguarded once f lands a patch.
 func (r *Runner) WithPatchForge(f PatchForge, gate PatchGate) *Runner {
 	r.patchForge = f
 	r.patchGate = gate
 	return r
 }
 
-// WithProgress sends the Runner's settle progress steps to p instead of stdout.
-// Returns r so a caller can chain it onto New.
+// WithProgress sends the Runner's settle progress steps to p instead of stdout,
+// and returns r.
 func (r *Runner) WithProgress(p settle.Progress) *Runner {
 	r.progress = p
 	return r
@@ -194,8 +186,8 @@ type MergeReader interface {
 }
 
 // WithMergeReader opts r into reading PR merges for a Records digest's Prior
-// findings. A nil m leaves them to the Records alone; a nil commits leaves the
-// merge commit unnamed. Returns r so a caller can chain it onto New.
+// findings, and returns r. A nil m leaves them to the Records alone; a nil
+// commits leaves the merge commit unnamed.
 func (r *Runner) WithMergeReader(m MergeReader, commits forge.MergeCommitReader) *Runner {
 	r.mergeRead, r.mergeCommit = m, commits
 	return r
@@ -235,19 +227,13 @@ func (r *Runner) mergeLookup(choreName string) recordsdigest.MergeLookup {
 }
 
 // Sweep picks the first due Chore out of chores (in order) and runs it, or
-// reports why none is due (ADR 0056). chores is either the single name given
-// on --chore, or every Policy.Chores entry in configured order when none was
-// given; a name absent from Policy.Chores is an error, since its Every and
-// PromotionClasses would otherwise silently read as zero. tree.Head is read once up
-// front, and the due check (internal/chore.Check) shares a single now()
-// reading across every candidate, so the picture of "what's due" is
-// consistent across the whole pass rather than drifting chore to chore. The
-// due check -- today's totals plus each candidate's Read/History -- reads
-// the backend's own view, which for a hosted Ledger is the mirror the
-// factory fetched once at run start (issue #3995), so it costs no fetch. A
-// rival's commit since then is invisible here but still wins the remote's
-// compare-and-swap, so this run's Claim reports Outcome{Kind: LostRace}
-// rather than overwriting it.
+// reports why none is due (ADR 0056). A name absent from Policy.Chores is an
+// error, since its Every and PromotionClasses would otherwise silently read
+// as zero. tree.Head and now() are read once so "what's due" is consistent
+// across the whole pass. The due check reads the backend's own view, which
+// for a hosted Ledger is the mirror fetched once at run start (issue #3995):
+// a rival's commit since then is invisible here but still wins the remote's
+// compare-and-swap, so this run's Claim reports LostRace.
 func (r *Runner) Sweep(chores []string) (Outcome, error) {
 	if len(chores) == 0 {
 		return Outcome{}, errors.New("butler: no chores to check")
@@ -321,9 +307,8 @@ func (r *Runner) Sweep(chores []string) (Outcome, error) {
 	return Outcome{Kind: NotDue, Reasons: reasons}, nil
 }
 
-// choreNames returns every Policy.Chores name, in order -- the slice
-// ledger.DayTotalsAll needs to sum budgets across every enabled Chore, not
-// just this Sweep's candidates.
+// choreNames returns every Policy.Chores name: budgets sum across every
+// enabled Chore, not just this Sweep's candidates.
 func (p Policy) choreNames() []string {
 	names := make([]string, len(p.Chores))
 	for i, c := range p.Chores {
@@ -333,16 +318,10 @@ func (p Policy) choreNames() []string {
 }
 
 // run claims c's Ledger (already read as tip), has src Prepare this run's
-// scan Scope and Box input, dispatches one Box through r.newBox, and settles
-// the result (ADR 0056). claimedAt is Sweep's whenNow, reused for
-// ClaimedBy.Start so the claim is stamped at the same instant its due
-// decision was made; r.now is called fresh at settle time instead. room is
-// Sweep's own chore.Room, handed to the Box and to settle rather than
-// re-walked. Once the Box has run, whether its settle step actually wrote
-// the done commit (Box success) or left the claim standing (Box crash, ADR
-// 0056) is read off the settle step's own return, never by re-reading the
-// Ledger -- a crashed run's settle writes nothing at all, so there would be
-// nothing new there to read back anyway.
+// scan Scope and Box input, dispatches one Box, and settles the result (ADR
+// 0056). claimedAt stamps the claim at the instant its due decision was made.
+// Whether settle wrote the done commit is read off its return, never by
+// re-reading the Ledger.
 func (r *Runner) run(c chore.Chore, src scopeSource, tip ledger.Tip, claimedAt time.Time, room chore.Room) (Outcome, error) {
 	choreName := c.Name
 
@@ -355,9 +334,6 @@ func (r *Runner) run(c chore.Chore, src scopeSource, tip ledger.Tip, claimedAt t
 	claim, err := ledger.Claim(r.backend, choreName, tip, ledger.ClaimedBy{Host: r.policy.Host, Slot: 0, Start: claimedAt})
 	if err != nil {
 		if errors.Is(err, ledger.ErrLostRace) {
-			// Another worker claimed it between the due check's Read and this
-			// Claim: exactly the "nothing to do right now" case, not a real
-			// error.
 			return Outcome{Kind: LostRace, Chore: choreName}, nil
 		}
 		return Outcome{}, fmt.Errorf("butler: claim %s: %w", choreName, err)
@@ -367,11 +343,9 @@ func (r *Runner) run(c chore.Chore, src scopeSource, tip ledger.Tip, claimedAt t
 	if err != nil {
 		return Outcome{}, fmt.Errorf("butler: %s: %w", choreName, err)
 	}
-	// A nil patchForge means this Runner never opted into the patch rung
-	// (WithPatchForge), so patchesPerDay reads as 0 regardless of the
-	// Consumer's own BUTLER_MAX_PATCHES_PER_DAY -- newPromotion's patchEnabled
-	// derivation is the only place that decides "on", so settle never needs
-	// its own patchForge-nil check (issue #4074).
+	// A nil patchForge zeroes patchesPerDay regardless of
+	// BUTLER_MAX_PATCHES_PER_DAY: newPromotion's patchEnabled is the only
+	// place that decides "on", so settle needs no nil check (issue #4074).
 	patchesPerDay := r.policy.Budgets.MaxPatchesPerDay
 	if r.patchForge == nil {
 		patchesPerDay = 0
@@ -384,25 +358,16 @@ func (r *Runner) run(c chore.Chore, src scopeSource, tip ledger.Tip, claimedAt t
 		maxLines: r.policy.PatchMaxLines,
 	})
 
-	// The Box only ever sees a class list when promotion is on and today's
-	// promotion room is actually > 0: with nothing left to spend this run,
-	// there is nothing useful to tell the Box, and settle re-checks a
-	// finding's class against promo itself regardless.
+	// Settle re-checks a finding's class against promo regardless; the Box
+	// only sees a list when there is room to spend.
 	var promotionClasses []string
 	if promo.enabled && room.Promotions > 0 {
 		promotionClasses = c.PromotionClasses
 	}
-	// promo.patchEnabled is required here, not just room.Patches > 0: room.Patches
-	// derives from the Consumer's BUTLER_MAX_PATCHES_PER_DAY budget and today's
-	// ledger alone (chore.Budgets.Room), so it stays positive even when this
-	// Runner has no patchForge (issue #4074) -- patchesPerDay above is what
-	// actually folds that in, and patchEnabled is the only place that reads
-	// patchesPerDay. It also requires len(promotionClasses) > 0 -- the promotion class
-	// list just above -- because the relay fragment only ever honours
-	// CHORE_PATCH_CLASSES for a class also present on CHORE_CLASSES: with
-	// promotion off or its room spent, promotionClasses is empty and a patch-class
-	// list alone would tell the Box about candidates the relay fragment says
-	// to omit -class for.
+	// room.Patches alone stays positive with no patchForge (issue #4074), so
+	// patchEnabled is required too. promotionClasses must be non-empty
+	// because the relay fragment only honours CHORE_PATCH_CLASSES for a class
+	// also on CHORE_CLASSES.
 	var patchClasses []string
 	if promo.patchEnabled && len(promotionClasses) > 0 && room.Patches > 0 {
 		patchClasses = c.PatchClasses
@@ -423,8 +388,7 @@ func (r *Runner) run(c chore.Chore, src scopeSource, tip ledger.Tip, claimedAt t
 	s := dispatch.Route(d.Run(),
 		func() settled {
 			// A live run already holds this Chore's Box (#562): settling would
-			// read the empty result as a crash (#3705). Leave its claim
-			// standing and don't retry.
+			// read the empty result as a crash (#3705).
 			fmt.Fprintf(r.out, "    #%s  status=already-in-flight  note=live run continues\n", dispatchkey.Chore(choreName))
 			return settled{}
 		},

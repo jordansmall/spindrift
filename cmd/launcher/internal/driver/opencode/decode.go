@@ -19,13 +19,11 @@ import (
 const WriteTool = "write"
 
 // NewDecoder returns an opencode decoder with fresh state for one scan. Real
-// opencode never puts modelID on step_finish, so the decoder remembers the
-// model and effort driver-exec announces in a pass_model op and attributes each
-// untagged step_finish to them until the next pass_start. It also tracks the
-// pass role a pass_start names, through dispatchkind.PassRole, and stamps it on
-// the KindModel and KindUsage events it tags. A scan over a log uses
-// NewDecoder; Decode alone is stateless and never sees an announced model or
-// role.
+// opencode never puts modelID on step_finish, so the decoder attributes each
+// untagged step_finish to the model and effort driver-exec's pass_model op
+// announced, until the next pass_start, and stamps the pass_start's role
+// (dispatchkind.PassRole) on the KindModel and KindUsage events it tags.
+// Decode alone is stateless and never sees either.
 func NewDecoder() driverkit.Decoder {
 	var model, effort, role string
 	// lastEmitted is the (model, effort, role) the last KindModel carried, so
@@ -60,12 +58,11 @@ func NewDecoder() driverkit.Decoder {
 }
 
 // isErrorEvent reports whether line is a type:"error" event, for ResolveExit.
-// It is deliberately narrower than Decode: it decodes only type and part.text,
-// so a malformed field elsewhere on an error line (a fractional timestamp, a
-// bad token count) still counts as an error, where Decode would drop the whole
-// line to KindUnparsed. part.text stays only for parity with the legacy decode:
-// an error line whose part.text is not a string is dropped, not counted.
-// ResolveExit runs Decode only on the remaining lines, to find progress.
+// It decodes only type and part.text, so a malformed field elsewhere (a
+// fractional timestamp, a bad token count) still counts, where Decode would
+// drop the line to KindUnparsed. part.text stays only for parity with the
+// legacy decode: an error line whose part.text is not a string does not
+// count. ResolveExit runs Decode only on the other lines.
 func isErrorEvent(line string) bool {
 	var ev struct {
 		Type string `json:"type"`

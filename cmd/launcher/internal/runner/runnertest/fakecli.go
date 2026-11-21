@@ -26,10 +26,8 @@ type Call struct {
 }
 
 // NewFakeCLI writes a stub runtime binary that records each invocation's argv
-// to call-NN.txt (zero-indexed) in a temp dir and exits/prints per the scripted
-// calls in order. Once the invocation count exceeds len(calls), the last
-// scripted call repeats. Returns the script path and the dir holding the
-// recorded calls.
+// to call-NN.txt (zero-indexed) in dir and answers per the scripted calls in
+// order, repeating the last one once they run out.
 func NewFakeCLI(t *testing.T, calls ...Call) (script, dir string) {
 	t.Helper()
 	if len(calls) == 0 {
@@ -57,10 +55,8 @@ func NewFakeCLI(t *testing.T, calls ...Call) (script, dir string) {
 }
 
 // NewFakeCLIBySubcommand is NewFakeCLI keyed on the invocation's first
-// argument (the runtime subcommand: inspect, run, ps, rm, ...) instead of its
-// position, so a test mixing subcommands on one adapter needs no call-order
-// bookkeeping. It records argv to the same call-NN.txt files, so ReadCall and
-// CallCount work unchanged. A subcommand with no scripted Call fails with exit
+// argument (the runtime subcommand) instead of its position, recording to the
+// same call-NN.txt files. A subcommand with no scripted Call fails with exit
 // 127 and a stderr message naming it.
 func NewFakeCLIBySubcommand(t *testing.T, calls map[string]Call) (script, dir string) {
 	t.Helper()

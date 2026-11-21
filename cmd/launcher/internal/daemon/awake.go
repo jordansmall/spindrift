@@ -7,18 +7,13 @@ import (
 	"strings"
 	"time"
 
-	// time/tzdata embeds the IANA zone database in the binary, so an
-	// explicitly configured DAEMON_AWAKE_WINDOW zone resolves identically
-	// on a minimal host, in a CI runner, and inside the Nix build sandbox
-	// -- none of which is guaranteed to ship /usr/share/zoneinfo. Without
-	// this import, time.LoadLocation depends on the host's zoneinfo files
-	// and these very tests are not hermetic.
+	// Embeds the IANA zone database so a DAEMON_AWAKE_WINDOW zone resolves
+	// identically on a minimal host, in CI and in the Nix sandbox, none of
+	// which is guaranteed to ship /usr/share/zoneinfo.
 	_ "time/tzdata"
 )
 
-// windowPrefix names the operator knob every Window parse error belongs
-// to, so the operator can tell where the error came from wherever it
-// surfaces.
+// windowPrefix names the operator knob every Window parse error belongs to.
 const windowPrefix = "DAEMON_AWAKE_WINDOW: "
 
 // windowFormat is the strict "HH:MM-HH:MM Zone" shape: two-digit hour,
@@ -27,11 +22,9 @@ const windowPrefix = "DAEMON_AWAKE_WINDOW: "
 var windowFormat = regexp.MustCompile(`^([0-9]{2}):([0-9]{2})-([0-9]{2}):([0-9]{2}) (\S+)$`)
 
 // Window is a daily local-time span, e.g. "sleep 22:00-06:00 London time".
-// start/end are minutes since local midnight rather than a time.Duration
-// or wall-clock struct: comparing "now" against the window reduces to two
-// integer comparisons, and the end < start wraparound case (a window that
-// crosses midnight) falls out of that comparison in Open rather than
-// needing a separate code path.
+// start/end are minutes since local midnight, so Open is two integer
+// comparisons and the end < start midnight wraparound needs no separate
+// path.
 type Window struct {
 	start, end int // minutes since local midnight, each in [0, minutesPerDay)
 	loc        *time.Location
@@ -42,12 +35,9 @@ type Window struct {
 // arithmetic wraps against.
 const minutesPerDay = 1440
 
-// ParseWindow parses the DAEMON_AWAKE_WINDOW knob. An empty (or
-// whitespace-only) string is not an error: it means no window is
-// configured, so the daemon is always awake, and ParseWindow reports that
-// with (nil, nil). Open and Until both give a nil *Window the always-awake
-// answer (see their comments) so the loop never has to branch on nil
-// itself at every call site.
+// ParseWindow parses the DAEMON_AWAKE_WINDOW knob. An empty or
+// whitespace-only string returns (nil, nil): no window, always awake, which
+// Open and Until answer for a nil *Window.
 func ParseWindow(raw string) (*Window, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
@@ -84,9 +74,8 @@ func ParseWindow(raw string) (*Window, error) {
 }
 
 // clockMinutes converts a regex-captured two-digit hour/minute pair into
-// minutes since midnight. The regex already guarantees exactly two ASCII
-// digits each, so strconv.Atoi cannot fail here; only the range remains to
-// check.
+// minutes since midnight. The regex guarantees the digits, so only the range
+// is checked.
 func clockMinutes(hh, mm string) (int, error) {
 	h, _ := strconv.Atoi(hh)
 	m, _ := strconv.Atoi(mm)
@@ -99,9 +88,8 @@ func clockMinutes(hh, mm string) (int, error) {
 	return h*60 + m, nil
 }
 
-// Open reports whether the window is open at now. A nil Window is the
-// always-awake case: there's no configured window to be closed against,
-// so every instant is open.
+// Open reports whether the window is open at now; a nil Window is always
+// open.
 func (w *Window) Open(now time.Time) bool {
 	if w == nil {
 		return true
@@ -110,8 +98,7 @@ func (w *Window) Open(now time.Time) bool {
 	if w.start < w.end {
 		return minutes >= w.start && minutes < w.end
 	}
-	// Wraps past midnight (e.g. 22:00-06:00): one continuous span from
-	// start through midnight to end, rather than two separate spans.
+	// Wraps past midnight (e.g. 22:00-06:00).
 	return minutes >= w.start || minutes < w.end
 }
 
@@ -138,19 +125,15 @@ const untilHorizon = 8 * 24 * time.Hour
 // It is 0 while the window is already open, including the nil-receiver
 // always-awake case.
 //
-// Otherwise it walks forward one zone period (a span of constant UTC
-// offset) at a time via ZoneBounds, computing the next start-of-window
-// wall clock by exact arithmetic within the period. Every DST wrinkle --
-// a skipped or repeated hour -- lives exactly at a period boundary, so
-// when the computed candidate would fall past the boundary, Until checks
-// Open at the boundary instant itself instead: that's what makes a
-// window opening mid-skip resolve to the transition, and a window
-// re-opening inside a repeated hour get seen at all.
+// Otherwise it walks forward one zone period (constant UTC offset) at a
+// time via ZoneBounds. Every DST skip or repeat lies at a period boundary,
+// so when the computed candidate falls past one, Until checks Open at the
+// boundary instant instead: a window opening mid-skip resolves to the
+// transition, and one re-opening inside a repeated hour is seen at all.
 //
-// exhausted is true only when the walk runs past untilHorizon without
-// finding an opening, so a caller can tell that degraded case apart from
-// a genuine long park; wait is then untilHorizon, a re-check interval
-// rather than an opening.
+// exhausted is true only when the walk passes untilHorizon without an
+// opening, so a caller can tell it from a genuine long park; wait is then
+// untilHorizon, a re-check interval.
 func (w *Window) Until(now time.Time) (wait time.Duration, exhausted bool) {
 	if w == nil || w.Open(now) {
 		return 0, false

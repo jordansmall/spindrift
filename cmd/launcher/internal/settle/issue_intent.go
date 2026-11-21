@@ -70,31 +70,21 @@ func ensureFilingLabel(it forge.IssueTracker, name string, known *[]string) {
 	}
 }
 
-// maxConcurrenceLen bounds Concurrence in grapheme clusters, the
-// visible-length unit, so truncation never splits a user-perceived
-// character (an emoji ZWJ sequence, a base rune and its combining marks).
-// maxConcurrenceBytes is the cap that actually bounds size: a single
-// grapheme cluster can carry unboundedly many combining marks, so a
-// cluster count alone doesn't stop one finding's note from ballooning
-// arbitrarily -- the reason signalwire.ValidClass bounds Class applies here
-// too, this text is Box-supplied prose interpolated into a host-authored
-// note. 1024 keeps the note a small slice of GitHub's 65,536-character
-// issue-body cap.
+// maxConcurrenceLen bounds Concurrence in grapheme clusters, so truncation
+// never splits a user-perceived character. maxConcurrenceBytes is what
+// actually bounds size, since one cluster can carry unboundedly many combining
+// marks, and this Box-supplied prose lands in a host-authored note; 1024 is a
+// small slice of GitHub's 65,536-character body cap.
 const (
 	maxConcurrenceLen   = 200
 	maxConcurrenceBytes = 1024
 )
 
-// sanitizeConcurrence truncates s to at most maxConcurrenceLen grapheme
-// clusters and at most maxConcurrenceBytes bytes, cutting only at a
-// grapheme-cluster boundary, and neutralizes backticks. Only an oversized
-// first cluster yields "", which fails closed: internal/butler's
-// promotion.concurred method rejects a blank concurrence. An oversized
-// later cluster just ends the result at the preceding boundary, an ordinary
-// truncated fragment. internal/butler's promotionNote quotes the result
-// inside a markdown code span; with every backtick gone the Box text can't
-// close that span early, so the span keeps swallowing whatever formatting
-// -- @mentions, links, emphasis, inline HTML -- the Box text tries to spoof.
+// sanitizeConcurrence truncates s to both caps at a grapheme-cluster boundary
+// and neutralizes backticks. Only an oversized first cluster yields "", which
+// fails closed: internal/butler rejects a blank concurrence. With no backtick
+// left, the text cannot close the code span promotionNote quotes it in, so
+// spoofed @mentions, links or HTML stay inert.
 func sanitizeConcurrence(s string) string {
 	s = strings.ReplaceAll(s, "`", "'")
 	lastEnd := 0
@@ -110,11 +100,9 @@ func sanitizeConcurrence(s string) string {
 }
 
 // parseIssueIntent decodes one raw SPINDRIFT_ISSUE_INTENT payload, already
-// base64-decoded and nonce-verified by outcome.AllIssueIntentLinesInLog, and
-// re-validates it defensively: the log carrier reaches settle unchecked, and
-// a socket payload already passed Validate, plus the socket's own type
-// requirement and its blank-dedup-term pruning. Any reject skips the whole
-// intent, so an illegal Class is never silently dropped from one.
+// base64-decoded and nonce-verified, and re-validates it: the log carrier
+// reaches settle unchecked. Any reject skips the whole intent, so an illegal
+// Class is never silently dropped from one.
 func parseIssueIntent(raw string) (issueIntent, *signalwire.Reject) {
 	var in issueIntent
 	if err := json.Unmarshal([]byte(raw), &in); err != nil {
@@ -136,11 +124,8 @@ func ParseIssueIntent(raw string) (signalwire.IssueIntent, bool) {
 }
 
 // filedIntent is the outcome of filing one issue-intent: a URL on success,
-// Failed with the intent's own body so a caller can degrade it into inline
-// comment text rather than dropping it silently, or Skipped when a dedup key
-// already matched an open or closed finding issue, or an earlier intent this
-// same run (issue #3609) -- never posted, so it has no URL and no Body to
-// render.
+// Failed with the body kept so a caller can render it inline, or Skipped on a
+// dedup match (issue #3609), with neither URL nor Body.
 type filedIntent struct {
 	Title   string
 	URL     string
@@ -148,14 +133,10 @@ type filedIntent struct {
 	Body    string
 	Skipped bool
 	// DupRef is a comma-joined, display-only list of every reference
-	// covering the intent -- each "#<number>" (an open or closed backlog
-	// finding issue) or this run's "<title>" (an intent this run filed,
-	// matched exactly or by overlapping line range), possibly mixed in one
-	// value -- so a Skipped entry can name what it matched (issue #3811).
-	// It is a string, not a typed reference set, because its one renderer,
-	// buildSkippedIssuesSection, never branches on kind; split it only for
-	// a renderer that must treat a backlog "#<number>" differently from a
-	// this-run peer (issue #3831).
+	// covering the intent, backlog "#<number>" issues and this run's
+	// "<title>" peers mixed, so a Skipped entry names its match (issue
+	// #3811). A string because its one renderer never branches on kind
+	// (issue #3831).
 	DupRef string
 }
 
@@ -189,20 +170,11 @@ func fileIssueIntentsDetailed(progress Progress, it forge.IssueTracker, num stri
 }
 
 // fileIssueIntentsDetailedFunc is fileIssueIntentsDetailed's per-intent sibling
-// (issue #3875): decorate is computed from each intent rather than fixed
-// once, so a caller like internal/butler's settle step can name that intent's
-// own files in its backlink. It also returns extraLabels -- labels beyond the
-// provenance and type labels this function already applies, e.g. the Butler
-// Runner's own auto-promotion gate (issue #3880) adding "ready-for-agent" --
-// appended after them. The third return, onFiled, is called with the filed
-// issue's URL only after PostIssue actually succeeds -- never on a failed or
-// skipped intent -- so a caller that spends shared state (the Runner's
-// per-run promotion room) on deciding extraLabels can defer committing that
-// spend, and record which URL it was spent on, until the filing it was for
-// is real: a failed PostIssue must not burn the day's promotion room.
-// fileIssueIntentsDetailed delegates to this with a constant closure,
-// rather than the other way around, so callers with a fixed backlink keep the
-// plain (it, num, result, provenanceLabel, bodyBacklink string) shape.
+// (issue #3875): decorate runs per intent, returning its backlink, extraLabels
+// appended after the provenance and type labels (e.g. the Butler's
+// auto-promotion "ready-for-agent", issue #3880), and onFiled, called with the
+// URL only once PostIssue succeeds, so a failed filing never burns the
+// Butler's per-run promotion room.
 func fileIssueIntentsDetailedFunc(progress Progress, it forge.IssueTracker, num string, result dispatch.Result, provenanceLabel string, dedup DedupPolicy, decorate func(issueIntent) (bodyBacklink string, extraLabels []string, onFiled func(url string))) []filedIntent {
 	if !result.IssueIntentsFound {
 		return nil
@@ -214,29 +186,22 @@ func fileIssueIntentsDetailedFunc(progress Progress, it forge.IssueTracker, num 
 		return degradeIssueIntents(num, result, fmt.Sprintf("tracker %T cannot file issues host-side (no HostPostedIssueFiler capability)", it))
 	}
 	// A blank label means the settle was built without its kind's descriptor;
-	// filing under it would leave each finding outside the provenance label
-	// the dedup and triage queues key on. Failed with the body kept degrades
-	// the finding inline, like any other filing failure.
+	// filing would leave each finding outside the label dedup and triage key on.
 	if provenanceLabel == "" {
 		return degradeIssueIntents(num, result, "no provenance label (a construction bug: the settle was built without a dispatch kind's finding label)")
 	}
-	// Hoisted out of the loop: N findings would otherwise cost N ListLabels
-	// round trips. A listErr is non-fatal: ensureLabel falls back to its own
-	// create-then-recheck path.
+	// Listed once per pass, not per finding. A listErr is non-fatal:
+	// ensureLabel falls back to create-then-recheck.
 	existingLabels, listErr := it.ListLabels()
 	if listErr != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: list labels failed: %v\n", num, listErr)
 	}
-	// Backlog dedup keys (issue #3609; closed findings too as of #3873), built
-	// at most once per pass for the same reason ListLabels is hoisted -- N
-	// findings would otherwise cost N pairs of backlog list round trips -- but
-	// lazily, since a payload whose intents carry no keys can never match
-	// anything the list returns. backlogDedupIndex yields a non-nil map even
-	// on failure, so the nil check below is a true once-only memo. Grown in
-	// place as this run files its own intents, so a duplicate pair within one
-	// payload dedups too, not just against the backlog. runKeys is that
-	// within-run subset, kept apart so applyRunLineOverlap never matches a
-	// line overlap against the backlog (issue #4108).
+	// Backlog dedup keys (issue #3609; closed findings too, #3873), built
+	// lazily at most once per pass: an intent with no keys can never match.
+	// backlogDedupIndex never returns nil, so the nil check is a true memo.
+	// dedupIndex grows as this run files, so duplicates within one payload
+	// dedup too; runKeys is that within-run subset, so line overlap never
+	// matches the backlog (issue #4108).
 	var dedupIndex map[string]string
 	runKeys := make(map[string]string)
 	var out []filedIntent
@@ -262,21 +227,16 @@ func fileIssueIntentsDetailedFunc(progress Progress, it forge.IssueTracker, num 
 		applyRunLineOverlap(dedupIndex, runKeys, keys)
 		ov := matchDedup(dedupIndex, keys)
 		if ov.full {
-			// Every covering ref, not just the first: per-site dedup lets
-			// several references -- backlog issues, this run's peers, or
-			// both -- jointly cover one intent, so a DupRef naming one of
-			// them would point a reader at a partial answer.
+			// Every covering ref: per-site dedup lets several references
+			// jointly cover one intent.
 			ref := strings.Join(ov.refs, ", ")
 			progress.Step(Step{Key: num, Detail: fmt.Sprintf("skipped duplicate issue-intent: %q (already tracked: %s)", in.Title, ref)})
 			out = append(out, filedIntent{Title: in.Title, Skipped: true, DupRef: ref})
 			continue
 		}
-		// A partial overlap still files (issue #3808): the tally stays an
-		// ordinary ok, but the run's output would otherwise go silent on the
-		// fact that some of the finding's sites were already tracked -- the
-		// same visibility #3609 required for a full skip. The covered keys
-		// are bracketed because both halves of the line are lists: without
-		// it, "site a, site b via #501, #502" reads as one four-item list.
+		// A partial overlap still files (issue #3808) but says so. The
+		// covered keys are bracketed because both halves are lists: "site a,
+		// site b via #501, #502" would read as one four-item list.
 		if ov.partial() {
 			progress.Step(Step{Key: num, Detail: fmt.Sprintf("filing issue-intent %q despite partial dedup overlap (already tracked: [%s] via %s)", in.Title, strings.Join(ov.covered, ", "), strings.Join(ov.refs, ", "))})
 		}
@@ -285,17 +245,13 @@ func fileIssueIntentsDetailedFunc(progress Progress, it forge.IssueTracker, num 
 		if link != "" {
 			body = in.Body + "\n\n" + link
 		}
-		// The launcher's own marker goes last unconditionally, even carrying
-		// no terms: parseDedupMarker is last-wins, so omitting it would let a
-		// marker line quoted in body prose speak for this issue's key set.
-		// On a partial overlap the marker deliberately carries the
-		// already-covered term too: both issues are then valid "already
-		// tracked" answers, and the next run sees full coverage and skips.
-		//
-		// A finding wearing a Chore's finding label also carries that Chore's
-		// choreTerm, so PriorFindings can list it on any tracker and local's
-		// merge hold can recognise it without the label; deriving the term
-		// from the label keeps the two from diverging.
+		// The launcher's marker goes last even with no terms: parseDedupMarker
+		// is last-wins, so omitting it would let a marker quoted in body prose
+		// speak for this issue. On a partial overlap it keeps the covered terms
+		// too, so the next run sees full coverage and skips. A Chore's finding
+		// also carries its choreTerm, so PriorFindings and the merge hold can
+		// recognise it without the label; deriving it from the label keeps the
+		// two from diverging.
 		markerTerms := terms
 		for _, row := range catalogRows() {
 			if wearsFindingLabel(row, extraLabels) {
@@ -322,13 +278,9 @@ func fileIssueIntentsDetailedFunc(progress Progress, it forge.IssueTracker, num 
 			out = append(out, filedIntent{Title: in.Title, Failed: true, Body: in.Body})
 			continue
 		}
-		// Added only on a successful filing (not on failure): a transient
-		// PostIssue error must not suppress a retry of the same intent within
-		// this run.
-		//
-		// markdownInlineText, which buildSkippedIssuesSection applies to the
-		// dedup ref, is the primary guard against a line break in this
-		// reference; %q also keeps it newline-free.
+		// Only a successful filing indexes its keys: a transient PostIssue
+		// error must not suppress a retry within this run. %q keeps the ref
+		// newline-free, backing up markdownInlineText.
 		ref := fmt.Sprintf("this run's %q", in.Title)
 		for k := range keys {
 			dedupIndex[k] = ref
@@ -342,19 +294,16 @@ func fileIssueIntentsDetailedFunc(progress Progress, it forge.IssueTracker, num 
 	return out
 }
 
-// filedTally is one run's issue-filing volume. A failed filing is counted
-// apart from a successful one so a run that tried and failed does not read as
-// a quiet run (issue #3608). skipped counts a dedup match (issue #3609)
-// separately from both: neither a success nor a failure, so folding it into
-// either would misreport which of the three actually happened.
+// filedTally is one run's issue-filing volume. Failures count apart so a run
+// that tried and failed does not read as quiet (issue #3608), and a dedup
+// skip (issue #3609) is neither success nor failure.
 type filedTally struct {
 	ok      int
 	failed  int
 	skipped int
 }
 
-// tallyFiled counts filed by filedIntent.Failed/Skipped. A nil/empty slice
-// yields the zero tally, not an error.
+// tallyFiled counts filed by filedIntent.Failed/Skipped.
 func tallyFiled(filed []filedIntent) filedTally {
 	var t filedTally
 	for _, f := range filed {
@@ -370,9 +319,8 @@ func tallyFiled(filed []filedIntent) filedTally {
 	return t
 }
 
-// String renders as comma-joined name:count pairs (issue #3608) rather than
-// a fixed "ok/failed" shape, so skipped:<N> (issue #3609) slots in as one
-// more pair instead of a breaking format change.
+// String renders comma-joined name:count pairs (issues #3608, #3609), so a new
+// count is one more pair rather than a format change.
 func (t filedTally) String() string {
 	return fmt.Sprintf("ok:%d,failed:%d,skipped:%d", t.ok, t.failed, t.skipped)
 }
@@ -386,11 +334,8 @@ func reportFiled(progress Progress, num string, filed []filedIntent) {
 }
 
 // postSkippedComment posts a standalone "## Skipped (deduplicated)" comment
-// for num when filed carries a dedup skip, a no-op otherwise. The work path
-// (gate.go), unlike research.go, has no filed-issues verdict comment to append
-// the section to, so it posts standalone -- see buildSkippedIssuesSection for
-// why the skip needs a comment at all. Best-effort, matching postUsageComment's
-// log-but-don't-propagate contract.
+// for num when filed carries a dedup skip: unlike research, the work path has
+// no verdict comment to append it to. Best-effort.
 func postSkippedComment(it forge.IssueTracker, num string, filed []filedIntent) {
 	section := buildSkippedIssuesSection(filed)
 	if section == "" {

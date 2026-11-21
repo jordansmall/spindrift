@@ -7,11 +7,9 @@ import (
 	"testing"
 )
 
-// NewTestSocket deliberately avoids t.TempDir(): that helper's directory embeds
-// the full test name, and under a nix build sandbox the build root is already
-// long, so the two together can exceed AF_UNIX's ~108-byte sun_path limit
-// (net.Listen then fails with "bind: invalid argument"). A short os.MkdirTemp
-// prefix keeps the path under the limit whatever the test name.
+// NewTestSocket avoids t.TempDir(), whose path embeds the test name: under a
+// nix build sandbox's long root that can exceed AF_UNIX's ~108-byte sun_path
+// limit ("bind: invalid argument").
 func NewTestSocket(t *testing.T, name string) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "sock-")

@@ -11,8 +11,7 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 )
 
-// Clock is the injectable time seam, owned by the retry leaf (issue #2154);
-// this alias keeps every existing dispatch constructor compiling unchanged.
+// Clock is the injectable time seam, owned by the retry leaf (issue #2154).
 type Clock = retry.Clock
 
 // RealClock returns a Clock backed by the real time.Now and time.Sleep.
@@ -30,9 +29,7 @@ type Factory struct {
 	cache  *cache
 
 	// genMu guards agentGeneration: a store-closure staleness hot-swap (issue
-	// #2682) can land at any time, including concurrently with New() and with
-	// an already-launched Box's own in-flight Run(), so a mutex is required
-	// where cfg, fixed at construction, needs none.
+	// #2682) can land concurrently with New() and an in-flight Run().
 	genMu           sync.RWMutex
 	agentGeneration *runner.AgentGeneration
 
@@ -68,10 +65,8 @@ func (f *Factory) New(number, title string) *Dispatch {
 	return f.newDispatch(issueSubject(number, title))
 }
 
-// newDispatch is the single construction path New and NewChore share (issue
-// #3954): it derives the Dispatch's log/lock/cache key from subj.key.String()
-// rather than taking one from the caller, so the key and subj can never
-// drift apart.
+// newDispatch derives the Dispatch's log/lock/cache key from subj rather than
+// taking one from the caller, so the two can never drift apart (issue #3954).
 func (f *Factory) newDispatch(subj subject) *Dispatch {
 	key := subj.key.String()
 	cfg := f.cfg
@@ -95,8 +90,7 @@ func (f *Factory) newDispatch(subj subject) *Dispatch {
 }
 
 // NewChore constructs a Dispatch for one one-shot butler run, keyed by
-// dispatchkey.Chore(c.Name) rather than a tracker issue number (ADR 0056);
-// buildBoxEnv reads subj.key.IsChore() to skip the issue-keyed env entirely.
+// dispatchkey.Chore(c.Name) rather than a tracker issue number (ADR 0056).
 func (f *Factory) NewChore(c Chore) *Dispatch {
 	d := f.newDispatch(choreSubject(c))
 	if !c.ClaimTime.IsZero() {
@@ -108,9 +102,9 @@ func (f *Factory) NewChore(c Chore) *Dispatch {
 
 // newNonce mints an unpredictable per-run nonce (issue #1937) that lets the
 // host tell a control-signal line produced by this run's own Box from one an
-// untrusted issue or comment author echoed into the log; a predictable or
-// reused value would defeat that. crypto/rand.Read only fails when the OS
-// entropy source is broken, so this panics rather than threading an error.
+// untrusted issue or comment author echoed into the log. crypto/rand.Read
+// fails only when the OS entropy source is broken, so this panics rather than
+// threading an error.
 func newNonce() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
@@ -126,10 +120,8 @@ func (f *Factory) Cleanup() {
 }
 
 // SetAgentGeneration overrides the agent-closure generation every Box launched
-// afterward binds (issue #2682, the store-closure Box-only staleness
-// hot-swap). A hot-swap must be able to land mid-run, so the mutex is what
-// keeps a concurrent set and read safe. A nil gen restores the runner
-// adapter's own startup-baked default.
+// afterward binds (issue #2682, the store-closure staleness hot-swap). A nil
+// gen restores the runner adapter's own startup-baked default.
 func (f *Factory) SetAgentGeneration(gen *runner.AgentGeneration) {
 	f.genMu.Lock()
 	defer f.genMu.Unlock()
@@ -137,10 +129,8 @@ func (f *Factory) SetAgentGeneration(gen *runner.AgentGeneration) {
 }
 
 // AgentGeneration returns the agent-closure generation this Factory carries,
-// nil until SetAgentGeneration is called, meaning "use the runner adapter's own
-// startup-baked default". New() snapshots it into each Dispatch, so a swap that
-// lands mid-run only affects Boxes launched by a Dispatch minted after it,
-// never one already in flight.
+// nil meaning the runner adapter's own default. New() snapshots it into each
+// Dispatch, so a swap never affects a Dispatch already in flight.
 func (f *Factory) AgentGeneration() *runner.AgentGeneration {
 	f.genMu.RLock()
 	defer f.genMu.RUnlock()

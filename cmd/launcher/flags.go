@@ -28,11 +28,10 @@ func printVersion(w io.Writer) {
 }
 
 // doctorFlagArgs parses doctor's own args: --verbose or -v requests the full
-// report (issue #3777); --butler additionally validates the butler config,
-// folding a failure into doctor's config-invalid exit (issue #3920). Unlike
-// parseIssuePositionals, doctor takes no positionals of its own, so any
-// other token — flag or bare word — is a usage error; ok is false
-// exactly when badArg holds that token.
+// report (issue #3777); --butler also validates the butler config, folding a
+// failure into doctor's config-invalid exit (issue #3920). doctor takes no
+// positionals, so any other token is a usage error; ok is false exactly when
+// badArg holds it.
 func doctorFlagArgs(args []string) (opts doctorOptions, badArg string, ok bool) {
 	for _, a := range args {
 		switch a {
@@ -61,10 +60,9 @@ type issueArgs struct {
 
 // parseIssuePositionals strips the dispatch-only booleans shared by every
 // issue-taking verb (issue #3054): --no-build, --yes (aliased by --force), and
-// --self-contained (issue #2202). Stripping them is the only filtering it
-// does, and callers use remaining directly as the issue-ID list (issue
-// #3055): recover accepts opaque, non-numeric identifiers such as Jira keys
-// and local-forge slugs, so any filter here would silently narrow it.
+// --self-contained (issue #2202). It filters nothing else: callers use
+// remaining as the issue-ID list (issue #3055), and recover accepts opaque IDs
+// such as Jira keys and local-forge slugs that any filter would drop.
 func parseIssuePositionals(args []string) issueArgs {
 	var parsed issueArgs
 	for _, a := range args {
@@ -176,11 +174,10 @@ func verbIndex(args []string) int {
 }
 
 // splitVerb separates the verb from the rest of args. rest holds the post-verb
-// args first, then the leading pass-through flags that preceded the verb:
-// handlers such as registry read their own first positional, so the verb's
-// own args must lead. The consequence is that a handler's "unrecognized
-// argument" error names a bad post-verb token before a bad leading flag.
-// verb is "" and rest nil when args has no verb.
+// args first, then the leading pass-through flags: handlers such as registry
+// read their own first positional, so the verb's args must lead (a handler's
+// "unrecognized argument" error then names a bad post-verb token first). verb
+// is "" and rest nil when args has no verb.
 func splitVerb(args []string) (verb string, rest []string) {
 	i := verbIndex(args)
 	if i < 0 {
@@ -202,13 +199,11 @@ func verbSoFar(remaining []string) string {
 }
 
 // cliFlag is one row of the non-schema flag table generated from
-// lib/cli-flags.nix. verb, when set, restricts the flag to follow that verb;
-// arg, when set, means the flag consumes the next token as its value. short is
-// the single-letter -x form. intercepted rows are acted on by mainRun before
-// parseFlags, so lookupCliFlag skips them and parseFlags rejects them. They
-// still sit in cliFlags, so any new parser-side consumer of it must filter on
-// !f.intercepted as lookupCliFlag does; help rendering lists them all, like
-// the man page. doc is the one-line description shown there.
+// lib/cli-flags.nix. verb restricts the flag to follow that verb; arg means it
+// consumes the next token as its value; short is the -x form; doc is its help
+// line. intercepted rows are acted on by mainRun before parseFlags (which
+// rejects them), so any parser-side consumer of cliFlags must skip them as
+// lookupCliFlag does; help lists them all, like the man page.
 type cliFlag struct {
 	flag, verb, arg, short, doc string
 	intercepted                 bool
@@ -341,14 +336,13 @@ func scanFlags(args []string) (flagScan, error) {
 }
 
 // parseFlags splits args into the verb arguments and the schema-flag tokens.
-// Schema flags are never written to the environment: they are returned in
-// order (a value flag's token and its value, a bool's single token) for
+// Schema flags never reach the environment: they are returned in order for
 // inputdoc.Resolve, which ranks them over the document and schema default
 // (ADR 0020). Only tokens classified here reach Resolve, so a verb flag's
-// value or anything after "--" is never mistaken for a knob (#6707). The
-// secret --*-file/--*-cmd flags are the exception: secrets are read from the
-// process environment by design, so those still land there. An unrecognised
-// --flag is an error; non-flag args and everything after "--" pass through.
+// value or anything after "--" is never mistaken for a knob (#6707). Secret
+// --*-file/--*-cmd flags are the exception and land in the environment, where
+// secrets are read by design. An unrecognised --flag is an error; non-flag
+// args and everything after "--" pass through in remaining.
 func parseFlags(args []string) (remaining, schemaArgs []string, err error) {
 	sc, err := scanFlags(args)
 	// Always overwrites the global (empty with no --secret-cmd or on a failed
@@ -412,13 +406,10 @@ func parseFlags(args []string) (remaining, schemaArgs []string, err error) {
 // changing parseFlags' signature.
 var globalSecretCmdTemplate string
 
-// connectorCredentialNeededThisRun reports whether this run reads through row:
-// the row is shadowed and its backend is the active CODE_FORGE or ISSUE_TRACKER,
-// or it is the active CODE_FORGE and backendkit.ForgeReadsThroughConnector, or
-// the active ISSUE_TRACKER and backendkit.TrackerReadsThroughConnector.
-// backendrows.Use keeps a row that is none of those (a jira Connector imported
-// by a Consumer whose ISSUE_TRACKER is not jira) that nothing reads, so the
-// SECRET_CMD template must not fetch, or fail on, its credential.
+// connectorCredentialNeededThisRun reports whether this run reads through row.
+// backendrows.Use keeps rows nothing reads (a jira Connector imported under a
+// non-jira ISSUE_TRACKER), and SECRET_CMD must not fetch, or fail on, their
+// credential.
 func connectorCredentialNeededThisRun(row backendrows.Row) bool {
 	isForge := resolvedKnob("CODE_FORGE") == row.Name
 	isTracker := resolvedKnob("ISSUE_TRACKER") == row.Name
@@ -531,13 +522,13 @@ func credentialRuleFor(rules []driver.CredentialRule, env string) (driver.Creden
 }
 
 // secretRequiredThisRun gates whether applySecretCmdFallback tries the global
-// template for env, so it never forces a vault lookup for a secret this run
-// does not use. rules are the active Driver's credential rules: a rule's
-// variables are tried whenever none has a value, even when no visible tier
-// applies the rule (a tier baked into the image can select github-copilot
-// invisibly to the launcher); applySecretCmdFallback tolerates that miss.
-// Reads CODE_FORGE and ISSUE_TRACKER through resolvedKnob, not os.Getenv, so a
-// value set only in the Consumer flake is seen (ADR 0020).
+// template for env, so it never forces a vault lookup for an unused secret.
+// rules are the active Driver's credential rules; a rule's variables are tried
+// whenever none has a value, even if no visible tier applies the rule (an
+// image-baked tier can select github-copilot invisibly);
+// applySecretCmdFallback tolerates that miss.
+// CODE_FORGE and ISSUE_TRACKER go through resolvedKnob so a flake-only value
+// is seen (ADR 0020).
 func secretRequiredThisRun(env string, rules []driver.CredentialRule) bool {
 	// Any one of a rule's variables satisfies validate(), so try the template
 	// only when none already has a value. The driver warning is main's to emit.

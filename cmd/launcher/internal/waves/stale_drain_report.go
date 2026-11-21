@@ -14,13 +14,11 @@ type StaleDrainReport struct {
 	DrainedAt    time.Time
 	FreeSlotSecs float64
 	// HeldBack counts issues that didn't launch solely because the run had
-	// already gone stale by the time they were reached. Queue.Pending()
-	// supplies it (#2939); headlessQueue filters through CountReady. What
-	// counts is a scope decision (#2778).
+	// already gone stale, from Queue.Pending() (#2939). What counts is a scope
+	// decision (#2778).
 	HeldBack int
-	// HeldBackUnknown is true when queue.Pending() errored at the moment of the
-	// stale verdict (#2678, #2939). Stdout() and HostLog() must render this
-	// distinctly from a confirmed zero.
+	// HeldBackUnknown is true when queue.Pending() errored at the stale
+	// verdict (#2678, #2939); it must render distinctly from a confirmed zero.
 	HeldBackUnknown bool
 }
 

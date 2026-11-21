@@ -46,12 +46,10 @@ func execClaude(argv []string, stdout, stderr io.Writer) int {
 	return fakeConfigExit
 }
 
-// orchestratorFake stands in for the in-box orchestrator on one pass.
-// It records its argv, reads only --prompt-file, --session-file and
-// --log-path (the rest, such as --handoff-file and --manifest-path, stay in
-// the record), and runs the Driver as `<fields of the session file> -p
-// <prompt file content>`: the shape the claude Driver's session flags and
-// prompt reach the CLI in. The Driver's stdout is teed to --log-path and the
+// orchestratorFake stands in for the in-box orchestrator on one pass. It
+// records its argv, reads only --prompt-file, --session-file and --log-path,
+// and runs the Driver as `<session file fields> -p <prompt>`, the shape the
+// claude Driver's CLI gets. The Driver's stdout is teed to --log-path and the
 // fake's own stdout; the Driver's exit code is the fake's.
 func orchestratorFake(args []string, stdout, stderr io.Writer, drive driverRunner) int {
 	var cfg OrchestratorConfig

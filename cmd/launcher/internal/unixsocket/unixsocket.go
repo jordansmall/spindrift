@@ -6,10 +6,8 @@ package unixsocket
 
 import "runtime"
 
-// sunPathCap takes goos as an argument so tests can cover both branches
-// whatever OS the test binary runs on. Darwin and Linux are the only
-// platforms spindrift targets, so Linux is the default case rather than a
-// "linux" match.
+// sunPathCap takes goos so tests cover both branches on any OS. spindrift
+// targets only Darwin and Linux, so Linux is the default case.
 func sunPathCap(goos string) int {
 	if goos == "darwin" {
 		return 104

@@ -96,14 +96,13 @@ func run(cfg execConfig, stdout io.Writer) (int, error) {
 		return 0, err
 	}
 
-	// A devShell that no longer evaluates cleanly at Driver-run time (even
-	// though box's devShell probe found one earlier) fails before the Driver
-	// writes anything, so an empty stream separates that from a genuine task
-	// failure, which always produces output. Relaunch once in the baked env.
+	// A devShell that no longer evaluates at Driver-run time (though box's
+	// probe found one earlier) fails before the Driver writes anything, so an
+	// empty stream separates that from a genuine task failure, which always
+	// produces output. Relaunch once in the baked env.
 	if cfg.devshell && rc != 0 && logFileEmpty(cfg.logPath) {
-		// This line only signals progress to whoever tails the box's stderr
-		// live, so docs/reference.md leaves it out of the operator-facing
-		// relaunch behavior on purpose (issue #1162, following up on #797 AC3).
+		// This line is progress for a live tail only; docs/reference.md omits
+		// it on purpose (issue #1162).
 		fmt.Fprintf(os.Stderr, "==> nix develop failed to launch Driver (rc=%d, empty stream) — relaunching in baked env\n", rc)
 		direct := cfg
 		direct.devshell = false

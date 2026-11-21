@@ -362,35 +362,29 @@ func New(routes []Route, rewriteRows []registryvocab.RewriteRow) (http.Handler, 
 			// gate secret, since upstream may be a third party (issue #4806).
 			pr.Out.Header.Del("Authorization")
 			pr.Out.Header.Del(registrymanifest.TCPSecretHeader)
-			// routeLogHandler.ServeHTTP computed the route and stripped
-			// remainder before calling in, so a 404 for an unmatched prefix
-			// never reaches here and the enforcement check and this join
-			// cannot drift apart over the same path.
+			// routeLogHandler.ServeHTTP selected the route before calling in,
+			// so the enforcement check and this join read the same path.
 			sel, ok := pr.In.Context().Value(selectedRouteContextKey{}).(selectedRoute)
 			if !ok {
-				// Unreachable: ServeHTTP always stashes a selectedRoute.
-				// Rewrite has no ResponseWriter to answer with, so leave
-				// pr.Out.URL untouched rather than call SetURL on the zero
-				// value's nil upstreamURL and panic. RoundTrip then errors
-				// on the schemeless URL and ErrorHandler returns a bare 502.
+				// Unreachable. Rewrite has no ResponseWriter, so leave
+				// pr.Out.URL untouched rather than SetURL a nil upstreamURL
+				// and panic; RoundTrip then fails and ErrorHandler 502s.
 				log.Printf("registryproxy: Rewrite ran without a selected route in context")
 				return
 			}
-			// Mutated before SetURL so its join uses this stripped remainder
-			// rather than the still-prefixed inbound path. The origin
-			// carries no path of its own (New rejects one that does), so the
-			// join is the remainder verbatim.
+			// Set before SetURL so its join uses the stripped remainder; the
+			// origin has no path (New rejects one), so the join is verbatim.
 			pr.Out.URL.Path = sel.path
 			pr.Out.URL.RawPath = sel.rawPath
 			// SetURL also points the outbound Host at the upstream, so a
 			// client-controlled Host never rides along with the credential.
 			pr.SetURL(sel.rs.upstreamURL)
 			pr.SetXForwarded()
-			// ReverseProxy.ServeHTTP runs cleanQueryParams before Rewrite,
-			// silently rewriting a semicolon-separated or malformed-escape
-			// query to "". Recompute from the untouched inbound raw query
-			// and the route's own (SetURL reset RawQuery from the mangled
-			// value), joining them as the legacy Director did.
+			// ReverseProxy.ServeHTTP's cleanQueryParams silently empties a
+			// semicolon-separated or malformed-escape query before Rewrite,
+			// and SetURL just reset RawQuery from that mangled value, so
+			// recompute from the untouched inbound raw query and the route's
+			// own.
 			inboundQuery := pr.In.URL.RawQuery
 			if sel.rs.upstreamQuery == "" || inboundQuery == "" {
 				pr.Out.URL.RawQuery = sel.rs.upstreamQuery + inboundQuery
@@ -493,9 +487,8 @@ func (h *routeLogHandler) modifyResponse(resp *http.Response) error {
 	}
 	if len(body) > maxRewriteBodyBytes {
 		// Over cap: relay untouched, splicing the bytes already read in front
-		// of the unread remainder instead of buffering the rest too. The cap
-		// exists so an oversized body is never fully held in memory. The line
-		// names the row and request path only, never the body or credential.
+		// of the unread remainder rather than buffering the rest. The log
+		// line never names the body or credential.
 		log.Printf("registryproxy: %s: body over %d bytes on %s, left unchanged", row.Name, maxRewriteBodyBytes, sel.requestPath())
 		resp.Body = &bodyWithClose{Reader: io.MultiReader(bytes.NewReader(body), resp.Body), closer: resp.Body}
 		return nil
@@ -613,7 +606,6 @@ func (h *routeLogHandler) streamRewrite(resp *http.Response, row *registryvocab.
 	resp.Header.Del("Content-Length")
 }
 
-// closerFunc adapts a function to io.Closer.
 type closerFunc func() error
 
 func (f closerFunc) Close() error { return f() }
@@ -654,10 +646,10 @@ type routeLogHandler struct {
 // success, which is the flood suppression exists to prevent.
 type routeFailureState struct {
 	firstFailureLogged bool
-	// The first, fully-logged failure's key: a later repeat of it must not
-	// also land in suppressedFailures (issue #3176 review finding). Only
-	// meaningful once firstFailureLogged is set, and that flag, not the zero
-	// key, is what distinguishes "no first failure yet" from one recorded.
+	// The first, fully-logged failure's key, so a repeat of it never lands in
+	// suppressedFailures (issue #3176). Meaningful only once
+	// firstFailureLogged is set; that flag, not the zero key, marks one as
+	// recorded.
 	firstFailureKey    failureKey
 	suppressedFailures map[failureKey]struct{}
 }
@@ -722,11 +714,9 @@ func (h *routeLogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		strippedPath = "/"
 	}
 
-	// Checked against strippedPath, not the raw inbound path: the enforced set
-	// describes subtrees relative to the upstream host's own root, which the
-	// path only resembles once the route-selecting segment is stripped (issue
-	// #3142). The static set is checked first, unlocked, since it is the cheap
-	// common case; h.mu is taken for the learned set (ADR 0047) on a miss.
+	// Checked against strippedPath: the enforced set is relative to the
+	// upstream host's root (issue #3142). The static set goes first, unlocked;
+	// h.mu is taken for the learned set (ADR 0047) only on a miss.
 	if !registryvocab.PathSet(sel.rs.enforcedPaths).Admits(strippedPath) && !h.learnedAdmits(sel.rs.prefix, strippedPath) {
 		http.Error(w, fmt.Sprintf(
 			"registry proxy: enforcement refused %s %s: not in the derived path-set (%s)",
@@ -803,8 +793,7 @@ func failureLogFields(r *http.Request) (prefix, method, path string, ok bool) {
 		return "", "", "", false
 	}
 	path = sel.path
-	// A request naming exactly "/<prefix>" maps to the route's own root,
-	// matching ServeHTTP's strippedPath.
+	// Matches ServeHTTP's strippedPath.
 	if path == "" {
 		path = "/"
 	}
@@ -924,15 +913,13 @@ func (p *Proxy) ListenAndServe(socketPath string) error {
 	return nil
 }
 
-// ListenAndServeTCP serves Handler on addr in the background. The caller owns
-// addr and nothing here narrows it: loopback ("127.0.0.1:0") is the safe
-// default, but the launcher deliberately binds every interface ("0.0.0.0:0")
-// because a Box on a docker bridge reaches the host at the bridge IP, not at
-// loopback. A TCP port has no filesystem permissions of its own, so every
-// request must present secret via registrymanifest.TCPSecretHeader before it
-// reaches Handler at all; New's Rewrite strips that header before forwarding
-// upstream. An empty secret would match an absent header, so it fails closed.
-// Call Addr to learn an ephemeral port's bound address.
+// ListenAndServeTCP serves Handler on addr in the background; Addr reports an
+// ephemeral port. Nothing here narrows addr: the launcher binds every
+// interface ("0.0.0.0:0") because a Box on a docker bridge reaches the host at
+// the bridge IP, not loopback. A TCP port has no filesystem permissions, so
+// every request must present secret via registrymanifest.TCPSecretHeader
+// (which New's Rewrite strips); an empty secret would match an absent header,
+// so it fails closed.
 func (p *Proxy) ListenAndServeTCP(addr, secret string) error {
 	if secret == "" {
 		return errors.New("registryproxy: refusing to listen on TCP with an empty secret")

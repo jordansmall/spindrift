@@ -1,17 +1,12 @@
-// Package connectortracker builds core's tracker reads (the forge.IssueTracker
-// list and issue reads and, when advertised, forge.CommentLister,
-// forge.NativeDepsReader, forge.BlockersLister, forge.IssueSearcher,
-// forge.LabeledBacklogLister, the Probe read, forge.StatusMappingChecker,
-// forge.IssueTypeChecker and forge.DemandCounter) from a tracker Connector,
-// over the 0.2 tracker primitives in sdk/tracker. A Connector that advertises
-// the transition and label-edit primitives performs the writes, while core keeps
-// every lifecycle decision (claim checks, the settled-label strip, fallback and
-// refusal, verdicts); any other write stays with the native adapter, which also
-// stays authoritative for every optional capability the protocol does not carry: the
-// result is a stack of forge.Unwrapper layers over the native adapter, so
-// forge.As reaches those capabilities through it. The check and demand
-// capabilities are the exception: they come only from the Connector, and are
-// absent when it omits them.
+// Package connectortracker builds core's forge.IssueTracker, and each optional
+// read capability the Connector advertises, from a tracker Connector over the
+// sdk/tracker primitives. A Connector advertising transition and label-edit
+// performs the writes while core keeps every lifecycle decision (claim checks,
+// the settled-label strip, fallback and refusal, verdicts). Any other write,
+// and any capability the protocol does not carry, falls to the native adapter
+// the caller passes, if any: the result is a stack of forge.Unwrapper layers
+// over it, so forge.As reaches through. The check and demand capabilities come
+// only from the Connector and are absent when it omits them.
 package connectortracker
 
 import (
@@ -52,12 +47,9 @@ type Target struct {
 }
 
 // Lifecycle resolves a Dispatch state to the selectors a Connector lists by.
-// A state may have a label, a native status, both, or neither.
-//
-// Statuses and IssueType feed the check capabilities (CheckMappedStatuses,
-// CheckIssueType): a caller selecting a Connector tracker for doctor fills them.
-// IssueType is also the type tracker.fileIssue files under, so a caller filing
-// through the Connector must fill it too.
+// A state may have a label, a native status, both, or neither. Statuses and
+// IssueType feed doctor's check capabilities; IssueType is also what
+// tracker.fileIssue files under.
 type Lifecycle struct {
 	Labels   forge.DispatchLabels
 	Statuses map[forge.DispatchState]string
@@ -229,10 +221,8 @@ type guestCall func(ctx context.Context, method string, params, result any) erro
 
 // Capabilities a tracker Connector advertises beyond "tracker".
 const (
-	// CapNativeDeps: the Connector serves tracker.nativeDeps.
 	CapNativeDeps = "tracker.nativeDeps"
-	// CapBlocks: the Connector serves tracker.blocks.
-	CapBlocks = "tracker.blocks"
+	CapBlocks     = "tracker.blocks"
 	// CapComments: the Connector serves tracker.comments and attests that each
 	// comment's minimized and minimizedReason are faithful. forge.IssueText
 	// drops minimized comments on that flag, and some trackers (GitHub REST)
@@ -260,8 +250,7 @@ const (
 	// names removed from an issue, oldest first. Core maps them to a lifecycle
 	// state for recover; the Connector knows nothing of that.
 	CapRemovedLabels = "tracker.removedLabels"
-	// CapSearchIssues: the Connector serves tracker.searchIssues.
-	CapSearchIssues = "tracker.searchIssues"
+	CapSearchIssues  = "tracker.searchIssues"
 	// CapLabeled: the Connector serves tracker.labeled, the open or closed
 	// issues carrying one label, newest first, with the close date and
 	// not-planned flag on closed ones. Core's finding dedup scan reads it; no
@@ -270,7 +259,6 @@ const (
 	// CapTransition: the Connector serves tracker.transition. With CapEditLabels
 	// it performs core's transitions and verdicts.
 	CapTransition = "tracker.transition"
-	// CapEditLabels: the Connector serves tracker.editLabels.
 	CapEditLabels = "tracker.editLabels"
 	// CapLabels: the Connector serves tracker.listLabels and tracker.createLabel,
 	// its label registry.
@@ -301,8 +289,8 @@ const (
 var projectKeyID = regexp.MustCompile(`^[A-Z][A-Z0-9_]*-[1-9][0-9]*$`)
 
 // reads serves the list and issue reads from a Connector and leaves every write
-// to the embedded native adapter, which the write layers override. It is the base
-// layer; the optional layers stack on it.
+// to the embedded native adapter (nil for a Connector-only tracker), which the
+// write layers override. It is the base layer; the optional layers stack on it.
 type reads struct {
 	forge.IssueTracker
 	call      guestCall
@@ -620,8 +608,8 @@ func (l searchLayer) SearchIssues(text string, state forge.IssueState, label str
 		if err != nil {
 			return nil, err
 		}
-		// The guest is not trusted to have applied the filters: a hit outside
-		// the requested state or label would be treated as a suppressing match.
+		// The guest is not trusted to filter: a hit outside the requested state
+		// or label would count as a suppressing match.
 		if iss.State != state || (label != "" && !slices.Contains(iss.Labels, label)) {
 			continue
 		}
@@ -679,14 +667,12 @@ func (l labeledLayer) ListIssuesWithLabels(state forge.IssueState, labels []stri
 	})
 }
 
-// walkLabeled walks one label by cursor: every call asks for DedupScanLimit and
-// core repeats it with the answer's next until next is empty, so a Connector
-// that never sets next (one that predates paging) gets one call. A page is
-// not trusted to honour the limit and is kept whole. A repeated cursor, or a
-// page whose issues were all read already, fails the label closed rather than
-// loop; a walk past the page or byte bound keeps what it read and warns, as an
-// error would drop the whole label. A bad number or state fails closed, as in
-// issue().
+// walkLabeled walks one label by cursor until next is empty, so a Connector
+// that predates paging gets one call. A page is kept whole whatever the limit.
+// A repeated cursor, or a page of only already-read issues, fails the label
+// closed rather than loop; passing the page or byte bound keeps what was read
+// and warns, as an error would drop the whole label. A bad number or state
+// fails closed, as in issue().
 func (l labeledLayer) walkLabeled(state forge.IssueState, source, label string) ([]forge.Issue, error) {
 	var issues []forge.Issue
 	sent := map[[sha256.Size]byte]bool{}
@@ -767,17 +753,19 @@ var (
 )
 
 // New builds core's tracker from a tracker Connector. writes answers every
-// write the Connector does not perform: transitions and verdicts unless it
+// write the Connector does not perform (transitions and verdicts unless it
 // advertises both CapTransition and CapEditLabels, the label registry unless
-// CapLabels, comments unless CapComment, issue filing unless CapFileIssue,
-// issue closing unless CapCloseIssue, and issue edits always. It also answers
-// every optional capability the protocol does not carry (see CapComments,
-// CapNativeDeps, CapBlocks, CapSearchIssues and CapLabeled); Probe stays with
-// it unless the Connector advertises CapProbe. The doctor and demand checks
-// (CapStatuses, CapCreateMeta, CapCount) and recover's prior-claim read
-// (CapRemovedLabels) are never answered natively.
-// Look capabilities up with forge.As. Calls run under context.Background()
+// CapLabels, comments unless CapComment, filing unless CapFileIssue, closing
+// unless CapCloseIssue, issue edits always), every optional read it omits, and
+// Probe unless CapProbe. The doctor and demand checks (CapStatuses,
+// CapCreateMeta, CapCount) and recover's prior-claim read (CapRemovedLabels)
+// are never answered natively. Calls run under context.Background()
 // because IssueTracker methods carry no context.
+//
+// writes is nil for a Connector-only tracker: an optional capability the
+// Connector omits is then absent, and a core IssueTracker method it does not
+// serve panics, so such a caller first checks the Connector advertises every
+// capability it uses.
 //
 // A 0.1 Connector predates the status selector, tracker.blocks and project-key
 // ids, so core ignores those capabilities for it and never sends a status.
@@ -1062,7 +1050,7 @@ type readKind int
 
 const (
 	singleRead readKind = iota
-	// listRead may leave state empty, as native github's list projection does.
+	// listRead may leave state empty, as the github Connector's list projection does.
 	listRead
 )
 

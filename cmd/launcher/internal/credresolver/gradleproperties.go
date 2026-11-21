@@ -8,10 +8,9 @@ import (
 )
 
 // gradlePropertiesValue returns the value of the first line naming key in
-// Java-properties-format content, and does no I/O itself. It does not
-// implement line continuations or "\uXXXX" escapes, because a registry
-// credential is a single-line token. A missing key or empty value is an
-// error, not an empty string, so the proxy never runs unauthenticated.
+// Java-properties content. Line continuations and "\uXXXX" escapes are not
+// implemented: a credential is a single-line token. A missing key or empty
+// value is an error, so the proxy never runs unauthenticated.
 func gradlePropertiesValue(content []byte, sourceName, key string) (string, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(content))
 
@@ -31,8 +30,7 @@ func gradlePropertiesValue(content []byte, sourceName, key string) (string, erro
 			return "", fmt.Errorf("registry proxy credential file %s has property %q but the value is empty", sourceName, key)
 		}
 		// A mid-value "\r" would reach the HTTP proxy at header-write time.
-		// Never print v here, matching the embedded-newline guards in
-		// rawFileResolver and execResolver.
+		// Never print v here.
 		if strings.ContainsAny(v, "\r\n") {
 			return "", fmt.Errorf("registry proxy credential file %s has property %q with an embedded newline", sourceName, key)
 		}
@@ -47,10 +45,9 @@ func gradlePropertiesValue(content []byte, sourceName, key string) (string, erro
 }
 
 // splitGradleProperty splits a line at the earliest of "=", ":", or a run of
-// whitespace, matching java.util.Properties. Splitting at the first "=" or ":"
-// anywhere in the line would cut inside a whitespace-separated value that
-// contains one, such as a password with a colon. A line with no separator
-// returns ok=false.
+// whitespace, matching java.util.Properties; splitting at the first "=" or ":"
+// would cut inside a whitespace-separated value such as a password with a
+// colon.
 func splitGradleProperty(line string) (key, value string, ok bool) {
 	idx := strings.IndexAny(line, "=: \t")
 	if idx < 0 {

@@ -1,14 +1,10 @@
 // Package shadowreplay replays an archived host Pass log through the shadow
 // comparator, so a Connector port can be checked against Passes that already
-// ran. The archive is the host's copy of the Box's merged stdout and stderr:
-// every Pass of a Dispatch, the Driver's lines verbatim between the ops the Box
-// and host interleave. Replay cuts each ended Pass's lines back out, keeps the
-// JSON-object ones (and blanks) since live shadow read only the CLI's stdout,
-// hands them to shadow.Run, and writes the comparison to a sidecar beside the
-// archive, opening with the archive's own dispatch_start. The archive itself is
-// only ever read. The residual gap is a non-JSON stdout line (live compared it,
-// replay drops it) or a JSON-object stderr line (replay compares it, live never
-// saw it).
+// ran. The archive is the host's copy of the Box's merged stdout and stderr.
+// Replay cuts each ended Pass's lines back out, keeps the JSON-object ones
+// (and blanks), hands them to shadow.Run, and writes a sidecar; the archive
+// is only read. Residual gap versus live: replay drops a non-JSON stdout line
+// live compared, and compares a JSON-object stderr line live never saw.
 package shadowreplay
 
 import (
@@ -48,15 +44,14 @@ func SidecarPath(archive string) string {
 }
 
 // Replay replays every ended Pass of the archive through native and the
-// Connector load builds from wasm, and writes the shadow ops of all of them, in
-// Pass order, to SidecarPath(archive), replacing an earlier replay. The
-// sidecar's first line is the archive's dispatch_start, verbatim. driver names
-// the Driver native is: an archive whose dispatch_start stamps another Driver,
-// or none, is skipped, since its lines are in another grammar or its Driver is
-// unproven. A Pass with no closing pass_usage was cut short and is not replayed.
-//
-// The archive does not record the CLI's raw exit code, so each Pass resolves its
-// exit against 0, and every shadow_summary is marked Replayed.
+// Connector load builds from wasm, and writes their shadow ops in Pass order
+// to SidecarPath(archive), replacing an earlier replay; the sidecar's first
+// line is the archive's dispatch_start, verbatim. driver names the Driver
+// native is: an archive whose dispatch_start stamps another Driver, or none,
+// is skipped, since its lines are in another grammar or its Driver is
+// unproven. A Pass with no closing pass_usage was cut short and is skipped.
+// The archive lacks the CLI's raw exit code, so each Pass resolves its exit
+// against 0 and every shadow_summary is marked Replayed.
 func Replay(ctx context.Context, driver string, native driverkit.Strategy, load shadow.Loader, wasm []byte, archive string) (Result, error) {
 	var (
 		ops       []hostop.SpindriftOp
@@ -99,10 +94,9 @@ func Replay(ctx context.Context, driver string, native driverkit.Strategy, load 
 		case op != nil:
 			// Every other host op: not a Driver line.
 		case cur != nil:
-			// The archive merges the Box's stdout and stderr; live shadow read
-			// stdout only. Both replayable Drivers print one JSON object per
-			// stdout line, so a non-JSON line is stderr (a CLI warning, driver-exec's
-			// "==> ..." banner) and is left out. Blanks stay: stdout can carry them.
+			// Live shadow read stdout only, and both replayable Drivers print one
+			// JSON object per stdout line, so a non-JSON line is stderr and is
+			// left out. Blanks stay: stdout can carry them.
 			if t := strings.TrimSpace(line); t != "" && !(t[0] == '{' && json.Valid([]byte(t))) {
 				return true
 			}

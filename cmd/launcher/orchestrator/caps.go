@@ -21,7 +21,7 @@ const (
 // is too small for reviewRounds to ever reach maxReviewRounds, so maxSlices
 // fires first and the loop stops for the wrong reason (issue #2460). The
 // threshold comes from simulating the real passmachine loop, not a formula,
-// which drifted out of sync once (issue #2548). Zero disables either cap.
+// which can drift out of sync (issue #2548). Zero disables either cap.
 func validateCaps(maxReviewRounds, maxSlices int, reviewPassEnabled bool) error {
 	if maxReviewRounds <= 0 || maxSlices <= 0 {
 		return nil
@@ -66,11 +66,10 @@ func simulateReviewRoundCapPass(maxReviewRounds int, reviewPassEnabled bool) (in
 	}
 	extraRounds := maxReviewRounds - 1
 	if extraRounds >= (math.MaxInt-pass1)/perRound {
-		// The real threshold would overflow int or come within perRound-1
-		// of MaxInt (where validateCaps' simPass+1 could wrap), so return
-		// MaxInt-1: minSlices then lands exactly on MaxInt and the
-		// comparison rejects every maxSlices below MaxInt instead of
-		// passing on a wrapped negative.
+		// The real threshold would overflow or come within perRound-1 of
+		// MaxInt, where validateCaps' simPass+1 could wrap. MaxInt-1 puts
+		// minSlices exactly on MaxInt, rejecting every smaller maxSlices
+		// instead of passing on a wrapped negative.
 		return math.MaxInt - 1, nil
 	}
 	return pass1 + extraRounds*perRound, nil
@@ -115,7 +114,7 @@ func capFiredPass(probeMaxReviewRounds int, reviewPassEnabled bool) (int, error)
 
 	passKind := passmachine.KindImplement
 	// Named phase so it does not shadow run.go's package-level landPhase()
-	// helper (issue #2548 review).
+	// helper (issue #2548).
 	phase := passmachine.LandPhaseActive
 	lastVerdict := passmachine.VerdictNone
 	for {
@@ -148,7 +147,7 @@ func capFiredPass(probeMaxReviewRounds int, reviewPassEnabled bool) (int, error)
 		}
 		// Compare the typed Cap field, not CapFired's prose string: that
 		// string doubles as operator-facing prompt text and can be reworded
-		// independently of this comparison (issue #2548 finding 3).
+		// independently of this comparison (issue #2548).
 		if d.Cap == passmachine.StopMaxReviewRoundsReached {
 			return pass, nil
 		}

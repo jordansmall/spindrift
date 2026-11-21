@@ -42,9 +42,8 @@ var _ Backend = Remote{}
 const butlerRefspec = "+" + RefPrefix + "*:" + RefPrefix + "*"
 
 // NewRemote returns a Remote whose scratch repo is scratch, git-init'ing it
-// bare if it is not already a repo, then syncing its mirror from url once --
-// the routine fetch, so nothing later needs to repeat it. cred (zero for none)
-// authenticates every git call against url.
+// bare if needed, then syncs its mirror from url: the run's one routine fetch.
+// cred (zero for none) authenticates every git call against url.
 func NewRemote(scratch, url string, cred gitexec.Credential, gitArgs ...string) (Remote, error) {
 	if err := exec.Command("git", "-C", scratch, "rev-parse", "--is-bare-repository").Run(); err != nil {
 		if out, err := exec.Command("git", "init", "--bare", "-q", scratch).CombinedOutput(); err != nil {
@@ -66,11 +65,10 @@ func NewRemote(scratch, url string, cred gitexec.Credential, gitArgs ...string) 
 	return r, nil
 }
 
-// sync fetches every Ledger ref from url into the scratch repo, so the
-// mirror picks up the remote's current state. A ref gone on the remote is
-// pruned locally; a ref never on the remote is simply absent (Local's
-// Read/History already treat that as a zero Tip). Called only from
-// NewRemote and from Append after a lost race, never routinely.
+// sync fetches every Ledger ref from url into the scratch repo, pruning any
+// gone on the remote; a ref never pushed stays absent, which Local's Read
+// already treats as a zero Tip. Called only from NewRemote and from Append
+// after a lost race or failed push, never routinely.
 func (r Remote) sync() error {
 	out, err := r.cred.Apply(gitexec.Cmd(r.gitArgs, "-C", r.repo, "fetch", "--prune", "-q", r.url, butlerRefspec)).CombinedOutput()
 	if err != nil {
@@ -101,17 +99,13 @@ func (r Remote) lsRemote(ref string) (string, error) {
 	return fields[0], nil
 }
 
-// Append builds the state commit on the mirror (mirror.Append's own
-// compare-and-swap) and, if that wins, pushes it under a --force-with-lease
-// keyed on old, so the compare-and-swap that counts happens on the remote.
-// Whenever the mirror and the remote may now disagree -- a lost race on
-// either side, or a failed push -- Append re-syncs the mirror before
-// returning, so a later Read sees where the remote actually stands. The
-// "one refs fetch per run" a caller may assume (issue #3995) holds only for
-// a race-free run; a lost race or failed push costs an extra re-sync. If
-// that re-sync itself fails (e.g. the network is down), the phantom commit
-// mirror.Append already wrote stays in the mirror until the next Append,
-// which loses its lease against the stale mirror and repairs it then.
+// Append builds the state commit on the mirror and, if that wins, pushes it
+// under a --force-with-lease keyed on old, so the compare-and-swap that counts
+// happens on the remote. After a lost race or failed push it re-syncs the
+// mirror so a later Read sees where the remote stands; the "one refs fetch
+// per run" (issue #3995) thus holds only for a race-free run. If that re-sync
+// fails, the phantom commit mirror.Append wrote stays in the mirror until the
+// next Append loses its lease and repairs it.
 func (r Remote) Append(chore, old string, s State, at time.Time) (string, error) {
 	newCommit, err := r.mirror.Append(chore, old, s, at)
 	if err != nil {
@@ -127,12 +121,11 @@ func (r Remote) Append(chore, old string, s State, at time.Time) (string, error)
 	refspec := fmt.Sprintf("%s:%s", newCommit, ref)
 	pushOut, err := r.cred.Apply(gitexec.Cmd(r.gitArgs, "-C", r.repo, "push", "-q", r.url, lease, refspec)).CombinedOutput()
 	if err != nil {
-		// The lease lost only if the remote ref has since moved off old
-		// (absent counts as "") to something other than our own newCommit;
-		// the remote can end up at newCommit despite the client seeing a
-		// push error (e.g. the connection drops after the server applies
-		// the update), and that is our own win, not a lost race. Any other
-		// push failure, including a failed re-query, is a real error.
+		// The remote can hold newCommit despite a push error (the connection
+		// dropped after the server applied it): that is our win. The lease lost
+		// only if the ref moved off old (absent counts as "") to something
+		// else; any other failure, including a failed re-query, is a real
+		// error.
 		cur, lsErr := r.lsRemote(ref)
 		if lsErr == nil && cur == newCommit {
 			return newCommit, nil

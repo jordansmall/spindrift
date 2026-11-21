@@ -30,13 +30,11 @@ type Strategy struct {
 	// remedies depend on cfg, its part of art, and the family's knobs, read
 	// through l; nil means none.
 	Prerequisites func(cfg Config, art inputdoc.Artifacts, l KnobLookup) []Prerequisite
-	// PrepareHotSwap prepares a realized store-closure (a /nix/store path) before
-	// a hot-swap binds it as the new agent generation; core calls it for every
-	// store-closure hot-swap, nixInBox or not (issue #5996), so a family can root
-	// the generation either way and keys nixInBox-only work off its nix-config
-	// artifact. nil means the family needs no preparation (ADR 0069 decision 2).
-	// art carries the daemon's startup-config artifacts a hot-swapped Box still
-	// mounts, which the family must keep alive alongside closure.
+	// PrepareHotSwap prepares a realized store-closure before a hot-swap binds
+	// it as the new agent generation, nixInBox or not (issue #5996); a family
+	// keys nixInBox-only work off its nix-config artifact. nil means none (ADR
+	// 0069 decision 2). art holds the startup-config artifacts a hot-swapped
+	// Box still mounts, which the family must keep alive alongside closure.
 	PrepareHotSwap func(art inputdoc.Artifacts, pwd, closure string) error
 	// RawNetworkKnobs returns the env names of the family's raw network knobs
 	// set in l, read through the family's own reader; core refuses a non-open

@@ -42,17 +42,14 @@ type Result struct {
 	// to name), or on a launcher eval/hash-derive failure. The non-convergence
 	// diagnostic (#2113) names it alongside the loaded value.
 	TipTag string
-	// LauncherFresh is true when no host-launcher rebuild would be needed. It
-	// is false (fail-closed) on every branch that returns before the launcher
-	// comparison is known, and true when flakeLauncherAttr is empty, because
-	// "not configured" is not "stale". Fresh requires both this and the image
-	// comparison.
+	// LauncherFresh is true when no host-launcher rebuild would be needed:
+	// false (fail-closed) until the comparison is known, true when
+	// flakeLauncherAttr is empty ("not configured" is not "stale"). Fresh
+	// requires both this and the image comparison.
 	LauncherFresh bool
 	// ImageFresh is true only when the image dimension matched, independent of
-	// the launcher dimension and of the overall Fresh verdict. False
-	// (fail-closed) on every branch that returns before the image comparison
-	// is known; once known it carries through the rest of Probe, including a
-	// launcher eval/hash-derive failure.
+	// the launcher dimension. False (fail-closed) until the image comparison
+	// is known; it then survives a launcher eval/hash-derive failure.
 	ImageFresh bool
 	// TipLauncherHash is the bare 32-char store hash flakeLauncherAttr would
 	// produce at the base tip. Empty when flakeLauncherAttr is empty or the

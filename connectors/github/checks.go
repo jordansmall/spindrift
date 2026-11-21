@@ -28,8 +28,7 @@ func trackerProbe(t tracker.Target) (int, error) {
 }
 
 // countMaxPages bounds the pages one count reads: past it a PR-heavy label
-// settles for an under-count rather than a request per page. It mirrors the
-// native adapter's demandMaxPages (cmd/launcher/internal/forge/github/demand.go).
+// settles for an under-count rather than a request per page.
 const countMaxPages = 5
 
 // countEntry is the last full walk of one first-page request: page 1's ETag to
@@ -56,13 +55,12 @@ func countQuery(q tracker.Query) string {
 	return s
 }
 
-// count sizes the open issues q names, pull requests excluded, mirroring the
-// native adapter's demand probe. Page 1 is conditional on the cached ETag
-// unless fresh, and a 304 returns the cached count. Deeper pages are read
-// unconditionally while pages are full (PRs share the endpoint), up to limit
-// issues (when limit > 0) and countMaxPages pages; the result is clamped to
-// limit. Page 1's ETag does not cover the deeper pages, so a cached count can
-// lag them.
+// count sizes the open issues q names, pull requests excluded. Page 1 is
+// conditional on the cached ETag unless fresh, and a 304 returns the cached
+// count. Deeper pages are read unconditionally while full (PRs share the
+// endpoint), up to limit issues (when limit > 0) and countMaxPages pages; the
+// result is clamped to limit. Page 1's ETag does not cover the deeper pages,
+// so a cached count can lag them.
 func count(t tracker.Target, q tracker.Query, limit int, fresh bool) (int, error) {
 	path := repoPath(t) + countQuery(q)
 	key := t.API + path

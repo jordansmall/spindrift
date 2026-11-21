@@ -14,14 +14,13 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
-// LookPathFunc is ResolveGate's injectable seam for the socat-on-PATH
-// check (issue #3141). Tests must stub it: the Nix go-test sandbox has no socat, so
-// a real exec.LookPath("socat") fails there though it succeeds on a developer machine.
+// LookPathFunc is ResolveGate's seam for the socat-on-PATH check (issue
+// #3141). Tests must stub it: the Nix go-test sandbox has no socat.
 type LookPathFunc func(file string) (string, error)
 
-// TCPSpawnFunc starts the TCP Forwarder (issue #3111) on 127.0.0.1:listenPort relaying
-// to upstreamHost:upstreamPort and returns its pid. It is injected so tests never
-// invoke the real one, which re-execs a binary detached.
+// TCPSpawnFunc starts the TCP Forwarder (issue #3111) on 127.0.0.1:listenPort
+// relaying to upstreamHost:upstreamPort and returns its pid. Injected because
+// the real one re-execs a binary detached.
 type TCPSpawnFunc func(upstreamHost string, upstreamPort int, secret string, listenPort int) (int, error)
 
 // GateDeps are ResolveGate's injected dependencies.
@@ -44,15 +43,12 @@ type PublishFunc func([]ecosystem.EnvExport) bool
 type gateOutcome int
 
 const (
-	// gateAbsent is an unset REGISTRY_PROXY_MANIFEST: the registry
-	// proxy is off for this dispatch and every mode gated on the manifest
-	// stays silent, the deliberate silence of issue #3082.
+	// gateAbsent is an unset REGISTRY_PROXY_MANIFEST: the proxy is off and
+	// every gated mode stays silent (issue #3082).
 	gateAbsent gateOutcome = iota
-	// gateUnusable is a manifest present but not deliverable as a
-	// live Forwarder: malformed manifest, an unmounted unix socket, missing
-	// socat, a missing REGISTRY_PROXY_TCP_SECRET, or EnsureForwarderReady
-	// failing. Every gated mode warns, naming the endpoint or the parse
-	// error, then skips its rewrite entirely, never a partial one (#3112).
+	// gateUnusable is a manifest that cannot yield a live Forwarder. Every
+	// gated mode warns, then skips its rewrite entirely, never a partial one
+	// (#3112).
 	gateUnusable
 	// gateReady is a confirmed-listening Forwarder at gate.port.
 	gateReady
@@ -65,13 +61,10 @@ type Gate struct {
 	outcome  gateOutcome
 	manifest registrymanifest.Manifest
 	port     int
-	// pid is set only on a gateReady outcome reached through an
-	// actual spawn; zero on every other outcome, including the
-	// already-ready short-circuit, which spawns nothing.
+	// pid is nonzero only when gateReady was reached through a spawn.
 	pid int
-	// reason explains a gateUnusable outcome, always naming the
-	// endpoint or the parse error. Callers append their own mode-specific
-	// "...skipped" tail.
+	// reason explains a gateUnusable outcome, naming the endpoint or the
+	// parse error; callers append their own "...skipped" tail.
 	reason string
 }
 
@@ -88,9 +81,6 @@ func isMountedSocket(path string) bool {
 func ResolveGate(w io.Writer, deps GateDeps) Gate {
 	g := resolveGate(deps)
 
-	// Logs the detached Forwarder child's PID so an operator can find it in the
-	// run log; the one call site both intree-apply and bindings modes share.
-	// Silent on the already-ready short-circuit (g.pid == 0): nothing spawned.
 	if g.outcome == gateReady && g.pid != 0 {
 		fmt.Fprintln(w, "==> registry proxy Forwarder pid "+strconv.Itoa(g.pid))
 	}
@@ -119,21 +109,18 @@ func resolveGate(deps GateDeps) Gate {
 			return Gate{outcome: gateUnusable, manifest: manifest, reason: "registry proxy endpoint " + endpointName + " is not mounted"}
 		}
 		forwarderSocketArg = socketPath
-		// The socat PATH check gates only the spawn path: an already-ready
-		// Forwarder needs socat not at all, so checking unconditionally would
-		// wrongly warn and skip everything for a Forwarder that is already up.
+		// Only the spawn path needs socat; an already-up Forwarder must not be
+		// skipped for lacking it.
 		if !probe(port) {
 			if _, err := lookPath("socat"); err != nil {
 				return Gate{outcome: gateUnusable, manifest: manifest, reason: "registry proxy endpoint " + endpointName + " is mounted but socat is not on PATH"}
 			}
 		}
 	case manifest.Endpoint.IsTCP():
-		// A TCP endpoint means the launcher decided the unix socket cannot
-		// cross into this Box (issue #3111). SpawnTCP re-execs a binary rather
-		// than shelling out, so there is no PATH check to gate here: a missing
-		// binary surfaces as an EnsureForwarderReady failure (warn-and-skip). The
-		// launcher only mints a TCP endpoint together with
-		// REGISTRY_PROXY_TCP_SECRET, so a missing secret is a misconfiguration.
+		// The launcher decided the unix socket cannot cross into this Box
+		// (issue #3111). SpawnTCP re-execs a binary, so no PATH check: a missing
+		// binary surfaces as an EnsureForwarderReady failure. The launcher always
+		// mints REGISTRY_PROXY_TCP_SECRET with a TCP endpoint.
 		secret := os.Getenv("REGISTRY_PROXY_TCP_SECRET")
 		if secret == "" {
 			return Gate{outcome: gateUnusable, manifest: manifest, reason: "registry proxy endpoint " + endpointName + " requires REGISTRY_PROXY_TCP_SECRET, which is not set"}
@@ -147,9 +134,7 @@ func resolveGate(deps GateDeps) Gate {
 			return deps.SpawnTCP(host, upstreamPort, secret, listenPort)
 		}
 	default:
-		// The zero Endpoint: Parse succeeds on valid JSON whose "endpoint"
-		// field was absent, so Endpoint never went through ParseEndpoint and
-		// json.Unmarshal had no error to raise over a missing field.
+		// The zero Endpoint: Parse accepts valid JSON with no "endpoint" field.
 		return Gate{outcome: gateUnusable, manifest: manifest, reason: "REGISTRY_PROXY_MANIFEST has no usable endpoint"}
 	}
 
@@ -164,11 +149,11 @@ func resolveGate(deps GateDeps) Gate {
 	return Gate{outcome: gateReady, manifest: manifest, port: port, pid: pid}
 }
 
-// resolveHomeConfigPath resolves row's HomeConfig to an on-disk path and creates its
-// parent directory, shared by BindHomes and applyRepoAwareHomeConfigs
-// so the two writes cannot drift (issue #3201). It returns ok == false, having
-// printed why, when both the Strategy's home var and $HOME are unset: concatenation would
-// otherwise resolve under the cwd, or to "/.gradle", which MkdirAll creates as root.
+// resolveHomeConfigPath resolves row's HomeConfig to an on-disk path and creates
+// its parent directory, shared by BindHomes and applyRepoAwareHomeConfigs so
+// the two writes cannot drift (issue #3201). It returns false, having printed
+// why, when both the home var and $HOME are unset: the path would otherwise
+// land under the cwd, or at "/.gradle", which MkdirAll creates as root.
 func resolveHomeConfigPath(stdout io.Writer, row ecosystem.Strategy, getenv func(string) string) (string, bool) {
 	hc := row.HomeConfig
 	home := getenv(hc.HomeEnvVar)
@@ -194,15 +179,13 @@ func ReadyGate(manifest registrymanifest.Manifest) Gate {
 	return Gate{outcome: gateReady, manifest: manifest, port: ForwarderPort}
 }
 
-// BindHomes is bindings mode: it computes the Go, npm, cargo and gradle env exports
-// from gate.port, hands them to publish, then writes each HomeConfig Strategy's home config.
-// publish runs before the home writes because the verb's env file was always written
-// first, so a failing home write still leaves it behind; it is not called when the
-// gate is closed or the manifest carries no route prefix. It returns false on a failed
-// publish or write. Everything downstream of a gateReady gate is transport-blind,
-// since ecosystem tooling never needs to know which transport the manifest named
-// (issue #3141). getenv is the environment the renderers and home-path
-// resolution read, so a replay supplies its own rather than the process's.
+// BindHomes is bindings mode: it computes each Strategy's env exports from
+// gate.port, hands them to publish, then writes each HomeConfig Strategy's home
+// config. publish runs first, so a failing home write still leaves the env file
+// behind; publish is not called when the gate is closed or the manifest has no
+// route prefix. It returns false on a failed publish or write. Everything downstream
+// of a ready gate is transport-blind (issue #3141). getenv lets a replay supply
+// its own environment.
 func BindHomes(stdout io.Writer, rows []ecosystem.Strategy, gate Gate, publish PublishFunc, getenv func(string) string) bool {
 	switch gate.outcome {
 	case gateAbsent:
@@ -215,17 +198,13 @@ func BindHomes(stdout io.Writer, rows []ecosystem.Strategy, gate Gate, publish P
 
 	// A GOPROXY value, a cargo config.toml and a gradle init script can each
 	// name only ONE upstream, so all bind to the first route's prefix (issue
-	// #3142), preserving the pre-prefix routes[0] fallback.
-	//
-	// A no-prefix manifest leaves any already-spawned Forwarder running idle and
-	// never calls publish. Both are harmless: the verb's env file simply stays empty.
+	// #3142). A no-prefix manifest leaves a spawned Forwarder idle and the env
+	// file empty, both harmless.
 	prefix, ok := firstRoutePrefix(stdout, gate.manifest, rows)
 	if !ok {
 		return true
 	}
 
-	// Strategy-generic, so a future Strategy with an EnvExports renderer needs no change
-	// here.
 	var exports []ecosystem.EnvExport
 	var warnings []string
 	for _, row := range ecosystem.EnvExportRows(rows) {
@@ -238,10 +217,8 @@ func BindHomes(stdout io.Writer, rows []ecosystem.Strategy, gate Gate, publish P
 		return false
 	}
 
-	// homeConfigPaths lets bindingSummaryProse name a HomeConfig Strategy's binding
-	// path Strategy-generically. Only Strategies with a non-nil HomeConfig whose render
-	// bound something land here: an inert render still writes its file (overwriting a
-	// stale redirect) but is left out so the summary does not advertise it.
+	// An inert render still writes its file (overwriting a stale redirect) but
+	// is left out of homeConfigPaths so the summary does not advertise it.
 	homeConfigPaths := make(map[string]string)
 	for _, row := range ecosystem.HomeConfigRows(rows) {
 		path, ok := resolveHomeConfigPath(stdout, row, getenv)
@@ -258,12 +235,11 @@ func BindHomes(stdout io.Writer, rows []ecosystem.Strategy, gate Gate, publish P
 		}
 	}
 
-	// These lines print only after every fallible write above has succeeded:
-	// printing earlier (issue #2931) would claim a binding even when a later
-	// write fails and the caller treats the run as "nothing applied". A Strategy's
-	// AnnounceBindingValue line reads its computed BindingEnvVar export rather
-	// than re-deriving the URL, which a host-rooted route (issue #3260) makes
-	// wrong or absent.
+	// Printed only after every write succeeded, or a later failed write would
+	// leave a claimed binding on a run the caller treats as "nothing applied"
+	// (issue #2931). The announce line reads the computed export rather than
+	// re-deriving the URL, which a host-rooted route makes wrong or absent
+	// (issue #3260).
 	for _, w := range warnings {
 		fmt.Fprintln(stdout, w)
 	}
@@ -304,11 +280,11 @@ type hostRewriteCollision struct {
 	Prefixes []string
 }
 
-// buildIntreeHostRewrites projects every manifest route carrying both an upstream
-// host and a prefix into a HostRewrite (issue #3142); a route missing
-// either is skipped. When two routes share an upstream host, as one Artifactory host
-// fronting separate npm and cargo prefixes does, every rewrite for that host is
-// dropped rather than kept-first, since keeping either rewrites the other wrongly.
+// buildIntreeHostRewrites projects every manifest route carrying both an
+// upstream host and a prefix into a HostRewrite (issue #3142). When two routes
+// share an upstream host (one Artifactory host fronting npm and cargo prefixes),
+// every rewrite for that host is dropped, since keeping either rewrites the
+// other wrongly.
 func buildIntreeHostRewrites(routes []registrymanifest.Route, port int) ([]HostRewrite, []hostRewriteCollision) {
 	// Keys fold case to match ApplyInTreeBinding's own duplicate guard (issue
 	// #3706); the collision report uses each group's first-seen spelling.
@@ -346,9 +322,8 @@ func buildIntreeHostRewrites(routes []registrymanifest.Route, port int) ([]HostR
 	return rewrites, collisions
 }
 
-// rewriteHostNames renders every rewrite's UpstreamHost, comma-joined, for the
-// ApplyNoopContent warning below (issue #3142). Deduped because a repeated host
-// would read as "host.example, host.example", though none can reach here today.
+// rewriteHostNames renders every rewrite's UpstreamHost, deduped and
+// comma-joined, for the ApplyNoopContent warning (issue #3142).
 func rewriteHostNames(rewrites []HostRewrite) string {
 	seen := make(map[string]bool, len(rewrites))
 	var hosts []string
@@ -395,11 +370,11 @@ func InTreeRoutes(routes []registrymanifest.Route, port int) (rewrites []HostRew
 
 // ApplyInTree is in-tree apply mode (issue #2932) followed by the repo-aware home
 // configs (issue #3201): it rewrites every tracked in-tree registry config the
-// manifest names, then re-renders each repo-aware home config, handing their env
-// exports to publish once every write succeeded (publish is not called when the
-// gate is closed or nothing repo-aware applies). The repo-aware half is skipped
-// when the in-tree apply failed. It returns false on any failure. Revert is
-// RevertInTreeBindings, which needs neither the manifest nor a Forwarder.
+// manifest names, then, if that succeeded, re-renders each repo-aware home
+// config and hands their env exports to publish once every write succeeded
+// (publish is not called when the gate is closed or nothing repo-aware
+// applies). It returns false on any failure. RevertInTreeBindings reverts it
+// without the manifest or a Forwarder.
 func ApplyInTree(stdout io.Writer, workDir string, rows []ecosystem.Strategy, gate Gate, publish PublishFunc) bool {
 	if !applyInTree(stdout, workDir, rows, gate) {
 		return false
@@ -407,14 +382,11 @@ func ApplyInTree(stdout io.Writer, workDir string, rows []ecosystem.Strategy, ga
 	return applyRepoAwareHomeConfigs(stdout, workDir, rows, gate, publish)
 }
 
-// applyInTree loops over every InTreeBindings(rows) Strategy (npm, yarn, pnpm and
-// nuget today, cargo retired from this loop by issue #3201).
+// applyInTree loops over every InTreeBindings(rows) Strategy; cargo binds
+// through applyRepoAwareHomeConfigs instead (issue #3201).
 func applyInTree(stdout io.Writer, workDir string, rows []ecosystem.Strategy, gate Gate) bool {
 	switch gate.outcome {
 	case gateAbsent:
-		// An unset REGISTRY_PROXY_MANIFEST means the launcher never enabled
-		// the registry proxy for this dispatch: the common no-proxy case, and
-		// issue #3082's one deliberate silence.
 		return true
 	case gateUnusable:
 		fmt.Fprintln(stdout, "==> WARNING: "+gate.reason+" — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry")
@@ -427,9 +399,8 @@ func applyInTree(stdout io.Writer, workDir string, rows []ecosystem.Strategy, ga
 		fmt.Fprintln(stdout, "==> WARNING: "+w)
 	}
 	if len(rewrites) == 0 {
-		// A collision warning already explained why every candidate was
-		// dropped; the generic "carries no route upstream host" warning would
-		// mislead, since the manifest does carry one, just an unusable one.
+		// After a collision warning, "carries no route upstream host" would
+		// mislead: the manifest carries one, just an unusable one.
 		if len(collisionWarnings) == 0 {
 			fmt.Fprintln(stdout, "==> WARNING: registry proxy manifest carries no route upstream host — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry")
 		}
@@ -463,9 +434,7 @@ func applyInTree(stdout io.Writer, workDir string, rows []ecosystem.Strategy, ga
 	return !failed
 }
 
-// exportNames names the export vars for applyRepoAwareHomeConfigs' success line, the
-// only thing the Strategy-generic renderer contract hands this verb that it can name
-// without an ecosystem-specific value of its own.
+// exportNames names the export vars for applyRepoAwareHomeConfigs' success line.
 func exportNames(exports []ecosystem.EnvExport) string {
 	names := make([]string, len(exports))
 	for i, e := range exports {
@@ -474,9 +443,7 @@ func exportNames(exports []ecosystem.EnvExport) string {
 	return strings.Join(names, ", ")
 }
 
-// joinProse renders names as an English list with an Oxford comma. An empty list
-// yields "", which no caller reaches today: every list here comes from the
-// caller's Strategies, and an empty rows slice yields an empty name list.
+// joinProse renders names as an English list with an Oxford comma.
 func joinProse(names []string) string {
 	switch len(names) {
 	case 0:
@@ -504,10 +471,9 @@ func ecosystemFallbackNames(rows []ecosystem.Strategy) string {
 	return joinProse(rowNames(rows))
 }
 
-// firstRoutePrefix returns the manifest's first route prefix. A missing route or
-// empty prefix is defensive only, but it warns that rows fall back to the public
-// registry and returns false rather than bind them to a URL that 404s every
-// request. The warning is already printed on false, so the caller must not warn
+// firstRoutePrefix returns the manifest's first route prefix. A missing route
+// or empty prefix warns that rows fall back to the public registry and returns
+// false rather than bind them to a URL that 404s; the caller must not warn
 // again.
 func firstRoutePrefix(stdout io.Writer, m registrymanifest.Manifest, rows []ecosystem.Strategy) (string, bool) {
 	if len(m.Routes) == 0 || m.Routes[0].Prefix == "" {
@@ -518,12 +484,10 @@ func firstRoutePrefix(stdout io.Writer, m registrymanifest.Manifest, rows []ecos
 }
 
 // bindingSummaryProse renders the success summary's "<name> bound to it via <where>"
-// clauses in Strategies order. A BindingEnvVar Strategy is named only when exports
-// actually carries its var, because a host-rooted route can render no export for
-// that ecosystem (issues #3259, #3260) and naming it would advertise a binding the
-// child process will not have. A HomeConfig Strategy is likewise named only when
-// homeConfigPaths carries it, which an inert render (issue #6338) leaves it out of.
-// An empty result leaves the caller's bare line.
+// clauses in Strategies order. A Strategy is named only when exports carries
+// its BindingEnvVar or homeConfigPaths its path: a host-rooted route can render
+// no export (issues #3259, #3260) and an inert render no home config (issue
+// #6338), and naming either would advertise a binding the child lacks.
 func bindingSummaryProse(rows []ecosystem.Strategy, exports []ecosystem.EnvExport, homeConfigPaths map[string]string) string {
 	var fragments []string
 	for _, row := range rows {
@@ -544,9 +508,8 @@ func bindingSummaryProse(rows []ecosystem.Strategy, exports []ecosystem.EnvExpor
 	return joinProse(fragments)
 }
 
-// repoAwareHomeConfigRows filters HomeConfigRows(rows) rather than rows because the
-// renderer re-renders the Strategy's own HomeConfig file; a non-nil RepoAwareHomeConfig
-// requires a non-nil HomeConfig, which makes the two equivalent.
+// repoAwareHomeConfigRows filters HomeConfigRows(rows): the renderer
+// re-renders the Strategy's own HomeConfig file.
 func repoAwareHomeConfigRows(rows []ecosystem.Strategy) []ecosystem.Strategy {
 	var out []ecosystem.Strategy
 	for _, row := range ecosystem.HomeConfigRows(rows) {
@@ -558,10 +521,10 @@ func repoAwareHomeConfigRows(rows []ecosystem.Strategy) []ecosystem.Strategy {
 }
 
 // applyRepoAwareHomeConfigs is the post-clone half of in-tree apply mode
-// (issue #3201): a Strategy with a non-nil RepoAwareHomeConfig (cargo today) binds by
-// re-rendering its whole home config against the repo's own un-rewritten in-tree
-// config, which bindings mode cannot read pre-clone. Collided routes are dropped as
-// applyInTree drops them, but it ran first and printed those warnings.
+// (issue #3201): a RepoAwareHomeConfig Strategy (cargo) re-renders its whole
+// home config against the repo's own un-rewritten in-tree config, which
+// bindings mode cannot read pre-clone. Collided routes are dropped silently;
+// applyInTree already warned.
 func applyRepoAwareHomeConfigs(stdout io.Writer, workDir string, rows []ecosystem.Strategy, gate Gate, publish PublishFunc) bool {
 	switch gate.outcome {
 	case gateAbsent:
@@ -577,9 +540,6 @@ func applyRepoAwareHomeConfigs(stdout io.Writer, workDir string, rows []ecosyste
 		return true
 	}
 
-	// The warning names the repo-aware Strategies from the supplied Strategies rather than a
-	// hardcoded list, so a second such Strategy landing cannot leave it
-	// overstating the fallback.
 	prefix, ok := firstRoutePrefix(stdout, gate.manifest, repoAwareRows)
 	if !ok {
 		return true
@@ -596,8 +556,7 @@ func applyRepoAwareHomeConfigs(stdout io.Writer, workDir string, rows []ecosyste
 		case err == nil:
 			repoConfig = string(raw)
 		case os.IsNotExist(err):
-			// A repo with no tracked in-tree config declares no named
-			// registry, the common case, not an error.
+			// No in-tree config: no named registry, the common case.
 		default:
 			fmt.Fprintf(stdout, "driver-exec bind-registry: read %s repo config: %v\n", row.Name, err)
 			failed = true

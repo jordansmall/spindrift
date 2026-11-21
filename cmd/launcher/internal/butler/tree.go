@@ -24,39 +24,32 @@ type Tree interface {
 	TrackedFiles(commit string) ([]string, error)
 	// CommitPatch first refuses diff unless git's own reading of it matches
 	// signalwire.ParseUnifiedDiff(diff), so the parser the gates decided on
-	// is never the only thing between an untrusted diff and a commit. It
-	// then checks that diff applies
-	// cleanly to scanned (the commit the finding was scanned against) and to
-	// branch's current tip, in that order, then commits it on top of the tip
-	// as message under the launcher identity, returning a PatchCommit naming
-	// the repo dir and the local ref holding that commit -- exactly what
-	// forge.BranchPusher.PushBranch(srcDir, localRef, branch, base) takes
-	// (issue #4074).
+	// is never the only thing between an untrusted diff and a commit. It then
+	// checks that diff applies cleanly to scanned and to branch's current
+	// tip, in that order, and commits it on top of the tip under the launcher
+	// identity (issue #4074).
 	CommitPatch(branch string, scanned ScannedCommit, diff, message string) (PatchCommit, error)
 }
 
-// PatchCommit is CommitPatch's result: srcDir and localRef, ready to hand
-// straight to forge.BranchPusher.PushBranch(srcDir, localRef, branch, base).
+// PatchCommit is CommitPatch's result, ready to hand to
+// forge.BranchPusher.PushBranch(Dir, Ref, branch, base).
 type PatchCommit struct {
 	Dir string
 	Ref string
 }
 
-// patchRef is the single namespaced ref CommitPatch commits under. One ref,
-// overwritten per call: a Tree stages at most one proposed patch at a time,
-// so there is nothing to disambiguate between (issue #4074).
+// patchRef is overwritten per call: a Tree stages at most one proposed patch
+// at a time (issue #4074).
 const patchRef = "refs/butler/patch"
 
 // GitTree is Tree's production implementation over an existing local repo
-// (bare or not): Repo is the filesystem path git shells out against. The
-// branch comes from Sweep's own r.policy.Branch, not a field here, so it's
-// never passed twice (issue #3990). URL and GitArgs, when set (FetchTree
-// sets both on construction), let CommitPatch re-fetch branch's tip fresh
-// rather than trust however stale Repo's local ref is; a GitTree built
-// directly over a plain local repo (as in tests) leaves URL empty and
-// CommitPatch reads the local ref as-is. Name/Email are the launcher
-// identity CommitPatch commits under -- production wiring sets them, not
-// FetchTree, since a scan-only Tree never needs one.
+// (bare or not). It has no branch field: the branch comes from Sweep's
+// r.policy.Branch, so it is never passed twice (issue #3990). URL, when set
+// (FetchTree sets it), lets CommitPatch re-fetch branch's tip fresh rather
+// than trust however stale Repo's local ref is; an empty URL reads the local
+// ref as-is. Name/Email are the launcher identity
+// CommitPatch commits under; production wiring sets them, not FetchTree,
+// since a scan-only Tree never needs one.
 type GitTree struct {
 	Repo string
 	URL  string
@@ -76,9 +69,7 @@ func (g GitTree) Head(branch string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// TrackedFiles returns every path git tracks in commit's tree, in whatever
-// order `git ls-tree` reports them (NextScope sorts its own copy, so callers
-// needn't).
+// TrackedFiles returns every path git tracks in commit's tree, unsorted.
 func (g GitTree) TrackedFiles(commit string) ([]string, error) {
 	out, err := exec.Command("git", "-C", g.Repo, "ls-tree", "-r", "--name-only", "-z", commit).Output()
 	if err != nil {
@@ -97,16 +88,11 @@ func (g GitTree) TrackedFiles(commit string) ([]string, error) {
 }
 
 // FetchTree shallow-fetches branch's current tip from url into the
-// already-initialized bare repo at scratch (e.g. via ledger.NewRemote), once
-// at construction, and returns a Tree over it -- the scan checkout a hosted
-// Ledger's backend row shares with its Ledger backend (issue #3995). cred
-// (zero for none) authenticates every fetch from url; gitArgs are the same
-// leading git options a Ledger backend takes (e.g. credential
-// helpers); GIT_TERMINAL_PROMPT=0 keeps a missing credential from hanging,
-// and url's credentials never reach an error string
-// (forge.RedactURLCredentials). The returned GitTree carries url, cred and
-// gitArgs, so a later CommitPatch on it re-fetches rather than trusting this
-// construction-time fetch to still be fresh.
+// already-initialized bare repo at scratch, once at construction, and returns
+// a Tree over it -- the scan checkout a hosted Ledger shares with its Ledger
+// backend (issue #3995). cred (zero for none) authenticates every fetch; url's
+// credentials never reach an error string. The returned GitTree carries url,
+// cred and gitArgs, so a later CommitPatch re-fetches.
 func FetchTree(scratch, url, branch string, cred gitexec.Credential, gitArgs ...string) (GitTree, error) {
 	if err := fetchBranchTip(cred, gitArgs, scratch, url, branch); err != nil {
 		return GitTree{}, err
@@ -115,10 +101,8 @@ func FetchTree(scratch, url, branch string, cred gitexec.Credential, gitArgs ...
 }
 
 // fetchBranchTip shallow-fetches branch's current tip from url into repo,
-// force-updating repo's local refs/heads/<branch> to match -- the one fetch
-// invocation FetchTree and CommitPatch's re-fetch share, so "the current
-// base head" always means "just fetched", never "however stale scratch was
-// at construction" (issue #4074).
+// force-updating repo's local refs/heads/<branch>, so "the current base head"
+// always means "just fetched" (issue #4074).
 func fetchBranchTip(cred gitexec.Credential, gitArgs []string, repo, url, branch string) error {
 	ref := "refs/heads/" + branch
 	cmd := cred.Apply(gitexec.Cmd(gitArgs, "-C", repo, "fetch", "--depth=1", "-q", url, "+"+ref+":"+ref))
@@ -128,19 +112,10 @@ func fetchBranchTip(cred gitexec.Credential, gitArgs []string, repo, url, branch
 	return nil
 }
 
-// CommitPatch implements Tree. See the Tree interface doc for the contract;
-// the mechanics: first, verifyDiffMatchesGit (below) refuses diff unless
-// git's own reading of it agrees with signalwire.ParseUnifiedDiff(diff) --
-// then gate on scanned (ADR 0057) -- read-tree it into a throwaway index and
-// `apply --cached --check` diff against it, a dry run that writes nothing --
-// then re-fetch branch's tip when g.URL is set (see fetchBranchTip above),
-// stage that tip into the same index (GIT_INDEX_FILE -- Repo is bare, so
-// there is no working tree to stage into), apply diff against it for real --
-// a stale/rebased diff fails here with gitexec.OutputErr's own wrap around
-// git's own error -- write the resulting tree, commit it under the
-// configured identity, and point patchRef at the new commit. The scanned
-// check catches a diff that never matched what the Box reviewed, even when
-// it happens to apply to the tip.
+// CommitPatch implements Tree. The dry-run apply against scanned (ADR 0057)
+// catches a diff that never matched what the Box reviewed, even when it
+// happens to apply to the tip; the real apply against the re-fetched tip
+// fails a stale/rebased diff.
 func (g GitTree) CommitPatch(branch string, scanned ScannedCommit, diff, message string) (PatchCommit, error) {
 	if g.Name == "" || g.Email == "" {
 		return PatchCommit{}, fmt.Errorf("butler: CommitPatch: no launcher identity configured for %s", g.Repo)
@@ -154,9 +129,8 @@ func (g GitTree) CommitPatch(branch string, scanned ScannedCommit, diff, message
 		return PatchCommit{}, err
 	}
 
-	// A private index file, not Repo's real index (Repo is bare and has
-	// none): read-tree/apply/write-tree stage entirely off to the side, so
-	// nothing here can collide with another Tree operation on the same repo.
+	// A private index file (Repo is bare and has none), so nothing here can
+	// collide with another Tree operation on the same repo.
 	indexDir, err := os.MkdirTemp("", "butler-patch-index")
 	if err != nil {
 		return PatchCommit{}, fmt.Errorf("butler: CommitPatch: %w", err)
@@ -220,10 +194,10 @@ func (g GitTree) CommitPatch(branch string, scanned ScannedCommit, diff, message
 }
 
 // verifyDiffMatchesGit refuses diff unless git's own reading of it (`git
-// apply --numstat --summary`, a report-only dry run) matches entries
-// exactly: same paths, order and +/- counts, and no create/delete/rename/
-// copy/mode summary line. The gates decide on our parser's entries; this
-// keeps a parser gap from letting git apply something they never saw.
+// apply --numstat --summary`) matches entries exactly: same paths, order and
+// +/- counts, and no create/delete/rename/copy/mode summary line. The gates
+// decide on our parser's entries; this keeps a parser gap from letting git
+// apply something they never saw.
 func verifyDiffMatchesGit(gitArgs []string, repo, diff string, entries []signalwire.DiffFile) error {
 	want := make([]string, len(entries))
 	for i, f := range entries {

@@ -26,18 +26,16 @@ var fullSHA = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
 // when it resolves and HEAD otherwise.
 //
 // A Record stays unfilled, without error, when the clone cannot yet answer for
-// it: the merge commit is not in the clone or not on its base branch, the
-// window has not elapsed at now, or the clone's tip is older than the window's
-// end (a stale clone must never record a false "not reverted"). A revert is a
-// commit in the window whose message carries git revert's "This reverts commit
-// <sha>" trailer, or whose patch is the exact inverse of the merge's diff; a
-// merge whose first parent is missing (a shallow clone's boundary) cannot be
-// checked for an inverse, so it stays unfilled only when a candidate revert
-// needs one, and its churn stays empty. Churn is judged by churnWithinWindow.
-// An error means git could not run or the clone is not a usable repository. A
-// Record whose own check fails is skipped and stays unfilled while the pass
-// goes on to the rest; those errors come back joined once every Record has
-// been tried.
+// it: the merge is not in the clone or not on its base branch, the window has
+// not elapsed at now, or the clone's tip predates the window's end (a stale
+// clone must never record a false "not reverted"). A revert is a commit in the
+// window carrying git revert's "This reverts commit <sha>" trailer, or whose
+// patch exactly inverts the merge's diff. A merge whose first parent is missing
+// (a shallow clone's boundary) cannot be checked for an inverse, so it stays
+// unfilled only when a candidate revert needs that check, and its churn stays
+// empty; churnWithinWindow judges churn. An error means git could not run or
+// the clone is unusable; a Record whose own check fails is skipped, and those
+// errors come back joined after every Record is tried.
 func (s *Store) FillMaturity(clone string, now time.Time) error {
 	rows, err := s.db.Query(`SELECT record_id, merge_commit FROM records WHERE merge_commit <> '' AND matured_at IS NULL ORDER BY record_id`)
 	if err != nil {

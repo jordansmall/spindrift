@@ -19,10 +19,9 @@ func quickstartCheckConfig(a answers, codeForge string) launcherchecks.Config {
 		RepoSlug:     a.repoSlug,
 		GitUserName:  a.gitUserName,
 		GitUserEmail: a.gitUserEmail,
-		// The shared gh-token row reads GH_TOKEN, so the wizard's credential
-		// belongs here only when its own harness.env writes it under that name.
-		// Otherwise a scaffold that still needs GH_TOKEN (e.g. a jira tracker
-		// on a github forge) would pass here and fail `spindrift doctor`.
+		// Set only when harness.env writes the credential as GH_TOKEN;
+		// otherwise a scaffold still needing GH_TOKEN (a jira tracker on a
+		// github forge) would pass here and fail `spindrift doctor`.
 		GHToken: ghToken,
 
 		Driver:      a.driver,
@@ -48,10 +47,9 @@ func quickstartCheckDeps(a answers) launcherchecks.Deps {
 				return launcherchecks.Backend{}, false
 			}
 			b := launcherchecks.Backend{Descriptor: row}
-			// Each backend's own validators run against the wizard's answers; a
-			// knob the wizard never collected reads as unset, so the row reports
-			// it as `spindrift doctor` would. Only quickstart rows are ever the
-			// scaffold's tracker or forge, so those are the rows probed.
+			// Validators run against the wizard's answers; an uncollected knob
+			// reads as unset, as under `spindrift doctor`. Only quickstart rows
+			// can be the scaffold's tracker or forge, so only they are probed.
 			if s, ok := backendkit.ByName(name); ok {
 				shared := quickstartShared(a.repoSlug, a.gitUserName, a.gitUserEmail)
 				lookup := knobLookup(a.choice.knobs, s.TokenEnvVar, a.token)

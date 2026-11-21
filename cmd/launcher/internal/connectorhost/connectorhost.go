@@ -18,14 +18,13 @@ import (
 // ProtocolVersion is the Connector protocol core speaks.
 const ProtocolVersion = "0.3.0"
 
-// Limits on every call into a Connector. The bases below are wide multiples of
-// what a Go reactor needs in the interpreter, because Nix CI runs under load;
-// a connector_call adds an allowance per byte of the request the host sends
-// (limitsFor), since a correct Connector's time, memory and output grow with its
-// input, while a hostile one is still bounded by what the host chose to send.
-// The time budget also stops while the guest waits on an http_request and grows
-// with the response bytes delivered (budget), capped by maxHTTPRequests and
-// maxResponseCredit.
+// Limits on every call into a Connector. The bases are wide multiples of what
+// a Go reactor needs in the interpreter, because Nix CI runs under load. A
+// connector_call adds an allowance per request byte (limitsFor): a correct
+// Connector's cost grows with its input, while a hostile one is still bounded
+// by what the host chose to send. The time budget also stops during an
+// http_request and grows with the response bytes delivered (budget), capped
+// by maxHTTPRequests and maxResponseCredit.
 const (
 	callBudget = 5 * time.Second
 	// initBudget covers _initialize, which boots Go's runtime inside the
@@ -36,13 +35,11 @@ const (
 	// before the bytes are read.
 	maxOutput = 8 << 20
 	// maxRequest bounds one connector_call request, refused before the guest sees
-	// it. It covers a 4 MiB logscan line, the most the launcher reads: a valid
-	// JSON line at most doubles in encoding (HTML escaping is off, so only " and
-	// \ grow), though control bytes and invalid UTF-8 grow up to 6x. It bounds every
-	// scaled limit below: at maxRequest a call gets at most 5 s + 8 min, 192 MiB
-	// of memory and 56 MiB of output, so a looping or leaking Connector cannot
-	// be handed more by a large request. Response credit (maxResponseCredit) adds
-	// to the time, but only for bytes the host itself delivered.
+	// it. It covers a 4 MiB logscan line, the most the launcher reads: valid JSON
+	// at most doubles in encoding (HTML escaping is off, so only " and \ grow),
+	// though control bytes and invalid UTF-8 grow up to 6x. It caps every scaled
+	// limit: at maxRequest a call gets at most 5 s + 8 min, 192 MiB of memory and
+	// 56 MiB of output, plus response credit for bytes the host delivered.
 	maxRequest = 8 << 20
 	// The allowances per request byte, sized from the fixture Driver's decode under
 	// the interpreter: time is linear in request bytes at 4 to 11 s per MiB, peak
@@ -120,26 +117,22 @@ var (
 	// ErrHandshake marks a module that failed to load or to complete the
 	// handshake. It wraps the specific cause, which still matches its own
 	// sentinel (ErrBudget, ErrTrap, ErrMemoryCap, ErrDeclaredSize, ErrExport,
-	// ErrOutputTooLarge, ErrMalformedOutput); a failure with none, such as invalid
-	// wasm or an unlinkable import, matches only this. A context deadline that
-	// passed also matches context.DeadlineExceeded. A Host call that fails closed
-	// during the handshake (see ErrCall) surfaces here with its own sentinel.
-	// A call past maxHTTPRequests also matches ErrHTTPRequestLimit.
+	// ErrOutputTooLarge, ErrMalformedOutput, ErrHTTPRequestLimit, the sentinel of
+	// a Host call that failed closed (see ErrCall), or context.DeadlineExceeded);
+	// invalid wasm or an unlinkable import matches only this.
 	ErrHandshake = errors.New("connector handshake failed")
 	// ErrCall marks a failed connector_call. It wraps the specific cause, which
 	// still matches its own sentinel: ErrBudget, ErrTrap, ErrMemoryCap,
-	// ErrOutputTooLarge, ErrMalformedOutput (a malformed exchange, response or
-	// result, or a Host call with pointers outside module memory), ErrExport (the
-	// module lacks the call exports or gives them the wrong signature), ErrUnusable,
-	// or, for a network Connector, ErrRouteRefused, ErrResponseTooLarge or ErrAudit (a Host
-	// call failed closed; such a cause is not also ErrTrap). A call the caller's
-	// context cut off also matches that context's error. Every such guest failure
-	// but ErrExport closes the Connector. A Connector that answered with an error,
-	// or whose result failed the Driver's host-side validation (an unknown pattern
-	// reason, a ResolveExit answer that breaks the invariant), matches only ErrCall
-	// and stays usable (the error is a *CallError carrying its Class); so does a
-	// request refused as ErrRequestTooLarge, which never reaches the guest.
-	// A call past maxHTTPRequests also matches ErrHTTPRequestLimit.
+	// ErrOutputTooLarge, ErrMalformedOutput (including a Host call's pointers
+	// outside module memory), ErrExport, ErrUnusable, ErrHTTPRequestLimit, the
+	// caller's context error, or for a network Connector ErrRouteRefused,
+	// ErrResponseTooLarge or ErrAudit (a Host call failed closed; not also
+	// ErrTrap). Every such guest failure but ErrExport closes the Connector.
+	// A Connector-reported error, or a result failing the Driver's host-side
+	// validation (an unknown pattern reason, a ResolveExit answer breaking the
+	// invariant), matches only ErrCall and leaves the Connector usable (a
+	// *CallError carrying its Class); so does ErrRequestTooLarge, which never
+	// reaches the guest.
 	ErrCall = errors.New("connector call failed")
 	// ErrExport marks an export that is missing or lacks the signature the ABI
 	// gives it: connector_handshake takes nothing and returns an i64,
@@ -249,10 +242,9 @@ type Connector struct {
 }
 
 // Err returns the call failure that made the Connector unusable, nil while it
-// is usable or after only Close. It exists for callers whose guest-facing API
-// has no error return, such as a Decoder, which degrades a failed call to an
-// unparsed event, and for a cache that replaces a Connector a call has killed.
-// It does not wait for an in-flight call.
+// is usable or after only Close. It serves callers with no error return (a
+// Decoder degrades a failed call to an unparsed event) and a cache replacing a
+// killed Connector. It does not wait for an in-flight call.
 func (c *Connector) Err() error {
 	if p := c.err.Load(); p != nil {
 		return *p
@@ -269,13 +261,13 @@ func (c *Connector) Close(ctx context.Context) error {
 }
 
 // Abort kills the module without taking mu, so it ends a call another goroutine
-// is inside; Close cannot, since call holds mu for the whole exchange. The call
+// is inside; Close cannot, since exchange holds mu throughout. The call
 // then fails and marks the Connector dead as any other failure. engine is set
 // once, in loadWith, so reading it here without mu is safe.
 func (c *Connector) Abort() { c.engine.abort() }
 
 // encodeRequest is the one encoding of a connector_call request, so the size
-// check in call and logWindow measure the same bytes.
+// check in exchange and logWindow measure the same bytes.
 func encodeRequest(method string, params any) ([]byte, error) {
 	// No HTML escaping: <, > and & would each grow 6x. Encode appends a newline;
 	// trim it so the bytes match json.Marshal's.
@@ -292,16 +284,14 @@ func encodeRequest(method string, params any) ([]byte, error) {
 }
 
 // Call sends one request through connector_call and decodes the response's
-// result into result, which may be nil to ignore it. A failure comes back
-// wrapping ErrCall and, for a guest failure, its own sentinel too. A
-// failed call, or a Connector-reported error, also carries the host-side
-// reason of the call's last http_request, if it was admitted but could not be
-// sent.
+// result into result, which may be nil to ignore it. A failure wraps ErrCall
+// (see there). A failure or a Connector-reported error also carries the
+// host-side reason of the call's last http_request if it was admitted but
+// could not be sent.
 //
-// Any failure of the exchange itself, or of the response it returned, leaves
-// the module in an unknown state: the Connector is closed and every later call
-// returns ErrUnusable. A Connector-reported error is an answer, not a failure,
-// and does not.
+// A failed exchange or response leaves the module in an unknown state, so the
+// Connector is closed and every later call returns ErrUnusable; a
+// Connector-reported error is an answer and does not.
 func (c *Connector) Call(ctx context.Context, method string, params, result any) error {
 	req, err := encodeRequest(method, params)
 	if err != nil {
@@ -414,17 +404,15 @@ type handshake struct {
 // protocol version outside core's window.
 //
 // The sandbox grants nothing: wazero's ModuleConfig defaults to no filesystem,
-// environment, arguments or stdio and to fake clocks and a deterministic random
-// source, and WASI is the only host module instantiated (bar the test-only
-// spindrift_escape of an escapeprobe build), so a Connector importing anything
-// else fails to link. A Driver Connector stays granted no
-// Host calls (ADR 0073 rule 2): only a network Connector loaded with LoadNetwork
-// gets spindrift.http_request. Memory and
-// table minimums and each function frame's slots (parameters, locals and
-// operand stack) are capped, reference types, SIMD and multi-value are off (so
-// table.grow does not compile) and every call, _initialize included, runs under
-// a wall-clock budget. A call's budget, memory cap and output cap each grow with
-// the size of its request (limitsFor), from the bases above.
+// environment, arguments or stdio, fake clocks and deterministic randomness,
+// and WASI is the only host module (bar an escapeprobe build's test-only
+// spindrift_escape), so any other import fails to link. A Driver Connector
+// gets no Host calls (ADR 0073 rule 2); only LoadNetwork grants
+// spindrift.http_request. Memory and table minimums and frame slots are
+// capped, reference types, SIMD and multi-value are off (so table.grow does
+// not compile), and every call, _initialize included, runs under a wall-clock
+// budget. A call's budget and memory and output caps grow with its request
+// (limitsFor).
 func Load(ctx context.Context, wasm []byte) (*Connector, error) {
 	return loadWith(ctx, wasm, interpretedEngine(), nil)
 }
@@ -452,9 +440,8 @@ func checkGrant(n Network) error {
 // LoadCompiled is Load under wazero's compiler where the platform has one,
 // trading a slower load for much cheaper guest calls. It is for test binaries
 // that push many lines through one Connector; the launcher uses Load (ADR 0073,
-// amendment for #6798).
-// A non-empty cacheDir keeps the compiled module on disk, shared across
-// processes; "" disables it.
+// amendment for #6798). A non-empty cacheDir shares the compiled module on
+// disk across processes.
 func LoadCompiled(ctx context.Context, wasm []byte, cacheDir string) (*Connector, error) {
 	return loadWith(ctx, wasm, compiledEngine(cacheDir), nil)
 }
