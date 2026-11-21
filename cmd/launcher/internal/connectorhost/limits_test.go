@@ -53,19 +53,25 @@ func TestDriverDecodesALargeLineWithoutWedging(t *testing.T) {
 // memory cap") partway through a run and every later line goes undecoded.
 //
 // To show a missing reclaim within a few MiB, the guest runs with GOGC=off
-// under a 40 MiB base cap, so only the SDK's runtime.GC() ever collects. That
-// proves the explicit reclaim bounds the heap; it does not exercise the
-// production default, GOGC on, where a background cycle starts but never
-// finishes. Keep the cap above 20 MiB: even with the reclaim, a 1 MiB batch
-// fails there.
+// under a cap just above what the reclaim needs, so only the SDK's runtime.GC()
+// ever collects. That proves the explicit reclaim bounds the heap; it does not
+// exercise the production default, GOGC on, where a background cycle starts but
+// never finishes. The reclaim fires every reclaimCalls calls or reclaimBytes
+// (sdk/connector/reclaim.go), so 4 KiB lines pile up about 1 MiB of requests
+// between collections and 1 MiB batches about 4 MiB: each shape gets its own
+// base cap (a 1 MiB batch call runs under about 40 MiB, the cap plus 16 times
+// the request), and a cap too low fails even a reclaiming guest. Each total runs
+// past the first reclaim plus the traffic a guest that never collects again
+// survives, so a collect-once regression fails too.
 func TestDriverDecodesALongRunWithoutExhaustingMemory(t *testing.T) {
-	const total = 14 << 20
-	t.Cleanup(connectorhost.SetMemoryCap(40 << 20))
 	t.Cleanup(connectorhost.SetGuestEnv(map[string]string{"GOGC": "off"}))
 	cache := t.TempDir() // compiling driver.wasm is most of a short subtest
 	line := strings.Repeat("a", 4<<10)
-	load := func(t *testing.T) (*connectorhost.Connector, driverkit.Strategy) {
+	// The cap goes in before the load: applyLimits only raises the guest's
+	// allocator ceiling, so a cap lowered after the load never takes effect.
+	load := func(t *testing.T, memoryCap uint64) (*connectorhost.Connector, driverkit.Strategy) {
 		t.Helper()
+		t.Cleanup(connectorhost.SetMemoryCap(memoryCap))
 		c, err := connectorhost.LoadCompiled(context.Background(), fixture(t, "driver.wasm"), cache)
 		if err != nil {
 			t.Fatal(err)
@@ -78,7 +84,8 @@ func TestDriverDecodesALongRunWithoutExhaustingMemory(t *testing.T) {
 		return c, s
 	}
 	t.Run("line by line", func(t *testing.T) {
-		c, s := load(t)
+		const total = 11 << 18
+		c, s := load(t, 14<<20)
 		d := s.NewDecoder()
 		sent := 0
 		for i := 1; sent < total; i++ {
@@ -93,7 +100,8 @@ func TestDriverDecodesALongRunWithoutExhaustingMemory(t *testing.T) {
 		}
 	})
 	t.Run("1 MiB batches", func(t *testing.T) {
-		c, s := load(t)
+		const total = 10 << 20
+		c, s := load(t, 24<<20)
 		d := s.NewBatchDecoder()
 		batch := make([]string, (1<<20)/len(line)) // the shadow's flushBytes
 		for i := range batch {
