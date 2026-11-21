@@ -109,6 +109,7 @@ func TestSessionsAbortInOneConnectorLeavesTheOtherWorking(t *testing.T) {
 }
 
 func TestSessionsBudgetOverrunInOneConnectorLeavesTheOtherWorking(t *testing.T) {
+	useShortCallBudget(t)
 	s := sessionsHost(t)
 	bad, err := s.Load(context.Background(), fixture(t, "hostile-loop.wasm"))
 	if err != nil {

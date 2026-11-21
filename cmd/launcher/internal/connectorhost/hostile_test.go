@@ -9,6 +9,25 @@ import (
 	"spindrift.dev/launcher/internal/connectorhost"
 )
 
+// useShortCallBudget lowers the call budget to ShortCallBudget until t ends.
+func useShortCallBudget(t *testing.T) {
+	t.Helper()
+	t.Cleanup(connectorhost.SetCallBudget(connectorhost.ShortCallBudget))
+}
+
+// shortenBudgetIfExhausting lowers the call budget (until t ends) for a case
+// that must exhaust it, so the test does not wait out the production budget,
+// and returns the budget in force. Other cases keep the production budget,
+// which leaves their legitimate work room on a loaded runner.
+func shortenBudgetIfExhausting(t *testing.T, want error) time.Duration {
+	t.Helper()
+	if !errors.Is(want, connectorhost.ErrBudget) {
+		return connectorhost.CallBudget
+	}
+	useShortCallBudget(t)
+	return connectorhost.ShortCallBudget
+}
+
 // The hostile fixtures are real Go-built Connectors whose connector_call
 // misbehaves as named; each must fail closed without taking the host down or
 // hanging the caller.
@@ -28,13 +47,14 @@ func TestHostileFixtureConnectorsFailClosed(t *testing.T) {
 		t.Run(engine, func(t *testing.T) {
 			for _, tc := range tests {
 				t.Run(tc.fixture, func(t *testing.T) {
+					budget := shortenBudgetIfExhausting(t, tc.want)
 					c, err := loadUsing(t, ld, tc.fixture)
 					if err != nil {
 						t.Fatalf("Load: %v", err)
 					}
 					start := time.Now()
 					err = c.Call(context.Background(), "misbehave", nil, nil)
-					if d := time.Since(start); d > connectorhost.CallBudget+slack {
+					if d := time.Since(start); d > budget+slack {
 						t.Errorf("Call took %v, want a prompt return", d)
 					}
 					if !errors.Is(err, connectorhost.ErrCall) {
