@@ -22,6 +22,17 @@ import (
 	"spindrift.dev/sdk/connector"
 )
 
+// Status is one workflow status: its name and its category.
+type Status struct {
+	Name string
+	// Category is the status's category, "" when the tracker has none;
+	// StatusCategoryDone marks a terminal one.
+	Category string
+}
+
+// StatusCategoryDone is the Category of a terminal status.
+const StatusCategoryDone = "done"
+
 // Target names the tracker repository a call reads from. API is the https
 // base URL without a trailing slash, for example https://api.github.com.
 // Dialect names the tracker deployment's API dialect (a Jira Connector takes
@@ -204,10 +215,10 @@ type Reader struct {
 	// a transport failure only. Setting it advertises "tracker.probe".
 	Probe func(t Target) (status int, err error)
 
-	// Statuses is optional: it returns the names of every status in the
-	// project's workflows, any issue type's. Core checks its status mapping
-	// against them. Setting it advertises "tracker.statuses".
-	Statuses func(t Target) ([]string, error)
+	// Statuses is optional: it returns every status in the project's
+	// workflows, any issue type's, with its category. Core checks its status
+	// mapping against them. Setting it advertises "tracker.statuses".
+	Statuses func(t Target) ([]Status, error)
 
 	// CreateMeta is optional: it returns the project's create metadata for
 	// issueType. Setting it advertises "tracker.createMeta".
@@ -394,16 +405,29 @@ func handlers(r Reader) ([]string, map[string]method) {
 			if err != nil {
 				return nil, err
 			}
-			names, err := r.Statuses(t)
+			sts, err := r.Statuses(t)
 			if err != nil {
 				return nil, err
 			}
-			if names == nil {
-				names = []string{} // encode [] rather than null
+			names := []string{} // encode [] rather than null
+			var cats map[string]string
+			for _, s := range sts {
+				names = append(names, s.Name)
+				if s.Category != "" {
+					if cats == nil {
+						cats = map[string]string{}
+					}
+					// A name shared across issue types keeps "done" so the result
+					// does not depend on reply order.
+					if cats[s.Name] != StatusCategoryDone {
+						cats[s.Name] = s.Category
+					}
+				}
 			}
 			return struct {
-				Statuses []string `json:"statuses"`
-			}{names}, nil
+				Statuses   []string          `json:"statuses"`
+				Categories map[string]string `json:"categories,omitempty"`
+			}{names, cats}, nil
 		}
 	}
 	if r.CreateMeta != nil {

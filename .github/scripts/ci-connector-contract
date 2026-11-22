@@ -17,6 +17,7 @@ cmd/launcher/internal/driver/driverkit/*
 cmd/launcher/internal/dispatchkind/*
 cmd/launcher/internal/hostop/*
 cmd/launcher/internal/forge/forgetest/*
+cmd/launcher/internal/forge/issuetracker.go
 lib/connector-checks.nix
 lib/build-constants.nix
 lib/backends/*
