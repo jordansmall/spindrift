@@ -5,8 +5,8 @@ package main
 // Regenerate with `nix run .#regen` after editing lib/cli-flags.nix.
 var cliFlags = []cliFlag{
 	{flag: "no-build", verb: "", arg: "", short: "", doc: "fail fast if the image is absent instead of building; pair with 'spindrift build' for split build/run flows", intercepted: false},
-	{flag: "yes", verb: "", arg: "", short: "", doc: "skip confirmation prompt when dispatching unlabeled issues (alias: --force)", intercepted: false},
-	{flag: "force", verb: "", arg: "", short: "", doc: "skip confirmation prompt when dispatching unlabeled issues (alias: --yes)", intercepted: false},
+	{flag: "yes", verb: "", arg: "", short: "", doc: "skip confirmation prompt when dispatching unlabeled or off-route issues (alias: --force)", intercepted: false},
+	{flag: "force", verb: "", arg: "", short: "", doc: "skip confirmation prompt when dispatching unlabeled or off-route issues (alias: --yes)", intercepted: false},
 	{flag: "self-contained", verb: "", arg: "", short: "", doc: "research only: review the issue from its body and comments alone, cloning no Target repo and needing no REPO_SLUG or GH_TOKEN", intercepted: false},
 	{flag: "verbose", verb: "doctor", arg: "", short: "v", doc: "show the full doctor report, every check and gate row, not just failures", intercepted: false},
 	{flag: "butler", verb: "doctor", arg: "", short: "", doc: "make doctor also validate the butler config (exit 2 on failure) and require the butler labels (exit 4 if missing)", intercepted: false},

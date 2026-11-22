@@ -19,27 +19,24 @@ import (
 // ready-for-agent label filter as an operator override. Dependency edges still
 // hold: in-list blockers are ordered ahead, and unmet external blockers evict
 // dependents. caps is safe to reuse because cf is fixed for the whole call
-// (issue #2946). Without an interactive stdin, unlabeled issues need forceYes.
+// (issue #2946). Without an interactive stdin, unlabeled or off-route issues
+// need forceYes.
 func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, pwd string, f *dispatch.Factory, s settle.Settler, terminated *terminate.Registry, nums []string, forceYes, interactive bool, stdin io.Reader, stdout io.Writer) error {
 	// Installed once, ahead of the first fetch, as run does (#3522), so a
 	// signal that already fired wins over every pre-wave early return below.
 	stopCh, abortCh, stopCleanup := installStopSignal()
 	defer stopCleanup()
 
-	issues, unlabeled, repeated, err := fetchSelectiveIssues(c, it, nums)
+	fetched, err := fetchSelectiveIssues(c, it, caps, nums)
 	if err != nil {
 		return signalledOr(stopCh, abortCh, err)
 	}
+	issues := fetched.issues
 
-	for _, num := range repeated {
-		fmt.Fprintf(stdout, "⚠ #%s listed more than once; dispatching once\n", num)
-	}
+	fetched.warn(stdout, c.IssueRoute)
 
-	if len(unlabeled) > 0 {
-		for _, num := range unlabeled {
-			fmt.Fprintf(stdout, "⚠ #%s not ready-for-agent; dispatching anyway (explicit)\n", num)
-		}
-		if err := confirmUnlabeled(len(unlabeled), forceYes, interactive, stdin, stdout); err != nil {
+	if len(fetched.unlabeled)+len(fetched.offRoute) > 0 {
+		if err := confirmExplicit(fetched.unlabeled, fetched.offRoute, forceYes, interactive, stdin, stdout); err != nil {
 			return signalledOr(stopCh, abortCh, err)
 		}
 	}
@@ -71,51 +68,112 @@ func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	return waves.Dispatch(cfg, &waves.Session{Terminated: terminated}, it, cf, pwd, f, s, in, claimer)
 }
 
+// selectiveFetch is the result of fetchSelectiveIssues.
+type selectiveFetch struct {
+	issues                        []issue
+	unlabeled, repeated, offRoute []string
+}
+
+// warn prints the explicit-override warnings both selective paths share.
+func (f selectiveFetch) warn(w io.Writer, route string) {
+	for _, num := range f.repeated {
+		fmt.Fprintf(w, "⚠ #%s listed more than once; dispatching once\n", num)
+	}
+	for _, num := range f.unlabeled {
+		fmt.Fprintf(w, "⚠ #%s not ready-for-agent; dispatching anyway (explicit)\n", num)
+	}
+	for _, num := range f.offRoute {
+		fmt.Fprintf(w, "⚠ #%s outside the issue route (%s); dispatching anyway (explicit)\n", num, route)
+	}
+}
+
 // fetchSelectiveIssues returns the fetched issues plus the numbers of those
-// missing the ready-for-agent label. A number the tracker resolves to an
-// issue already fetched is dropped, first occurrence winning, since a repeat
-// would claim and run that issue twice; the dropped numbers come back as
-// repeated so callers can say so.
-func fetchSelectiveIssues(c config, it forge.IssueTracker, nums []string) (issues []issue, unlabeled, repeated []string, err error) {
+// missing the ready-for-agent label and, when ISSUE_ROUTE is set, of those
+// outside it. A number the tracker resolves to an issue already fetched is
+// dropped, first occurrence winning, since a repeat would claim and run that
+// issue twice; the dropped numbers come back as repeated so callers can say so.
+// With no route set no route check is made at all, so a tracker without a
+// RouteMatcher is untouched; with one set, a tracker lacking it is an error
+// rather than a silent pass.
+func fetchSelectiveIssues(c config, it forge.IssueTracker, caps forge.Capabilities, nums []string) (selectiveFetch, error) {
+	var out selectiveFetch
+	var matcher forge.RouteMatcher
+	if len(issueRoute(c)) > 0 {
+		if matcher = caps.RouteMatcher; matcher == nil {
+			return selectiveFetch{}, fmt.Errorf("ISSUE_ROUTE %q is set but the issue tracker cannot check an issue against it", c.IssueRoute)
+		}
+	}
 	seen := make(map[string]bool, len(nums))
 	for _, num := range nums {
 		fi, err := it.Issue(num)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("issue %s: %w", num, err)
+			return selectiveFetch{}, fmt.Errorf("issue %s: %w", num, err)
 		}
 		if seen[fi.Number] {
-			repeated = append(repeated, fi.Number)
+			out.repeated = append(out.repeated, fi.Number)
 			continue
 		}
 		seen[fi.Number] = true
-		issues = append(issues, newIssue(fi))
+		out.issues = append(out.issues, newIssue(fi))
 		if !containsLabel(fi.Labels, c.Label) {
-			unlabeled = append(unlabeled, fi.Number)
+			out.unlabeled = append(out.unlabeled, fi.Number)
+		}
+		if matcher != nil {
+			ok, err := matcher.MatchesRoute(fi.Number)
+			if err != nil {
+				return selectiveFetch{}, fmt.Errorf("issue %s: route check: %w", num, err)
+			}
+			if !ok {
+				out.offRoute = append(out.offRoute, fi.Number)
+			}
 		}
 	}
-	return issues, unlabeled, repeated, nil
+	return out, nil
 }
 
-var errUnlabeledNotConfirmed = errors.New("aborted: unlabeled issue(s) not confirmed")
+var (
+	errUnlabeledNotConfirmed = errors.New("aborted: unlabeled issue(s) not confirmed")
+	errExplicitNotConfirmed  = errors.New("aborted: unlabeled or off-route issue(s) not confirmed")
+)
 
-// confirmUnlabeled prompts once for all n issues and returns nil when
+// confirmExplicit prompts once for every issue dispatched by explicit override,
+// counting one that is both unlabeled and off-route once, and returns nil when
 // confirmed. Without a terminal and without forceYes it errors without
 // reading stdin, so a piped "y" never confirms and an open pipe never blocks.
-func confirmUnlabeled(n int, forceYes, interactive bool, stdin io.Reader, stdout io.Writer) error {
+func confirmExplicit(unlabeled, offRoute []string, forceYes, interactive bool, stdin io.Reader, stdout io.Writer) error {
+	notConfirmed := errExplicitNotConfirmed
+	if len(offRoute) == 0 {
+		notConfirmed = errUnlabeledNotConfirmed
+	}
 	if forceYes {
 		return nil
 	}
 	if !interactive {
-		return fmt.Errorf("%w (stdin is not a terminal; pass --yes to dispatch them)", errUnlabeledNotConfirmed)
+		return fmt.Errorf("%w (stdin is not a terminal; pass --yes to dispatch them)", notConfirmed)
 	}
-	fmt.Fprintf(stdout, "Dispatch %d unlabeled issue(s)? [y/N] ", n)
+	distinct := make(map[string]bool, len(unlabeled)+len(offRoute))
+	for _, num := range unlabeled {
+		distinct[num] = true
+	}
+	for _, num := range offRoute {
+		distinct[num] = true
+	}
+	if len(offRoute) == 0 {
+		fmt.Fprintf(stdout, "Dispatch %d unlabeled issue(s)? [y/N] ", len(distinct))
+	} else {
+		refs := make([]string, len(offRoute))
+		for i, num := range offRoute {
+			refs[i] = "#" + num
+		}
+		fmt.Fprintf(stdout, "Dispatch %d unlabeled or off-route issue(s) (off-route: %s)? [y/N] ", len(distinct), strings.Join(refs, ", "))
+	}
 	scanner := bufio.NewScanner(stdin)
 	if !scanner.Scan() {
 		fmt.Fprintln(stdout)
-		return errUnlabeledNotConfirmed
+		return notConfirmed
 	}
 	if strings.ToLower(strings.TrimSpace(scanner.Text())) != "y" {
-		return errUnlabeledNotConfirmed
+		return notConfirmed
 	}
 	return nil
 }
