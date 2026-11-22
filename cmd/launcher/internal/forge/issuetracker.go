@@ -257,6 +257,22 @@ type StatusMappingChecker interface {
 	CheckMappedStatuses() (missing []string, err error)
 }
 
+// StatusCategoryDone is the category of a terminal workflow status (Jira's
+// Done category) on a StatusCategoryReader's answer.
+const StatusCategoryDone = "done"
+
+// StatusCategoryReader is the optional IssueTracker capability for adapters
+// that map dispatch states to workflow statuses and can read each status's
+// category (issue #7337), so a routed daemon can warn when Complete maps to
+// a terminal status: closing on a green PR releases cross-route dependents
+// before that PR merges (ADR 0075).
+type StatusCategoryReader interface {
+	// MappedStatusCategory returns the category of the workflow status state
+	// maps to: "" when state maps to none or the tracker reports no category
+	// for it. An error means the read could not run.
+	MappedStatusCategory(state DispatchState) (string, error)
+}
+
 // LandingRecorder is the optional IssueTracker capability for adapters that
 // can persist where a Dispatch's work landed (ADR 0029). Only the local
 // adapter implements it; github and jira issues close through the forge's own

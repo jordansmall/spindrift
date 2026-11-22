@@ -48,6 +48,7 @@ type Capabilities struct {
 	DemandCounter         DemandCounter
 	IssueTypeChecker      IssueTypeChecker
 	StatusMappingChecker  StatusMappingChecker
+	StatusCategoryReader  StatusCategoryReader
 	// DepsOf and TouchesOf look these two up on the bare IssueTracker instead.
 	NativeDepsReader NativeDepsReader
 	BodyGrammarer    BodyGrammarer
@@ -108,6 +109,7 @@ func ResolveCapabilities(cf CodeForge, it IssueTracker, forgeDesc, trackerDesc b
 	c.DemandCounter, _ = As[DemandCounter](it)
 	c.IssueTypeChecker, _ = As[IssueTypeChecker](it)
 	c.StatusMappingChecker, _ = As[StatusMappingChecker](it)
+	c.StatusCategoryReader, _ = As[StatusCategoryReader](it)
 	c.NativeDepsReader, _ = As[NativeDepsReader](it)
 	c.BodyGrammarer, _ = As[BodyGrammarer](it)
 

@@ -27,7 +27,7 @@ func TestAbsentCheckCapabilitiesStayAbsent(t *testing.T) {
 	call, calls := stubGuest(t, nil)
 	tr := mustTracker(t, call, richNative{newNative()}, testLifecycle, testTarget, nil, true)
 	c := forge.ResolveCapabilities(nil, tr, backend.Descriptor{}, backend.Descriptor{})
-	if c.DemandCounter != nil || c.IssueTypeChecker != nil || c.StatusMappingChecker != nil {
+	if c.DemandCounter != nil || c.IssueTypeChecker != nil || c.StatusMappingChecker != nil || c.StatusCategoryReader != nil {
 		t.Errorf("absent capabilities resolved: %+v", c)
 	}
 	if _, err := tr.Probe(); err != nil || len(*calls) != 0 {
@@ -36,15 +36,15 @@ func TestAbsentCheckCapabilitiesStayAbsent(t *testing.T) {
 }
 
 func TestEachCheckCapabilityAppearsAlone(t *testing.T) {
-	for capName, want := range map[string][3]bool{
-		CapCount:      {true, false, false},
-		CapCreateMeta: {false, true, false},
-		CapStatuses:   {false, false, true},
+	for capName, want := range map[string][4]bool{
+		CapCount:      {true, false, false, false},
+		CapCreateMeta: {false, true, false, false},
+		CapStatuses:   {false, false, true, true},
 	} {
 		call, _ := stubGuest(t, map[string]string{"tracker.countInterval": `{"seconds":7}`})
 		tr := mustTracker(t, call, richNative{newNative()}, testLifecycle, testTarget, []string{capName}, true)
 		c := forge.ResolveCapabilities(nil, tr, backend.Descriptor{}, backend.Descriptor{})
-		got := [3]bool{c.DemandCounter != nil, c.IssueTypeChecker != nil, c.StatusMappingChecker != nil}
+		got := [4]bool{c.DemandCounter != nil, c.IssueTypeChecker != nil, c.StatusMappingChecker != nil, c.StatusCategoryReader != nil}
 		if got != want {
 			t.Errorf("%s: resolved %v, want %v", capName, got, want)
 		}
@@ -121,6 +121,80 @@ func TestStatusesLayerNothingMappedMakesNoCall(t *testing.T) {
 	missing, err := checker.CheckMappedStatuses()
 	if err != nil || missing != nil || len(*calls) != 0 {
 		t.Errorf("missing = %v, %v, %d calls; want nil, nil, 0", missing, err, len(*calls))
+	}
+}
+
+func TestStatusCategoryReader(t *testing.T) {
+	lc := Lifecycle{Labels: testLabels, Statuses: map[forge.DispatchState]string{
+		forge.InProgress: "Doing", forge.Complete: "Closed",
+	}}
+	for _, tc := range []struct {
+		name   string
+		reply  string
+		state  forge.DispatchState
+		want   string
+		called bool
+		mapped string
+	}{
+		{"done", `{"statuses":["Doing","Closed"],"categories":{"Closed":"done","Doing":"indeterminate"}}`, forge.Complete, "done", true, ""},
+		{"other category", `{"statuses":["Doing","Closed"],"categories":{"Closed":"done","Doing":"indeterminate"}}`, forge.InProgress, "indeterminate", true, ""},
+		{"case-insensitive name", `{"statuses":["Closed"],"categories":{"Closed":"done"}}`, forge.Complete, "done", true, "closed"},
+		{"exact case wins over fold", `{"categories":{"DONE":"indeterminate","Done":"done","done":"new"}}`, forge.Complete, "done", true, "Done"},
+		{"exact case wins over fold, reversed", `{"categories":{"Done":"done","DONE":"indeterminate"}}`, forge.Complete, "indeterminate", true, "DONE"},
+		{"fold ties resolve deterministically", `{"categories":{"DONE":"indeterminate","Done":"done"}}`, forge.Complete, "indeterminate", true, "done"},
+		{"no categories", `{"statuses":["Doing","Closed"]}`, forge.Complete, "", true, ""},
+		{"empty-named category ignored", `{"categories":{"":"done"}}`, forge.Complete, "", true, ""},
+		{"unmapped state", `{"statuses":["Doing"]}`, forge.Dispatchable, "", false, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lc := lc
+			if tc.mapped != "" {
+				lc.Statuses = map[forge.DispatchState]string{tc.state: tc.mapped}
+			}
+			call, calls := stubGuest(t, map[string]string{"tracker.statuses": tc.reply})
+			tr := mustTracker(t, call, newNative(), lc, testTarget, []string{CapStatuses}, true)
+			r, ok := forge.As[forge.StatusCategoryReader](tr)
+			if !ok {
+				t.Fatal("no StatusCategoryReader")
+			}
+			got, err := r.MappedStatusCategory(tc.state)
+			if err != nil || got != tc.want || (len(*calls) == 1) != tc.called {
+				t.Errorf("= %q, %v with %d calls; want %q, called=%v", got, err, len(*calls), tc.want, tc.called)
+			}
+		})
+	}
+}
+
+// The daemon reaches the reader through the DemandCounter it resolves, so the
+// statuses layer has to stay reachable from underneath the count layer.
+func TestStatusCategoryReaderReachableFromResolvedDemandCounter(t *testing.T) {
+	lc := Lifecycle{Labels: testLabels, Statuses: map[forge.DispatchState]string{forge.Complete: "Closed"}}
+	call, _ := stubGuest(t, map[string]string{
+		"tracker.statuses":      `{"statuses":["Closed"],"categories":{"Closed":"done"}}`,
+		"tracker.countInterval": `{"seconds":7}`,
+	})
+	tr := mustTracker(t, call, richNative{newNative()}, lc, testTarget, []string{CapCount, CapStatuses}, true)
+	c := forge.ResolveCapabilities(nil, tr, backend.Descriptor{}, backend.Descriptor{})
+	it, ok := c.DemandCounter.(forge.IssueTracker)
+	if !ok {
+		t.Fatalf("DemandCounter %T is not a forge.IssueTracker", c.DemandCounter)
+	}
+	r, ok := forge.As[forge.StatusCategoryReader](it)
+	if !ok {
+		t.Fatal("no StatusCategoryReader beneath the resolved DemandCounter")
+	}
+	if got, err := r.MappedStatusCategory(forge.Complete); err != nil || got != "done" {
+		t.Errorf("= %q, %v; want done", got, err)
+	}
+}
+
+func TestStatusCategoryReaderCallError(t *testing.T) {
+	lc := Lifecycle{Labels: testLabels, Statuses: map[forge.DispatchState]string{forge.Complete: "Closed"}}
+	call, _ := stubGuest(t, nil)
+	tr := mustTracker(t, call, newNative(), lc, testTarget, []string{CapStatuses}, true)
+	r, _ := forge.As[forge.StatusCategoryReader](tr)
+	if got, err := r.MappedStatusCategory(forge.Complete); err == nil || got != "" {
+		t.Errorf("= %q, %v; want the call error", got, err)
 	}
 }
 
@@ -296,5 +370,17 @@ func TestCountLayerClampsToResultPageLimit(t *testing.T) {
 	n, err := dc.CountReady(false)
 	if err != nil || n != forge.ResultPageLimit {
 		t.Errorf("CountReady = %d, %v; want %d, nil", n, err, forge.ResultPageLimit)
+	}
+}
+
+// Doctor's check reads names alone, so a categories key it never reads cannot
+// fail it.
+func TestStatusesLayerIgnoresMalformedCategories(t *testing.T) {
+	lc := Lifecycle{Labels: testLabels, Statuses: map[forge.DispatchState]string{forge.Complete: "Closed"}}
+	call, _ := stubGuest(t, map[string]string{"tracker.statuses": `{"statuses":["Closed"],"categories":["done"]}`})
+	tr := mustTracker(t, call, newNative(), lc, testTarget, []string{CapStatuses}, true)
+	checker, _ := forge.As[forge.StatusMappingChecker](tr)
+	if missing, err := checker.CheckMappedStatuses(); err != nil || missing != nil {
+		t.Errorf("missing = %v, %v; want nil, nil", missing, err)
 	}
 }

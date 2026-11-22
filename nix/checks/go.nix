@@ -750,9 +750,9 @@ let
   # sdk/ is a standalone, dependency-free module, so GOFLAGS=-mod=vendor
   # (goCheckEnv) would fail on it. The parity tests read driverkit, dispatchkind,
   # hostop, connectorhost's network.go and class.go, connectorforge's
-  # connectorforge.go and pushonly.go, and connectortracker.go under
-  # ../../cmd/launcher/internal, so the source tree holds them at their
-  # repo-relative layout.
+  # connectorforge.go and pushonly.go, connectortracker.go, and forge's
+  # issuetracker.go under ../../cmd/launcher/internal, so the source tree holds
+  # them at their repo-relative layout.
   sdkSrc = fs.toSource {
     root = ../..;
     fileset = fs.unions [
@@ -765,6 +765,7 @@ let
       ../../cmd/launcher/internal/connectorforge/connectorforge.go
       ../../cmd/launcher/internal/connectorforge/pushonly.go
       ../../cmd/launcher/internal/connectortracker/connectortracker.go
+      ../../cmd/launcher/internal/forge/issuetracker.go
     ];
   };
   sdkPrologue = ''

@@ -275,11 +275,12 @@ func TestTrackerListIssuesCapsAtPageLimit(t *testing.T) {
 // richNative is a native adapter with optional capabilities the Connector
 // layers must not hide. The Fake already supplies HostPostedCommenter,
 // IssueLabeler, DemandCounter, BlockersLister, CommentLister and
-// NativeDepsReader; these two it lacks or answers differently.
+// NativeDepsReader; these it lacks or answers differently.
 type richNative struct{ *forge.IssueTrackerFake }
 
-func (richNative) CheckIssueType() ([]string, error)      { return nil, nil }
-func (richNative) CheckMappedStatuses() ([]string, error) { return nil, nil }
+func (richNative) CheckIssueType() ([]string, error)                        { return nil, nil }
+func (richNative) CheckMappedStatuses() ([]string, error)                   { return nil, nil }
+func (richNative) MappedStatusCategory(forge.DispatchState) (string, error) { return "", nil }
 
 func (richNative) BodyGrammar() forge.BodyGrammar { return forge.BodyGrammarLocal }
 func (richNative) WalksAllPages() bool            { return true }
