@@ -697,3 +697,46 @@ func TestRouteRefusesACommaInTheQueryLabel(t *testing.T) {
 		t.Fatalf("unrouted = %q, %v; want the label passed as before", got, err)
 	}
 }
+
+func TestMatchesRoute(t *testing.T) {
+	label := func(v string) tracker.Selector { return tracker.Selector{Kind: "label", Value: v} }
+	got := stub(t, map[string]connector.Response{
+		"https://api.github.com/repos/o/r/issues/5": ok(`{"number":5,"title":"t","state":"open","labels":[{"name":"orders"},{"name":"web"}]}`),
+	})
+	for name, tc := range map[string]struct {
+		route []tracker.Selector
+		want  bool
+	}{
+		"empty route matches":  {nil, true},
+		"every label carried":  {[]tracker.Selector{label("orders"), label("web")}, true},
+		"one label missing":    {[]tracker.Selector{label("orders"), label("billing")}, false},
+		"single label missing": {[]tracker.Selector{label("billing")}, false},
+		"label case differs":   {[]tracker.Selector{label("Orders")}, true},
+	} {
+		m, err := matchesRoute(tgt, "5", tc.route)
+		if err != nil || m != tc.want {
+			t.Errorf("%s: matchesRoute = %v, %v; want %v", name, m, err, tc.want)
+		}
+	}
+	if len(*got) != 5 {
+		t.Errorf("requests = %d, want one issue read per call", len(*got))
+	}
+}
+
+func TestMatchesRouteRefusesWithoutARequest(t *testing.T) {
+	for name, route := range map[string][]tracker.Selector{
+		"non-label kind": {{Kind: "component", Value: "x"}},
+		"comma label":    {{Kind: "label", Value: "a,b"}},
+	} {
+		got := stub(t, nil)
+		if _, err := matchesRoute(tgt, "5", route); err == nil {
+			t.Errorf("%s: no error", name)
+		}
+		if len(*got) != 0 {
+			t.Errorf("%s: %d requests, want none", name, len(*got))
+		}
+	}
+	if _, err := matchesRoute(tgt, "abc", nil); err == nil {
+		t.Error("bad number: no error")
+	}
+}

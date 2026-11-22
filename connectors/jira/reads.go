@@ -271,6 +271,21 @@ func listIssues(t tracker.Target, q tracker.Query, limit int) ([]tracker.Issue, 
 	return search(t, query, limit)
 }
 
+// matchesRoute reports whether issue number is in the route: one search of the
+// key ANDed with every route clause, inside the project. A route kind Jira
+// cannot honour is an error, never a miss.
+func matchesRoute(t tracker.Target, number string, route []tracker.Selector) (bool, error) {
+	routed, err := routeJQL(route)
+	if err != nil {
+		return false, err
+	}
+	found, err := search(t, fmt.Sprintf("project = %q AND key = %q%s", t.Repo, number, routed), 1)
+	if err != nil {
+		return false, err
+	}
+	return len(found) > 0, nil
+}
+
 // labeledPage returns one page of issues in state carrying label, newest
 // first, and the cursor for the next ("" at the end). A closed one carries its
 // close date and not-planned reason, which core's dedup scan reads: a finding

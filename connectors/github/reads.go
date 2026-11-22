@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -218,6 +219,20 @@ func issue(t tracker.Target, number string) (tracker.Issue, error) {
 		return tracker.Issue{}, fmt.Errorf("#%s is a pull request, not an issue", number)
 	}
 	return raw.issue(), nil
+}
+
+// matchesRoute reports whether issue number carries every route label. The
+// route is validated before the read, so an unhonourable one costs no request.
+func matchesRoute(t tracker.Target, number string, route []tracker.Selector) (bool, error) {
+	required, err := tracker.RouteLabels("", route)
+	if err != nil {
+		return false, err
+	}
+	i, err := issue(t, number)
+	if err != nil {
+		return false, err
+	}
+	return hasAll(i.Labels, required), nil
 }
 
 func nativeDeps(t tracker.Target, number string) ([]string, error) {
@@ -460,4 +475,15 @@ func labeledPage(t tracker.Target, label string, route []tracker.Selector, state
 		next = strconv.Itoa(page + 1)
 	}
 	return out, next, nil
+}
+
+// hasAll reports whether have carries every required label. GitHub treats label
+// names case-insensitively, as its routed labels= list query does.
+func hasAll(have, required []string) bool {
+	for _, r := range required {
+		if !slices.ContainsFunc(have, func(l string) bool { return strings.EqualFold(l, r) }) {
+			return false
+		}
+	}
+	return true
 }

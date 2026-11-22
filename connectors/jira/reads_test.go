@@ -584,3 +584,46 @@ func TestLabeledCarriesRouteClauses(t *testing.T) {
 		}
 	}
 }
+
+func TestMatchesRouteSendsKeyAndRouteClauses(t *testing.T) {
+	hit := `{"isLast":true,"issues":[{"key":"ENG-7","fields":{"labels":["orders"]}}]}`
+	for name, tc := range map[string]struct {
+		body string
+		want bool
+	}{
+		"hit":    {hit, true},
+		"no hit": {`{"isLast":true,"issues":[]}`, false},
+	} {
+		got := script(t, func(connector.Request, *url.URL) (int, string) { return 200, tc.body })
+		route := []tracker.Selector{{Kind: "label", Value: "orders"}, {Kind: "component", Value: "web"}}
+		m, err := matchesRoute(cloud, "ENG-7", route)
+		if err != nil || m != tc.want {
+			t.Errorf("%s: matchesRoute = %v, %v; want %v", name, m, err, tc.want)
+		}
+		const want = `project = "ENG" AND key = "ENG-7" AND (labels = "orders") AND (component = "web")`
+		if len(*got) != 1 || mustQuery(t, (*got)[0]).Get("jql") != want {
+			t.Errorf("%s: requests = %v, want one with jql %s", name, *got, want)
+		}
+	}
+}
+
+func TestMatchesRouteQuotesTheKey(t *testing.T) {
+	got := script(t, func(connector.Request, *url.URL) (int, string) { return 200, `{"isLast":true,"issues":[]}` })
+	if _, err := matchesRoute(cloud, `ENG-7" OR project = "B`, nil); err != nil {
+		t.Fatal(err)
+	}
+	const want = `project = "ENG" AND key = "ENG-7\" OR project = \"B"`
+	if len(*got) != 1 || mustQuery(t, (*got)[0]).Get("jql") != want {
+		t.Fatalf("requests = %v, want one with jql %s", *got, want)
+	}
+}
+
+func TestMatchesRouteRefusesAnUnsupportedKindWithoutARequest(t *testing.T) {
+	got := script(t, func(connector.Request, *url.URL) (int, string) { return 200, `{"isLast":true,"issues":[]}` })
+	if _, err := matchesRoute(cloud, "ENG-7", []tracker.Selector{{Kind: "project", Value: "x"}}); err == nil {
+		t.Fatal("want an error")
+	}
+	if len(*got) != 0 {
+		t.Fatalf("requests = %v, want none", *got)
+	}
+}
