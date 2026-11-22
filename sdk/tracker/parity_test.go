@@ -180,14 +180,18 @@ func TestWireShapesMatchCore(t *testing.T) {
 	}
 }
 
-// TestWriteCapabilitiesMatchCore pins the write capability names against
-// core's named consts, which gate the write layers on the handshake.
-func TestWriteCapabilitiesMatchCore(t *testing.T) {
-	f, err := parser.ParseFile(token.NewFileSet(), coreFile, nil, 0)
+// forgeFile holds core's forge-side tracker contract, where
+// StatusCategoryDone is declared a second time.
+const forgeFile = "../../cmd/launcher/internal/forge/issuetracker.go"
+
+// stringConsts returns the string-literal consts declared in the file at path.
+func stringConsts(t *testing.T, path string) map[string]string {
+	t.Helper()
+	f, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	core := map[string]string{}
+	consts := map[string]string{}
 	for _, d := range f.Decls {
 		gd, ok := d.(*ast.GenDecl)
 		if !ok || gd.Tok != token.CONST {
@@ -200,11 +204,26 @@ func TestWriteCapabilitiesMatchCore(t *testing.T) {
 					break // an iota or typed const with no literal
 				}
 				if lit, ok := vs.Values[i].(*ast.BasicLit); ok && lit.Kind == token.STRING {
-					core[n.Name] = strings.Trim(lit.Value, `"`)
+					consts[n.Name] = strings.Trim(lit.Value, `"`)
 				}
 			}
 		}
 	}
+	return consts
+}
+
+// TestStatusCategoryDoneMatchesForge pins the category value the sdk emits to
+// the one core compares against.
+func TestStatusCategoryDoneMatchesForge(t *testing.T) {
+	if got, ok := stringConsts(t, forgeFile)["StatusCategoryDone"]; !ok || got != StatusCategoryDone {
+		t.Errorf("forge StatusCategoryDone = %q (declared: %v), sdk says %q", got, ok, StatusCategoryDone)
+	}
+}
+
+// TestWriteCapabilitiesMatchCore pins the write capability names against
+// core's named consts, which gate the write layers on the handshake.
+func TestWriteCapabilitiesMatchCore(t *testing.T) {
+	core := stringConsts(t, coreFile)
 	for name, want := range map[string]string{
 		"CapTransition": CapTransition, "CapEditLabels": CapEditLabels, "CapLabels": CapLabels,
 		"CapListLabels": CapListLabels, "CapCreateLabel": CapCreateLabel,

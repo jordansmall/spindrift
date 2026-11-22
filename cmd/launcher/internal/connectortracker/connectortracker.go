@@ -257,7 +257,7 @@ const (
 	// HTTP status core maps to a Probe result.
 	CapProbe = "tracker.probe"
 	// CapStatuses: the Connector serves tracker.statuses, the project's workflow
-	// status names.
+	// status names and, when the tracker reports them, each one's category.
 	CapStatuses = "tracker.statuses"
 	// CapCreateMeta: the Connector serves tracker.createMeta, the project's issue
 	// types and the create fields of one.
@@ -489,13 +489,20 @@ func (l probeLayer) Probe() (string, error) {
 	}
 }
 
-// statusesLayer serves forge.StatusMappingChecker.
+// statusesLayer serves forge.StatusMappingChecker and
+// forge.StatusCategoryReader.
 type statusesLayer struct {
 	forge.IssueTracker
 	r *reads
 }
 
 func (l statusesLayer) Unwrap() forge.IssueTracker { return l.IssueTracker }
+
+// read decodes the tracker.statuses reply into res. Each capability decodes
+// only its own key, so a malformed key one of them never reads cannot fail it.
+func (l statusesLayer) read(res any) error {
+	return l.r.call(context.Background(), CapStatuses, targetParams{l.r.target}, res)
+}
 
 func (l statusesLayer) CheckMappedStatuses() ([]string, error) {
 	var mapped []string
@@ -510,10 +517,38 @@ func (l statusesLayer) CheckMappedStatuses() ([]string, error) {
 	var res struct {
 		Statuses []string `json:"statuses"`
 	}
-	if err := l.r.call(context.Background(), CapStatuses, targetParams{l.r.target}, &res); err != nil {
+	if err := l.read(&res); err != nil {
 		return nil, err
 	}
 	return forge.MissingStatuses(mapped, res.Statuses), nil
+}
+
+func (l statusesLayer) MappedStatusCategory(state forge.DispatchState) (string, error) {
+	name := l.r.lifecycle.Statuses[state]
+	if name == "" {
+		return "", nil
+	}
+	var res struct {
+		Categories map[string]string `json:"categories"`
+	}
+	if err := l.read(&res); err != nil {
+		return "", err
+	}
+	// Exact case first, then the smallest folded match: a reply naming both
+	// "Done" and "DONE" must not resolve by map iteration order.
+	if category, ok := res.Categories[name]; ok {
+		return category, nil
+	}
+	var found string
+	for status := range res.Categories {
+		if strings.EqualFold(status, name) && (found == "" || status < found) {
+			found = status
+		}
+	}
+	if found == "" {
+		return "", nil
+	}
+	return res.Categories[found], nil
 }
 
 // createMetaLayer serves forge.IssueTypeChecker.
@@ -632,7 +667,7 @@ func readCountInterval(call guestCall) (time.Duration, error) {
 // them.
 func (t *reads) Hides(capability any) bool {
 	switch capability.(type) {
-	case *forge.DemandCounter, *forge.IssueTypeChecker, *forge.StatusMappingChecker, *forge.PriorClaimStateReader:
+	case *forge.DemandCounter, *forge.IssueTypeChecker, *forge.StatusMappingChecker, *forge.StatusCategoryReader, *forge.PriorClaimStateReader:
 		return true
 	}
 	return false
@@ -804,6 +839,7 @@ var (
 	_ forge.Unwrapper             = probeLayer{}
 	_ forge.Unwrapper             = statusesLayer{}
 	_ forge.StatusMappingChecker  = statusesLayer{}
+	_ forge.StatusCategoryReader  = statusesLayer{}
 	_ forge.Unwrapper             = createMetaLayer{}
 	_ forge.IssueTypeChecker      = createMetaLayer{}
 	_ forge.Unwrapper             = countLayer{}
