@@ -26,13 +26,13 @@
   }
   {
     flag = "yes";
-    doc = "skip confirmation prompt when dispatching unlabeled issues (alias: --force)";
+    doc = "skip confirmation prompt when dispatching unlabeled or off-route issues (alias: --force)";
     verb = null;
     arg = null;
   }
   {
     flag = "force";
-    doc = "skip confirmation prompt when dispatching unlabeled issues (alias: --yes)";
+    doc = "skip confirmation prompt when dispatching unlabeled or off-route issues (alias: --yes)";
     verb = null;
     arg = null;
   }

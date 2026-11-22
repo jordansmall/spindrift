@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -159,8 +160,12 @@ func TestSelectiveListDispatch_NonInteractiveAbort(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected non-interactive abort error, got nil")
 	}
-	if !strings.Contains(err.Error(), "--yes") {
-		t.Errorf("abort error should point at --yes, got: %v", err)
+	const want = "aborted: unlabeled issue(s) not confirmed (stdin is not a terminal; pass --yes to dispatch them)"
+	if err.Error() != want {
+		t.Errorf("abort error = %q, want %q", err, want)
+	}
+	if !errors.Is(err, errUnlabeledNotConfirmed) {
+		t.Errorf("err = %v, want errUnlabeledNotConfirmed", err)
 	}
 	if len(fr.RunCalls) != 0 {
 		t.Errorf("RunCalls: got %d, want 0", len(fr.RunCalls))
@@ -741,7 +746,8 @@ func TestFetchSelectiveIssues_MixedNumericAndSlugIDs_PreservesOrder(t *testing.T
 	fc.SetIssue(forge.Issue{Number: "SPIN-7", Title: "slug", Labels: []string{c.Label}})
 	fc.SetIssue(forge.Issue{Number: "15", Title: "numeric-again", Labels: []string{c.Label}})
 
-	issues, unlabeled, _, err := fetchSelectiveIssues(c, fc, []string{"12", "SPIN-7", "15"})
+	got, err := fetchSelectiveIssues(c, fc, capsFor(fc, fc), []string{"12", "SPIN-7", "15"})
+	issues, unlabeled := got.issues, got.unlabeled
 	if err != nil {
 		t.Fatalf("fetchSelectiveIssues: %v", err)
 	}
@@ -774,7 +780,8 @@ func TestFetchSelectiveIssues_RepeatedUnlabeledCountedOnce(t *testing.T) {
 	c.Label = "ready-for-agent"
 	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{Number: "12", Title: "bare"})
-	issues, unlabeled, repeated, err := fetchSelectiveIssues(c, fc, []string{"12", "12"})
+	got, err := fetchSelectiveIssues(c, fc, capsFor(fc, fc), []string{"12", "12"})
+	issues, unlabeled, repeated := got.issues, got.unlabeled, got.repeated
 	if err != nil {
 		t.Fatalf("fetchSelectiveIssues: %v", err)
 	}
@@ -792,7 +799,8 @@ func TestFetchSelectiveIssues_RepeatedKeepsFirstOccurrenceOrder(t *testing.T) {
 	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{Number: "12", Labels: []string{c.Label}})
 	fc.SetIssue(forge.Issue{Number: "15", Labels: []string{c.Label}})
-	issues, _, repeated, err := fetchSelectiveIssues(c, fc, []string{"12", "15", "12"})
+	got, err := fetchSelectiveIssues(c, fc, capsFor(fc, fc), []string{"12", "15", "12"})
+	issues, repeated := got.issues, got.repeated
 	if err != nil {
 		t.Fatalf("fetchSelectiveIssues: %v", err)
 	}
@@ -809,7 +817,8 @@ func TestFetchSelectiveIssues_TrackerNormalizedNumberCollapses(t *testing.T) {
 	c.Label = "ready-for-agent"
 	fc := forge.NewFake(dispatchLabels(c))
 	fc.SetIssue(forge.Issue{Number: "12", Labels: []string{c.Label}})
-	issues, _, repeated, err := fetchSelectiveIssues(c, normalizingTracker{fc}, []string{"12", "012"})
+	got, err := fetchSelectiveIssues(c, normalizingTracker{fc}, capsFor(normalizingTracker{fc}, fc), []string{"12", "012"})
+	issues, repeated := got.issues, got.repeated
 	if err != nil {
 		t.Fatalf("fetchSelectiveIssues: %v", err)
 	}
@@ -871,5 +880,229 @@ func TestSelectiveListDispatch_RepeatedUnlabeledPromptsOnce(t *testing.T) {
 	out := stdout.String()
 	if !strings.Contains(out, "Dispatch 1 unlabeled issue(s)?") || strings.Contains(out, "Dispatch 2") {
 		t.Errorf("expected a single-issue prompt, got: %s", out)
+	}
+}
+
+// routedSelectiveFixture is a tracker scoped to label=x with #12 on route,
+// #15 off route (labelled but not x), and #18 both unlabelled and off route.
+// c and the fake carry the same route, as the real wiring does.
+func routedSelectiveFixture(t *testing.T) (config, *forge.Fake) {
+	t.Helper()
+	c := baseConfig()
+	c.Label = "ready-for-agent"
+	c.MaxParallel = 4
+	c.IssueRoute = "label=x"
+
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.Route = forge.Route{{Kind: "label", Value: "x"}}
+	fc.SetIssue(forge.Issue{Number: "12", Title: "on route", Labels: []string{c.Label, "x"}})
+	fc.SetIssue(forge.Issue{Number: "15", Title: "off route", Labels: []string{c.Label}})
+	fc.SetIssue(forge.Issue{Number: "18", Title: "unlabeled and off route", Labels: []string{}})
+	fc.SetIssue(forge.Issue{Number: "21", Title: "unlabeled on route", Labels: []string{"x"}})
+	return c, fc
+}
+
+func runRoutedSelective(t *testing.T, c config, fc *forge.Fake, nums []string, forceYes, interactive bool, stdin *strings.Reader) (*runner.Fake, string, error) {
+	t.Helper()
+	fr := runner.NewFake()
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := testNewSettle(c, fc, testWired(fc), fc)
+	stdout := &bytes.Buffer{}
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, s.Registry(), nums, forceYes, interactive, stdin, stdout)
+	return fr, stdout.String(), err
+}
+
+func TestSelectiveListDispatch_OffRoutePromptsOnceAndAbortsOnN(t *testing.T) {
+	c, fc := routedSelectiveFixture(t)
+
+	fr, out, err := runRoutedSelective(t, c, fc, []string{"12", "15"}, false, true, strings.NewReader("n\n"))
+	if !errors.Is(err, errExplicitNotConfirmed) {
+		t.Fatalf("err = %v, want errExplicitNotConfirmed", err)
+	}
+	if got := strings.Count(out, "[y/N]"); got != 1 {
+		t.Errorf("prompts = %d, want 1; out:\n%s", got, out)
+	}
+	if !strings.Contains(out, "#15 outside the issue route (label=x)") {
+		t.Errorf("missing off-route warning for #15; out:\n%s", out)
+	}
+	if !strings.Contains(out, "Dispatch 1 unlabeled or off-route issue(s) (off-route: #15)? [y/N] ") {
+		t.Errorf("prompt does not name #15 as off-route; out:\n%s", out)
+	}
+	if strings.Contains(out, "#12 outside") {
+		t.Errorf("on-route #12 flagged off route; out:\n%s", out)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("RunCalls = %d, want 0 after abort", len(fr.RunCalls))
+	}
+	if len(fc.TransitionStateCalls) != 0 {
+		t.Errorf("TransitionState calls = %d, want 0 after abort", len(fc.TransitionStateCalls))
+	}
+}
+
+func TestSelectiveListDispatch_OffRouteConfirmedDispatches(t *testing.T) {
+	c, fc := routedSelectiveFixture(t)
+
+	fr, _, err := runRoutedSelective(t, c, fc, []string{"12", "15"}, false, true, strings.NewReader("y\n"))
+	if err != nil {
+		t.Fatalf("selectiveListDispatch: %v", err)
+	}
+	if len(fr.RunCalls) != 2 {
+		t.Errorf("RunCalls = %d, want 2", len(fr.RunCalls))
+	}
+}
+
+// One prompt covers off-route and unlabelled issues together; an issue that is
+// both, and a repeated number, each count once.
+func TestSelectiveListDispatch_OffRouteAndUnlabeledShareOnePrompt(t *testing.T) {
+	c, fc := routedSelectiveFixture(t)
+
+	fr, out, err := runRoutedSelective(t, c, fc, []string{"12", "15", "18", "21", "15"}, false, true, strings.NewReader("y\n"))
+	if err != nil {
+		t.Fatalf("selectiveListDispatch: %v", err)
+	}
+	if got := strings.Count(out, "[y/N]"); got != 1 {
+		t.Errorf("prompts = %d, want 1; out:\n%s", got, out)
+	}
+	// #15 off route, #18 both, #21 unlabelled: three distinct issues.
+	if !strings.Contains(out, "Dispatch 3 unlabeled or off-route issue(s) (off-route: #15, #18)? [y/N] ") {
+		t.Errorf("prompt count/naming wrong; out:\n%s", out)
+	}
+	if len(fr.RunCalls) != 4 {
+		t.Errorf("RunCalls = %d, want 4", len(fr.RunCalls))
+	}
+}
+
+func TestSelectiveListDispatch_OffRouteNonInteractiveRefusedWithoutYes(t *testing.T) {
+	c, fc := routedSelectiveFixture(t)
+
+	stdin := strings.NewReader("y\n")
+	fr, out, err := runRoutedSelective(t, c, fc, []string{"15"}, false, false, stdin)
+	if !errors.Is(err, errExplicitNotConfirmed) {
+		t.Fatalf("err = %v, want errExplicitNotConfirmed", err)
+	}
+	if !strings.Contains(err.Error(), "--yes") {
+		t.Errorf("refusal should point at --yes, got: %v", err)
+	}
+	if stdin.Len() != 2 {
+		t.Errorf("stdin was read without a terminal: %d bytes left, want 2", stdin.Len())
+	}
+	if strings.Contains(out, "[y/N]") {
+		t.Errorf("prompted without a terminal; out:\n%s", out)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("RunCalls = %d, want 0", len(fr.RunCalls))
+	}
+}
+
+func TestSelectiveListDispatch_OffRouteYesSkipsPrompt(t *testing.T) {
+	for _, interactive := range []bool{true, false} {
+		t.Run(fmt.Sprintf("interactive=%v", interactive), func(t *testing.T) {
+			c, fc := routedSelectiveFixture(t)
+
+			fr, out, err := runRoutedSelective(t, c, fc, []string{"15"}, true, interactive, strings.NewReader(""))
+			if err != nil {
+				t.Fatalf("selectiveListDispatch with --yes: %v", err)
+			}
+			if strings.Contains(out, "[y/N]") {
+				t.Errorf("--yes still prompted; out:\n%s", out)
+			}
+			if len(fr.RunCalls) != 1 {
+				t.Errorf("RunCalls = %d, want 1", len(fr.RunCalls))
+			}
+		})
+	}
+}
+
+func TestSelectiveListDispatch_OnRouteOnlyNoPrompt(t *testing.T) {
+	c, fc := routedSelectiveFixture(t)
+
+	fr, out, err := runRoutedSelective(t, c, fc, []string{"12"}, false, false, strings.NewReader(""))
+	if err != nil {
+		t.Fatalf("selectiveListDispatch: %v", err)
+	}
+	if strings.Contains(out, "outside the issue route") || strings.Contains(out, "[y/N]") {
+		t.Errorf("on-route issue warned or prompted; out:\n%s", out)
+	}
+	if len(fr.RunCalls) != 1 {
+		t.Errorf("RunCalls = %d, want 1", len(fr.RunCalls))
+	}
+}
+
+// matchCountingTracker counts MatchesRoute calls so a test can prove none is
+// made when no route is set.
+type matchCountingTracker struct {
+	*forge.Fake
+	calls int
+}
+
+func (m *matchCountingTracker) MatchesRoute(num string) (bool, error) {
+	m.calls++
+	return m.Fake.MatchesRoute(num)
+}
+
+func TestFetchSelectiveIssues_NoRouteSkipsRouteCheck(t *testing.T) {
+	c := baseConfig()
+	c.Label = "ready-for-agent"
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.SetIssue(forge.Issue{Number: "12", Labels: []string{c.Label}})
+	// A tracker with no RouteMatcher must not fail when no route is set.
+	if got, err := fetchSelectiveIssues(c, bareTracker{fc}, capsFor(bareTracker{fc}, fc), []string{"12"}); err != nil || len(got.offRoute) != 0 {
+		t.Fatalf("no route, bare tracker: offRoute=%v err=%v, want none", got.offRoute, err)
+	}
+	m := &matchCountingTracker{Fake: fc}
+	if _, err := fetchSelectiveIssues(c, m, capsFor(m, fc), []string{"12"}); err != nil {
+		t.Fatalf("fetchSelectiveIssues: %v", err)
+	}
+	if m.calls != 0 {
+		t.Errorf("MatchesRoute calls = %d, want 0 with no route", m.calls)
+	}
+}
+
+func TestFetchSelectiveIssues_RouteChecksEachDistinctIssueOnce(t *testing.T) {
+	c, fc := routedSelectiveFixture(t)
+	m := &matchCountingTracker{Fake: fc}
+	got, err := fetchSelectiveIssues(c, m, capsFor(m, fc), []string{"12", "15", "15", "18"})
+	repeated, offRoute := got.repeated, got.offRoute
+	if err != nil {
+		t.Fatalf("fetchSelectiveIssues: %v", err)
+	}
+	if want := []string{"15", "18"}; !reflect.DeepEqual(offRoute, want) {
+		t.Errorf("offRoute = %v, want %v", offRoute, want)
+	}
+	if want := []string{"15"}; !reflect.DeepEqual(repeated, want) {
+		t.Errorf("repeated = %v, want %v", repeated, want)
+	}
+	if m.calls != 3 {
+		t.Errorf("MatchesRoute calls = %d, want 3 (repeat not rechecked)", m.calls)
+	}
+}
+
+// bareTracker exposes only the IssueTracker interface, hiding every optional
+// capability, RouteMatcher included.
+type bareTracker struct{ forge.IssueTracker }
+
+func TestFetchSelectiveIssues_RouteWithoutMatcherFailsClosed(t *testing.T) {
+	c, fc := routedSelectiveFixture(t)
+	_, err := fetchSelectiveIssues(c, bareTracker{fc}, capsFor(bareTracker{fc}, fc), []string{"12"})
+	if err == nil || !strings.Contains(err.Error(), "ISSUE_ROUTE") {
+		t.Fatalf("err = %v, want an ISSUE_ROUTE error", err)
+	}
+}
+
+func TestPreviewIssues_WithList_ShowsOffRouteWarning(t *testing.T) {
+	c, fc := routedSelectiveFixture(t)
+	c.RepoSlug = "owner/repo"
+
+	var buf bytes.Buffer
+	if err := previewIssues(c, fc, fc, capsFor(fc, fc), &buf, []string{"12", "15"}, t.TempDir(), nil); err != nil {
+		t.Fatalf("previewIssues: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "⚠ #15 outside the issue route (label=x)") {
+		t.Errorf("missing off-route warning for #15; got:\n%s", out)
+	}
+	if strings.Contains(out, "#12 outside") || strings.Contains(out, "[y/N]") {
+		t.Errorf("unexpected on-route warning or prompt; got:\n%s", out)
 	}
 }
