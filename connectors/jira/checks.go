@@ -29,23 +29,27 @@ func probe(t tracker.Target) (int, error) {
 	return resp.Status, nil
 }
 
-// statuses names every status in the project's workflows, across issue types.
-func statuses(t tracker.Target) ([]string, error) {
+// statuses lists every status in the project's workflows, across issue types,
+// each with its Jira status category key ("new", "indeterminate", "done").
+func statuses(t tracker.Target) ([]tracker.Status, error) {
 	var perType []struct {
 		Statuses []struct {
-			Name string `json:"name"`
+			Name           string `json:"name"`
+			StatusCategory struct {
+				Key string `json:"key"`
+			} `json:"statusCategory"`
 		} `json:"statuses"`
 	}
 	if err := get(t, "/rest/api/2/project/"+url.PathEscape(t.Repo)+"/statuses", &perType); err != nil {
 		return nil, err
 	}
-	names := []string{}
+	out := []tracker.Status{}
 	for _, it := range perType {
 		for _, s := range it.Statuses {
-			names = append(names, s.Name)
+			out = append(out, tracker.Status{Name: s.Name, Category: s.StatusCategory.Key})
 		}
 	}
-	return names, nil
+	return out, nil
 }
 
 // createMetaRow covers both createmeta row kinds: issue types carry id and
