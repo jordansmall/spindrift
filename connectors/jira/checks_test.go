@@ -36,18 +36,19 @@ func TestProbeErrorsOnTransportFailure(t *testing.T) {
 	}
 }
 
-func TestStatusesCollectsNamesAcrossIssueTypes(t *testing.T) {
-	got := serve(t, "/jira/rest/api/2/project/ENG/statuses", `[
-		{"name":"Bug","statuses":[{"name":"To Do"},{"name":"Done"}]},
-		{"name":"Task","statuses":[{"name":"In Review"}]}]`)
-	names, err := statuses(cloud)
+func TestStatusesCollectsNamesAndCategoriesAcrossIssueTypes(t *testing.T) {
+	reqs := serve(t, "/jira/rest/api/2/project/ENG/statuses", `[
+		{"name":"Bug","statuses":[{"name":"To Do","statusCategory":{"key":"new"}},{"name":"Done","statusCategory":{"key":"done"}}]},
+		{"name":"Task","statuses":[{"name":"In Review","statusCategory":{"key":"indeterminate"}}]}]`)
+	got, err := statuses(cloud)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"To Do", "Done", "In Review"}; !reflect.DeepEqual(names, want) {
-		t.Fatalf("statuses = %v", names)
+	want := []tracker.Status{{Name: "To Do", Category: "new"}, {Name: "Done", Category: tracker.StatusCategoryDone}, {Name: "In Review", Category: "indeterminate"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("statuses = %v", got)
 	}
-	if r := (*got)[0]; r.Method != "GET" {
+	if r := (*reqs)[0]; r.Method != "GET" {
 		t.Fatalf("request = %#v", r)
 	}
 }

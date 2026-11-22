@@ -183,7 +183,7 @@ func (r rawIssue) issue() tracker.Issue {
 	}
 	// statusCategory "done" is Jira's terminal category whatever the workflow
 	// names its terminal status.
-	if r.Fields.Status.StatusCategory.Key == "done" {
+	if r.Fields.Status.StatusCategory.Key == tracker.StatusCategoryDone {
 		i.State = "closed"
 		i.ClosedAt = rfc3339(r.Fields.ResolutionDate)
 		i.ClosedNotPlanned = slices.ContainsFunc(notPlannedResolutions, func(n string) bool {
