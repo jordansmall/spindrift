@@ -308,8 +308,30 @@ func probeRoute(demand demandSources, kinds []daemon.Kind, route string, stderr 
 			return fmt.Errorf("%s: ISSUE_ROUTE %q: tracker rejected the ready query: %w", k, route, err)
 		}
 		fmt.Fprintf(stderr, "daemon: %s: ISSUE_ROUTE %q matches %d ready issue(s)\n", k, route, n)
+		if it, ok := counter.(forge.IssueTracker); ok {
+			warnDoneComplete(k, it, stderr)
+		}
 	}
 	return nil
+}
+
+// warnDoneComplete warns when the status the tracker maps Complete to is in the
+// Done category, for the reason forge.StatusCategoryReader gives. It only
+// warns; the tracker may not expose the capability, and a failed read is noted,
+// never fatal.
+func warnDoneComplete(k daemon.Kind, it forge.IssueTracker, stderr io.Writer) {
+	r, ok := forge.As[forge.StatusCategoryReader](it)
+	if !ok {
+		return
+	}
+	category, err := r.MappedStatusCategory(forge.Complete)
+	if err != nil {
+		fmt.Fprintf(stderr, "daemon: %s: could not check the complete status's category: %v\n", k, err)
+		return
+	}
+	if category == forge.StatusCategoryDone {
+		fmt.Fprintf(stderr, "daemon: %s: warning: the complete status is in the Done category; with ISSUE_ROUTE set, a green PR still awaiting review closes the issue and releases cross-route dependents before it merges (map complete to a status outside the Done category, such as a review status, and let the tracker close the issue on merge)\n", k)
+	}
 }
 
 // issueRoute is the ISSUE_ROUTE a child resolves.

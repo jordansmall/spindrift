@@ -1060,3 +1060,76 @@ func TestProbeRoute_SilentWithoutRouteOrTrackerProbe(t *testing.T) {
 		t.Errorf("stderr = %q, want empty", stderr.String())
 	}
 }
+
+// categoryCounter is a tracker-backed counter whose Connector-backed layer
+// answers a fixed status category for the Complete state.
+type categoryCounter struct {
+	forge.IssueTracker
+	category string
+	err      error
+}
+
+func (categoryCounter) CountReady(bool) (int, error) { return 0, nil }
+
+func (categoryCounter) ProbeInterval() time.Duration { return time.Second }
+
+func (c categoryCounter) MappedStatusCategory(state forge.DispatchState) (string, error) {
+	if state != forge.Complete {
+		return "", errors.New("probed a state other than Complete")
+	}
+	return c.category, c.err
+}
+
+// Issue #7337: with a route set, a Complete status in the Done category closes
+// the issue on a green PR and releases cross-route dependents before it merges.
+// The probe warns, never halts.
+func TestProbeRoute_WarnsWhenCompleteIsDoneCategory(t *testing.T) {
+	work := daemon.KindOf(dispatchkind.Work)
+	cases := []struct {
+		name     string
+		counter  categoryCounter
+		route    string
+		wantWarn []string
+	}{
+		{"routed done", categoryCounter{category: forge.StatusCategoryDone}, "label=x",
+			[]string{"daemon: dispatch: warning", "Done category", "cross-route dependents", "before it merges"}},
+		{"routed in progress", categoryCounter{category: "indeterminate"}, "label=x", nil},
+		{"routed unmapped", categoryCounter{}, "label=x", nil},
+		{"unrouted done", categoryCounter{category: forge.StatusCategoryDone}, "", nil},
+		{"read error", categoryCounter{err: errors.New("jira down")}, "label=x",
+			[]string{"daemon: dispatch: could not check the complete status's category: jira down"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var stderr strings.Builder
+			if err := probeRoute(demandSources{work: tc.counter}, []daemon.Kind{work}, tc.route, &stderr); err != nil {
+				t.Fatalf("probeRoute = %v, want nil (a warning never halts)", err)
+			}
+			got := stderr.String()
+			if len(tc.wantWarn) == 0 {
+				if strings.Contains(got, "warning") || strings.Contains(got, "could not check") {
+					t.Errorf("stderr = %q, want no warning", got)
+				}
+				return
+			}
+			for _, want := range tc.wantWarn {
+				if !strings.Contains(got, want) {
+					t.Errorf("stderr %q missing %q", got, want)
+				}
+			}
+		})
+	}
+}
+
+// A counter whose tracker has no category capability stays silent.
+func TestProbeRoute_NoCategoryCapabilityIsSilent(t *testing.T) {
+	tf := forge.NewFake().IssueTrackerFake
+	work := daemon.KindOf(dispatchkind.Work)
+	var stderr strings.Builder
+	if err := probeRoute(demandSources{work: tf}, []daemon.Kind{work}, "label=x", &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stderr.String(), "warning") || strings.Contains(stderr.String(), "could not check") {
+		t.Errorf("stderr = %q, want no warning", stderr.String())
+	}
+}
