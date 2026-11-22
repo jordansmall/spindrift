@@ -2,6 +2,7 @@ package backend
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 
 	"spindrift.dev/launcher/internal/testutil"
@@ -225,6 +226,17 @@ func TestRouteKindsAreDeclaredPerRow(t *testing.T) {
 	for _, d := range Registry {
 		if !reflect.DeepEqual(d.RouteKinds, declared[d.Name]) {
 			t.Errorf("%s.RouteKinds = %v, want %v", d.Name, d.RouteKinds, declared[d.Name])
+		}
+	}
+}
+
+// TestEveryTrackerRowDeclaresLabelRoute fails for any future tracker row the
+// per-name table above does not list: ADR 0075 makes label universal, and a
+// tracker that ignored a label route would list the whole Tracker scope.
+func TestEveryTrackerRowDeclaresLabelRoute(t *testing.T) {
+	for _, d := range Registry {
+		if d.ValidAsTracker && !slices.Contains(d.RouteKinds, "label") {
+			t.Errorf("tracker row %s does not declare the label route kind (RouteKinds = %v)", d.Name, d.RouteKinds)
 		}
 	}
 }
