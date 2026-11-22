@@ -220,22 +220,26 @@ func TestConnectorFailingMidRunStopsTheReplay(t *testing.T) {
 	}
 }
 
-// A shadow Connector whose every decode is slow, though inside the host's
-// per-call budget, must not stretch the replay past the overall deadline: the
-// run ends as a summary error naming it.
+// A shadow Connector decode that outlives the overall deadline, though inside
+// the host's per-call budget, must not stretch the replay past it: the run
+// ends as a summary error naming it. The stall sits on a fixed line rather than
+// slowing every line, so a loaded runner cannot change how many lines land.
 func TestDeadlineEndsTheReplayWithASummaryError(t *testing.T) {
 	batchOf1(t)
 	log := passLog(t, 1000)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
 	shadow := nativeStrategy()
 	shadow.NewDecoder = func() driverkit.Decoder {
 		inner := nativeStrategy().NewDecoder()
+		n := 0
 		return func(line string) []driverkit.Event {
-			time.Sleep(20 * time.Millisecond)
+			if n++; n == 5 {
+				<-ctx.Done()
+			}
 			return inner(line)
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
-	defer cancel()
 	var ops []hostop.SpindriftOp
 	r := &run{native: nativeStrategy(), Recorder: shadowrecord.New("native", func(op hostop.SpindriftOp) { ops = append(ops, op) })}
 	r.Sum.Loaded = true
@@ -244,12 +248,12 @@ func TestDeadlineEndsTheReplayWithASummaryError(t *testing.T) {
 	r.finish()
 
 	if d := time.Since(start); d > 5*time.Second {
-		t.Errorf("replay took %v, want it cut off near the 150ms deadline", d)
+		t.Errorf("replay took %v, want it cut off near the 500ms deadline", d)
 	}
 	divs, sum := split(t, ops)
-	if len(divs) != 0 || !sum.Loaded || sum.Compared == 0 || sum.Compared >= 1000 ||
-		!strings.Contains(sum.Error, "deadline exceeded after") {
-		t.Errorf("summary = %+v, divergences = %v, want a deadline Error after some but not all lines", sum, divs)
+	if len(divs) != 0 || !sum.Loaded || sum.Compared != 4 ||
+		!strings.Contains(sum.Error, "deadline exceeded after 4 lines") {
+		t.Errorf("summary = %+v, divergences = %v, want a deadline Error after the 4 lines before the stall", sum, divs)
 	}
 }
 
