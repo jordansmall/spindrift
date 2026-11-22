@@ -15,6 +15,7 @@ var GitHub = Descriptor{
 	LabelRegistry:      true,
 	IssuesWearLabels:   true,
 	Quickstart:         &QuickstartBlock{Hosts: []string{"github.com"}, Axes: []string{"tracker", "forge"}},
+	RouteKinds:         []string{"label"},
 }
 
 // Git is the descriptor for the "git" backend.
@@ -79,6 +80,7 @@ var Forgejo = Descriptor{
 	TrackerAxisFiler:   "FORGEJO",
 	ForgeBackend:       "FORGEJO",
 	Quickstart:         &QuickstartBlock{Hosts: []string{"codeberg.org"}, Axes: []string{"tracker", "forge"}},
+	RouteKinds:         []string{"label"},
 }
 
 var Registry = []Descriptor{GitHub, Git, Local, Jira, Forgejo}

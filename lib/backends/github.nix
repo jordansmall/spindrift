@@ -8,6 +8,8 @@
   validAsCodeForge = true;
   # A bare `Closes #N` in a PR closes this tracker's own issue #N (ADR 0075).
   bareRefClosesIssues = true;
+  # ADR 0075: a label route narrows every list and is stamped on filing.
+  routeKinds = [ "label" ];
   connectorOnly = true;
   tokenEnvVar = "GH_TOKEN";
   outboxRelayCapable = true;

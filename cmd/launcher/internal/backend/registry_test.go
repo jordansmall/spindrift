@@ -211,14 +211,16 @@ func TestQuickstartBlocks(t *testing.T) {
 	}
 }
 
-// TestRouteKindsAreDeclaredPerRow pins ADR 0075 decision 1: local declares
-// label, jira declares label and component, and every other row declares none,
-// since a tracker that ignored the route would quietly list the whole Tracker
-// scope.
+// TestRouteKindsAreDeclaredPerRow pins ADR 0075 decision 1: every tracker row
+// declares label, jira declares component too, and a non-tracker row declares
+// none, since a tracker that ignored the route would quietly list the whole
+// Tracker scope.
 func TestRouteKindsAreDeclaredPerRow(t *testing.T) {
 	declared := map[string][]string{
-		"local": {"label"},
-		"jira":  {"label", "component"},
+		"github":  {"label"},
+		"local":   {"label"},
+		"jira":    {"label", "component"},
+		"forgejo": {"label"},
 	}
 	for _, d := range Registry {
 		if !reflect.DeepEqual(d.RouteKinds, declared[d.Name]) {
