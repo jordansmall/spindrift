@@ -533,3 +533,47 @@ func TestQueryRouteWireShape(t *testing.T) {
 		t.Errorf("routed Query = %s, %v", b, err)
 	}
 }
+
+func TestRouteLabels(t *testing.T) {
+	label := func(v string) Selector { return Selector{Kind: "label", Value: v} }
+	for name, tc := range map[string]struct {
+		label string
+		route []Selector
+		want  []string
+		err   bool
+	}{
+		"nothing":          {},
+		"label only":       {label: "ready", want: []string{"ready"}},
+		"route only":       {route: []Selector{label("a"), label("b")}, want: []string{"a", "b"}},
+		"label then route": {label: "ready", route: []Selector{label("a")}, want: []string{"ready", "a"}},
+		"unrouted comma":   {label: "a,b", want: []string{"a,b"}},
+		"routed comma":     {label: "a,b", route: []Selector{label("c")}, err: true},
+		"comma in value":   {route: []Selector{label("a,b")}, err: true},
+		"empty value":      {route: []Selector{label("")}, err: true},
+		"non-label kind":   {label: "ready", route: []Selector{{Kind: "project", Value: "x"}}, err: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := RouteLabels(tc.label, tc.route)
+			if (err != nil) != tc.err {
+				t.Fatalf("err = %v, want error %v", err, tc.err)
+			}
+			if !tc.err && !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("labels = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestStampRouteLabels(t *testing.T) {
+	route := []Selector{{Kind: "label", Value: "orders"}, {Kind: "label", Value: "team-a"}}
+	got, err := StampRouteLabels([]string{"finding", "team-a"}, route)
+	if want := []string{"finding", "team-a", "orders"}; err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("StampRouteLabels = %v, %v; want %v", got, err, want)
+	}
+	if got, err := StampRouteLabels(nil, nil); err != nil || len(got) != 0 || got == nil {
+		t.Errorf("unrouted = %#v, %v; want an empty, non-nil list", got, err)
+	}
+	if _, err := StampRouteLabels([]string{"finding"}, []Selector{{Kind: "component", Value: "x"}}); err == nil {
+		t.Error("a non-label selector was stamped")
+	}
+}

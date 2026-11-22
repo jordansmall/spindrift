@@ -15,6 +15,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"spindrift.dev/sdk/connector"
@@ -46,6 +48,48 @@ type Query struct {
 type Selector struct {
 	Kind  string `json:"kind"`
 	Value string `json:"value"`
+}
+
+// RouteLabels is label (when set) followed by every route label: the set an
+// issue must carry in full. A comma-joined labels filter cannot tell a label
+// holding a comma from two, so one is refused under a route, never split. A
+// non-label selector fails closed, because ignoring it would list the whole
+// scope.
+func RouteLabels(label string, route []Selector) ([]string, error) {
+	var all []string
+	if label != "" {
+		all = append(all, label)
+	}
+	for _, s := range route {
+		if s.Kind != "label" {
+			return nil, fmt.Errorf("issue route: unsupported selector kind %q (only label)", s.Kind)
+		}
+		if s.Value == "" || strings.Contains(s.Value, ",") {
+			return nil, fmt.Errorf("issue route: label %q is empty or holds a comma, which a labels filter cannot express", s.Value)
+		}
+		all = append(all, s.Value)
+	}
+	if len(route) > 0 && strings.Contains(label, ",") {
+		return nil, fmt.Errorf("issue route: label %q holds a comma, which a labels filter cannot express", label)
+	}
+	return all, nil
+}
+
+// StampRouteLabels is labels followed by every route label it lacks: what a
+// label-filter Connector files, so the issue matches its own route's Query.
+// The route is refused as RouteLabels refuses it.
+func StampRouteLabels(labels []string, route []Selector) ([]string, error) {
+	extra, err := RouteLabels("", route)
+	if err != nil {
+		return nil, err
+	}
+	out := append([]string{}, labels...)
+	for _, l := range extra {
+		if !slices.Contains(out, l) {
+			out = append(out, l)
+		}
+	}
+	return out, nil
 }
 
 // Issue is one tracker issue. State is "open" or "closed"; a listIssues answer
