@@ -627,3 +627,16 @@ func (tf *IssueTrackerFake) searchIssues(text string, state IssueState, label st
 	}
 	return out
 }
+
+// MatchesRoute implements RouteMatcher. It reads the labels via issueLabels,
+// not Issue, so it records no IssueCalls.
+func (tf *IssueTrackerFake) MatchesRoute(num string) (bool, error) {
+	labels, ok, err := tf.issueLabels(num)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, fmt.Errorf("issue %s not found", num)
+	}
+	return tf.Route.MatchesLabels(labels), nil
+}

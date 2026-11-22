@@ -43,6 +43,7 @@ type Capabilities struct {
 	LinkedIssueLister     LinkedIssueLister
 	LabeledBacklogLister  LabeledBacklogLister
 	IssueSearcher         IssueSearcher
+	RouteMatcher          RouteMatcher
 	IssueLabeler          IssueLabeler
 	DemandCounter         DemandCounter
 	IssueTypeChecker      IssueTypeChecker
@@ -102,6 +103,7 @@ func ResolveCapabilities(cf CodeForge, it IssueTracker, forgeDesc, trackerDesc b
 	c.LinkedIssueLister, _ = As[LinkedIssueLister](it)
 	c.LabeledBacklogLister, _ = As[LabeledBacklogLister](it)
 	c.IssueSearcher, _ = As[IssueSearcher](it)
+	c.RouteMatcher, _ = As[RouteMatcher](it)
 	c.IssueLabeler, _ = As[IssueLabeler](it)
 	c.DemandCounter, _ = As[DemandCounter](it)
 	c.IssueTypeChecker, _ = As[IssueTypeChecker](it)

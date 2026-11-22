@@ -111,6 +111,16 @@ func (e *execClient) NativeDepsOf(num string) ([]string, error) {
 	return e.nativeDepsViaConnector(row, num)
 }
 
+// MatchesRoute reports whether issue num is in the client's Issue route, the
+// per-issue read of the route Issue itself leaves unnarrowed (ADR 0075).
+func (e *execClient) MatchesRoute(num string) (bool, error) {
+	row, err := routeRow()
+	if err != nil {
+		return false, err
+	}
+	return e.matchesRouteViaConnector(row, num)
+}
+
 // BlocksOf returns the issues num blocks, read from GitHub's native
 // issue-dependencies API. No prose grammar declares a forward "blocks"
 // relationship, so unlike DepsOf there is no body-text fallback and a lookup

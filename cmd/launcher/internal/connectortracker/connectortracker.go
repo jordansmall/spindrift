@@ -207,6 +207,11 @@ type (
 		Target    Target `json:"target"`
 		IssueType string `json:"issueType"`
 	}
+	matchesRouteParams struct {
+		Target Target     `json:"target"`
+		Number string     `json:"number"`
+		Route  []Selector `json:"route"`
+	}
 	countParams struct {
 		Target Target     `json:"target"`
 		Label  string     `json:"label"`
@@ -246,6 +251,7 @@ const (
 	// CapRoute: the Connector ANDs a route into every routed read and stamps it
 	// on the issue it files. Absent, core refuses a route unsent, since a
 	// Connector without it would drop the field and answer the whole scope.
+	// It also serves tracker.matchesRoute, the one-issue form of the route.
 	CapRoute = "tracker.route"
 	// CapProbe: the Connector serves tracker.probe, one authenticated read whose
 	// HTTP status core maps to a Probe result.
@@ -329,6 +335,25 @@ func (t *reads) routeParam() ([]Selector, error) {
 		return nil, fmt.Errorf("%w: connector does not advertise %q; it cannot narrow by issue route", connectorhost.ErrProtocolUnsupported, CapRoute)
 	}
 	return t.route, nil
+}
+
+// MatchesRoute implements forge.RouteMatcher. An empty route matches every
+// issue, so it asks the Connector nothing.
+func (t *reads) MatchesRoute(num string) (bool, error) {
+	if len(t.route) == 0 {
+		return true, nil
+	}
+	route, err := t.routeParam()
+	if err != nil {
+		return false, err
+	}
+	var res struct {
+		Matches bool `json:"matches"`
+	}
+	if err := t.call(context.Background(), "tracker.matchesRoute", matchesRouteParams{Target: t.target, Number: num, Route: route}, &res); err != nil {
+		return false, err
+	}
+	return res.Matches, nil
 }
 
 // Unwrap implements forge.Unwrapper, so forge.As finds the native adapter's own
@@ -768,6 +793,7 @@ var (
 	_ forge.Unwrapper             = (*reads)(nil)
 	_ forge.FullyPaginated        = (*reads)(nil)
 	_ forge.LabeledTracker        = (*reads)(nil)
+	_ forge.RouteMatcher          = (*reads)(nil)
 	_ forge.Unwrapper             = commentsLayer{}
 	_ forge.CommentLister         = commentsLayer{}
 	_ forge.Unwrapper             = nativeDepsLayer{}

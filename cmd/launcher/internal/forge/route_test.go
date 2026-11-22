@@ -102,6 +102,32 @@ func TestFake_Route_IssueReadByKeyIsNotNarrowed(t *testing.T) {
 	}
 }
 
+func TestFake_MatchesRoute(t *testing.T) {
+	f := NewFake(DispatchLabels{Dispatchable: "ready"})
+	f.SetIssue(Issue{Number: "1", Labels: []string{"ready", "orders"}})
+	f.SetIssue(Issue{Number: "2", Labels: []string{"ready", "billing"}})
+	f.Route = Route{{RouteKindLabel, "orders"}}
+	rm, ok := As[RouteMatcher](f)
+	if !ok {
+		t.Fatal("the fake tracker is not a RouteMatcher")
+	}
+	for num, want := range map[string]bool{"1": true, "2": false} {
+		if got, err := rm.MatchesRoute(num); err != nil || got != want {
+			t.Errorf("MatchesRoute(%s) = %v, %v, want %v", num, got, err, want)
+		}
+	}
+	if _, err := rm.MatchesRoute("9"); err == nil {
+		t.Error("MatchesRoute of a missing issue = nil error, want not found")
+	}
+	f.Route = nil
+	if got, err := rm.MatchesRoute("2"); err != nil || !got {
+		t.Errorf("unrouted MatchesRoute(2) = %v, %v, want true", got, err)
+	}
+	if len(f.IssueCalls) != 0 {
+		t.Errorf("MatchesRoute recorded %d Issue calls, want none", len(f.IssueCalls))
+	}
+}
+
 func TestRouteCheckKinds(t *testing.T) {
 	r := Route{{"label", "a"}}
 	if err := r.CheckKinds("local", []string{"label"}); err != nil {

@@ -484,6 +484,13 @@ func (e *execClient) blocksOfViaConnector(row backendrows.Row, num string) ([]fo
 	return viaTrackerCap(e, row, connectortracker.CapBlocks, "read the issues an issue blocks", func(bl forge.BlockersLister) ([]forge.Dependency, error) { return bl.BlocksOf(num) })
 }
 
+// matchesRouteViaConnector gates on the route, not the handshake, here: an
+// unrouted client matches every issue even on a Connector that lacks
+// tracker.route, and a routed one is refused by the tracker view itself.
+func (e *execClient) matchesRouteViaConnector(row backendrows.Row, num string) (bool, error) {
+	return viaTrackerCap(e, row, coreTracker, "match an issue against the route", func(rm forge.RouteMatcher) (bool, error) { return rm.MatchesRoute(num) })
+}
+
 func (e *execClient) searchIssuesViaConnector(row backendrows.Row, text string, state forge.IssueState, label string, limit int) ([]forge.Issue, error) {
 	return viaTrackerCap(e, row, connectortracker.CapSearchIssues, "search issues", func(s forge.IssueSearcher) ([]forge.Issue, error) { return s.SearchIssues(text, state, label, limit) })
 }

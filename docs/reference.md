@@ -3825,10 +3825,11 @@ This is protocol version **0.3.0**. The host is
   `"tracker.probe"`, `"tracker.statuses"`, `"tracker.createMeta"`,
   `"tracker.count"`, `"tracker.removedLabels"`, `"tracker.searchIssues"`,
   `"tracker.labeled"`, `"tracker.transition"`, `"tracker.editLabels"`,
-  `"tracker.comment"`, `"tracker.fileIssue"`, `"tracker.closeIssue"` and
+  `"tracker.comment"`, `"tracker.fileIssue"`, `"tracker.closeIssue"`,
+  `"tracker.route"` (see `route` below) and
   `"tracker.labels"`, serving the method of the same name (`"tracker.labels"`
-  serves `tracker.listLabels` and `tracker.createLabel`), and two that serve no
-  method, `"tracker.route"` (see `route` below) and
+  serves `tracker.listLabels` and `tracker.createLabel`; `"tracker.route"`
+  serves `tracker.matchesRoute`), and one that serves no method,
   `"tracker.ids.projectKey"` (see **Issue
   ids**). Advertising `"tracker.comments"` attests that each comment's
   `minimized` and `minimizedReason` are faithful; a Connector whose API cannot
@@ -3867,6 +3868,7 @@ This is protocol version **0.3.0**. The host is
   | `tracker.closeIssue` (optional) | `{target, number}` | `{}`; closes the issue as completed, never as not planned; core calls it only on an open issue |
   | `tracker.listLabels` (optional, capability `tracker.labels`) | `{target}` | `{labels}`, every label the tracker knows |
   | `tracker.createLabel` (optional, capability `tracker.labels`) | `{target, name, description, color}` | `{}`; a no-op where the tracker has no label registry |
+  | `tracker.matchesRoute` (optional, capability `tracker.route`) | `{target, number, route}` | `{matches}`: whether issue `number` matches every selector in `route`, answered however the tracker allows (Jira ANDs the issue's key into the route's JQL); core asks it of an issue it was handed by number, since `tracker.issue` is not narrowed by a route and core sends it only for a non-empty route |
 
   An issue is `{number, title, body, state, labels, closedAt, closedNotPlanned,
   dedupMarker, status}`. `number` is a string id and `state` is `"open"` or `"closed"`; a
@@ -4096,7 +4098,8 @@ This is protocol version **0.3.0**. The host is
   `forge.openPR` behind `forge.draftPRs`, giving `driver.newDecoder` an
   optional `now`, giving `tracker.labeled` an optional `cursor` and `next`,
   giving `tracker.listIssues`, `tracker.count`, `tracker.labeled` and
-  `tracker.fileIssue` an optional `route` behind `tracker.route`, giving a
+  `tracker.fileIssue` an optional `route` behind `tracker.route`, adding
+  `tracker.matchesRoute` behind `tracker.route`, giving a
   PR an optional `crossRepo`, or adding the `not-mergeable` error class
   within 0.3 takes no bump. An older Connector ignores `cursor` and sends no
   `next`, so core reads its one page as before. An older Connector

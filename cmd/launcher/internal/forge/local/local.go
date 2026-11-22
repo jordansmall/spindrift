@@ -125,6 +125,7 @@ type LocalTracker struct {
 var _ forge.HostPostedIssueFiler = (*LocalTracker)(nil)
 var _ forge.HostPostedCommenter = (*LocalTracker)(nil)
 var _ forge.DemandCounter = (*LocalTracker)(nil)
+var _ forge.RouteMatcher = (*LocalTracker)(nil)
 
 // NewLocalTracker returns a forge.IssueTracker backed by issue files in dir.
 // verdictLabels configures CompleteVerdict for the research dispatch kind, and
@@ -139,8 +140,9 @@ func NewLocalTracker(dir string, labels forge.DispatchLabels, verdictLabels ...f
 
 // WithRoute narrows ListIssues (and so CountReady) and ListIssuesWithLabels
 // (the findings backlog reads) to issues carrying every route label and
-// stamps them onto issues PostIssue files. ListOpenIssues and AllIssues stay
-// unrouted: readiness reads the whole scope (ADR 0075).
+// stamps them onto issues PostIssue files. ListOpenIssues, AllIssues and Issue
+// stay unrouted: readiness reads the whole scope (ADR 0075). MatchesRoute is
+// the per-issue read of the route.
 func (lt *LocalTracker) WithRoute(r forge.Route) *LocalTracker {
 	lt.route = r
 	return lt
@@ -338,6 +340,15 @@ func (lt *LocalTracker) Issue(num string) (forge.Issue, error) {
 		return forge.Issue{}, err
 	}
 	return toIssue(num, li), nil
+}
+
+// MatchesRoute implements forge.RouteMatcher.
+func (lt *LocalTracker) MatchesRoute(num string) (bool, error) {
+	li, err := lt.readIssueFile(num)
+	if err != nil {
+		return false, err
+	}
+	return lt.route.MatchesLabels(li.frontmatter.Labels), nil
 }
 
 // TransitionState overwrites issue num's single frontmatter "state" marker

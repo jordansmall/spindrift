@@ -1,11 +1,14 @@
 package github
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -80,5 +83,38 @@ func TestStrategy_RouteReachesTheTrackerNotTheCodeForge(t *testing.T) {
 	}
 	if got := cf.(*execClient).route; got != nil {
 		t.Errorf("code forge route = %v, want none", got)
+	}
+}
+
+// MatchesRoute is the per-issue read of the Issue route that Issue leaves
+// unnarrowed: an in-route issue matches, an off-route one does not.
+func TestExecClient_MatchesRouteReadsOneIssueAgainstTheRoute(t *testing.T) {
+	h, c, _ := routedHarness(t)
+	h.SeedIssue(forge.Issue{Number: "1", Title: "in route", Labels: []string{testLabels.Dispatchable, routeLabel}})
+	h.SeedIssue(forge.Issue{Number: "2", Title: "other route", Labels: []string{testLabels.Dispatchable}})
+
+	if ok, err := c.MatchesRoute("2"); err != nil || !ok {
+		t.Errorf("unrouted MatchesRoute(2) = %v, %v; want true", ok, err)
+	}
+	setTrackerRoute(c)
+	for num, want := range map[string]bool{"1": true, "2": false} {
+		if ok, err := c.MatchesRoute(num); err != nil || ok != want {
+			t.Errorf("routed MatchesRoute(%s) = %v, %v; want %v", num, ok, err, want)
+		}
+	}
+}
+
+// A Connector without tracker.route cannot answer a routed match, so it is
+// refused rather than read as in route; an unrouted client needs no answer.
+func TestExecClient_MatchesRouteRefusedWithoutTheRouteCapability(t *testing.T) {
+	withoutCapability(t, connectortracker.CapRoute)
+	h, c, _ := routedHarness(t)
+	h.SeedIssue(forge.Issue{Number: "1", Title: "t", Labels: []string{testLabels.Dispatchable}})
+	if ok, err := c.MatchesRoute("1"); err != nil || !ok {
+		t.Errorf("unrouted MatchesRoute = %v, %v; want true", ok, err)
+	}
+	setTrackerRoute(c)
+	if _, err := c.MatchesRoute("1"); !errors.Is(err, connectorhost.ErrProtocolUnsupported) {
+		t.Errorf("routed MatchesRoute err = %v; want ErrProtocolUnsupported", err)
 	}
 }

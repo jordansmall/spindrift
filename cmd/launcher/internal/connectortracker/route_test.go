@@ -2,6 +2,7 @@ package connectortracker
 
 import (
 	"errors"
+	"maps"
 	"reflect"
 	"testing"
 
@@ -22,6 +23,7 @@ var routeReplies = map[string]string{
 	CapCount:                `{"count":1}`,
 	CapLabeled:              `{"issues":[]}`,
 	CapFileIssue:            `{"url":"https://j/browse/P-1"}`,
+	"tracker.matchesRoute":  `{"matches":false}`,
 }
 
 var routeCaps = []string{CapCount, CapLabeled, CapFileIssue, CapRoute}
@@ -131,4 +133,67 @@ func TestPre02ConnectorAdvertisingRouteCapRefusesARoute(t *testing.T) {
 	if len(*calls) != 0 {
 		t.Errorf("a routed call reached the guest: %v", *calls)
 	}
+}
+
+func TestMatchesRouteAsksTheConnectorWithTheRoute(t *testing.T) {
+	call, calls := stubGuest(t, routeReplies)
+	tr := mustTracker(t, call, newNative(), routedLifecycle(testRoute), testTarget, routeCaps, true)
+	rm, ok := forge.As[forge.RouteMatcher](tr)
+	if !ok {
+		t.Fatal("the tracker is not a RouteMatcher")
+	}
+	*calls = nil
+	got, err := rm.MatchesRoute("7")
+	if err != nil || got {
+		t.Fatalf("MatchesRoute = %v, %v, want false", got, err)
+	}
+	want := recordedCall{"tracker.matchesRoute", map[string]any{
+		"target": map[string]any{"api": testTarget.API, "repo": testTarget.Repo, "dialect": ""},
+		"number": "7",
+		"route":  wantRouteWire,
+	}}
+	if len(*calls) != 1 || !reflect.DeepEqual((*calls)[0], want) {
+		t.Errorf("calls = %+v, want [%+v]", *calls, want)
+	}
+}
+
+func TestMatchesRouteTrueWhenTheConnectorSaysSo(t *testing.T) {
+	call, _ := stubGuest(t, withReply("tracker.matchesRoute", `{"matches":true}`))
+	tr := mustTracker(t, call, newNative(), routedLifecycle(testRoute), testTarget, routeCaps, true)
+	rm, _ := forge.As[forge.RouteMatcher](tr)
+	if got, err := rm.MatchesRoute("7"); err != nil || !got {
+		t.Errorf("MatchesRoute = %v, %v, want true", got, err)
+	}
+}
+
+func TestMatchesRouteEmptyRouteMatchesWithoutACall(t *testing.T) {
+	call, calls := stubGuest(t, routeReplies)
+	tr := mustTracker(t, call, newNative(), testLifecycle, testTarget, routeCaps, true)
+	rm, _ := forge.As[forge.RouteMatcher](tr)
+	*calls = nil
+	if got, err := rm.MatchesRoute("7"); err != nil || !got {
+		t.Errorf("MatchesRoute = %v, %v, want true", got, err)
+	}
+	if len(*calls) != 0 {
+		t.Errorf("an unrouted match reached the guest: %v", *calls)
+	}
+}
+
+func TestMatchesRouteRefusedUnsentWithoutTheRouteCap(t *testing.T) {
+	call, calls := stubGuest(t, withReply("tracker.matchesRoute", `{"matches":true}`))
+	tr := mustTracker(t, call, newNative(), routedLifecycle(testRoute), testTarget, []string{CapCount}, true)
+	rm, _ := forge.As[forge.RouteMatcher](tr)
+	*calls = nil
+	if _, err := rm.MatchesRoute("7"); !errors.Is(err, connectorhost.ErrProtocolUnsupported) {
+		t.Errorf("MatchesRoute err = %v, want ErrProtocolUnsupported", err)
+	}
+	if len(*calls) != 0 {
+		t.Errorf("a routed call reached the guest: %v", *calls)
+	}
+}
+
+func withReply(method, reply string) map[string]string {
+	m := maps.Clone(routeReplies)
+	m[method] = reply
+	return m
 }
