@@ -2010,6 +2010,27 @@ func TestLocalTracker_Route_IssueReadByKeyIsNotNarrowed(t *testing.T) {
 	}
 }
 
+func TestLocalTracker_MatchesRoute(t *testing.T) {
+	dir := t.TempDir()
+	for slug, labels := range map[string][]string{"mine": {"orders"}, "foreign": {"billing"}} {
+		writeLocalIssue(t, dir, slug, localIssue{frontmatter: localFrontmatter{
+			Title: slug, State: testLabels.Dispatchable, Labels: labels, Created: "2026-01-01T00:00:00Z",
+		}})
+	}
+	routed := NewLocalTracker(dir, testLabels).WithRoute(forge.Route{{Kind: "label", Value: "orders"}})
+	for slug, want := range map[string]bool{"mine": true, "foreign": false} {
+		if got, err := routed.MatchesRoute(slug); err != nil || got != want {
+			t.Errorf("MatchesRoute(%s) = %v, %v, want %v", slug, got, err, want)
+		}
+	}
+	if _, err := routed.MatchesRoute("absent"); err == nil {
+		t.Error("MatchesRoute of a missing issue = nil error, want not found")
+	}
+	if got, err := NewLocalTracker(dir, testLabels).MatchesRoute("foreign"); err != nil || !got {
+		t.Errorf("unrouted MatchesRoute(foreign) = %v, %v, want true", got, err)
+	}
+}
+
 func TestLocalTracker_PostIssue_StampsRouteLabel(t *testing.T) {
 	dir := t.TempDir()
 	labelsOf := func(lt *LocalTracker, title string, in []string) []string {

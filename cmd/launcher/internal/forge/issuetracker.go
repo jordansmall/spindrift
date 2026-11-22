@@ -118,6 +118,16 @@ type LabeledBacklogLister interface {
 	ListIssuesWithLabels(state IssueState, labels []string) ([]Issue, error)
 }
 
+// RouteMatcher is the optional IssueTracker capability that tells whether one
+// issue belongs to the tracker's Issue route (ADR 0075). Issue reads stay
+// unrouted, so a caller holding an issue number from outside the route's
+// listings asks this before acting on it. An empty route matches every issue.
+type RouteMatcher interface {
+	// MatchesRoute reports whether issue number carries every route selector.
+	// A missing issue is an error, as for Issue.
+	MatchesRoute(number string) (bool, error)
+}
+
 // IssueSearcher is the optional IssueTracker capability for a free-text search
 // of the backlog, so the in-Box Filer can dedup against it without a forge
 // token (issue #6895). The query comes from an untrusted Box: an
