@@ -3854,7 +3854,7 @@ This is protocol version **0.3.0**. The host is
   | `tracker.nativeDeps` (optional) | `{target, number}` | `{ids}`, the issues `number` is blocked on, in the API's order |
   | `tracker.blocks` (optional) | `{target, number}` | `{ids}`, the issues `number` blocks, in the API's order |
   | `tracker.probe` (optional) | `{target}` | `{status}`, the HTTP status of one authenticated read; an error only when the request could not be sent |
-  | `tracker.statuses` (optional) | `{target}` | `{statuses}`, the name of every status in the project's workflows |
+  | `tracker.statuses` (optional) | `{target}` | `{statuses, categories}`: the name of every status in the project's workflows, and `categories` (optional, omitted when empty) mapping a status name to its category, `done` marking a terminal one |
   | `tracker.createMeta` (optional) | `{target, issueType}` | `{issueTypes, fields}`: every issue type the project offers, and the create fields (`{fieldId, name, required, hasDefaultValue}`) of `issueType`, none when it is not offered |
   | `tracker.count` (optional) | `{target, label, status, limit, fresh, route}`, selecting as `tracker.listIssues` does; `limit` is how many issues core will use (it clamps every Connector's answer to it, a Jira server total included, so the count need not walk past it), `fresh` asks the Connector to bypass any conditional-request cache (core sets it after a count a child contradicted) | `{count}`, possibly approximate |
   | `tracker.countInterval` (with `tracker.count`) | `{}` | `{seconds}`, at least 1: how often core re-asks `tracker.count` |
@@ -4106,7 +4106,10 @@ This is protocol version **0.3.0**. The host is
   advertises no `tracker.route`, so core refuses a route rather than send
   it. An older Connector that reports a real not-mergeable refusal as
   `permanent` now fails the merge at once instead of polling for checks,
-  which fails fast and loses nothing. Core
+  which fails fast and loses nothing. The `tracker.statuses` reply also gained
+  an optional `categories` map (status name to category); an older Connector
+  sends none, so core reads an empty category and the routed daemon's
+  Done-category warning stays silent. Core
   accepts its current `0.y` and the one before it, so today 0.3.z and 0.2.z.
   That overlap is what protects a third-party Connector, not core's CI, which
   runs only first-party Connectors' conformance: a third-party Connector has

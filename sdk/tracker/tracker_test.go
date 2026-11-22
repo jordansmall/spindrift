@@ -400,11 +400,11 @@ func jiraReader(t *testing.T) Reader {
 		}
 		return 401, nil
 	}
-	r.Statuses = func(tg Target) ([]string, error) {
+	r.Statuses = func(tg Target) ([]Status, error) {
 		if tg != wantTarget {
 			t.Errorf("Statuses(%v)", tg)
 		}
-		return []string{"To Do", "Done"}, nil
+		return []Status{{Name: "To Do"}, {Name: "Done"}}, nil
 	}
 	r.CreateMeta = func(tg Target, issueType string) (CreateMeta, error) {
 		if tg != wantTarget || issueType != "Task" {
@@ -467,9 +467,36 @@ func TestDoctorWireShapes(t *testing.T) {
 	}
 }
 
+func TestStatusesWireCarriesCategories(t *testing.T) {
+	r := jiraReader(t)
+	r.Statuses = func(Target) ([]Status, error) {
+		return []Status{{Name: "To Do", Category: "new"}, {Name: "Done", Category: StatusCategoryDone}, {Name: "Odd"}}, nil
+	}
+	_, m := handlers(r)
+	want := `{"statuses":["To Do","Done","Odd"],"categories":{"Done":"done","To Do":"new"}}`
+	if got := call(t, m, "tracker.statuses", `{`+target+`}`); got != want {
+		t.Errorf("statuses = %s, want %s", got, want)
+	}
+}
+
+func TestStatusesWireDoneCategoryWinsConflict(t *testing.T) {
+	for name, sts := range map[string][]Status{
+		"done first": {{Name: "Closed", Category: StatusCategoryDone}, {Name: "Closed", Category: "indeterminate"}},
+		"done last":  {{Name: "Closed", Category: "indeterminate"}, {Name: "Closed", Category: StatusCategoryDone}},
+	} {
+		r := jiraReader(t)
+		r.Statuses = func(Target) ([]Status, error) { return sts, nil }
+		_, m := handlers(r)
+		want := `{"statuses":["Closed","Closed"],"categories":{"Closed":"done"}}`
+		if got := call(t, m, "tracker.statuses", `{`+target+`}`); got != want {
+			t.Errorf("%s: statuses = %s, want %s", name, got, want)
+		}
+	}
+}
+
 func TestDoctorEmptyListsEncodeAsArrays(t *testing.T) {
 	r := jiraReader(t)
-	r.Statuses = func(Target) ([]string, error) { return nil, nil }
+	r.Statuses = func(Target) ([]Status, error) { return nil, nil }
 	r.CreateMeta = func(Target, string) (CreateMeta, error) { return CreateMeta{}, nil }
 	_, m := handlers(r)
 	if got, want := call(t, m, "tracker.statuses", `{`+target+`}`), `{"statuses":[]}`; got != want {
