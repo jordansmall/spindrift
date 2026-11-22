@@ -162,11 +162,17 @@ type Reader struct {
 	IDs IDGrammar
 	// Routes declares that ListIssues, Count and LabeledPage AND every selector
 	// of a route into their read, that the Writer's FileIssue stamps it on the
-	// issue it files, and that each errors on a kind it cannot honour. It
-	// advertises "tracker.route". Core sends a route only to a Connector
-	// advertising it, because an older one drops the unknown route field and
-	// answers the whole scope.
+	// issue it files, that MatchesRoute answers one issue's match, and that
+	// each errors on a kind it cannot honour. It advertises "tracker.route".
+	// Core sends a route only to a Connector advertising it, because an older
+	// one drops the unknown route field and answers the whole scope.
 	Routes bool
+	// MatchesRoute is required with Routes: it reports whether issue number
+	// matches every selector of route (an empty route matches). A Connector
+	// answers it however its tracker allows, e.g. Jira ANDs the issue key into
+	// the route's JQL. It errors on a kind it cannot
+	// honour rather than answering false. Served as "tracker.matchesRoute".
+	MatchesRoute func(t Target, number string, route []Selector) (bool, error)
 
 	// ListIssues returns up to limit open issues matching q.
 	ListIssues func(t Target, q Query, limit int) ([]Issue, error)
@@ -299,6 +305,8 @@ func handlers(r Reader) ([]string, map[string]method) {
 		panic("tracker: Reader.ListIssues is required")
 	case r.Issue == nil:
 		panic("tracker: Reader.Issue is required")
+	case r.Routes && r.MatchesRoute == nil:
+		panic("tracker: Reader.MatchesRoute is required with Routes")
 	case r.Count != nil && r.CountInterval < time.Second:
 		panic("tracker: Reader.CountInterval of at least one second is required with Count")
 	}
@@ -525,6 +533,23 @@ func handlers(r Reader) ([]string, map[string]method) {
 	}
 	if r.Routes {
 		caps = append(caps, "tracker.route")
+		m["tracker.matchesRoute"] = func(params json.RawMessage) (any, error) {
+			var p struct {
+				Target Target     `json:"target"`
+				Number string     `json:"number"`
+				Route  []Selector `json:"route"`
+			}
+			if err := unmarshal(params, &p); err != nil {
+				return nil, err
+			}
+			ok, err := r.MatchesRoute(p.Target, p.Number, p.Route)
+			if err != nil {
+				return nil, err
+			}
+			return struct {
+				Matches bool `json:"matches"`
+			}{ok}, nil
+		}
 	}
 	return caps, m
 }

@@ -309,15 +309,56 @@ func TestMissingRequiredPanics(t *testing.T) {
 func TestRoutesCapability(t *testing.T) {
 	r := fakeReader(t)
 	r.Routes = true
+	r.MatchesRoute = func(Target, string, []Selector) (bool, error) { return true, nil }
 	caps, _ := handlers(r)
 	if want := []string{"tracker", "tracker.comments", "tracker.route"}; !reflect.DeepEqual(caps, want) {
 		t.Fatalf("caps = %v, want %v", caps, want)
 	}
 	r.Routes = false
-	caps, _ = handlers(r)
+	caps, m := handlers(r)
 	if want := []string{"tracker", "tracker.comments"}; !reflect.DeepEqual(caps, want) {
 		t.Fatalf("unrouted caps = %v, want %v", caps, want)
 	}
+	if m["tracker.matchesRoute"] != nil {
+		t.Error("matchesRoute handler present without Reader.Routes")
+	}
+}
+
+func TestMatchesRouteWireShape(t *testing.T) {
+	r := fakeReader(t)
+	r.Routes = true
+	r.MatchesRoute = func(tg Target, number string, route []Selector) (bool, error) {
+		if tg != wantTarget || number != "7" || !reflect.DeepEqual(route, []Selector{{Kind: "label", Value: "orders"}}) {
+			t.Errorf("MatchesRoute(%v, %q, %v)", tg, number, route)
+		}
+		return true, nil
+	}
+	_, m := handlers(r)
+	got := call(t, m, "tracker.matchesRoute", `{`+target+`,"number":"7","route":[{"kind":"label","value":"orders"}]}`)
+	if want := `{"matches":true}`; got != want {
+		t.Errorf("tracker.matchesRoute = %s, want %s", got, want)
+	}
+	r.MatchesRoute = func(Target, string, []Selector) (bool, error) { return false, nil }
+	_, m = handlers(r)
+	if got := call(t, m, "tracker.matchesRoute", `{`+target+`,"number":"7"}`); got != `{"matches":false}` {
+		t.Errorf("miss = %s, want matches false", got)
+	}
+	r.MatchesRoute = func(Target, string, []Selector) (bool, error) { return false, errors.New("boom") }
+	_, m = handlers(r)
+	if _, err := m["tracker.matchesRoute"](json.RawMessage(`{` + target + `,"number":"7"}`)); err == nil {
+		t.Error("MatchesRoute error not propagated")
+	}
+}
+
+func TestRoutesWithoutMatchesRoutePanics(t *testing.T) {
+	r := fakeReader(t)
+	r.Routes = true
+	defer func() {
+		if recover() == nil {
+			t.Error("Routes without MatchesRoute: no panic")
+		}
+	}()
+	handlers(r)
 }
 
 func TestProjectKeyIDsCapability(t *testing.T) {

@@ -238,3 +238,45 @@ func TestListIssuesUndefinedRouteLabelAsksNoIssues(t *testing.T) {
 		}
 	}
 }
+
+func TestMatchesRoute(t *testing.T) {
+	label := func(v string) tracker.Selector { return tracker.Selector{Kind: "label", Value: v} }
+	got := stub(t, map[string]connector.Response{
+		repoAPI + "/issues/7": ok(`{"number":7,"state":"open","labels":[{"name":"orders"},{"name":"web"}]}`),
+	})
+	cases := map[string]struct {
+		route []tracker.Selector
+		want  bool
+	}{
+		"empty route matches": {nil, true},
+		"every label carried": {[]tracker.Selector{label("orders"), label("web")}, true},
+		"one label missing":   {[]tracker.Selector{label("orders"), label("billing")}, false},
+	}
+	for name, tc := range cases {
+		m, err := matchesRoute(ttgt, "7", tc.route)
+		if err != nil || m != tc.want {
+			t.Errorf("%s: matchesRoute = %v, %v; want %v", name, m, err, tc.want)
+		}
+	}
+	if len(*got) != len(cases) {
+		t.Errorf("requests = %d, want one issue read per call", len(*got))
+	}
+}
+
+func TestMatchesRouteRefusesWithoutARequest(t *testing.T) {
+	for name, route := range map[string][]tracker.Selector{
+		"non-label kind": {{Kind: "component", Value: "x"}},
+		"comma label":    {{Kind: "label", Value: "a,b"}},
+	} {
+		got := stub(t, nil)
+		if _, err := matchesRoute(ttgt, "7", route); err == nil {
+			t.Errorf("%s: no error", name)
+		}
+		if len(*got) != 0 {
+			t.Errorf("%s: %d requests, want none", name, len(*got))
+		}
+	}
+	if _, err := matchesRoute(ttgt, "x", nil); err == nil {
+		t.Error("bad number: no error")
+	}
+}

@@ -50,7 +50,8 @@ func init() {
 		LabeledPage:   labeledPage,
 		Search:        search,
 		// Routes: a label route joins the labels filter and fileIssue stamps it.
-		Routes: true,
+		Routes:       true,
+		MatchesRoute: matchesRoute,
 	})
 	tracker.RegisterWrites(tracker.Writer{
 		Transition:  transition,

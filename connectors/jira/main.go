@@ -15,14 +15,15 @@ func init() {
 	// Comments is set, unlike connectors/github: Jira has no minimized-comment
 	// concept, so Minimized=false is the faithful report, not a gap.
 	tracker.Register(tracker.Reader{
-		IDs:         tracker.ProjectKeyIDs,
-		Routes:      true,
-		ListIssues:  listIssues,
-		Issue:       issue,
-		Comments:    comments,
-		NativeDeps:  nativeDeps,
-		Blocks:      blocks,
-		LabeledPage: labeledPage,
+		IDs:          tracker.ProjectKeyIDs,
+		Routes:       true,
+		MatchesRoute: matchesRoute,
+		ListIssues:   listIssues,
+		Issue:        issue,
+		Comments:     comments,
+		NativeDeps:   nativeDeps,
+		Blocks:       blocks,
+		LabeledPage:  labeledPage,
 
 		Probe:         probe,
 		Statuses:      statuses,

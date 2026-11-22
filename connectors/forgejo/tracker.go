@@ -66,6 +66,20 @@ func issue(t tracker.Target, number string) (tracker.Issue, error) {
 	return raw.issue(), nil
 }
 
+// matchesRoute reports whether issue number carries every route label. The
+// route is validated before the read, so an unhonourable one costs no request.
+func matchesRoute(t tracker.Target, number string, route []tracker.Selector) (bool, error) {
+	required, err := tracker.RouteLabels("", route)
+	if err != nil {
+		return false, err
+	}
+	i, err := issue(t, number)
+	if err != nil {
+		return false, err
+	}
+	return hasAll(i, required), nil
+}
+
 // listIssues returns the open issues carrying q.Label and every route label,
 // ascending by number; q.Status is ignored, Forgejo has none.
 func listIssues(t tracker.Target, q tracker.Query, limit int) ([]tracker.Issue, error) {
