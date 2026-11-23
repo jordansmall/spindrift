@@ -13,6 +13,10 @@
 # override would reach it as arguments. The scan matches any word equal to one
 # of those, an option's value included (`--option foo -c`), splitting it from
 # its option.
+#
+# A <connector> that is a Connector template (templates/connector-<kind>, issue
+# #7421) is generated with new-connector under two names and the args run in
+# each generated copy, in temp dirs removed on exit.
 set -euo pipefail
 
 if [ "$#" -lt 2 ]; then
@@ -57,6 +61,24 @@ for a in "$@"; do
   args+=("$a")
 done
 [ -n "$injected" ] || args+=("${override[@]}")
+
+# A Connector template is checked under generated names so that more than its
+# placeholder name is exercised: it is generated under two distinct non-core
+# names and the same nix args run in each; both always run so one CI log shows
+# both failures.
+case "$dir" in
+  "$root"/templates/connector-*)
+    kind="${dir##*/connector-}"
+    gen="$(mktemp -d)"
+    trap 'rm -rf "$gen"' EXIT
+    rc=0
+    for name in acme zeta; do
+      new-connector "$kind" "$name" "$gen/$name"
+      (cd "$gen/$name" && nix "${args[@]}") || rc=1
+    done
+    exit "$rc"
+    ;;
+esac
 
 cd "$dir"
 exec nix "${args[@]}"
