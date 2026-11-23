@@ -3520,8 +3520,34 @@ operation. The row sets no `primary`: jira is Connector-only, and a jira row
 that sets it fails evaluation, because there is no native backend of the same
 name to replace.
 
-Import the Connector's flake module (`connectors/jira`) in the Consumer, set
-`JIRA_BASE_URL` to the site's https URL and `JIRA_PROJECT_KEY`, and set the
+The batteries flake (`spindrift.flakeModules.default`) carries no jira
+Connector, so add an input on its subflake and import its module in the
+Consumer:
+
+```nix
+inputs = {
+  nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  flake-parts.url = "github:hercules-ci/flake-parts";
+  spindrift.url = "github:jordansmall/spindrift";
+  jira = {
+    url = "github:jordansmall/spindrift?dir=connectors/jira";
+    inputs.core.follows = "spindrift";
+  };
+};
+# ...
+imports = [
+  spindrift.flakeModules.default
+  inputs.jira.flakeModules.default
+];
+```
+
+`core` follows `spindrift` (not `spindrift/core`: the root flake has no `core`
+input, and its outputs serve as core), so the lock graph holds one core. The
+Connector module carries a dedup `key`, so importing it twice is harmless. The
+[Quickstart wizard](../README.md#quick-start) writes this stanza when you pick
+jira as the tracker.
+
+Set `JIRA_BASE_URL` to the site's https URL and `JIRA_PROJECT_KEY`, and set the
 row's two host-only credentials:
 
 ```sh
@@ -6325,8 +6351,9 @@ and the code forge separately. A remote on a host a row's `quickstart` block
 lists (github.com, codeberg.org) pre-selects both and you can override either;
 otherwise each defaults to `github`. It offers a row on an axis when it can
 collect that row's credential: `github`, `forgejo` and `local` on both axes,
-`git` as a forge only. `jira` is not offered yet, so select it by editing
-`issues.tracker` in the generated `flake.nix`.
+`git` as a forge only, and `jira` as a tracker only. A jira pick also adds the
+jira Connector's flake input and module import to the generated `flake.nix`
+(see [Running jira through its Connector](#running-jira-through-its-connector)).
 
 - **`github`** (default) — the label lifecycle described above.
 - **`local`** — a private, file-based tracker; see [Local issue
