@@ -2184,8 +2184,8 @@ func TestRender_ForgejoCodeberg_ConfiguresBothSeamsOmitsDefaultBaseURL(t *testin
 	if !strings.Contains(flakeNix.content, `forge.backend = "forgejo"`) {
 		t.Errorf("expected flake.nix to configure the forgejo code forge, got:\n%s", flakeNix.content)
 	}
-	if strings.Contains(flakeNix.content, "issues.forgejo.baseURL") {
-		t.Errorf("expected flake.nix to omit issues.forgejo.baseURL for the codeberg default, got:\n%s", flakeNix.content)
+	if strings.Contains(flakeNix.content, "\n            issues.forgejo.baseURL") {
+		t.Errorf("expected flake.nix to omit a live issues.forgejo.baseURL for the codeberg default, got:\n%s", flakeNix.content)
 	}
 
 	harnessEnv := byPath["harness.env"]
@@ -2301,65 +2301,117 @@ func TestRender_ForgejoSelfHosted_EmitsBaseURL(t *testing.T) {
 	}
 }
 
-// TestRender_Github_Golden byte-compares renderFlakeNix's output for a fixed
-// github-tracker fixture against a committed golden file.
-// nix/checks/quickstart-golden.nix imports that same file and evaluates it
-// against the real spindrift flake module, so the fixture values here must
-// stay in sync with what that check expects to evaluate cleanly.
-func TestRender_Github_Golden(t *testing.T) {
-	a := answers{
-		repoSlug:     "jordansmall/spindrift-consumer-example",
-		runtime:      "podman",
-		gitUserName:  "Ada Lovelace",
-		gitUserEmail: "ada@example.com",
-		tracker:      backendChoice{name: "github"},
-		forge:        backendChoice{name: "github"},
-		tokens:       map[string]string{"github": "ghp_faketoken"},
-		credentials:  []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}},
-	}
+// goldenPairings are the tracker/forge pairings with a committed golden
+// directory testdata/golden/<tracker>-<forge>/{flake.nix,harness.env}.
+// nix/checks/quickstart-golden.nix evaluates each flake.nix against the real
+// spindrift flake module, so the fixture values here must stay in sync with
+// what that check expects to evaluate cleanly.
+var goldenPairings = []struct{ tracker, forge string }{
+	{"github", "github"},
+	{"forgejo", "forgejo"},
+	{"forgejo", "github"},
+	{"local", "git"},
+	{"local", "local"},
+}
 
-	files := mustRender(t, a)
-	flakeNix := flakeNixFor(t, files)
-
-	want, err := os.ReadFile("testdata/golden/github/flake.nix")
+// Every golden directory (bar the deliberately broken one) has a goldenPairings
+// entry and vice versa, so nix/checks/quickstart-golden.nix, which derives its
+// pairings from the same directory listing, evaluates exactly the pairings the
+// Go test renders.
+func TestGoldenPairings_MatchGoldenDirs(t *testing.T) {
+	entries, err := os.ReadDir(filepath.Join("testdata", "golden"))
 	if err != nil {
-		t.Fatalf("reading golden file: %v", err)
+		t.Fatalf("reading golden dir: %v", err)
 	}
-
-	if flakeNix != string(want) {
-		t.Errorf("flake.nix does not match testdata/golden/github/flake.nix\n--- got ---\n%s\n--- want ---\n%s", flakeNix, want)
+	onDisk := map[string]bool{}
+	for _, e := range entries {
+		if e.IsDir() && e.Name() != "broken" {
+			onDisk[e.Name()] = true
+		}
+	}
+	inTable := map[string]bool{}
+	for _, p := range goldenPairings {
+		inTable[p.tracker+"-"+p.forge] = true
+	}
+	for dir := range onDisk {
+		if !inTable[dir] {
+			t.Errorf("testdata/golden/%s has no goldenPairings entry", dir)
+		}
+	}
+	for dir := range inTable {
+		if !onDisk[dir] {
+			t.Errorf("goldenPairings entry %s has no testdata/golden directory", dir)
+		}
 	}
 }
 
-// TestRender_Forgejo_Golden is TestRender_Github_Golden's forgejo twin: a
-// self-hosted forgejoBaseURL (not the codeberg default) so the golden
-// exercises the issues.forgejo.baseURL line too.
-func TestRender_Forgejo_Golden(t *testing.T) {
-	a := answers{
-		repoSlug:     "jordansmall/spindrift-consumer-example",
-		runtime:      "podman",
-		gitUserName:  "Ada Lovelace",
-		gitUserEmail: "ada@example.com",
-		tracker:      backendChoice{name: "forgejo", knobs: map[string]string{"FORGEJO_BASE_URL": "https://git.example.com"}},
-		forge:        backendChoice{name: "forgejo", knobs: map[string]string{"FORGEJO_BASE_URL": "https://git.example.com"}},
-		tokens:       map[string]string{"forgejo": "forgejo-faketoken"},
-		credentials:  []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}},
+// goldenChoice is the fixture backendChoice for a backend: the knobs its
+// Strategy would derive from a self-hosted remote.
+func goldenChoice(name string) backendChoice {
+	switch name {
+	case "forgejo":
+		return backendChoice{name: name, knobs: map[string]string{"FORGEJO_BASE_URL": "https://git.example.com"}}
+	case "git":
+		return backendChoice{name: name, knobs: map[string]string{"CODE_FORGE_REMOTE_URL": "https://git.example.com/jordansmall/spindrift-consumer-example.git"}}
 	}
+	return backendChoice{name: name}
+}
 
-	files := mustRender(t, a)
-	flakeNix := flakeNixFor(t, files)
+// Byte-compares the flake.nix and harness.env render writes for each pairing
+// against its committed golden, then asserts the pairing's own knobs and
+// secrets are present and no other backend's are.
+func TestRender_PairingGoldens(t *testing.T) {
+	for _, p := range goldenPairings {
+		dir := p.tracker + "-" + p.forge
+		t.Run(dir, func(t *testing.T) {
+			a := answers{
+				repoSlug:     "jordansmall/spindrift-consumer-example",
+				runtime:      "podman",
+				gitUserName:  "Ada Lovelace",
+				gitUserEmail: "ada@example.com",
+				tracker:      goldenChoice(p.tracker),
+				forge:        goldenChoice(p.forge),
+				tokens:       map[string]string{"github": "ghp_faketoken", "forgejo": "forgejo-faketoken"},
+				credentials:  []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}},
+			}
+			files := mustRender(t, a)
+			got := map[string]string{"flake.nix": flakeNixFor(t, files)}
+			for _, f := range files {
+				if f.path == "harness.env" {
+					got["harness.env"] = f.content
+				}
+			}
+			for _, name := range []string{"flake.nix", "harness.env"} {
+				want, err := os.ReadFile(filepath.Join("testdata", "golden", dir, name))
+				if err != nil {
+					t.Fatalf("reading golden file: %v", err)
+				}
+				if got[name] != string(want) {
+					t.Errorf("%s does not match testdata/golden/%s/%s\n--- got ---\n%s\n--- want ---\n%s", name, dir, name, got[name], want)
+				}
+			}
 
-	want, err := os.ReadFile("testdata/golden/forgejo/flake.nix")
-	if err != nil {
-		t.Fatalf("reading golden file: %v", err)
-	}
-
-	if flakeNix != string(want) {
-		t.Errorf("flake.nix does not match testdata/golden/forgejo/flake.nix\n--- got ---\n%s\n--- want ---\n%s", flakeNix, want)
+			chosen := map[string]bool{p.tracker: true, p.forge: true}
+			for name, stanza := range consumerStanzas {
+				for _, s := range stanza.Settings {
+					// A row chosen only as the tracker omits its forge-group knobs.
+					want := chosen[name] && (name == p.forge || !strings.HasPrefix(s.Path, forgeOptionGroup))
+					if has := strings.Contains(got["flake.nix"], s.Path); has != want {
+						t.Errorf("flake.nix mentions %s (backend %q) = %v, want %v", s.Path, name, has, want)
+					}
+				}
+				for _, s := range stanza.Secrets {
+					has := strings.HasPrefix(got["harness.env"], s.Env+"=") || strings.Contains(got["harness.env"], "\n"+s.Env+"=")
+					if has != chosen[name] {
+						t.Errorf("harness.env has a %s= line (backend %q) = %v, want %v", s.Env, name, has, chosen[name])
+					}
+				}
+			}
+		})
 	}
 }
 
-// Byte-pins testdata/golden/broken/flake.nix against the github golden,
+// Byte-pins testdata/golden/broken/flake.nix against the github-github golden,
 // asserting they are identical except for two deliberate diff regions (issue
 // #2565, tracked further by issue #2735): a 5-line comment block explaining
 // the fixture is deliberately broken, and the infra.runtime value, which the
@@ -2369,7 +2421,7 @@ func TestGoldenBroken_MatchesGithubExceptKnownDiffs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading broken golden file: %v", err)
 	}
-	github, err := os.ReadFile("testdata/golden/github/flake.nix")
+	github, err := os.ReadFile("testdata/golden/github-github/flake.nix")
 	if err != nil {
 		t.Fatalf("reading github golden file: %v", err)
 	}
@@ -2443,10 +2495,10 @@ func TestGoldenBroken_MatchesGithubExceptKnownDiffs(t *testing.T) {
 		t.Fatalf("testdata/golden/broken/flake.nix does not contain the expected deliberately-broken infra.runtime line %q (issue #2565 / #2735)", wantBrokenRuntime)
 	}
 	if runtimeIdx >= len(githubLines) {
-		t.Fatalf("testdata/golden/github/flake.nix has only %d lines; expected an infra.runtime line at line %d", len(githubLines), runtimeIdx+1)
+		t.Fatalf("testdata/golden/github-github/flake.nix has only %d lines; expected an infra.runtime line at line %d", len(githubLines), runtimeIdx+1)
 	}
 	if !strings.HasPrefix(githubLines[runtimeIdx], runtimeLinePrefix) || !strings.HasSuffix(githubLines[runtimeIdx], runtimeLineSuffix) {
-		t.Fatalf("testdata/golden/github/flake.nix line %d: expected an infra.runtime line matching %q...%q, got %q", runtimeIdx+1, runtimeLinePrefix, runtimeLineSuffix, githubLines[runtimeIdx])
+		t.Fatalf("testdata/golden/github-github/flake.nix line %d: expected an infra.runtime line matching %q...%q, got %q", runtimeIdx+1, runtimeLinePrefix, runtimeLineSuffix, githubLines[runtimeIdx])
 	}
 
 	const runtimePlaceholder = "            infra.runtime = <normalized>;"
@@ -2456,7 +2508,7 @@ func TestGoldenBroken_MatchesGithubExceptKnownDiffs(t *testing.T) {
 	normalizedGithub[runtimeIdx] = runtimePlaceholder
 
 	if len(trimmedBroken) != len(normalizedGithub) {
-		t.Fatalf("testdata/golden/broken/flake.nix (minus known comment block) has %d lines, testdata/golden/github/flake.nix has %d lines; expected equal length after removing known diffs", len(trimmedBroken), len(normalizedGithub))
+		t.Fatalf("testdata/golden/broken/flake.nix (minus known comment block) has %d lines, testdata/golden/github-github/flake.nix has %d lines; expected equal length after removing known diffs", len(trimmedBroken), len(normalizedGithub))
 	}
 	for i := range trimmedBroken {
 		if trimmedBroken[i] != normalizedGithub[i] {
@@ -2656,6 +2708,7 @@ func TestRenderHarnessEnv_RegistryDriven(t *testing.T) {
 		TokenEnvVar:      "GITLAB_TOKEN",
 	})
 	defer func() { backend.Registry = original }()
+	withStanza(t, backend.Descriptor{Name: "gitlab", TokenEnvVar: "GITLAB_TOKEN"})
 
 	out := harnessEnvFor("gitlab", "gitlab-faketoken", []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}})
 
@@ -3018,7 +3071,7 @@ func TestRunQuickstart_CodebergRemote_UsesForgejoBackend(t *testing.T) {
 	if !strings.Contains(string(flakeNix), `forge.backend = "forgejo"`) {
 		t.Errorf("expected flake.nix to set codeForge to forgejo, got:\n%s", flakeNix)
 	}
-	if strings.Contains(string(flakeNix), "issues.forgejo.baseURL") {
+	if strings.Contains(string(flakeNix), "\n            issues.forgejo.baseURL") {
 		t.Errorf("expected flake.nix not to emit an explicit forgejo baseURL for the codeberg default, got:\n%s", flakeNix)
 	}
 
@@ -3291,6 +3344,7 @@ func TestRunQuickstart_NewBackend_TokenAcquisitionNeedsNoRunQuickstartEdit(t *te
 	// renderHarnessEnv still resolves the token name through backend.Registry.
 	originalRegistry := backend.Registry
 	backend.Registry = append(append([]backend.Descriptor{}, originalRegistry...), stub.Descriptor)
+	withStanza(t, stub.Descriptor)
 	defer func() { backend.Registry = originalRegistry }()
 
 	dir := t.TempDir()
@@ -4047,8 +4101,21 @@ func withRegistryDescriptors(t *testing.T, rows ...backendkit.Strategy) {
 	backend.Registry = append([]backend.Descriptor{}, original...)
 	for _, s := range rows {
 		backend.Registry = append(backend.Registry, s.Descriptor)
+		withStanza(t, s.Descriptor)
 	}
 	t.Cleanup(func() { backend.Registry = original })
+}
+
+// withStanza gives a descriptor the Consumer stanza the generated table would
+// carry for it: harness.env is composed from that table, so a fake backend
+// without one writes no secrets.
+func withStanza(t *testing.T, d backend.Descriptor) {
+	t.Helper()
+	consumerStanzas[d.Name] = consumerStanza{
+		DisplayName: d.Name,
+		Secrets:     []stanzaSecret{{Env: d.TokenEnvVar, Secret: true}},
+	}
+	t.Cleanup(func() { delete(consumerStanzas, d.Name) })
 }
 
 func quickstartRun(t *testing.T, env fakeEnvironment, builder ForgeBuilder, lines ...string) (dir, transcript string, err error) {

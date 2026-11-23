@@ -133,9 +133,18 @@ let
     '';
   mkEvaluatesCheck = mkEvaluatesCheckWith evalGolden;
 
-  githubGolden = ../../cmd/launcher/quickstart/testdata/golden/github/flake.nix;
-  forgejoGolden = ../../cmd/launcher/quickstart/testdata/golden/forgejo/flake.nix;
-  brokenGolden = ../../cmd/launcher/quickstart/testdata/golden/broken/flake.nix;
+  # One golden per tracker/forge pairing: every directory under testdata/golden
+  # but the deliberately broken one. TestGoldenPairings_MatchGoldenDirs pins the
+  # Go table to the same listing.
+  goldenDir = ../../cmd/launcher/quickstart/testdata/golden;
+  pairings = builtins.filter (name: name != "broken") (
+    builtins.attrNames (
+      pkgs.lib.filterAttrs (_: type: type == "directory") (builtins.readDir goldenDir)
+    )
+  );
+  pairingGolden = pairing: goldenDir + "/${pairing}/flake.nix";
+  githubGolden = pairingGolden "github-github";
+  brokenGolden = goldenDir + "/broken/flake.nix";
 
   # Copy of the github golden with its infra.runtime line renamed to match
   # patchedFlakeModule's renamed option path, for the positive control below.
@@ -145,7 +154,7 @@ let
       needle = ''infra.runtime = "${defaultRuntime}";'';
     in
     assert assertMsg (pkgs.lib.hasInfix needle text)
-      "cmd/launcher/quickstart/testdata/golden/github/flake.nix no longer contains the expected ${needle} — quickstart-golden-github-with-renamed-runtime-option-evaluates' replaceStrings needle is stale";
+      "cmd/launcher/quickstart/testdata/golden/github-github/flake.nix no longer contains the expected ${needle} — quickstart-golden-github-with-renamed-runtime-option-evaluates' replaceStrings needle is stale";
     builtins.toFile "golden-github-renamed-runtime.nix" (
       builtins.replaceStrings
         [ needle ]
@@ -155,11 +164,19 @@ let
         text
     );
 in
-{
-  quickstart-golden-github-evaluates = mkEvaluatesCheck "quickstart-golden-github-evaluates" githubGolden;
-
-  quickstart-golden-forgejo-evaluates = mkEvaluatesCheck "quickstart-golden-forgejo-evaluates" forgejoGolden;
-
+(pkgs.lib.listToAttrs (
+  map (
+    pairing:
+    let
+      name = "quickstart-golden-${pairing}-evaluates";
+    in
+    {
+      inherit name;
+      value = mkEvaluatesCheck name (pairingGolden pairing);
+    }
+  ) pairings
+))
+// {
   # The deliberately-broken golden sets infra.runtime to a value outside the
   # runtime enum and must fail to evaluate. That proves this check module can
   # detect a real schema regression instead of rubber-stamping anything that
@@ -204,7 +221,7 @@ in
           (evalGoldenWith patchedSpindriftInput githubGolden).packages.${system}.spindrift;
     in
     assert assertMsg (!result.success)
-      "cmd/launcher/quickstart/testdata/golden/github/flake.nix must fail to evaluate against a spindrift flake module with infra.runtime renamed to infra.${renamedRuntimeOption} — it evaluated successfully instead";
+      "cmd/launcher/quickstart/testdata/golden/github-github/flake.nix must fail to evaluate against a spindrift flake module with infra.runtime renamed to infra.${renamedRuntimeOption} — it evaluated successfully instead";
     pkgs.runCommand "quickstart-golden-github-with-renamed-runtime-option-fails" { } "touch $out";
 
   # Positive control for the check above: without it, that failure proves only

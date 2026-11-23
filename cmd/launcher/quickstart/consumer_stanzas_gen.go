@@ -33,6 +33,10 @@ type stanzaSecret struct {
 // Its verbs take the env name (%[1]s) and the kebab-cased vault key (%[2]s).
 const secretCmdHintFormat = "# Preferred: fetch this from a vault instead of the plaintext value below —\n# %[1]s_CMD=\"rbw get spindrift-%[2]s\" (or an op/pass/vault\n# read); the command's stdout wins over %[1]s and is never baked,\n# logged, or written to disk.\n"
 
+// backendHeaderFormat opens a backend's group; its verbs take the display name
+// (%[1]s) and the backend name (%[2]s).
+const backendHeaderFormat = "# %[1]s backend (%[2]s)\n"
+
 // harnessEnvPreamble opens the wizard's harness.env.
 const harnessEnvPreamble = "# Preferred: source each secret below from a vault via its <NAME>_CMD\n# form rather than the plaintext value — harness.env then holds\n# fetch recipes, not live credentials.\n# One vault, uniform naming? SECRET_CMD sets a single templated fetch\n# command (e.g. \"rbw get spindrift-{name}\") for any secret without a\n# <NAME>_CMD, but note the plaintext value below still wins over it\n# too, so remove that value (or add <NAME>_CMD) for SECRET_CMD to apply.\n\n"
 

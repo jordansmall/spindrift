@@ -32,9 +32,15 @@
             forge.repoSlug = "jordansmall/spindrift-consumer-example";
             git.user.name = "Ada Lovelace";
             git.user.email = "ada@example.com";
-            issues.tracker = "forgejo";
-            forge.backend = "forgejo";
-            issues.forgejo.baseURL = "https://git.example.com";
+            issues.tracker = "local";
+            forge.backend = "git";
+
+            # local backend (local)
+            # issues.localDir = ".spindrift/issues";
+            # issues.localReference = false;
+
+            # Git backend (git)
+            forge.remoteURL = "https://git.example.com/jordansmall/spindrift-consumer-example.git";
           };
 
           devShells.default = pkgs.mkShell {
