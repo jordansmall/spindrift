@@ -67,6 +67,7 @@ let
   # backend, so a backend edit leaves their drvPaths unchanged (issue #5738).
   backendBundleDirs = [
     "backendkit"
+    "connectorcall"
     "connectorforge"
     "connectortracker"
     "dedupmarker"
