@@ -2,6 +2,7 @@ package jira_test
 
 import (
 	"errors"
+	"net/http"
 	"os"
 	"reflect"
 	"slices"
@@ -482,5 +483,23 @@ func TestConnector_UnavailableTransition(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// A throttled write must reach core as RateLimited, not as a generic failure.
+func TestConnector_ThrottledCommentReportsRateLimited(t *testing.T) {
+	for _, fl := range connectorFlavours {
+		t.Run(fl.name, func(t *testing.T) {
+			h := newConnectorHarness(t, fl.cloud)
+			h.SeedIssue(forge.Issue{Number: "PROJ-1", Title: "t"})
+			h.commentStatus = http.StatusTooManyRequests
+			err := h.tr.Comment("PROJ-1", "hello")
+			if err == nil {
+				t.Fatal("Comment: want an error from the throttled write")
+			}
+			if got := connectorhost.ErrorClass(err); got != connectorhost.RateLimited {
+				t.Errorf("ErrorClass(%v) = %q, want %q", err, got, connectorhost.RateLimited)
+			}
+		})
 	}
 }
