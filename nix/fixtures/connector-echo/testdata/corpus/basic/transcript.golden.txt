@@ -1,0 +1,3 @@
+[implementor] hello from echo
+[implementor] second line
+[implementor] done

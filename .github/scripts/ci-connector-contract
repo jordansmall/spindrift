@@ -26,6 +26,7 @@ nix/checks/go-check-env.nix
 nix/connector-wasm.nix
 nix/fixtures/connector/*
 nix/fixtures/connector-wasm/*
+nix/fixtures/connector-echo/*
 .github/workflows/agent-dispatch.yml
 lib/drivers/*
 lib/credential-paths.nix

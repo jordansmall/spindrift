@@ -143,6 +143,7 @@ let
     // (import ./connector-driver-rows.nix common)
     // (import ./connector-escape-guard.nix common)
     // (import ./connector-checks-parity.nix common)
+    // (import ./connector-checks-any-name.nix common)
     // (import ./wazero-pin-guard.nix common)
     // (import ./go-vendor-errors.nix common)
     // (import ./connector-ownership.nix common);
