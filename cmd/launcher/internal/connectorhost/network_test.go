@@ -38,6 +38,8 @@ func TestRouteTableValidation(t *testing.T) {
 		"fragment":       {connectorhost.Route{Method: "GET", Host: "h.io", Path: "/a#x"}, registryvocab.ErrPatternURLDelimiter},
 		"lowercase verb": {connectorhost.Route{Method: "get", Host: "h.io", Path: "/a"}, nil},
 		"empty verb":     {connectorhost.Route{Method: "", Host: "h.io", Path: "/a"}, nil},
+		"trace verb":     {connectorhost.Route{Method: "TRACE", Host: "h.io", Path: "/a"}, nil},
+		"custom verb":    {connectorhost.Route{Method: "FOO", Host: "h.io", Path: "/a"}, nil},
 		"empty host":     {connectorhost.Route{Method: "GET", Host: "", Path: "/a"}, nil},
 		"scheme host":    {connectorhost.Route{Method: "GET", Host: "https://h.io", Path: "/a"}, nil},
 		"path in host":   {connectorhost.Route{Method: "GET", Host: "h.io/x", Path: "/a"}, nil},
@@ -264,8 +266,62 @@ func TestNetworkRefusalDoesNotEchoAHostileURL(t *testing.T) {
 		t.Fatalf("audit = %+v, want one entry", lines)
 	}
 	for _, got := range []string{derr.Error(), lines[0].Reason} {
-		if strings.Contains(got, "secret") || len(got) > 200 {
-			t.Errorf("refusal echoes the guest url: %.200q (len %d)", got, len(got))
+		if strings.Contains(got, "secret") || len(got) > connectorhost.MaxEchoLen {
+			t.Errorf("refusal echoes the guest url: %.*q (len %d)", connectorhost.MaxEchoLen, got, len(got))
+		}
+	}
+}
+
+func TestNetworkRefusesAnOversizedURLWithoutEchoingIt(t *testing.T) {
+	b := newBackend(t, func(http.ResponseWriter, *http.Request) {})
+	long := "https://" + b.host() + "/repos?secret=" + strings.Repeat("A", 64<<10)
+	raw, err := json.Marshal(map[string]string{"method": "GET", "url": long})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var audit bytes.Buffer
+	n := netFor(b, &audit, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
+	_, _, derr := n.Do(context.Background(), raw, 1<<20)
+	if !errors.Is(derr, connectorhost.ErrRouteRefused) {
+		t.Fatalf("err = %v, want ErrRouteRefused", derr)
+	}
+	lines := auditLines(t, &audit)
+	if len(lines) != 1 {
+		t.Fatalf("audit = %+v, want one entry", lines)
+	}
+	e := lines[0]
+	if e.Decision != connectorhost.DecisionRefused || e.Host != "" || e.Path != "" || e.Query != "" {
+		t.Errorf("audit entry records the oversized url: %+v", e)
+	}
+	for _, got := range []string{derr.Error(), e.Reason} {
+		if strings.Contains(got, "secret") || len(got) > connectorhost.MaxEchoLen {
+			t.Errorf("refusal echoes the guest url: %.*q (len %d)", connectorhost.MaxEchoLen, got, len(got))
+		}
+	}
+}
+
+func TestNetworkRefusesAMethodOutsideTheFixedSet(t *testing.T) {
+	b := newBackend(t, func(http.ResponseWriter, *http.Request) {})
+	for _, method := range []string{"get", "TRACE", "FOO", strings.Repeat("X", 64<<10)} {
+		raw, err := json.Marshal(map[string]string{"method": method, "url": "https://" + b.host() + "/repos"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var audit bytes.Buffer
+		n := netFor(b, &audit, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
+		_, _, derr := n.Do(context.Background(), raw, 1<<20)
+		if !errors.Is(derr, connectorhost.ErrRouteRefused) {
+			t.Errorf("method %.20q: err = %v, want ErrRouteRefused", method, derr)
+			continue
+		}
+		lines := auditLines(t, &audit)
+		if len(lines) != 1 {
+			t.Errorf("method %.20q: audit = %+v, want one entry", method, lines)
+			continue
+		}
+		if len(derr.Error()) > connectorhost.MaxEchoLen || len(lines[0].Method) > len("DELETE") || len(lines[0].Reason) > connectorhost.MaxEchoLen {
+			t.Errorf("method %.20q: refusal or audit unbounded: err %d, method %d, reason %d",
+				method, len(derr.Error()), len(lines[0].Method), len(lines[0].Reason))
 		}
 	}
 }

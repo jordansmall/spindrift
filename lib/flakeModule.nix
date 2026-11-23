@@ -647,7 +647,7 @@ in
                       options = {
                         method = mkOption {
                           type = types.str;
-                          description = "HTTP method, matched exactly (uppercase).";
+                          description = "HTTP method, matched exactly: GET, HEAD, POST, PUT, PATCH or DELETE.";
                         };
                         host = mkOption {
                           type = types.str;
