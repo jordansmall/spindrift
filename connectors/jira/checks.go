@@ -24,7 +24,7 @@ func probe(t tracker.Target) (int, error) {
 		Headers: map[string]string{"Accept": "application/json"},
 	})
 	if err != nil {
-		return 0, err
+		return 0, connector.Errorf(connector.Transient, "%w", err)
 	}
 	return resp.Status, nil
 }
