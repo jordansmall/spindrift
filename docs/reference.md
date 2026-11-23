@@ -12846,6 +12846,16 @@ Because it never takes the daemon's lock, it stays up while the daemon is
 down. See [ADR
 0060](adr/0060-the-dashboard-is-a-read-only-process-over-the-daemons-published-files.md).
 
+The Dashboard follows the OS light/dark setting
+(`prefers-color-scheme`), with no toggle and dark by default. Every
+text and indicator colour it chooses meets WCAG 2.1 AA in both themes
+(4.5:1 for text, 3:1 for a control's indicator), held by
+`dashboard/jstest/contrast.test.js`. The log panes stay dark in both
+themes so agent output renders the same, and their 16-colour ANSI palette
+is held to AA too; faint (SGR 2 dim) text, which renders at reduced
+opacity, and the 256-colour and truecolor escapes an agent emits are its
+own content and carry no contrast guarantee.
+
 > **The Dashboard is unauthenticated.** Anyone who can reach the listen
 > address can read the daemon's state and history: issue numbers, Chores,
 > revisions, settle notes, host, pid, and every Child log and Pass log

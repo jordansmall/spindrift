@@ -159,3 +159,11 @@ is plain files, so it survives the Dashboard moving to its own repo: it
 becomes a published artifact rather than shared code.
 Generating event rows into both modules was considered and rejected: it
 pins names but not fields, and it binds the Dashboard to this repo's regen.
+
+## Amendment (issue #7440): the JS check also pins colour contrast
+
+The Dashboard now follows the OS light/dark setting, and
+`dashboard/jstest/contrast.test.js` joins the Node test check. It reads
+style.css's two theme blocks and dispatch.js's 16-colour ANSI palette and
+asserts WCAG 2.1 AA contrast ratios, still on Node built-ins only. It
+checks declared colours, not layout or rendering.
