@@ -11,6 +11,7 @@
 sdk/*
 core/*
 cmd/launcher/internal/connectorhost/*
+cmd/launcher/internal/connectorconformance/*
 cmd/launcher/internal/connectortracker/*
 cmd/launcher/internal/connectorforge/*
 cmd/launcher/internal/driver/driverkit/*
@@ -25,6 +26,7 @@ lib/jira-status-mapping.nix
 nix/checks/go-check-env.nix
 nix/connector-wasm.nix
 nix/fixtures/connector/*
+nix/fixtures/connector-conformance.nix
 nix/fixtures/connector-wasm/*
 nix/fixtures/connector-echo/*
 .github/workflows/agent-dispatch.yml
