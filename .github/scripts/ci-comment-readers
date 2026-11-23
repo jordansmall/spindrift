@@ -32,3 +32,5 @@ templates/connector-tracker/*.go
 templates/connector-tracker/*.nix
 templates/connector-driver/*.go
 templates/connector-driver/*.nix
+templates/connector-forge/*.go
+templates/connector-forge/*.nix

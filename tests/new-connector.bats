@@ -1,10 +1,12 @@
 #!/usr/bin/env bats
-# Issue #7421: nix/new-connector.sh writes templates/connector-tracker with the
-# Connector name substituted at the two token sites and nowhere else. It runs
-# against the real template and the Nix-supplied core row names (issue #7423
-# adds the driver kind).
+# Issues #7421, #7422: nix/new-connector.sh writes templates/connector-<kind>
+# with the Connector name substituted at the two token sites and nowhere else.
+# It runs against the real templates and the Nix-supplied core row names (issue
+# #7423 adds the driver kind).
 
 bats_require_minimum_version 1.5.0
+
+KINDS=(tracker forge)
 
 setup() {
   SCRIPT="${NEW_CONNECTOR_SH:-$BATS_TEST_DIRNAME/../nix/new-connector.sh}"
@@ -30,37 +32,49 @@ listing() {
 }
 
 @test "generates the template's file set with the name in paths" {
-  run bash "$SCRIPT" tracker acme "$OUT"
-  [ "$status" -eq 0 ]
-  expected="$(listing "$TEMPLATE" | sed 's/connectorname/acme/g')"
-  [ "$(listing "$OUT")" = "$expected" ]
+  for kind in "${KINDS[@]}"; do
+    rm -rf "$OUT"
+    run bash "$SCRIPT" "$kind" acme "$OUT"
+    [ "$status" -eq 0 ]
+    expected="$(listing "$NEW_CONNECTOR_TEMPLATES/connector-$kind" | sed 's/connectorname/acme/g')"
+    [ "$(listing "$OUT")" = "$expected" ]
+  done
 }
 
 @test "reversing the substitution reproduces the template byte for byte" {
-  for n in acme zeta; do
-    up="$(printf '%s' "$n" | tr a-z A-Z)"
-    run bash "$SCRIPT" tracker "$n" "$BATS_TEST_TMPDIR/$n"
-    [ "$status" -eq 0 ]
-    cp -R "$BATS_TEST_TMPDIR/$n" "$BATS_TEST_TMPDIR/rev-$n"
-    chmod -R u+w "$BATS_TEST_TMPDIR/rev-$n"
-    find "$BATS_TEST_TMPDIR/rev-$n" -type f -exec sed -i -e "s/$n/connectorname/g" -e "s/$up/CONNECTORNAME/g" {} +
-    mv "$BATS_TEST_TMPDIR/rev-$n/fragments/$n" "$BATS_TEST_TMPDIR/rev-$n/fragments/connectorname"
-    run diff -r "$TEMPLATE" "$BATS_TEST_TMPDIR/rev-$n"
-    [ "$status" -eq 0 ]
+  for kind in "${KINDS[@]}"; do
+    for n in acme zeta; do
+      up="$(printf '%s' "$n" | tr a-z A-Z)"
+      rev="$BATS_TEST_TMPDIR/rev-$kind-$n"
+      run bash "$SCRIPT" "$kind" "$n" "$BATS_TEST_TMPDIR/$kind-$n"
+      [ "$status" -eq 0 ]
+      cp -R "$BATS_TEST_TMPDIR/$kind-$n" "$rev"
+      chmod -R u+w "$rev"
+      find "$rev" -type f -exec sed -i -e "s/$n/connectorname/g" -e "s/$up/CONNECTORNAME/g" {} +
+      mv "$rev/fragments/$n" "$rev/fragments/connectorname"
+      run diff -r "$NEW_CONNECTOR_TEMPLATES/connector-$kind" "$rev"
+      [ "$status" -eq 0 ]
+    done
   done
 }
 
 @test "the generated tree holds no placeholder or example residue" {
-  run bash "$SCRIPT" tracker acme "$OUT"
-  [ "$status" -eq 0 ]
-  run ! grep -rliE 'connectorname|example' "$OUT"
-  run ! bash -c 'cd "$1" && find . | grep -iE "connectorname|example"' _ "$OUT"
+  for kind in "${KINDS[@]}"; do
+    rm -rf "$OUT"
+    run bash "$SCRIPT" "$kind" acme "$OUT"
+    [ "$status" -eq 0 ]
+    run ! grep -rliE 'connectorname|example' "$OUT"
+    run ! bash -c 'cd "$1" && find . | grep -iE "connectorname|example"' _ "$OUT"
+  done
 }
 
 @test "the name replaces the env-name token in upper case" {
-  run bash "$SCRIPT" tracker acme "$OUT"
-  [ "$status" -eq 0 ]
-  grep -rq ACME "$OUT"
+  for kind in "${KINDS[@]}"; do
+    rm -rf "$OUT"
+    run bash "$SCRIPT" "$kind" acme "$OUT"
+    [ "$status" -eq 0 ]
+    grep -rq ACME "$OUT"
+  done
 }
 
 @test "generated files are writable and carry no store path" {
@@ -125,7 +139,7 @@ listing() {
 }
 
 @test "an unknown kind is refused and writes nothing" {
-  for kind in forge butler ""; do
+  for kind in butler Forge ""; do
     run bash "$SCRIPT" "$kind" acme "$OUT"
     [ "$status" -eq 1 ]
     [[ "$output" == *"unknown kind"* ]]

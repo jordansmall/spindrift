@@ -29,13 +29,12 @@ kind="$1"
 name="$2"
 dir="${3:-.}"
 
-# One arm per kind; a forge template is another arm and directory.
-# connectorChecks keys its per-row path on a tracker's name against the backend
-# rows and on a driver's against the Driver rows, so each kind refuses only its
-# own list.
+# One arm per kind. connectorChecks keys its per-row path on a tracker's or
+# forge's name against the backend rows and on a driver's against the Driver
+# rows, so each kind refuses only its own list.
 case "$kind" in
-  tracker)
-    template="$NEW_CONNECTOR_TEMPLATES/connector-tracker"
+  tracker | forge)
+    template="$NEW_CONNECTOR_TEMPLATES/connector-$kind"
     core_names="$NEW_CONNECTOR_CORE_NAMES"
     core_what="backend"
     ;;
@@ -44,7 +43,7 @@ case "$kind" in
     core_names="$NEW_CONNECTOR_CORE_DRIVER_NAMES"
     core_what="Driver"
     ;;
-  *) die "unknown kind '$kind' (known: tracker, driver)" ;;
+  *) die "unknown kind '$kind' (known: tracker, driver, forge)" ;;
 esac
 
 [[ "$name" =~ ^[a-z][a-z0-9]*$ ]] ||

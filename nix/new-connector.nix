@@ -1,5 +1,5 @@
-# Scaffold app (issues #7421, #7423):
-# `nix run .#new-connector -- <tracker|driver> <name> [<dir>]` writes
+# Scaffold app (issues #7421, #7422, #7423):
+# `nix run .#new-connector -- <tracker|driver|forge> <name> [<dir>]` writes
 # templates/connector-<kind> with the name substituted. The templates and the
 # core backend and Driver row names are baked in here, so the app runs from
 # `nix run github:jordansmall/spindrift#new-connector` with no checkout, and
@@ -32,6 +32,7 @@ pkgs.writeShellApplication {
       fileset = pkgs.lib.fileset.unions [
         ../templates/connector-tracker
         ../templates/connector-driver
+        ../templates/connector-forge
       ];
     };
     NEW_CONNECTOR_SDK_VERSION = sdkVersion;
