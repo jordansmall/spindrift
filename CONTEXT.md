@@ -1254,7 +1254,8 @@ from, and the fields it sets live in `flake.nix`, not env). A TTY-only wizard
 that detects what it can (container runtime by `podman → docker →
 nerdctl(⇒ rancher) → bwrap`, host git identity, repoSlug from `git remote`,
 an ambient token) and asks only the
-irreducible rest, then writes a minimal generated `flake.nix` + secrets-only
+irreducible rest, the issue tracker and the code forge as separate questions,
+then writes a minimal generated `flake.nix` + secrets-only
 `harness.env` + `.gitignore` + `.envrc` (no `prompts/` — the Harness defaults
 every prompt), and finishes through `spindrift doctor` and `spindrift build`
 (ADR 0027). Refuses to clobber an existing flake without `--force`.

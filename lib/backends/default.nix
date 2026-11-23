@@ -55,13 +55,15 @@
 # eval (ADR 0068).
 
 # quickstart (optional) opts the backend into Quickstart's remote-host
-# detection and wizard (ADR 0068 decision 8): `hosts` lists the git remote
-# hosts that identify it, `axes` a non-empty subset of "tracker" and "forge"
-# that must include "tracker" (Quickstart's answer is the issue tracker).
+# detection (ADR 0068 decision 8): `hosts` lists the git remote hosts that
+# identify it, `axes` a non-empty subset of "tracker" and "forge" that must
+# include "tracker" and names the axes a matching remote pre-selects it on.
 # "tracker" requires validAsTracker and "forge" validAsCodeForge, else
-# renderBackendRegistryGo throws. Quickstart renders the values the Strategy
-# derives from the remote for the flakeOption knobs in the row's `knobs`. An
-# omitted block means hand-edit only.
+# renderBackendRegistryGo throws. The block does not make a row offerable:
+# the wizard offers a row on every axis it is valid for when it can collect
+# the row's credential (offeredOn in cmd/launcher/quickstart/quickstart.go),
+# block or not. Quickstart renders the values the Strategy derives from the
+# remote for the flakeOption knobs in the row's `knobs`.
 
 # validateKnobs (optional) is a function from the merged defaults to true,
 # throwing on an invalid value of a knob the row owns; lib/mkHarness.nix runs

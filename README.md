@@ -62,8 +62,10 @@ nix run github:jordansmall/spindrift#quickstart
 ```
 
 The wizard detects your container runtime, your git identity, and the repo
-slug from `git remote`. It asks for your token, checks it for over-broad
-scopes, and asks for agent auth. Then it does the following:
+slug from `git remote`. It asks for your issue tracker and your code forge
+separately, pre-selected from the remote's host (`github.com` picks GitHub,
+`codeberg.org` picks Forgejo), and you can override either. It asks for your
+token, checks it for over-broad scopes, and asks for agent auth. Then it does the following:
 
 - writes `flake.nix`, a secrets-only `harness.env` with mode 0600,
   `.gitignore`, and `.envrc`
@@ -73,7 +75,7 @@ scopes, and asks for agent auth. Then it does the following:
 The wizard won't overwrite an existing `flake.nix` or `harness.env` unless you
 pass `--force`. It never replaces an existing `.gitignore` or `.envrc`: it
 appends only the missing spindrift entries to `.gitignore` and leaves `.envrc`
-as it is. If the remote is on `codeberg.org`, it selects the Forgejo backend.
+as it is.
 
 <details>
 <summary>Prefer to start from a commented template and edit it by hand?</summary>
