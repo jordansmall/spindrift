@@ -333,9 +333,9 @@ and in the in-box `box` program; the only bash left is the generated shim that
   Each subflake gets `connector-<name>-go-{fmt,vet,test}` and
   `connector-<name>-conformance` from `core.lib.connectorChecks`; core's root
   `checks` carry none of them. A backend Connector named after no core backend
-  row (a third party's) gets the same set; its conformance runs the tracker
-  and forge contracts for the capabilities it registers, against a scripted
-  backend (`connector-checks-generic` pins this over `nix/fixtures`).
+  row gets the same set; its conformance runs the tracker and forge contracts
+  for the capabilities it registers, against a scripted backend
+  (`connector-checks-generic` pins this over `nix/fixtures`).
 - **`agent/`** — `entrypoint.sh`, the generated shim, and the Driver's hook
   scripts. The shim has no logic: `lib/image.nix` renders the preambles ahead
   of one `exec box` line, and `box` (`cmd/launcher/box`) does the rest
