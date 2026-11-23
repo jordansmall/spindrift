@@ -1124,9 +1124,9 @@ checkedMerge {
   # (issue #109).
   harness-env-example =
     let
-      schema = import ../../lib/env-schema.nix;
+      connectorKnobs = (import ../connector-knobs.nix { inherit (pkgs) lib; }).knobs;
       generated = pkgs.writeText "harness.env.example.generated" (
-        renderers.renderHarnessEnvExample schema
+        renderers.renderHarnessEnvExample schema connectorKnobs
       );
     in
     pkgs.runCommand "harness-env-example"
@@ -1136,7 +1136,7 @@ checkedMerge {
       }
       ''
         diff "$generated" "$committed" \
-          || { echo "templates/default/harness.env.example is out of sync with lib/env-schema.nix — regenerate it" >&2; exit 1; }
+          || { echo "templates/default/harness.env.example is out of sync with lib/env-schema.nix or the Connector modules' knobs — regenerate it" >&2; exit 1; }
         touch $out
       '';
 
