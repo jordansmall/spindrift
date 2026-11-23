@@ -1,5 +1,140 @@
 # Changelog
 
+## [0.34.0](https://github.com/jordansmall/spindrift/compare/v0.33.0...v0.34.0) (2026-11-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* **sdk:** tracker.Reader.Statuses returns []tracker.Status rather than []string. This is a Go source break for Connectors built on the SDK only; the Connector wire stays backward compatible.
+* **sdk:** Reader.LabeledPage takes a route []Selector argument after label.
+
+### Features
+
+* **backend:** declare the Issue route kinds a tracker row supports ([8224430](https://github.com/jordansmall/spindrift/commit/8224430d2f0c6286c4c30467afe2c52e25f019a4)), closes [#7331](https://github.com/jordansmall/spindrift/issues/7331)
+* **backends:** declare a Consumer stanza on every backend row ([aac2775](https://github.com/jordansmall/spindrift/commit/aac2775f02f9f7ff5ab3175aafb31349ddade9f1)), closes [#7415](https://github.com/jordansmall/spindrift/issues/7415)
+* **backends:** declare label and component routes on the jira row ([80302d0](https://github.com/jordansmall/spindrift/commit/80302d0fe0437af5b521efc9bca94fb0db993978)), closes [#7333](https://github.com/jordansmall/spindrift/issues/7333)
+* **backends:** declare the jira Consumer stanza's input and import ([b332e23](https://github.com/jordansmall/spindrift/commit/b332e239f4412ff9dbaead8acbaa99b61e24ebcf)), closes [#7417](https://github.com/jordansmall/spindrift/issues/7417)
+* **backends:** declare the label route kind on github and forgejo ([fff426a](https://github.com/jordansmall/spindrift/commit/fff426ac33e346a37a15cbf4f37674062fe0945f)), closes [#7334](https://github.com/jordansmall/spindrift/issues/7334)
+* **connector-checks:** run conformance for a Connector of any name ([3abd3b0](https://github.com/jordansmall/spindrift/commit/3abd3b0694551b03b186f2aa9801422fe910bdd2)), closes [#7419](https://github.com/jordansmall/spindrift/issues/7419)
+* **connector-checks:** run Driver conformance for any Driver name ([fafa61e](https://github.com/jordansmall/spindrift/commit/fafa61e78de2d53ba6f13a9266488ba4765cf9ed)), closes [#7420](https://github.com/jordansmall/spindrift/issues/7420)
+* **connector-dev:** check a Connector template under two names ([f7b5c63](https://github.com/jordansmall/spindrift/commit/f7b5c63aaecc59c08ef70becee20a0d6a98ed857)), closes [#7421](https://github.com/jordansmall/spindrift/issues/7421)
+* **connectorconformance:** run the contracts a Connector registers ([fdae7c7](https://github.com/jordansmall/spindrift/commit/fdae7c7ff216fefe5d892fd95c0834026c75528b)), closes [#7419](https://github.com/jordansmall/spindrift/issues/7419)
+* **connectors:** make pi a Connector subflake ([51a65ae](https://github.com/jordansmall/spindrift/commit/51a65aeaf461a86a05c34daaf9d1681e6e707470)), closes [#6875](https://github.com/jordansmall/spindrift/issues/6875)
+* **connectors:** port the pi Driver's host half to the SDK ([79e98a6](https://github.com/jordansmall/spindrift/commit/79e98a60b01ef4e20474703bf6597efe07c21f49)), closes [#6875](https://github.com/jordansmall/spindrift/issues/6875)
+* **connectortracker:** read the category of a mapped status ([6bcaf2d](https://github.com/jordansmall/spindrift/commit/6bcaf2d4045776764024cbc4f5b2243770ffd73b)), closes [#7337](https://github.com/jordansmall/spindrift/issues/7337)
+* **connectortracker:** send the Issue route to a tracker Connector ([787f1af](https://github.com/jordansmall/spindrift/commit/787f1af5e9ac451e903c2007de6cb4b41ec4ae86)), closes [#7333](https://github.com/jordansmall/spindrift/issues/7333)
+* **daemon:** probe a routed daemon's ready query at startup ([0041608](https://github.com/jordansmall/spindrift/commit/00416088ea69b4558dc6808e05a3c97d812eea40)), closes [#7336](https://github.com/jordansmall/spindrift/issues/7336)
+* **daemon:** warn when a routed complete status is Done-category ([17f8832](https://github.com/jordansmall/spindrift/commit/17f883279156f1a51fbb4e3aa43cc45ae01bb1e9)), closes [#7337](https://github.com/jordansmall/spindrift/issues/7337)
+* **dashboard:** follow the OS light/dark preference ([dc89bb4](https://github.com/jordansmall/spindrift/commit/dc89bb4ce8b2068fadcdf24c1901046fe9660a11)), closes [#7440](https://github.com/jordansmall/spindrift/issues/7440)
+* **dogfood:** shadow the pi Connector's decoder and filter ([24a5095](https://github.com/jordansmall/spindrift/commit/24a50955fa8b1a24a8944b6fa804204dc01aa9a8)), closes [#6876](https://github.com/jordansmall/spindrift/issues/6876)
+* **driver-exec:** keep a raw stdout copy for the filter shadow ([1089661](https://github.com/jordansmall/spindrift/commit/1089661d14db53fbf238cd4941e4970abadc4d84)), closes [#6876](https://github.com/jordansmall/spindrift/issues/6876)
+* **forgejo:** pass the Issue route to the forgejo tracker ([e4f0121](https://github.com/jordansmall/spindrift/commit/e4f01218e9a70c22990638b9c03f8a3d052bdd16)), closes [#7334](https://github.com/jordansmall/spindrift/issues/7334)
+* **forge:** let a tracker match one issue against its route ([bd31a4c](https://github.com/jordansmall/spindrift/commit/bd31a4c11d736e6beea353046ce5345760f4e4b9)), closes [#7335](https://github.com/jordansmall/spindrift/issues/7335)
+* **forge:** route the local tracker's queue and filing by label ([5dd0cb9](https://github.com/jordansmall/spindrift/commit/5dd0cb9b5905a19ba94f3d2e080157adcf50ba29)), closes [#7331](https://github.com/jordansmall/spindrift/issues/7331)
+* **github:** join the Issue route to the native labels filter ([50b74de](https://github.com/jordansmall/spindrift/commit/50b74de442eeab6236eed85e8c28da9ab39f2fde)), closes [#7334](https://github.com/jordansmall/spindrift/issues/7334)
+* **github:** pass the Issue route to the github tracker ([046bed5](https://github.com/jordansmall/spindrift/commit/046bed57ca3d6a28704ccac7235ca153bfab05f7)), closes [#7334](https://github.com/jordansmall/spindrift/issues/7334)
+* **launcher:** carry ISSUE_ROUTE to the tracker and demand count ([995e660](https://github.com/jordansmall/spindrift/commit/995e6600437f078a53c3ad3d6826796f02edac26)), closes [#7331](https://github.com/jordansmall/spindrift/issues/7331)
+* **launcher:** confirm off-route issues in selective dispatch ([fcb55f2](https://github.com/jordansmall/spindrift/commit/fcb55f25b136cbfe0411e25339fcd0096161597a)), closes [#7335](https://github.com/jordansmall/spindrift/issues/7335)
+* **launcher:** forward BOX_ISSUE_ROUTED when a route is set ([9407c0f](https://github.com/jordansmall/spindrift/commit/9407c0f3f05de29dca587f6da667f6d0565315e9)), closes [#7338](https://github.com/jordansmall/spindrift/issues/7338)
+* **launcher:** require REPO_SLUG whenever an issue route is set ([1a99ce5](https://github.com/jordansmall/spindrift/commit/1a99ce5ef779a9de7e861790000762ac03ad7b53)), closes [#7338](https://github.com/jordansmall/spindrift/issues/7338)
+* **new-connector:** generate a Driver Connector from the template ([53878e8](https://github.com/jordansmall/spindrift/commit/53878e8462278c7f57a8542532a262bd5951f4b1)), closes [#7423](https://github.com/jordansmall/spindrift/issues/7423)
+* **new-connector:** generate a forge Connector from the template ([18107a2](https://github.com/jordansmall/spindrift/commit/18107a21c5456474f6a36a01bb7133a6ae24a94e)), closes [#7422](https://github.com/jordansmall/spindrift/issues/7422)
+* **new-connector:** generate a tracker Connector from the template ([ebcb499](https://github.com/jordansmall/spindrift/commit/ebcb499b47c8bd2ed800e46f9be94d77def4b0f9)), closes [#7421](https://github.com/jordansmall/spindrift/issues/7421)
+* **nix:** add the issues.route knob and the Tracker scope assert ([15bce76](https://github.com/jordansmall/spindrift/commit/15bce76f02f795a716deaa6968536e491ac70211)), closes [#7331](https://github.com/jordansmall/spindrift/issues/7331)
+* **promptassembly:** add the ISSUE_ROUTED gate and REPO_SLUG var ([a89cc18](https://github.com/jordansmall/spindrift/commit/a89cc18bc67c9da1aadfe4c754812917b6548f60)), closes [#7338](https://github.com/jordansmall/spindrift/issues/7338)
+* **prompts:** tell a routed Box its Target repo ([9a1de57](https://github.com/jordansmall/spindrift/commit/9a1de57e38e457c2917053722b755acdd7f4e967)), closes [#7338](https://github.com/jordansmall/spindrift/issues/7338)
+* **quickstart:** ask for the tracker and the forge separately ([c152077](https://github.com/jordansmall/spindrift/commit/c152077ca46b0f6038c4b5e00c0da79946dbfa5d)), closes [#7416](https://github.com/jordansmall/spindrift/issues/7416)
+* **quickstart:** compose flake.nix and harness.env from the stanzas ([d931d6a](https://github.com/jordansmall/spindrift/commit/d931d6a9198335e6d610be9779d356cbde96a793)), closes [#7416](https://github.com/jordansmall/spindrift/issues/7416)
+* **quickstart:** generate the Consumer stanza table for quickstart ([21f7db9](https://github.com/jordansmall/spindrift/commit/21f7db9c0a08b8e973b8e9fe7ac39287f954de22)), closes [#7415](https://github.com/jordansmall/spindrift/issues/7415)
+* **quickstart:** offer jira and wire its Connector input ([a890ecf](https://github.com/jordansmall/spindrift/commit/a890ecfaed1952bb70a78f454cf49b7a6dc5f373)), closes [#7417](https://github.com/jordansmall/spindrift/issues/7417)
+* **regen:** compose the default env example from Consumer stanzas ([93e9a62](https://github.com/jordansmall/spindrift/commit/93e9a62114d16e8246e72eacb5d2aff7f5219145)), closes [#7415](https://github.com/jordansmall/spindrift/issues/7415)
+* **regen:** generate the core-connector template's env example ([3628f26](https://github.com/jordansmall/spindrift/commit/3628f261a06ef9ab1adfabeb120c85cd2cff5215)), closes [#7418](https://github.com/jordansmall/spindrift/issues/7418)
+* **sdk:** add an Issue route to the tracker list Query ([2222780](https://github.com/jordansmall/spindrift/commit/222278094ce1e66ea726c3a9ab77a4237fdf52de)), closes [#7331](https://github.com/jordansmall/spindrift/issues/7331)
+* **sdk:** add the tracker.matchesRoute per-issue route read ([cc44f85](https://github.com/jordansmall/spindrift/commit/cc44f858138cf314a9358a3884328f8fb81b42cf)), closes [#7335](https://github.com/jordansmall/spindrift/issues/7335)
+* **sdk:** carry each status's category on the statuses read ([c22d82c](https://github.com/jordansmall/spindrift/commit/c22d82c328a54e9b1d09debaac89ba15e9afc6ac)), closes [#7337](https://github.com/jordansmall/spindrift/issues/7337)
+* **sdk:** carry the Issue route on filing and the labeled read ([68d146d](https://github.com/jordansmall/spindrift/commit/68d146d56d8b4610f489376f7d43e0ec7f366520)), closes [#7333](https://github.com/jordansmall/spindrift/issues/7333)
+* **sdk:** give the Driver side a LineFramer twin ([148d722](https://github.com/jordansmall/spindrift/commit/148d722deb11c1c1951c0c556c0f76d2ae2c95af)), closes [#6875](https://github.com/jordansmall/spindrift/issues/6875)
+* **sdk:** share label-route validation as RouteLabels ([3b8ab8e](https://github.com/jordansmall/spindrift/commit/3b8ab8e5bcf6f461cf6b0de1220f1aaa87daf0ef)), closes [#7334](https://github.com/jordansmall/spindrift/issues/7334)
+* **shadow:** compare a Connector's stream filter after the Pass ([f80e061](https://github.com/jordansmall/spindrift/commit/f80e06120f3fd2a38adc34db088dea710d793f53)), closes [#6876](https://github.com/jordansmall/spindrift/issues/6876)
+* **templates:** add a core-connector template on core plus github ([b73de73](https://github.com/jordansmall/spindrift/commit/b73de73d4c2ea021fb43d74e3cf41aee853af31f)), closes [#7418](https://github.com/jordansmall/spindrift/issues/7418)
+* **templates:** add a Driver Connector scaffold template ([763caba](https://github.com/jordansmall/spindrift/commit/763cabaf188ecb13d6fbd25eab37e96e079a1b58)), closes [#7423](https://github.com/jordansmall/spindrift/issues/7423)
+* **templates:** add a forge Connector scaffold template ([72d3542](https://github.com/jordansmall/spindrift/commit/72d354287f31cd9475c259998df91e57d1e4eb0b)), closes [#7422](https://github.com/jordansmall/spindrift/issues/7422)
+* **templates:** add a tracker Connector scaffold template ([e15cfcc](https://github.com/jordansmall/spindrift/commit/e15cfcc447f315993cbabf611355c2a3870ced1a)), closes [#7421](https://github.com/jordansmall/spindrift/issues/7421)
+
+
+### Bug Fixes
+
+* **connector-checks:** drop the core-directory guard on the generic path ([5c176b6](https://github.com/jordansmall/spindrift/commit/5c176b66e46717765e864180bf5d05a5127cd06a)), closes [#7419](https://github.com/jordansmall/spindrift/issues/7419)
+* **dashboard:** lift dark idle and ANSI greys to WCAG AA ([855f023](https://github.com/jordansmall/spindrift/commit/855f023895772d570476a52c94aa2ef5c791c844)), closes [#7440](https://github.com/jordansmall/spindrift/issues/7440)
+* **forge:** narrow the local finding backlog list to the route ([510c126](https://github.com/jordansmall/spindrift/commit/510c12675eef7f1c812cb064711fcd754a974d8a)), closes [#7332](https://github.com/jordansmall/spindrift/issues/7332)
+* **jira:** give the Connector module a dedup key ([df9646e](https://github.com/jordansmall/spindrift/commit/df9646ed9659a9b85b37aec3f540bd34d5ee782a)), closes [#7417](https://github.com/jordansmall/spindrift/issues/7417)
+* **quickstart:** write the backend's Connector credential ([ca1ff37](https://github.com/jordansmall/spindrift/commit/ca1ff37496efe397d00eeb9d096e3c299ce31524)), closes [#7411](https://github.com/jordansmall/spindrift/issues/7411)
+* **regen:** list Connector credentials in harness.env.example ([a75b018](https://github.com/jordansmall/spindrift/commit/a75b018f4147370be2e4fbef7cb0dfe784d31ce3)), closes [#7411](https://github.com/jordansmall/spindrift/issues/7411)
+
+
+### Documentation
+
+* add 0.34.0 release notes ([ba69322](https://github.com/jordansmall/spindrift/commit/ba69322429742fcb9b6289cc561145cab82bc051))
+* **adr:** link ADR 0075 consequences to routed deployments ([95b870d](https://github.com/jordansmall/spindrift/commit/95b870d5c1eb9ea0e35ba54c1b5929977554ca95)), closes [#7339](https://github.com/jordansmall/spindrift/issues/7339)
+* **adr:** measure pi's stream filter across the Connector seam ([ca9d702](https://github.com/jordansmall/spindrift/commit/ca9d702c0a40995b69a140ce811b2f304d503a1d)), closes [#6875](https://github.com/jordansmall/spindrift/issues/6875)
+* **context:** define Consumer stanza ([e418aa4](https://github.com/jordansmall/spindrift/commit/e418aa47365e7b06d2c186c8f6afb4efdadbefff)), closes [#7415](https://github.com/jordansmall/spindrift/issues/7415)
+* **dashboard:** note the OS theme and the AA contrast guarantee ([1d19447](https://github.com/jordansmall/spindrift/commit/1d194471069e9398aaa944291b66f39e60d9c1ce)), closes [#7440](https://github.com/jordansmall/spindrift/issues/7440)
+* **go:** trim and correct comments in Go sources ([b5ea3c7](https://github.com/jordansmall/spindrift/commit/b5ea3c7b4ded1ce6d19cd14b0d02c1749b1530ab))
+* **jira:** show the Consumer stanza for the jira Connector ([39cbeb4](https://github.com/jordansmall/spindrift/commit/39cbeb453ec05ece9f531c7b562ef40c0c7b57ac)), closes [#7417](https://github.com/jordansmall/spindrift/issues/7417)
+* list the pi Connector beside the other first-party ones ([0f785fe](https://github.com/jordansmall/spindrift/commit/0f785fef6ecf9ccebdca4d477dd3ad2db9b278c5)), closes [#6875](https://github.com/jordansmall/spindrift/issues/6875)
+* **nix:** trim and correct comments in Nix sources ([862042b](https://github.com/jordansmall/spindrift/commit/862042b35483dfacd356051cdcf0caacba385a9c))
+* **quickstart:** amend ADR 0027 for separate tracker and forge axes ([d739cad](https://github.com/jordansmall/spindrift/commit/d739cadf3b6b92de042f215b0ac1344f42eaf8b9)), closes [#7416](https://github.com/jordansmall/spindrift/issues/7416)
+* **reference:** add Authoring a Connector ([1ea8aa5](https://github.com/jordansmall/spindrift/commit/1ea8aa50890bde07da0ecfcd2495391bee53dd25)), closes [#7421](https://github.com/jordansmall/spindrift/issues/7421)
+* **reference:** cover the Driver variant in Authoring a Connector ([ea4e6f8](https://github.com/jordansmall/spindrift/commit/ea4e6f83db2a0249c49704e367c763e16615d341)), closes [#7423](https://github.com/jordansmall/spindrift/issues/7423)
+* **reference:** cover the forge variant in Authoring a Connector ([32e024d](https://github.com/jordansmall/spindrift/commit/32e024dca3af70130c666bda6d92098c920ae79f)), closes [#7422](https://github.com/jordansmall/spindrift/issues/7422)
+* **reference:** document routed deployments ([63ef377](https://github.com/jordansmall/spindrift/commit/63ef3773f97eeb79e793ae347782cf4bf3f24774)), closes [#7339](https://github.com/jordansmall/spindrift/issues/7339)
+* **reference:** list github and forgejo as label-route trackers ([ce77f68](https://github.com/jordansmall/spindrift/commit/ce77f684896909a64cea181597fd9ba791406a28)), closes [#7334](https://github.com/jordansmall/spindrift/issues/7334)
+* **reference:** note the routed daemon's startup probe ([8004e83](https://github.com/jordansmall/spindrift/commit/8004e83997726e4f98512862a6f61d26c025b6fe)), closes [#7336](https://github.com/jordansmall/spindrift/issues/7336)
+* **reference:** say what ISSUE_ROUTE narrows and what it leaves alone ([94ea340](https://github.com/jordansmall/spindrift/commit/94ea3400c72c277006ef1d0c9a10643ad8d4c2ee)), closes [#7332](https://github.com/jordansmall/spindrift/issues/7332)
+* relabel the 0.29.1 release notes as 0.30.0 ([b00bd69](https://github.com/jordansmall/spindrift/commit/b00bd69d084ffcd07631c50749b67848c31be440))
+* say a core-only Consumer imports the github Connector ([c2c23be](https://github.com/jordansmall/spindrift/commit/c2c23bee31bd6b2c203719a97a8dedab7f449a69)), closes [#7418](https://github.com/jordansmall/spindrift/issues/7418)
+* **shell:** trim comments in shell scripts ([9029f6c](https://github.com/jordansmall/spindrift/commit/9029f6c11b3cc484b01e7a570cdb0857fe41ec10))
+
+
+### Code Refactoring
+
+* **connectorforgetest:** load a Connector from its wasm and routes ([1a236fe](https://github.com/jordansmall/spindrift/commit/1a236fea8f4a0c1e6451a3e91bf28851cfdec939)), closes [#7419](https://github.com/jordansmall/spindrift/issues/7419)
+* **dashboard:** give the log pane its own fixed colours ([4780324](https://github.com/jordansmall/spindrift/commit/4780324206cd8634d1a5dbb05c49c4dfa8cc0196)), closes [#7440](https://github.com/jordansmall/spindrift/issues/7440)
+* **quickstart:** move harness.env wording into the stanza table ([cac834d](https://github.com/jordansmall/spindrift/commit/cac834db02f109e9e4605074545557e19fe143d8)), closes [#7416](https://github.com/jordansmall/spindrift/issues/7416)
+
+
+### Tests
+
+* **backend:** require every tracker row to declare the label route ([a31333d](https://github.com/jordansmall/spindrift/commit/a31333ddbe29b1de7d9cb3a80f6f74c3b5cc892a)), closes [#7334](https://github.com/jordansmall/spindrift/issues/7334)
+* **ci-changes:** route the forge Connector template to the lane ([977543a](https://github.com/jordansmall/spindrift/commit/977543a7eb662bb9c9ae8ea54a3866dd47e9f371)), closes [#7422](https://github.com/jordansmall/spindrift/issues/7422)
+* **conformance:** replay a Connector-supplied corpus via RunConnector ([d25a941](https://github.com/jordansmall/spindrift/commit/d25a941b8991f38b52b7e4ced1f04b456e0fa248)), closes [#7420](https://github.com/jordansmall/spindrift/issues/7420)
+* **connector-scaffold:** pin template fragment files to shipped ([3f65659](https://github.com/jordansmall/spindrift/commit/3f65659e949bc34804d456c292b5ee4b6c05fc9e)), closes [#7422](https://github.com/jordansmall/spindrift/issues/7422)
+* **connector-scaffold:** pin the forge template to forgejo's layout ([ef3ef96](https://github.com/jordansmall/spindrift/commit/ef3ef96641112791f36dc25d396cb8b5e8667981)), closes [#7422](https://github.com/jordansmall/spindrift/issues/7422)
+* **connectortrackertest:** add a scripted tracker backend ([429bf44](https://github.com/jordansmall/spindrift/commit/429bf44353d7e05b9c60f88d7974745102948439)), closes [#7419](https://github.com/jordansmall/spindrift/issues/7419)
+* **driver/opencode:** replay the corpus through shadow mode ([1291df1](https://github.com/jordansmall/spindrift/commit/1291df1de0de53777fa6bd9d01489edbeda08d6c)), closes [#6874](https://github.com/jordansmall/spindrift/issues/6874)
+* **fixtures:** add a fixture tracker Connector ([dc5a141](https://github.com/jordansmall/spindrift/commit/dc5a14192c756704d45682a8a4999477ff6a6263)), closes [#7419](https://github.com/jordansmall/spindrift/issues/7419)
+* **forgetest:** add a branch contract for any Code Forge ([3353f54](https://github.com/jordansmall/spindrift/commit/3353f54667c5142b7d45b846990e05e513bebc5d)), closes [#7419](https://github.com/jordansmall/spindrift/issues/7419)
+* **go:** trim and correct comments in Go tests ([61fbf0f](https://github.com/jordansmall/spindrift/commit/61fbf0fd01dc860ac09ca9b5696b3e9fb6c22a51))
+* **jira:** pin a rejected count query's reason at the Connector ([230d905](https://github.com/jordansmall/spindrift/commit/230d905f29cd8eb7b4b40f4e710228cdf7338310)), closes [#7336](https://github.com/jordansmall/spindrift/issues/7336)
+* **launcher:** pin the route on the research queue too ([45502e2](https://github.com/jordansmall/spindrift/commit/45502e2302a69efbb54d79483f7d015c83578c88)), closes [#7332](https://github.com/jordansmall/spindrift/issues/7332)
+* **nix:** add a test-only echo Driver Connector with its own corpus ([2c48bb7](https://github.com/jordansmall/spindrift/commit/2c48bb717d14611d6dc65381620fdbf2f33cc137)), closes [#7420](https://github.com/jordansmall/spindrift/issues/7420)
+* **pi:** pin the Connector's decoder and filter to native source ([22e034f](https://github.com/jordansmall/spindrift/commit/22e034f529a016eb4cb097d3fcb8ac771990cfb1)), closes [#6875](https://github.com/jordansmall/spindrift/issues/6875)
+* **pi:** pin the stream filter with Conformance goldens ([9ca156e](https://github.com/jordansmall/spindrift/commit/9ca156e4ada2a9d25d353a284848eeaa99c46594)), closes [#6875](https://github.com/jordansmall/spindrift/issues/6875)
+* **settle:** pin the route stamp on every finding class ([e7436a0](https://github.com/jordansmall/spindrift/commit/e7436a07973ef1d95225987a4c4275a50945cd9c)), closes [#7332](https://github.com/jordansmall/spindrift/issues/7332)
+* **settle:** pin the route stamp on Filer relay filings ([0749404](https://github.com/jordansmall/spindrift/commit/0749404d4f40d7819e57c6cee100ddd99d91d603)), closes [#7331](https://github.com/jordansmall/spindrift/issues/7331)
+* **shadow:** stall the deadline test on a fixed line ([71d9407](https://github.com/jordansmall/spindrift/commit/71d940715b2b06721e3b3140f67421a0141756ad)), closes [#7337](https://github.com/jordansmall/spindrift/issues/7337)
+* **waves:** pin cross-route blockers and unrouted key reads ([6e3a2e7](https://github.com/jordansmall/spindrift/commit/6e3a2e7357b499f105e002a0d2f0cb5242802795)), closes [#7332](https://github.com/jordansmall/spindrift/issues/7332)
+
+
+### Build System
+
+* **dogfood:** shadow the opencode Connector ([3994485](https://github.com/jordansmall/spindrift/commit/39944857df72047c399a7a7ecd81e369109ea6b8)), closes [#6874](https://github.com/jordansmall/spindrift/issues/6874)
+
+
+### Continuous Integration
+
+* **ci-changes:** route Connector template changes to the connector lane ([bfa6b4b](https://github.com/jordansmall/spindrift/commit/bfa6b4b86886b75ae7432ed783db6fc26a6ddf4d)), closes [#7421](https://github.com/jordansmall/spindrift/issues/7421)
+
 ## [0.33.0](https://github.com/jordansmall/spindrift/compare/v0.32.0...v0.33.0) (2026-11-21)
 
 

@@ -1,9 +1,9 @@
 {
-  ".": "0.33.0",
-  "connectors/claude": "0.3.0",
-  "connectors/forgejo": "0.2.0",
-  "connectors/github": "0.3.0",
-  "connectors/jira": "0.2.0",
-  "connectors/opencode": "0.1.1",
-  "connectors/pi": "0.1.0"
+  ".": "0.34.0",
+  "connectors/claude": "0.3.1",
+  "connectors/forgejo": "0.3.0",
+  "connectors/github": "0.4.0",
+  "connectors/jira": "0.3.0",
+  "connectors/opencode": "0.1.2",
+  "connectors/pi": "0.1.1"
 }
