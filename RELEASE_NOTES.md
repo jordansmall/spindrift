@@ -336,13 +336,21 @@ No breaking changes.
 
 ---
 
-## 0.29.1 — 2026-10-21
+## 0.30.0 — 2026-10-23
 
-A hardening and speed patch: opencode's credential guard closes its gaps,
-and harness evaluation gets a lot cheaper.
+A hardening and speed release: pi subagents stay inside the roster,
+opencode's credential guard closes its gaps, and harness evaluation gets a
+lot cheaper.
 
-No breaking changes.
+**⚠ Breaking changes** this release: pi rosters are checked against the
+subagents each role may spawn.
 
+- **⚠ Breaking: pi subagents can only spawn what the roster allows.** Under
+  the pi Driver, a role's subagent tool now launches only the roles in its
+  `spawns` list, and the roster is checked at eval time. A roster that keeps
+  the default reviewer but leaves out the `review-axis` entry it spawns now
+  fails eval: drop it from the reviewer's `spawns` or restore the entry. An
+  entry that declares `spawns` also needs a non-blank description.
 - **opencode's credential guard actually holds.** opencode only matched its
   deny rules against simple commands, so a glob, a redirect on a compound
   command or a `$(<file)` read of a dotenv file got past them, and a Target
@@ -363,7 +371,9 @@ No breaking changes.
   thinking level tacked on, so it never matched the configured model and
   one model could show up under two ids. The id is now bare, and each Pass
   records the efforts it ran at separately. Existing Records are re-read
-  once on upgrade, so `spindrift stats` stops mixing old and new ids.
+  once on upgrade, so `spindrift stats` stops mixing old and new ids. A
+  `:<level>` suffix on a dispatch-time `--review-model` now sets the review
+  pass's effort too, unless `REVIEW_EFFORT` is set.
 - **`spindrift stats` can't be spoofed by odd labels.** A role or agent
   label made of control characters, or one with a trailing space, used to
   print as a blank or look-alike row. Those labels now print quoted, so two
