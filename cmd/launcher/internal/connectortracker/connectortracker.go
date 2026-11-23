@@ -25,9 +25,11 @@ import (
 	"time"
 	"unicode"
 
+	"spindrift.dev/launcher/internal/connectorcall"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/dedupmarker"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/retry"
 )
 
 // ErrNotTracker marks a Connector that does not advertise the "tracker"
@@ -239,7 +241,7 @@ type (
 
 // guestCall is the Connector.Call signature, a seam so the adapter's policy
 // runs against a stub guest.
-type guestCall func(ctx context.Context, method string, params, result any) error
+type guestCall = connectorcall.Call
 
 // Capabilities a tracker Connector advertises beyond "tracker".
 const (
@@ -865,6 +867,21 @@ var (
 	_ forge.LabeledBacklogLister  = labeledLayer{}
 )
 
+// CallPolicy is the tracker axis's retry policy: Classify's shared path, and
+// these methods called once. editLabels, closeIssue and the reads are safe to
+// retry, so they take the default.
+func CallPolicy() connectorcall.Policy {
+	return connectorcall.Policy{NotRetried: []string{
+		// A lost response would mean a second post.
+		CapComment,
+		CapFileIssue,
+		// A replay is refused once the first landed.
+		CapCreateLabel,
+		// A replay may meet a status that no longer offers it.
+		CapTransition,
+	}}
+}
+
 // New builds core's tracker from a tracker Connector. writes answers every
 // write the Connector does not perform (transitions and verdicts unless it
 // advertises both CapTransition and CapEditLabels, the label registry unless
@@ -882,16 +899,19 @@ var (
 //
 // A 0.1 Connector predates the status selector, tracker.blocks and project-key
 // ids, so core ignores those capabilities for it and never sends a status.
-func New(c *connectorhost.Connector, writes forge.IssueTracker, lifecycle Lifecycle, target Target) (forge.IssueTracker, error) {
-	return newFrom(c, c.Call, writes, lifecycle, target)
+//
+// clock paces the retry backoff; the zero value sleeps for real.
+func New(c *connectorhost.Connector, writes forge.IssueTracker, lifecycle Lifecycle, target Target, clock retry.Clock) (forge.IssueTracker, error) {
+	return newFrom(c, c.Call, writes, lifecycle, target, clock)
 }
 
-// newFrom builds the tracker over c's handshake, routing calls through call.
-func newFrom(c *connectorhost.Connector, call guestCall, writes forge.IssueTracker, lifecycle Lifecycle, target Target) (forge.IssueTracker, error) {
+// newFrom builds the tracker over c's handshake, routing calls through call
+// under CallPolicy; a zero clock sleeps for real.
+func newFrom(c *connectorhost.Connector, call guestCall, writes forge.IssueTracker, lifecycle Lifecycle, target Target, clock retry.Clock) (forge.IssueTracker, error) {
 	if !slices.Contains(c.Capabilities, "tracker") {
 		return nil, fmt.Errorf("%w: capabilities %v lack \"tracker\"", ErrNotTracker, c.Capabilities)
 	}
-	return newTracker(call, writes, lifecycle, target, c.Capabilities, speaksV02(c.ProtocolVersion))
+	return newTracker(connectorcall.Classify(call, clock, CallPolicy()), writes, lifecycle, target, c.Capabilities, speaksV02(c.ProtocolVersion))
 }
 
 // NewReloading is New for a tracker that lives as long as its process. A
@@ -899,14 +919,16 @@ func newFrom(c *connectorhost.Connector, call guestCall, writes forge.IssueTrack
 // tracker would fail every later operation; here a call finding the Connector
 // dead reloads it first. Capabilities come from the first handshake. A load
 // error on the first load is returned as is. A non-nil note sees every later
-// failure the Connector causes, by the method that met it.
-func NewReloading(load func() (*connectorhost.Connector, error), note func(method string, err error), writes forge.IssueTracker, lifecycle Lifecycle, target Target) (forge.IssueTracker, error) {
+// failure the Connector causes, by the method that met it: the retry wraps
+// outside the reloader, so that includes a failed attempt a later retry
+// recovers. clock is as for New.
+func NewReloading(load func() (*connectorhost.Connector, error), note func(method string, err error), writes forge.IssueTracker, lifecycle Lifecycle, target Target, clock retry.Clock) (forge.IssueTracker, error) {
 	c, err := load()
 	if err != nil {
 		return nil, err
 	}
 	r := &reloader{load: func() (conn, error) { return load() }, cur: c, note: note}
-	return newFrom(c, r.call, writes, lifecycle, target)
+	return newFrom(c, r.call, writes, lifecycle, target, clock)
 }
 
 // conn is the part of a Connector the reloader drives, a seam for its tests.

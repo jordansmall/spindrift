@@ -28,6 +28,7 @@ import (
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
+	"spindrift.dev/launcher/internal/retry"
 )
 
 const (
@@ -262,7 +263,7 @@ func New(t *testing.T, c connectorforgetest.Connector) forgetest.Harness {
 	t.Cleanup(func() { _ = conn.Close(context.Background()) })
 	h.Conn = conn
 	h.tr, err = connectortracker.New(conn, nil, connectortracker.Lifecycle{Labels: Labels, VerdictLabels: forge.ResearchVerdictLabels(), WebHost: b.Host},
-		connectortracker.Target{API: b.URL + apiPath, Repo: Repo})
+		connectortracker.Target{API: b.URL + apiPath, Repo: Repo}, retry.NoSleepClock())
 	if err != nil {
 		t.Fatal(err)
 	}

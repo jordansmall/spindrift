@@ -27,6 +27,7 @@ import (
 	"spindrift.dev/launcher/internal/forge/jira"
 	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/primaryrecord"
+	"spindrift.dev/launcher/internal/retry"
 )
 
 const (
@@ -127,7 +128,7 @@ func newConnectorHarnessWith(t *testing.T, cloud bool, lc connectortracker.Lifec
 		lc.WebHost = u.Host
 	}
 	h.tr, err = connectortracker.New(conn, failingWrites{t}, lc,
-		connectortracker.Target{API: h.srv.URL, Repo: connectorProject, Dialect: dialect})
+		connectortracker.Target{API: h.srv.URL, Repo: connectorProject, Dialect: dialect}, retry.NoSleepClock())
 	if err != nil {
 		t.Fatal(err)
 	}

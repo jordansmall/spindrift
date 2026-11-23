@@ -208,6 +208,24 @@ func TestRun_RepoNotFound_DefaultSlugHintNamesFlagAndConfigKey(t *testing.T) {
 	}
 }
 
+func TestRun_IssueTrackerRateLimitWrappedAsNotFound_SaysQuotaNotSlug(t *testing.T) {
+	it := forge.NewFake()
+	// The shape connectortracker.Probe returns: TestProbeRateLimitAndAuthAlsoMatchNotFound.
+	it.ProbeErr = fmt.Errorf("%w: %w", forge.ErrRepoNotFound, forge.ErrRateLimit)
+
+	var buf bytes.Buffer
+	err := Run(it, forge.NewFake(), defaultDoctorConfig(), NewReporter(&buf, true), bufio.NewScanner(strings.NewReader("")), false, nil)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "quota window") {
+		t.Errorf("want error to mention the quota window, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "is correct") {
+		t.Errorf("want no slug hint for a rate-limited probe, got: %v", err)
+	}
+}
+
 func TestRun_IssueTrackerRateLimit_CodeForgeProbeDoesNotRun(t *testing.T) {
 	it := forge.NewFake()
 	it.ProbeErr = forge.ErrRateLimit

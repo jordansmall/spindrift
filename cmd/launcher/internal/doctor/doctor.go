@@ -252,11 +252,13 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 					if errors.Is(err, forge.ErrAuthFailure) {
 						return nil, fmt.Errorf("%w: check %s is set and valid: %w", ErrConnectivity, tokenHint, err)
 					}
-					if errors.Is(err, forge.ErrRepoNotFound) {
-						return nil, fmt.Errorf("%w: check %s is correct: %w", ErrConnectivity, slugHint, err)
-					}
+					// Before not-found: a Connector tracker's Probe wraps every call
+					// error, rate-limited included, in ErrRepoNotFound.
 					if errors.Is(err, forge.ErrRateLimit) {
 						return nil, fmt.Errorf("%w: wait for the quota window to reset, then retry: %w", ErrConnectivity, err)
+					}
+					if errors.Is(err, forge.ErrRepoNotFound) {
+						return nil, fmt.Errorf("%w: check %s is correct: %w", ErrConnectivity, slugHint, err)
 					}
 					return nil, fmt.Errorf("%w: forge connectivity check failed: %w", ErrConnectivity, err)
 				}

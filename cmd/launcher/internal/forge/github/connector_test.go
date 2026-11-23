@@ -265,7 +265,9 @@ func (b *restBackend) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		if i.failNative {
 			i.failNative = false
-			http.Error(w, "scripted native failure", http.StatusInternalServerError)
+			// Permanent, not a 5xx: core retries a transient tracker read, and
+			// a one-shot 5xx would succeed on that retry.
+			http.Error(w, "scripted native failure", http.StatusBadRequest)
 			return
 		}
 		deps := []map[string]any{}
@@ -769,7 +771,7 @@ func newHarnessWith(t *testing.T, targetRepo string, lc connectortracker.Lifecyc
 	if lc.WebHost == "" {
 		lc.WebHost = b.host
 	}
-	h.tr, err = connectortracker.New(conn, failingWrites{t}, lc, connectortracker.Target{API: b.URL, Repo: connectorRepo})
+	h.tr, err = connectortracker.New(conn, failingWrites{t}, lc, connectortracker.Target{API: b.URL, Repo: connectorRepo}, retry.NoSleepClock())
 	if err != nil {
 		t.Fatal(err)
 	}

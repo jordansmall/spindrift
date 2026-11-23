@@ -18,6 +18,7 @@ import (
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/primaryrecord"
+	"spindrift.dev/launcher/internal/retry"
 )
 
 // loadRowConnector loads a backend row's Connector; a test seam.
@@ -180,7 +181,7 @@ func (e *execClient) trackerOp(row backendrows.Row, capName, verb string, fn fun
 			}
 		}
 		lc := connectortracker.Lifecycle{Labels: e.labels, VerdictLabels: e.verdictLabels, Route: e.route, WebHost: Host()}
-		tr, err := connectortracker.New(conn, nil, lc, connectortracker.Target{API: api, Repo: e.repo})
+		tr, err := connectortracker.New(conn, nil, lc, connectortracker.Target{API: api, Repo: e.repo}, retry.Clock{})
 		if err != nil {
 			return err
 		}

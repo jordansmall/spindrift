@@ -16,6 +16,7 @@ import (
 	"spindrift.dev/launcher/internal/dedupmarker"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
+	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/tokenrefresh"
 )
 
@@ -196,7 +197,7 @@ func TestConnector_UndeclaredTrackerWritesAreRefusedUnsentAndAudited(t *testing.
 		t.Run(c.name, func(t *testing.T) {
 			h := newComposedHarness(t)
 			tr, err := connectortracker.New(h.conn, failingWrites{t}, trackerWriteLifecycle,
-				connectortracker.Target{API: h.backend.URL, Repo: hostileRepo})
+				connectortracker.Target{API: h.backend.URL, Repo: hostileRepo}, retry.NoSleepClock())
 			if err != nil {
 				t.Fatal(err)
 			}

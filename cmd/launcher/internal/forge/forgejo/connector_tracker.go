@@ -12,6 +12,7 @@ import (
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/retry"
 )
 
 // errConnectorCapabilities is a Connector whose handshake omits a method the
@@ -67,7 +68,7 @@ func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (for
 	}, connectortracker.Target{
 		API:  strings.TrimSuffix(k.ForgejoBaseURL, "/"),
 		Repo: s.RepoSlug,
-	})
+	}, retry.Clock{})
 	if err != nil {
 		recordFailure("load the Connector", err)
 		return nil, err
