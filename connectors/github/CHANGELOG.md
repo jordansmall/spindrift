@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.4.0](https://github.com/jordansmall/spindrift/compare/github-v0.3.0...github-v0.4.0) (2026-11-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* **sdk:** Reader.LabeledPage takes a route []Selector argument after label.
+
+### Features
+
+* **github:** join the Issue route to the native labels filter ([50b74de](https://github.com/jordansmall/spindrift/commit/50b74de442eeab6236eed85e8c28da9ab39f2fde)), closes [#7334](https://github.com/jordansmall/spindrift/issues/7334)
+* **sdk:** add the tracker.matchesRoute per-issue route read ([cc44f85](https://github.com/jordansmall/spindrift/commit/cc44f858138cf314a9358a3884328f8fb81b42cf)), closes [#7335](https://github.com/jordansmall/spindrift/issues/7335)
+* **sdk:** carry the Issue route on filing and the labeled read ([68d146d](https://github.com/jordansmall/spindrift/commit/68d146d56d8b4610f489376f7d43e0ec7f366520)), closes [#7333](https://github.com/jordansmall/spindrift/issues/7333)
+
+
+### Documentation
+
+* **go:** trim and correct comments in Go sources ([b5ea3c7](https://github.com/jordansmall/spindrift/commit/b5ea3c7b4ded1ce6d19cd14b0d02c1749b1530ab))
+* **nix:** trim and correct comments in Nix sources ([862042b](https://github.com/jordansmall/spindrift/commit/862042b35483dfacd356051cdcf0caacba385a9c))
+
+
+### Tests
+
+* **go:** trim and correct comments in Go tests ([61fbf0f](https://github.com/jordansmall/spindrift/commit/61fbf0fd01dc860ac09ca9b5696b3e9fb6c22a51))
+
 ## [0.3.0](https://github.com/jordansmall/spindrift/compare/github-v0.2.0...github-v0.3.0) (2026-11-21)
 
 

@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.3.0](https://github.com/jordansmall/spindrift/compare/jira-v0.2.0...jira-v0.3.0) (2026-11-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* **sdk:** Reader.LabeledPage takes a route []Selector argument after label.
+
+### Features
+
+* **connectors/jira:** report each status's category ([40655ef](https://github.com/jordansmall/spindrift/commit/40655efe08c04a0ad35c17d1ef0171e7ae786bf9)), closes [#7337](https://github.com/jordansmall/spindrift/issues/7337)
+* **connectors/jira:** route queries and filing by label and Component ([f6bb7ec](https://github.com/jordansmall/spindrift/commit/f6bb7ec1ef67c05cd48e44aa4133ce5b702d904d)), closes [#7333](https://github.com/jordansmall/spindrift/issues/7333)
+* **sdk:** add the tracker.matchesRoute per-issue route read ([cc44f85](https://github.com/jordansmall/spindrift/commit/cc44f858138cf314a9358a3884328f8fb81b42cf)), closes [#7335](https://github.com/jordansmall/spindrift/issues/7335)
+* **sdk:** carry the Issue route on filing and the labeled read ([68d146d](https://github.com/jordansmall/spindrift/commit/68d146d56d8b4610f489376f7d43e0ec7f366520)), closes [#7333](https://github.com/jordansmall/spindrift/issues/7333)
+
+
+### Bug Fixes
+
+* **jira:** carry Jira's reason on a refused request ([0b5f7c2](https://github.com/jordansmall/spindrift/commit/0b5f7c21275473ccedddbffb362785251d170832)), closes [#7336](https://github.com/jordansmall/spindrift/issues/7336)
+* **jira:** give the Connector module a dedup key ([df9646e](https://github.com/jordansmall/spindrift/commit/df9646ed9659a9b85b37aec3f540bd34d5ee782a)), closes [#7417](https://github.com/jordansmall/spindrift/issues/7417)
+
 ## [0.2.0](https://github.com/jordansmall/spindrift/compare/jira-v0.1.1...jira-v0.2.0) (2026-11-21)
 
 

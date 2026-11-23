@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.2](https://github.com/jordansmall/spindrift/compare/opencode-v0.1.1...opencode-v0.1.2) (2026-11-23)
+
+
+### Documentation
+
+* **go:** trim and correct comments in Go sources ([b5ea3c7](https://github.com/jordansmall/spindrift/commit/b5ea3c7b4ded1ce6d19cd14b0d02c1749b1530ab))
+
+
+### Tests
+
+* **connector/opencode:** make the header-merge seed deterministic ([1fc1445](https://github.com/jordansmall/spindrift/commit/1fc144548df72c108947f043a6df016631152738)), closes [#6874](https://github.com/jordansmall/spindrift/issues/6874)
+
 ## [0.1.1](https://github.com/jordansmall/spindrift/compare/opencode-v0.1.0...opencode-v0.1.1) (2026-11-21)
 
 
