@@ -20,6 +20,7 @@ let
   defaultModelFixture = import ./default-model-fixture.nix;
   schema = import ./env-schema.nix;
   structuralTemplateExamples = import ./structural-template-examples.nix { inherit lib; };
+  consumerStanzas = (import ../nix/consumer-stanzas.nix { inherit lib; }).stanzas;
   bakedSkills = import ./baked-skills.nix;
   gateVocabulary = import ./gate-vocabulary.nix;
   structuralPaths = import ./structural-paths.nix;
@@ -144,10 +145,10 @@ map assertMarkerShape [
     name = "template-settings-block";
     docPath = "templates/default/flake.nix";
     blockName = "SETTINGS EXAMPLE";
-    sourceDesc = "lib/env-schema.nix";
+    sourceDesc = "lib/env-schema.nix and nix/consumer-stanzas.nix";
     beginMarker = "            # BEGIN GENERATED SETTINGS EXAMPLE -- nix run .#regen -- DO NOT EDIT\n";
     endMarker = "            # END GENERATED SETTINGS EXAMPLE";
-    generated = renderers.renderTemplateSettingsBlock schema structuralTemplateExamples;
+    generated = renderers.renderTemplateSettingsBlock schema consumerStanzas structuralTemplateExamples;
   }
   {
     name = "baked-skills-probes-gen";

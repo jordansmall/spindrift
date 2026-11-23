@@ -23,7 +23,8 @@ let
   structuralPaths = import ../lib/structural-paths.nix;
   extraOptionPaths = import ../lib/extra-option-paths.nix;
   connectorKnobs = import ./connector-knobs.nix { inherit (pkgs) lib; };
-  envExample = renderers.renderHarnessEnvExample schema connectorKnobs.knobs;
+  consumerStanzas = (import ./consumer-stanzas.nix { inherit (pkgs) lib; }).stanzas;
+  envExample = renderers.renderHarnessEnvExample schema consumerStanzas;
   flagTable = renderers.renderFlagTableGo schema;
   knobsFile = renderers.renderKnobsGo schema;
   loadKnobsFile = renderers.renderLoadKnobsGo schema;
