@@ -906,3 +906,89 @@ M	connectors/claude/b.go
 '
   [ "$status" -ne 0 ]
 }
+
+# The tracker scaffold (issue #7421) is checked in the connector lane as the
+# path templates/connector-<kind>: connector-dev generates it under two names.
+# Its template files, the generator, and the Connector contract all select it;
+# plain classify mode keeps them code.
+# Stderr carries why a Go or Nix edit is code (nothing to parse at base), so
+# the verdict is read from stdout alone.
+classify_code() {
+  run --separate-stderr bash "$CI_CHANGES_SH" base head
+  [ "$status" -eq 0 ]
+  [ "$output" = code ]
+}
+
+template_repo() {
+  repo_with_base connectors/foo/flake.nix '{ }' lib/drivers/default.nix "$DRIVERS_NIX" \
+    templates/connector-tracker/flake.nix '{ }'
+  mkdir -p connectors/bar
+  printf '{ }' >connectors/bar/flake.nix
+  commit head
+}
+
+@test "connector template: a template file edit selects the scaffold and classifies as code" {
+  template_repo
+  diff='M	templates/connector-tracker/main.go
+'
+  connector_names <<<"$diff"
+  [ "$output" = '["templates/connector-tracker"]' ]
+  classify_code <<<"$diff"
+}
+
+@test "connector template: a git-quoted template path selects the scaffold" {
+  template_repo
+  connector_names <<<'M	"templates/connector-tracker/\303\261.go"
+'
+  [ "$output" = '["templates/connector-tracker"]' ]
+}
+
+@test "connector template: a generator edit selects the scaffold and classifies as code" {
+  template_repo
+  for f in nix/new-connector.sh nix/new-connector.nix; do
+    diff="M	$f
+"
+    connector_names <<<"$diff"
+    [ "$output" = '["templates/connector-tracker"]' ]
+    classify_code <<<"$diff"
+  done
+}
+
+@test "connector template: a contract diff selects every Connector and the scaffold" {
+  template_repo
+  connector_names <<<'M	sdk/connector.go
+'
+  [ "$output" = '["bar","foo","templates/connector-tracker"]' ]
+}
+
+@test "connector template: a Connector edit beside a template edit names each" {
+  template_repo
+  connector_names <<<'M	connectors/foo/a.go
+M	templates/connector-tracker/a.go
+'
+  [ "$output" = '["foo","templates/connector-tracker"]' ]
+}
+
+@test "connector template: an unrelated edit does not select the scaffold" {
+  template_repo
+  connector_names <<<'M	cmd/launcher/main.go
+M	templates/default/prompts/x.md
+M	nix/connector-dev.sh
+M	nix/new-connector-other.sh
+'
+  [ "$output" = '[]' ]
+}
+
+@test "connector template: a template deleted at the new revision is not selected" {
+  template_repo
+  connector_names <<<'D	templates/connector-gone/flake.nix
+'
+  [ "$output" = '[]' ]
+}
+
+@test "connector template: without a template at the new revision a generator edit selects nothing" {
+  connector_repo
+  connector_names <<<'M	nix/new-connector.sh
+'
+  [ "$output" = '[]' ]
+}
