@@ -1,10 +1,13 @@
 # Builds driver.wasm (the fixture Driver's host half), network.wasm (the
 # fixture network Connector, ./network), forge.wasm (the fixture push-only
-# forge Connector, ./forge) and forge-pr.wasm (the fixture PR-capable forge
-# Connector, ./forgepr), wasip1 reactors. The SDK source comes from `core`, not
-# a path out of this directory (the escape guard); both trees are copied to
-# their repo-relative layout because go.mod replaces spindrift.dev/sdk with a
-# relative path three levels up.
+# forge Connector, ./forge), forge-pr.wasm (the fixture PR-capable forge
+# Connector, ./forgepr), tracker.wasm (the fixture read-only tracker
+# Connector, ./tracker), tracker-writes.wasm (the same tracker built
+# in its write-capable mode) and tracker-dialect.wasm (the same tracker built to
+# probe a path only a scripted backend answers), wasip1 reactors. The SDK source
+# comes from `core`, not a path out of this directory (the escape guard); both
+# trees are copied to their repo-relative layout because go.mod replaces
+# spindrift.dev/sdk with a relative path three levels up.
 { pkgs, core }:
 let
   fs = pkgs.lib.fileset;
@@ -27,4 +30,7 @@ pkgs.runCommand "connector-fixture-wasm" { nativeBuildInputs = [ pkgs.go ]; } ''
   go build -buildmode=c-shared -o $out/network.wasm ./network
   go build -buildmode=c-shared -o $out/forge.wasm ./forge
   go build -buildmode=c-shared -o $out/forge-pr.wasm ./forgepr
+  go build -buildmode=c-shared -o $out/tracker.wasm ./tracker
+  go build -buildmode=c-shared -ldflags=-X=main.mode=writes -o $out/tracker-writes.wasm ./tracker
+  go build -buildmode=c-shared -ldflags=-X=main.mode=dialect -o $out/tracker-dialect.wasm ./tracker
 ''
