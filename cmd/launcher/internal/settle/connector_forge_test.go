@@ -2,6 +2,7 @@ package settle
 
 import (
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -288,5 +289,45 @@ func TestSettle_ConflictingMergeRefusalRespondsToConflictThroughConnectorForge(t
 	}
 	if !h.Rebased("1") {
 		t.Error("branch not rebased by the conflict response")
+	}
+}
+
+// A Connector that answers the changed-file list with garbage must not read as
+// "no guarded path touched": the merge guard holds the PR and names the answer.
+func TestSettle_MergeGuardHoldsOnMalformedFileListThroughConnectorForge(t *testing.T) {
+	for name, files := range map[string][]string{
+		"no entries":   {},
+		"dotdot entry": {"docs/a.md", "../.github/workflows/ci.yml"},
+		"control char": {"docs/a\x00.md"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := connectorforgetest.NewPR(t)
+			url, outbox := h.SeedLandablePRWithBundle("1")
+			h.Backend.SetFiles(1, files)
+
+			fc := forge.NewFake(testDispatchLabels)
+			fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+			cfg := baseConfig()
+			cfg.MergeMode = "immediate"
+			cfg.MergeGuardPaths = ".github/**"
+			cfg.BaseBranch = "main"
+			cfg.OutboxDir = func(string) string { return outbox }
+			cfg.Capabilities = h.Capabilities()
+			s := New(cfg, fc, h.CodeForge())
+
+			gen := s.term.Begin("1")
+			got := s.Settle(dispatch.NewFake(), "1", gen, settleReadyResult("1", handoffBranch))
+
+			if want := (Settlement{Verdict: ForReason(dispatchrecord.ReasonMergeGuardCheckError), PRURL: url}); got != want {
+				t.Errorf("Settle = %+v, want %+v", got, want)
+			}
+			if h.Merged(url) {
+				t.Error("PR merged despite an unreadable file list")
+			}
+			comments := h.Backend.PR(1).Comments
+			if len(comments) != 1 || !strings.Contains(comments[0], "file list") {
+				t.Errorf("hold comments = %q, want one naming the file list", comments)
+			}
+		})
 	}
 }

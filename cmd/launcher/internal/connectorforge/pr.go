@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 	"slices"
+	"strings"
 	"time"
+	"unicode"
 
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/forge"
@@ -183,13 +186,40 @@ func (f *prForge) NeedsUpdate(prURL string) (bool, error) {
 }
 
 func (f *prForge) ListPRFiles(prURL string) ([]string, error) {
-	var res struct {
-		Files []string `json:"files"`
-	}
-	if err := f.numbered("forge.prFiles", prURL, &res); err != nil {
+	n, err := f.prNumber(prURL)
+	if err != nil {
 		return nil, err
 	}
-	return res.Files, nil
+	var res struct {
+		Files *[]string `json:"files"`
+	}
+	if err := f.call(context.Background(), "forge.prFiles", numberedParams{f.target, n}, &res); err != nil {
+		return nil, err
+	}
+	// The merge guard reads this list, so an absent, empty or malformed one must
+	// not decode to "no guarded path touched": every PR changes at least a file.
+	if res.Files == nil {
+		return nil, fmt.Errorf("%w: PR %s file list is missing", ErrAnswer, n)
+	}
+	files := *res.Files
+	if len(files) == 0 {
+		return nil, fmt.Errorf("%w: PR %s file list has no entries", ErrAnswer, n)
+	}
+	for _, p := range files {
+		if !cleanRepoPath(p) {
+			return nil, fmt.Errorf("%w: PR %s file list entry %q is not a clean repository-relative path", ErrAnswer, n, p)
+		}
+	}
+	return files, nil
+}
+
+// cleanRepoPath reports whether p is a non-empty, relative path in path.Clean
+// form (so "./x" cannot dodge a guard glob) with no ".." segment and no
+// control character.
+func cleanRepoPath(p string) bool {
+	return p != "" && !strings.HasPrefix(p, "/") && path.Clean(p) == p &&
+		!slices.Contains(strings.Split(p, "/"), "..") &&
+		strings.IndexFunc(p, unicode.IsControl) < 0
 }
 
 func (f *prForge) setDraft(prURL string, draft bool) error {
