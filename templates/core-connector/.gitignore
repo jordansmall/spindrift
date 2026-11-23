@@ -1,0 +1,16 @@
+# nix build output
+result
+result-*
+
+# local config + secrets — never commit this
+harness.env
+
+# private local issues (ISSUE_TRACKER=local; see LOCAL_ISSUES_DIR)
+.spindrift/
+
+# container-fallback build artifacts (staged under tmpdir; listed here as safety net)
+.spindrift-image.tar
+.spindrift-image-path
+
+# OS
+.DS_Store
