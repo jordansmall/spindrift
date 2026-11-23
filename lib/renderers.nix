@@ -1779,10 +1779,6 @@ rec {
     + "\n"
     + builtins.concatStringsSep "\n" constBlocks
     + "\n"
-    + "// defaultCodeForge is the CODE_FORGE schema default; the wizard omits the\n"
-    + "// codeForge line when the chosen backend equals it.\n"
-    + "const defaultCodeForge = ${builtins.toJSON quickstartTable.defaultCodeForge}\n"
-    + "\n"
     + builtins.concatStringsSep "\n" hostGitConfigKeyBlocks;
 
   # cmd/launcher/internal/agentpaths/agentpaths_gen.go content (issue #2531): one

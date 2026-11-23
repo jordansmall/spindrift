@@ -7,28 +7,28 @@ import (
 )
 
 // quickstartCheckConfig converts the wizard's answers into a
-// launcherchecks.Config. Quickstart prompts for one backend and uses it as both
-// the tracker and the forge, so answers has no codeForge field and the caller
-// passes that name separately.
-func quickstartCheckConfig(a answers, codeForge string) launcherchecks.Config {
+// launcherchecks.Config.
+func quickstartCheckConfig(a answers) launcherchecks.Config {
 	var ghToken string
-	if harnessEnvTokenEnvVar(a.choice.name) == "GH_TOKEN" {
-		ghToken = a.token
+	for _, c := range a.chosen() {
+		if harnessEnvTokenEnvVar(c.name) == "GH_TOKEN" {
+			ghToken = a.tokens[c.name]
+		}
 	}
 	return launcherchecks.Config{
 		RepoSlug:     a.repoSlug,
 		GitUserName:  a.gitUserName,
 		GitUserEmail: a.gitUserEmail,
-		// Set only when harness.env writes the credential as GH_TOKEN;
-		// otherwise a scaffold still needing GH_TOKEN (a jira tracker on a
-		// github forge) would pass here and fail `spindrift doctor`.
+		// Set only when harness.env writes a credential as GH_TOKEN, so a
+		// scaffold still needing GH_TOKEN fails here as it would under
+		// `spindrift doctor`.
 		GHToken: ghToken,
 
 		Driver:      a.driver,
 		Credentials: credentialValues(a.credentials),
 
-		IssueTracker: a.choice.name,
-		CodeForge:    codeForge,
+		IssueTracker: a.tracker.name,
+		CodeForge:    a.forge.name,
 
 		// Models, ResearchDispatch, and SelfContained stay zero because the
 		// wizard never prompts for them.
@@ -48,11 +48,11 @@ func quickstartCheckDeps(a answers) launcherchecks.Deps {
 			}
 			b := launcherchecks.Backend{Descriptor: row}
 			// Validators run against the wizard's answers; an uncollected knob
-			// reads as unset, as under `spindrift doctor`. Only quickstart rows
+			// reads as unset, as under `spindrift doctor`. Only registered rows
 			// can be the scaffold's tracker or forge, so only they are probed.
 			if s, ok := backendkit.ByName(name); ok {
 				shared := quickstartShared(a.repoSlug, a.gitUserName, a.gitUserEmail)
-				lookup := knobLookup(a.choice.knobs, s.TokenEnvVar, a.token)
+				lookup := a.lookup()
 				if s.ValidateTracker != nil {
 					b.ValidateTracker = func() error { return s.ValidateTracker(shared, lookup) }
 				}

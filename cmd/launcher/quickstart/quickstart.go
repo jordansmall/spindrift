@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -69,18 +70,10 @@ func validateRuntimeChoice(runtime string) error {
 }
 
 // quickstartStrategies is the source the wizard detects and offers backends
-// from: every registered Strategy carrying a Quickstart block, in registration
-// order. A var so tests can add a row without leaking it into the global
-// registry, which has no unregister.
-var quickstartStrategies = func() []backendkit.Strategy {
-	var rows []backendkit.Strategy
-	for _, s := range backendkit.Strategies() {
-		if s.Quickstart != nil {
-			rows = append(rows, s)
-		}
-	}
-	return rows
-}
+// from: every registered Strategy, in registration order. A var so tests can
+// add a row without leaking it into the global registry, which has no
+// unregister.
+var quickstartStrategies = backendkit.Strategies
 
 // The axes a quickstart block may name (lib/renderers.nix quickstartAxes).
 const (
@@ -88,32 +81,27 @@ const (
 	axisForge   = "forge"
 )
 
-// effectiveForge names the Code Forge a quickstart choice lands code on: the
-// backend itself when its row drives the forge axis, else defaultCodeForge.
-// buildForge, the rendered flake and the doctor checks all resolve through it
-// so they cannot disagree.
-func effectiveForge(s backendkit.Strategy) string {
-	if s.Quickstart != nil && slices.Contains(s.Quickstart.Axes, axisForge) {
-		return s.Name
-	}
-	return defaultCodeForge
-}
-
-// quickstartForge is effectiveForge for the named quickstart row.
-func quickstartForge(name string) string {
-	for _, s := range quickstartStrategies() {
-		if s.Name == name {
-			return effectiveForge(s)
+// offeredOn returns the rows the wizard offers on an axis, in registration
+// order: those valid on it whose credential quickstart can collect. A row
+// declaring a token env var needs an AcquireToken hook to be offered; one
+// declaring none (local, git) needs nothing, and a forge-only row is never
+// valid as a tracker.
+func offeredOn(axis string, rows []backendkit.Strategy) []backendkit.Strategy {
+	var offered []backendkit.Strategy
+	for _, s := range rows {
+		valid := s.ValidAsTracker
+		if axis == axisForge {
+			valid = s.ValidAsCodeForge
+		}
+		if valid && (harnessEnvTokenEnvVar(s.Name) == "" || s.AcquireToken != nil) {
+			offered = append(offered, s)
 		}
 	}
-	return defaultCodeForge
+	return offered
 }
 
-// quickstartBackendNames returns the backend names the wizard accepts when no
-// quickstart row claims the git remote host. A newly registered row appears
-// here unedited.
-func quickstartBackendNames() []string {
-	rows := quickstartStrategies()
+// strategyNames lists the rows' names in order, the choices a backend prompt offers.
+func strategyNames(rows []backendkit.Strategy) []string {
 	names := make([]string, len(rows))
 	for i, s := range rows {
 		names[i] = s.Name
@@ -122,15 +110,16 @@ func quickstartBackendNames() []string {
 }
 
 // detectBackend returns the quickstart row that claims the remote's host and
-// the knobs its remote implies. A row claims a remote when it lists the host
-// and its RemoteMatch accepts the remote under those knobs.
+// the knobs its remote implies. A row claims a remote when it carries a
+// quickstart block listing the host and its RemoteMatch accepts the remote
+// under those knobs.
 func detectBackend(rows []backendkit.Strategy, host, slug, remote string) (backendkit.Strategy, map[string]string, bool) {
 	for _, s := range rows {
-		if !slices.Contains(s.Quickstart.Hosts, host) || s.RemoteMatch == nil {
+		if s.Quickstart == nil || !slices.Contains(s.Quickstart.Hosts, host) || s.RemoteMatch == nil {
 			continue
 		}
 		knobs := remoteKnobs(s, remote)
-		if s.RemoteMatch(backendkit.Shared{RepoSlug: slug}, knobLookup(knobs, "", ""), remote) {
+		if s.RemoteMatch(backendkit.Shared{RepoSlug: slug}, knobLookup(knobs, nil), remote) {
 			return s, knobs, true
 		}
 	}
@@ -144,14 +133,14 @@ func remoteKnobs(s backendkit.Strategy, remote string) map[string]string {
 	return s.KnobsFromRemote(remote)
 }
 
-func validateBackendChoice(b string) error {
-	names := quickstartBackendNames()
-	for _, v := range names {
-		if b == v {
+// validateBackendChoice accepts only the names offered on one axis.
+func validateBackendChoice(names []string) func(string) error {
+	return func(b string) error {
+		if slices.Contains(names, b) {
 			return nil
 		}
+		return fmt.Errorf("expected one of %s, got %q", strings.Join(names, ", "), b)
 	}
-	return fmt.Errorf("expected one of %s, got %q", strings.Join(names, ", "), b)
 }
 
 // CommandRunner abstracts the two subprocesses Quickstart shells out to,
@@ -244,10 +233,11 @@ func postWriteFailure(step postWriteStep, written []string, insideGitWorkTree bo
 }
 
 // ForgeBuilder constructs the real IssueTracker and CodeForge from the chosen
-// backend's Strategy so the finish line's doctor validation runs in-process:
-// the `spindrift` binary doesn't exist yet at this pre-CLI stage (ADR 0027).
-// Injected so tests substitute a forge.Fake instead of reaching a live API.
-type ForgeBuilder func(s backendkit.Strategy, sh backendkit.Shared, l backendkit.Lookup) (forge.IssueTracker, forge.CodeForge, error)
+// tracker and forge Strategies so the finish line's doctor validation runs
+// in-process: the `spindrift` binary doesn't exist yet at this pre-CLI stage
+// (ADR 0027). Injected so tests substitute a forge.Fake instead of reaching a
+// live API.
+type ForgeBuilder func(tracker, codeForge backendkit.Strategy, sh backendkit.Shared, l backendkit.Lookup) (forge.IssueTracker, forge.CodeForge, error)
 
 // buildTracker builds the backend's issue tracker alone.
 func buildTracker(s backendkit.Strategy, sh backendkit.Shared, l backendkit.Lookup) (forge.IssueTracker, error) {
@@ -261,27 +251,20 @@ func buildTracker(s backendkit.Strategy, sh backendkit.Shared, l backendkit.Look
 	return it, nil
 }
 
-// buildForge is the production ForgeBuilder. The Code Forge is the chosen
-// backend itself when it declares the forge axis, else defaultCodeForge (ADR
-// 0027: Quickstart never prompts for it).
-func buildForge(s backendkit.Strategy, sh backendkit.Shared, l backendkit.Lookup) (forge.IssueTracker, forge.CodeForge, error) {
-	it, err := buildTracker(s, sh, l)
+// buildForge is the production ForgeBuilder: the tracker comes from the
+// tracker row and the Code Forge from the forge row, which the operator chose
+// independently.
+func buildForge(tracker, codeForge backendkit.Strategy, sh backendkit.Shared, l backendkit.Lookup) (forge.IssueTracker, forge.CodeForge, error) {
+	it, err := buildTracker(tracker, sh, l)
 	if err != nil {
 		return nil, nil, err
 	}
-	cs := s
-	if forgeName := effectiveForge(s); forgeName != s.Name {
-		var ok bool
-		if cs, ok = backendkit.ByName(forgeName); !ok {
-			return nil, nil, fmt.Errorf("code forge %q is not registered", forgeName)
-		}
+	if codeForge.NewCodeForge == nil {
+		return nil, nil, fmt.Errorf("backend %q cannot build a code forge", codeForge.Name)
 	}
-	if cs.NewCodeForge == nil {
-		return nil, nil, fmt.Errorf("backend %q cannot build a code forge", cs.Name)
-	}
-	cf, err := cs.NewCodeForge(sh, l, forge.SanitizedParent{}, it)
+	cf, err := codeForge.NewCodeForge(sh, l, forge.SanitizedParent{}, it)
 	if err != nil {
-		return nil, nil, fmt.Errorf("build %s code forge: %w", cs.Name, err)
+		return nil, nil, fmt.Errorf("build %s code forge: %w", codeForge.Name, err)
 	}
 	return it, cf, nil
 }
@@ -296,12 +279,12 @@ func quickstartShared(repoSlug, gitUserName, gitUserEmail string) backendkit.Sha
 	}
 }
 
-// knobLookup resolves the backend's remote-derived knobs plus, once acquired,
-// its token under the Descriptor's TokenEnvVar.
-func knobLookup(knobs map[string]string, tokenEnv, token string) backendkit.Lookup {
+// knobLookup resolves the remote-derived knobs plus, once acquired, each
+// token under its backend's TokenEnvVar (secrets maps env name to value).
+func knobLookup(knobs, secrets map[string]string) backendkit.Lookup {
 	return func(name string) (string, bool) {
-		if token != "" && name == tokenEnv {
-			return token, true
+		if v, ok := secrets[name]; ok && v != "" {
+			return v, true
 		}
 		v, ok := knobs[name]
 		return v, ok
@@ -414,27 +397,66 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 	remoteURL := env.GitRemoteURL()
 	host, repoSlugDefault := gitremote.ParseHostSlug(remoteURL)
 	rows := quickstartStrategies()
-	if len(rows) == 0 {
-		return errors.New("no backend declares a quickstart block")
+	trackers, forges := offeredOn(axisTracker, rows), offeredOn(axisForge, rows)
+	if len(trackers) == 0 || len(forges) == 0 {
+		return errors.New("quickstart offers no issue tracker or no code forge")
 	}
-	// No remote means the first row, silently. A host a row claims is
-	// announced; any other host is asked. Only rows with a quickstart block
-	// take part, so Jira and local are never offered or detected.
-	strategy, knobs := rows[0], map[string]string(nil)
+	// The remote's host pre-selects a backend per axis, but never skips the
+	// prompts: an operator may put the tracker and the forge on different
+	// backends. With no claimed host each axis defaults to its first row.
+	trackerDefault, forgeDefault := trackers[0].Name, forges[0].Name
+	var detectedName string
 	if host != "" {
-		if s, k, ok := detectBackend(rows, host, repoSlugDefault, remoteURL); ok {
-			strategy, knobs = s, k
-			fmt.Fprintf(w, "detected a %s remote — using the %s backend\n", host, s.Name)
-		} else {
-			name, err := promptValidated(fmt.Sprintf("Backend (%s)", strings.Join(quickstartBackendNames(), "/")), rows[0].Name, validateBackendChoice)
-			if err != nil {
-				return err
+		if s, _, ok := detectBackend(rows, host, repoSlugDefault, remoteURL); ok {
+			detectedName = s.Name
+			fmt.Fprintf(w, "detected a %s remote — pre-selecting the %s backend\n", host, s.Name)
+			if slices.Contains(s.Quickstart.Axes, axisTracker) && slices.ContainsFunc(trackers, func(t backendkit.Strategy) bool { return t.Name == s.Name }) {
+				trackerDefault = s.Name
 			}
-			strategy = rows[slices.IndexFunc(rows, func(s backendkit.Strategy) bool { return s.Name == name })]
-			knobs = remoteKnobs(strategy, remoteURL)
+			if slices.Contains(s.Quickstart.Axes, axisForge) && slices.ContainsFunc(forges, func(f backendkit.Strategy) bool { return f.Name == s.Name }) {
+				forgeDefault = s.Name
+			}
 		}
 	}
-	choice := backendChoice{name: strategy.Name, knobs: knobs}
+	pickBackend := func(label, def string, offered []backendkit.Strategy) (backendChoice, error) {
+		names := strategyNames(offered)
+		name, err := promptValidated(fmt.Sprintf("%s (%s)", label, strings.Join(names, "/")), def, validateBackendChoice(names))
+		if err != nil {
+			return backendChoice{}, err
+		}
+		return backendChoice{name: name, row: offered[slices.Index(names, name)]}, nil
+	}
+	trackerChoice, err := pickBackend("Issue tracker", trackerDefault, trackers)
+	if err != nil {
+		return err
+	}
+	forgeChoice, err := pickBackend("Code forge", forgeDefault, forges)
+	if err != nil {
+		return err
+	}
+	// The checkout remote is the forge's, so only the forge axis, or a tracker
+	// on the forge's own backend or the row that claimed the remote, derives
+	// knobs from it; any other tracker would be pointed at the forge's host.
+	forgeChoice.knobs = remoteKnobs(forgeChoice.row, remoteURL)
+	if trackerChoice.name == forgeChoice.name || trackerChoice.name == detectedName {
+		trackerChoice.knobs = remoteKnobs(trackerChoice.row, remoteURL)
+	} else if trackerChoice.row.KnobsFromRemote != nil {
+		// Blank keeps the default instance, left as a commented default in flake.nix.
+		label := fmt.Sprintf("%s issue tracker repo URL (blank for the default instance)", consumerStanzas[trackerChoice.name].DisplayName)
+		trackerURL, err := promptValidated(label, "", func(u string) error {
+			if u != "" && trackerChoice.row.KnobsFromRemote(u) == nil {
+				return fmt.Errorf("cannot read an instance from %q — give the tracker's repo URL, or leave blank", u)
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		if trackerURL != "" {
+			trackerChoice.knobs = trackerChoice.row.KnobsFromRemote(trackerURL)
+		}
+	}
+	a := answers{tracker: trackerChoice, forge: forgeChoice}
 
 	repoSlug, err := promptValidated("Repo slug (owner/repo)", repoSlugDefault, validateRepoSlug)
 	if err != nil {
@@ -453,41 +475,49 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 	gitUserName := promptDefault("Git user name", env.GitConfig(hostGitConfigKeyGitUserName))
 	gitUserEmail := promptDefault("Git user email", env.GitConfig(hostGitConfigKeyGitUserEmail))
 
-	if strategy.AcquireToken == nil {
-		return fmt.Errorf("backend %q declares no AcquireToken hook, so quickstart cannot set up its token", strategy.Name)
-	}
 	shared := quickstartShared(repoSlug, gitUserName, gitUserEmail)
 	// Quickstart installs no Connector sandbox, so a Connector-read tracker or
-	// Code Forge defers its finish-line checks to `spindrift doctor`, and the
-	// token probe too when the tracker is the Connector. The false arguments
-	// mean "not primary".
+	// Code Forge defers its finish-line checks to `spindrift doctor`, as does
+	// the token probe of any chosen row whose tracker side is the Connector.
+	// The false arguments mean "not primary".
 	deferChecks := !connectorsandbox.Installed() &&
-		(backendkit.TrackerReadsThroughConnector(strategy.Name, false) ||
-			backendkit.ForgeReadsThroughConnector(effectiveForge(strategy), false))
-	token, err := strategy.AcquireToken(
-		shared,
-		knobLookup(knobs, "", ""),
-		backendkit.TokenPrompt{
-			Out:          w,
-			Getenv:       env.Getenv,
-			Prompt:       prompt,
-			PromptMasked: promptMasked,
-			AmbientToken: env.GHAuthToken,
-			Probe: func(token string) error {
-				if deferChecks && backendkit.TrackerReadsThroughConnector(strategy.Name, false) {
-					return connectorsandbox.ErrNoConnectorSandbox
-				}
-				it, _, err := forgeBuilder(strategy, shared, knobLookup(knobs, strategy.TokenEnvVar, token))
-				if err != nil {
+		(backendkit.TrackerReadsThroughConnector(trackerChoice.name, false) ||
+			backendkit.ForgeReadsThroughConnector(forgeChoice.name, false))
+	tokens := map[string]string{}
+	for _, c := range a.chosen() {
+		row, knobs := c.row, c.knobs
+		tokenEnv := harnessEnvTokenEnvVar(c.name)
+		if tokenEnv == "" {
+			continue
+		}
+		token, err := row.AcquireToken(
+			shared,
+			knobLookup(knobs, nil),
+			backendkit.TokenPrompt{
+				Out:          w,
+				Getenv:       env.Getenv,
+				Prompt:       prompt,
+				PromptMasked: promptMasked,
+				AmbientToken: env.GHAuthToken,
+				Probe: func(token string) error {
+					if deferChecks && backendkit.TrackerReadsThroughConnector(row.Name, false) {
+						return connectorsandbox.ErrNoConnectorSandbox
+					}
+					// The row is built as both axes so the probe needs nothing
+					// the other chosen row has yet to collect.
+					it, _, err := forgeBuilder(row, row, shared, knobLookup(knobs, map[string]string{tokenEnv: token}))
+					if err != nil {
+						return err
+					}
+					_, err = it.Probe()
 					return err
-				}
-				_, err = it.Probe()
-				return err
-			},
-			RerunCmd: quickstartRerunCmd,
-		})
-	if err != nil {
-		return err
+				},
+				RerunCmd: quickstartRerunCmd,
+			})
+		if err != nil {
+			return err
+		}
+		tokens[row.Name] = token
 	}
 
 	rules, _ := driver.CredentialRules(driverName)
@@ -496,16 +526,9 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 		return err
 	}
 
-	a := answers{
-		repoSlug:     repoSlug,
-		runtime:      runtime,
-		gitUserName:  gitUserName,
-		gitUserEmail: gitUserEmail,
-		choice:       choice,
-		token:        token,
-		driver:       driverName,
-		credentials:  credentials,
-	}
+	a.repoSlug, a.runtime = repoSlug, runtime
+	a.gitUserName, a.gitUserEmail = gitUserName, gitUserEmail
+	a.tokens, a.driver, a.credentials = tokens, driverName, credentials
 
 	files, err := render(a)
 	if err != nil {
@@ -563,8 +586,11 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 	// The gh CLI reads auth from GH_TOKEN in the process environment. Keyed
 	// off the descriptor rather than the backend name so a third backend's
 	// credential is never exported under GitHub's env var name.
-	if strategy.TokenEnvVar == "GH_TOKEN" {
-		if err := os.Setenv("GH_TOKEN", token); err != nil {
+	for _, c := range a.chosen() {
+		if harnessEnvTokenEnvVar(c.name) != "GH_TOKEN" {
+			continue
+		}
+		if err := os.Setenv("GH_TOKEN", tokens[c.name]); err != nil {
 			return fmt.Errorf("set GH_TOKEN: %w", err)
 		}
 	}
@@ -576,19 +602,19 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 	if deferChecks {
 		fmt.Fprintln(w, "the finish-line checks need the Connector sandbox, which quickstart does not run — deferred to `spindrift doctor`.")
 	} else {
-		it, cf, err := forgeBuilder(strategy, shared, knobLookup(knobs, strategy.TokenEnvVar, token))
+		it, cf, err := forgeBuilder(a.tracker.row, a.forge.row, shared, a.lookup())
 		if err != nil {
 			return postWriteFailure(doctorPostWriteStep, written, insideGitWorkTree, err)
 		}
-		tokenHint, slugHint, noLabelRegistry := doctorHints(choice.name)
+		tokenHint, slugHint, noLabelRegistry := doctorHints(a.tracker.name)
 		// launcherchecks carries no runtime row: doctor.Config.Runtime below
 		// reports runtime validity.
-		launcherRows := launcherchecks.All(quickstartCheckConfig(a, quickstartForge(choice.name)), quickstartCheckDeps(a))
+		launcherRows := launcherchecks.All(quickstartCheckConfig(a), quickstartCheckDeps(a))
 		// Verbose: quickstart's finish line always reports in full, whatever
 		// `spindrift doctor`'s own quiet default does (issue #3777).
 		rep := doctor.NewReporter(w, true)
 		if err := doctor.Run(it, cf, doctor.Config{
-			IssueTracker:    choice.name,
+			IssueTracker:    a.tracker.name,
 			TokenHint:       tokenHint,
 			SlugHint:        slugHint,
 			NoLabelRegistry: noLabelRegistry,
@@ -773,10 +799,12 @@ func doctorHints(issueTracker string) (tokenHint, slugHint string, noLabelRegist
 	return row.DoctorTokenHint, row.DoctorSlugHint, !row.LabelRegistry
 }
 
-// backendChoice is the backend the wizard settled on and the knob values
-// (env name -> value) its Strategy derived from the git remote.
+// backendChoice is the backend the wizard settled on, its Strategy row (set
+// only by runQuickstart; render needs just the name) and the knob values (env
+// name -> value) the row derived from the git remote.
 type backendChoice struct {
 	name  string
+	row   backendkit.Strategy
 	knobs map[string]string
 }
 
@@ -787,10 +815,34 @@ type answers struct {
 	runtime      string
 	gitUserName  string
 	gitUserEmail string
-	choice       backendChoice
-	token        string
+	tracker      backendChoice
+	forge        backendChoice
+	tokens       map[string]string // acquired token per backend name
 	driver       string
 	credentials  []credential
+}
+
+// chosen returns the distinct backends the scaffold names, tracker first. A
+// backend on both axes derives its knobs from the same remote, so one entry
+// stands for both.
+func (a answers) chosen() []backendChoice {
+	if a.forge.name == a.tracker.name {
+		return []backendChoice{a.tracker}
+	}
+	return []backendChoice{a.tracker, a.forge}
+}
+
+// lookup serves every chosen backend's remote-derived knobs and acquired token
+// (under its TokenEnvVar), as one Lookup for both axes.
+func (a answers) lookup() backendkit.Lookup {
+	knobs, secrets := map[string]string{}, map[string]string{}
+	for _, c := range a.chosen() {
+		maps.Copy(knobs, c.knobs)
+		if env := harnessEnvTokenEnvVar(c.name); env != "" {
+			secrets[env] = a.tokens[c.name]
+		}
+	}
+	return knobLookup(knobs, secrets)
 }
 
 // credential is one secret the wizard gathered for the Driver, in the order
@@ -809,13 +861,13 @@ type scaffoldFile struct {
 // operator string crosses the nixEscape seam inside this call, before
 // runQuickstart writes to disk.
 func render(a answers) ([]scaffoldFile, error) {
-	flakeNix, err := renderFlakeNix(a.repoSlug, a.runtime, a.gitUserName, a.gitUserEmail, a.choice)
+	flakeNix, err := renderFlakeNix(a)
 	if err != nil {
 		return nil, err
 	}
 	return []scaffoldFile{
 		{path: "flake.nix", content: flakeNix, mode: 0o644},
-		{path: "harness.env", content: renderHarnessEnv(a.choice.name, a.token, a.credentials), mode: 0o600},
+		{path: "harness.env", content: renderHarnessEnv(a), mode: 0o600},
 		{path: ".gitignore", content: quickstartGitignore, mode: 0o644},
 		{path: ".envrc", content: quickstartEnvrc, mode: 0o644},
 	}, nil
@@ -824,29 +876,25 @@ func render(a answers) ([]scaffoldFile, error) {
 // renderFlakeNix generates a minimal Consumer flake.nix carrying only the
 // options the wizard collected (ADR 0027). No prompts/ directory is
 // scaffolded, because the harness defaults every prompt.
-func renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail string, choice backendChoice) (string, error) {
-	trackerLine := fmt.Sprintf("            %s = \"%s\";\n", pathIssueTracker, nixEscape(choice.name))
-
-	settingsLines := trackerLine
-	// A row driving the forge axis lands code on the instance doctor
-	// validated; the default forge needs no line.
-	if forgeName := quickstartForge(choice.name); forgeName != defaultCodeForge {
-		settingsLines += fmt.Sprintf("            %s = \"%s\";\n", pathCodeForge, nixEscape(forgeName))
-	}
-	envs := make([]string, 0, len(choice.knobs))
-	for env := range choice.knobs {
-		envs = append(envs, env)
-	}
-	slices.Sort(envs)
-	for _, env := range envs {
-		i := slices.IndexFunc(consumerStanzas[choice.name].Settings, func(s stanzaSetting) bool { return s.Env == env })
-		if i < 0 {
-			return "", fmt.Errorf("backend %q derives knob %s from the remote, but its Consumer stanza has no setting for it", choice.name, env)
+func renderFlakeNix(a answers) (string, error) {
+	settingsLines := fmt.Sprintf("            %s = \"%s\";\n", pathIssueTracker, nixEscape(a.tracker.name)) +
+		fmt.Sprintf("            %s = \"%s\";\n", pathCodeForge, nixEscape(a.forge.name))
+	for _, choice := range a.chosen() {
+		envs := make([]string, 0, len(choice.knobs))
+		for env := range choice.knobs {
+			envs = append(envs, env)
 		}
-		knob := consumerStanzas[choice.name].Settings[i]
-		if v := choice.knobs[env]; v != "" {
-			if lit := `"` + nixEscape(v) + `"`; lit != knob.Default {
-				settingsLines += fmt.Sprintf("            %s = %s;\n", knob.Path, lit)
+		slices.Sort(envs)
+		for _, env := range envs {
+			i := slices.IndexFunc(consumerStanzas[choice.name].Settings, func(s stanzaSetting) bool { return s.Env == env })
+			if i < 0 {
+				return "", fmt.Errorf("backend %q derives knob %s from the remote, but its Consumer stanza has no setting for it", choice.name, env)
+			}
+			knob := consumerStanzas[choice.name].Settings[i]
+			if v := choice.knobs[env]; v != "" {
+				if lit := `"` + nixEscape(v) + `"`; lit != knob.Default {
+					settingsLines += fmt.Sprintf("            %s = %s;\n", knob.Path, lit)
+				}
 			}
 		}
 	}
@@ -893,10 +941,10 @@ func renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail string, choice 
         };
     };
 }
-`, pathRuntime, nixEscape(runtime),
-		pathRepoSlug, nixEscape(repoSlug),
-		pathGitUserName, nixEscape(gitUserName),
-		pathGitUserEmail, nixEscape(gitUserEmail),
+`, pathRuntime, nixEscape(a.runtime),
+		pathRepoSlug, nixEscape(a.repoSlug),
+		pathGitUserName, nixEscape(a.gitUserName),
+		pathGitUserEmail, nixEscape(a.gitUserEmail),
 		settingsLines)
 	return out, nil
 }
@@ -913,31 +961,39 @@ func nixEscape(s string) string {
 	return r.Replace(s)
 }
 
-// renderHarnessEnv writes only the secrets the wizard collected: the
-// code-forge credential under the backend's TokenEnvVar, the same token again
-// under the backend's Connector credential (when it has one), and the Driver
-// credentials gatherCredentials collected. The generated comments mirror
+// renderHarnessEnv writes only the secrets the wizard collected: for each
+// chosen backend that has one, its token under its TokenEnvVar and again under
+// its Connector credential (when it has one), then the Driver credentials
+// gatherCredentials collected. The generated comments mirror
 // lib/renderers.nix's renderHarnessEnvExample, the source of that wording.
-func renderHarnessEnv(issueTracker, token string, credentials []credential) string {
+func renderHarnessEnv(a answers) string {
 	out := harnessEnvPreamble
-	out += harnessEnvSecretLine(harnessEnvTokenEnvVar(issueTracker), token)
-	if env := consumerStanzas[issueTracker].Credential; env != "" {
-		out += connectorCredentialNote + harnessEnvSecretLine(env, token)
+	for _, c := range a.chosen() {
+		env := harnessEnvTokenEnvVar(c.name)
+		if env == "" {
+			continue
+		}
+		token := a.tokens[c.name]
+		out += harnessEnvSecretLine(env, token)
+		if cred := consumerStanzas[c.name].Credential; cred != "" {
+			out += connectorCredentialNote + harnessEnvSecretLine(cred, token)
+		}
 	}
-	for _, c := range credentials {
+	for _, c := range a.credentials {
 		out += harnessEnvSecretLine(c.env, c.value)
 	}
 	return out
 }
 
 // harnessEnvTokenEnvVar returns the env var name the wizard writes the
-// backend credential under, falling back to GH_TOKEN. Keep it the only source,
-// so the scaffold and the doctor row cannot drift.
-func harnessEnvTokenEnvVar(issueTracker string) string {
-	if desc, ok := backend.ByName(issueTracker); ok && desc.TokenEnvVar != "" {
+// backend credential under, or "" for a backend that needs none. Every
+// reader of that name goes through it, so the scaffold, the token loop and the
+// doctor row cannot drift.
+func harnessEnvTokenEnvVar(backendName string) string {
+	if desc, ok := backend.ByName(backendName); ok {
 		return desc.TokenEnvVar
 	}
-	return "GH_TOKEN"
+	return ""
 }
 
 // harnessEnvSecretLine renders one secret's stanza: the <NAME>_CMD

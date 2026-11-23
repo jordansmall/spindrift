@@ -40,6 +40,12 @@ var Strategy = backendkit.Strategy{
 		}
 		return SeedMirror(k.CodeForgeRemoteURL, s.BaseBranch, dir)
 	},
+	KnobsFromRemote: func(remote string) map[string]string {
+		if remote == "" {
+			return nil
+		}
+		return map[string]string{CodeForgeRemoteURLEnv: remote}
+	},
 	RemoteMatch: func(_ backendkit.Shared, l backendkit.Lookup, remote string) bool {
 		k, err := ReadKnobs(l)
 		if err != nil || k.CodeForgeRemoteURL == "" {

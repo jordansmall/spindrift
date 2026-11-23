@@ -32,7 +32,7 @@ func acquireToken(s backendkit.Shared, l backendkit.Lookup, p backendkit.TokenPr
 			return token, nil
 		}
 		if errors.Is(err, forge.ErrAuthFailure) {
-			return "", fmt.Errorf("Forgejo token rejected by the API at %s — the instance is derived from the git remote, so if this is the wrong instance, `git remote set-url` to point at the right one before you rerun `%s` and paste a valid token: %w", baseURL, p.RerunCmd, err)
+			return "", fmt.Errorf("Forgejo token rejected by the API at %s — if this is the wrong instance, point the git remote (or, for a Forgejo tracker beside another forge, the issue tracker repo URL answer) at the right one, then rerun `%s` and paste a valid token: %w", baseURL, p.RerunCmd, err)
 		}
 		return "", fmt.Errorf("Forgejo connectivity check to %s (repo slug %q) failed — either the instance is unreachable or the repo slug is wrong; check both, then rerun `%s`: %w", baseURL, repoSlug, p.RerunCmd, err)
 	}

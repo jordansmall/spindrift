@@ -19,27 +19,28 @@ func validAnswers() answers {
 		runtime:      "podman",
 		gitUserName:  "Ada Lovelace",
 		gitUserEmail: "ada@example.com",
-		choice:       backendChoice{name: "github"},
-		token:        "ghp_faketoken",
+		tracker:      backendChoice{name: "github"},
+		forge:        backendChoice{name: "github"},
+		tokens:       map[string]string{"github": "ghp_faketoken"},
 		credentials:  []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}},
 	}
 }
 
 func TestQuickstartCheckConfig_MapsFields(t *testing.T) {
 	a := validAnswers()
-	c := quickstartCheckConfig(a, "github")
+	c := quickstartCheckConfig(a)
 
 	want := launcherchecks.Config{
 		RepoSlug:     a.repoSlug,
 		GitUserName:  a.gitUserName,
 		GitUserEmail: a.gitUserEmail,
-		GHToken:      a.token,
+		GHToken:      a.tokens["github"],
 		Credentials:  map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"},
-		IssueTracker: a.choice.name,
+		IssueTracker: a.tracker.name,
 		CodeForge:    "github",
 	}
 	if !reflect.DeepEqual(c, want) {
-		t.Errorf("quickstartCheckConfig(a, \"github\") = %+v, want %+v", c, want)
+		t.Errorf("quickstartCheckConfig(a) = %+v, want %+v", c, want)
 	}
 }
 
@@ -97,7 +98,7 @@ func TestQuickstartCheckDeps_TrackerAndCodeForgeNames(t *testing.T) {
 // launcherchecks reintroduces one.
 func TestQuickstartLauncherRows_NoRuntimeRow(t *testing.T) {
 	a := validAnswers()
-	rows := launcherchecks.All(quickstartCheckConfig(a, "github"), quickstartCheckDeps(a))
+	rows := launcherchecks.All(quickstartCheckConfig(a), quickstartCheckDeps(a))
 	for _, ch := range rows {
 		if ch.Name == runner.RuntimePrerequisiteName {
 			t.Fatalf("launcherchecks row set contains the %q row, want none (doctor.Config.Runtime reports it)", runner.RuntimePrerequisiteName)
@@ -114,6 +115,8 @@ func TestRunQuickstart_WiresLauncherChecksIntoDoctorOutput(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
+		"",                      // issue tracker, default
+		"",                      // code forge, default
 		"jordansmall/spindrift", // repoSlug
 		"podman",                // runtime
 		"",                      // git user name, left blank
@@ -148,29 +151,31 @@ func TestQuickstartCheckConfig_GHTokenMirrorsHarnessEnvKnob(t *testing.T) {
 	for _, tc := range []struct {
 		issueTracker string
 		codeForge    string
-		wantGHToken  bool
+		tokens       map[string]string
+		wantGHToken  string
 		wantMissing  bool
 	}{
-		{issueTracker: "github", codeForge: "github", wantGHToken: true},
-		{issueTracker: "forgejo", codeForge: "forgejo", wantGHToken: false},
-		// jira writes JIRA_TOKEN, leaving GH_TOKEN blank, yet the github forge
-		// still reaches GitHub, so the row must report it missing.
-		{issueTracker: "jira", codeForge: "github", wantGHToken: false, wantMissing: true},
+		{issueTracker: "github", codeForge: "github", tokens: map[string]string{"github": "ghp_faketoken"}, wantGHToken: "ghp_faketoken"},
+		{issueTracker: "forgejo", codeForge: "forgejo", tokens: map[string]string{"forgejo": "forgejo-faketoken"}},
+		// A forgejo tracker on a github forge writes both credentials.
+		{issueTracker: "forgejo", codeForge: "github", tokens: map[string]string{"forgejo": "forgejo-faketoken", "github": "ghp_faketoken"}, wantGHToken: "ghp_faketoken"},
+		// The github forge still reaches GitHub, so a scaffold lacking its
+		// token must report GH_TOKEN missing.
+		{issueTracker: "forgejo", codeForge: "github", tokens: map[string]string{"forgejo": "forgejo-faketoken"}, wantMissing: true},
+		{issueTracker: "local", codeForge: "git"},
 	} {
 		t.Run(tc.issueTracker+"/"+tc.codeForge, func(t *testing.T) {
 			a := validAnswers()
-			a.choice.name = tc.issueTracker
+			a.tracker.name = tc.issueTracker
+			a.forge.name = tc.codeForge
+			a.tokens = tc.tokens
 
-			c := quickstartCheckConfig(a, tc.codeForge)
-			want := ""
-			if tc.wantGHToken {
-				want = a.token
-			}
-			if c.GHToken != want {
-				t.Errorf("quickstartCheckConfig(...).GHToken = %q, want %q", c.GHToken, want)
+			c := quickstartCheckConfig(a)
+			if c.GHToken != tc.wantGHToken {
+				t.Errorf("quickstartCheckConfig(...).GHToken = %q, want %q", c.GHToken, tc.wantGHToken)
 			}
 
-			row := launcherRow(t, a, tc.codeForge, "gh-token")
+			row := launcherRow(t, a, "gh-token")
 			_, err := row.Probe()
 			switch {
 			case tc.wantMissing && (err == nil || err.Error() != row.Remedy):
@@ -182,18 +187,35 @@ func TestQuickstartCheckConfig_GHTokenMirrorsHarnessEnvKnob(t *testing.T) {
 	}
 }
 
-// This test guards drift between the two callers of harnessEnvTokenEnvVar:
+// This test guards drift between harnessEnvTokenEnvVar's callers:
 // the name the helper reports, and hence the knob quickstartCheckConfig
 // mirrors, is the name renderHarnessEnv writes into harness.env.
 func TestHarnessEnvTokenEnvVar_MatchesRenderedFile(t *testing.T) {
 	for _, name := range launcherchecks.TrackerNamesFromRegistry() {
 		t.Run(name, func(t *testing.T) {
-			out := renderHarnessEnv(name, "faketoken", []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}})
-			if want := harnessEnvTokenEnvVar(name) + "=faketoken"; !strings.Contains(out, want) {
-				t.Errorf("renderHarnessEnv(%q, ...) does not contain %q, got:\n%s", name, want, out)
+			out := harnessEnvFor(name, "faketoken", []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}})
+			env := harnessEnvTokenEnvVar(name)
+			if env == "" {
+				if strings.Contains(out, "=faketoken") {
+					t.Errorf("a backend with no token env var must write no token line, got:\n%s", out)
+				}
+				return
+			}
+			if want := env + "=faketoken"; !strings.Contains(out, want) {
+				t.Errorf("renderHarnessEnv for %q does not contain %q, got:\n%s", name, want, out)
 			}
 		})
 	}
+}
+
+// harnessEnvFor renders harness.env for one backend on both axes.
+func harnessEnvFor(name, token string, creds []credential) string {
+	return renderHarnessEnv(answers{
+		tracker:     backendChoice{name: name},
+		forge:       backendChoice{name: name},
+		tokens:      map[string]string{name: token},
+		credentials: creds,
+	})
 }
 
 // Every Strategy's own validators are bound, not just forgejo's, so no row is
@@ -216,7 +238,7 @@ func TestQuickstartCheckDeps_BindsEachStrategyValidators(t *testing.T) {
 }
 
 func TestQuickstartCheckDeps_GithubValidatorPassesWizardAnswers(t *testing.T) {
-	if _, err := launcherRow(t, validAnswers(), "github", "issue-tracker-config").Probe(); err != nil {
+	if _, err := launcherRow(t, validAnswers(), "issue-tracker-config").Probe(); err != nil {
 		t.Errorf("issue-tracker-config Probe() = %v, want nil", err)
 	}
 }
@@ -234,7 +256,7 @@ func TestQuickstartCheckDeps_BlankSlugFailsOnlyRepoSlugRow(t *testing.T) {
 			a := tc.a
 			a.repoSlug = ""
 			var failed []string
-			for _, ch := range launcherchecks.All(quickstartCheckConfig(a, tc.name), quickstartCheckDeps(a)) {
+			for _, ch := range launcherchecks.All(quickstartCheckConfig(a), quickstartCheckDeps(a)) {
 				if _, err := ch.Probe(); err != nil {
 					failed = append(failed, ch.Name)
 				}
@@ -250,14 +272,15 @@ func TestQuickstartCheckDeps_BlankSlugFailsOnlyRepoSlugRow(t *testing.T) {
 // test can blank one at a time.
 func forgejoAnswers() answers {
 	a := validAnswers()
-	a.choice = backendChoice{name: "forgejo", knobs: map[string]string{"FORGEJO_BASE_URL": "https://codeberg.org"}}
-	a.token = "forgejo-faketoken"
+	a.tracker = backendChoice{name: "forgejo", knobs: map[string]string{"FORGEJO_BASE_URL": "https://codeberg.org"}}
+	a.forge = a.tracker
+	a.tokens = map[string]string{"forgejo": "forgejo-faketoken"}
 	return a
 }
 
-func launcherRow(t *testing.T, a answers, codeForge, name string) doctor.Check {
+func launcherRow(t *testing.T, a answers, name string) doctor.Check {
 	t.Helper()
-	for _, ch := range launcherchecks.All(quickstartCheckConfig(a, codeForge), quickstartCheckDeps(a)) {
+	for _, ch := range launcherchecks.All(quickstartCheckConfig(a), quickstartCheckDeps(a)) {
 		if ch.Name == name {
 			return ch
 		}
@@ -274,7 +297,7 @@ func TestQuickstartCheckDeps_ForgejoBindsValidator(t *testing.T) {
 		mutate  func(a *answers)
 		wantErr string
 	}{
-		{name: "missing token", mutate: func(a *answers) { a.token = "" }, wantErr: "FORGEJO_TOKEN"},
+		{name: "missing token", mutate: func(a *answers) { a.tokens = nil }, wantErr: "FORGEJO_TOKEN"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := forgejoAnswers()
@@ -283,7 +306,7 @@ func TestQuickstartCheckDeps_ForgejoBindsValidator(t *testing.T) {
 				{"issue-tracker-config", "ISSUE_TRACKER", "CODE_FORGE"},
 				{"code-forge-config", "CODE_FORGE", "ISSUE_TRACKER"},
 			} {
-				_, err := launcherRow(t, a, "forgejo", r.row).Probe()
+				_, err := launcherRow(t, a, r.row).Probe()
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) || !strings.Contains(err.Error(), r.knob+"=forgejo") ||
 					strings.Contains(err.Error(), r.other) {
 					t.Errorf("%s Probe() = %v, want an error mentioning %s and %s=forgejo, not %s", r.row, err, tc.wantErr, r.knob, r.other)
@@ -295,7 +318,7 @@ func TestQuickstartCheckDeps_ForgejoBindsValidator(t *testing.T) {
 	t.Run("well-formed", func(t *testing.T) {
 		a := forgejoAnswers()
 		for _, row := range []string{"issue-tracker-config", "code-forge-config"} {
-			if _, err := launcherRow(t, a, "forgejo", row).Probe(); err != nil {
+			if _, err := launcherRow(t, a, row).Probe(); err != nil {
 				t.Errorf("%s Probe() = %v, want nil", row, err)
 			}
 		}
@@ -306,7 +329,7 @@ func TestQuickstartCheckConfig_CarriesDriver(t *testing.T) {
 	a := validAnswers()
 	a.driver = "opencode"
 	a.credentials = nil
-	c := quickstartCheckConfig(a, "github")
+	c := quickstartCheckConfig(a)
 	if c.Driver != "opencode" {
 		t.Errorf("Driver = %q, want opencode", c.Driver)
 	}
