@@ -22,7 +22,6 @@ let
   structuralOptionsDoc = import ../lib/structural-options-doc.nix;
   structuralPaths = import ../lib/structural-paths.nix;
   extraOptionPaths = import ../lib/extra-option-paths.nix;
-  connectorKnobs = import ./connector-knobs.nix { inherit (pkgs) lib; };
   consumerStanzas = (import ./consumer-stanzas.nix { inherit (pkgs) lib; }).stanzas;
   envExample = renderers.renderHarnessEnvExample schema consumerStanzas;
   flagTable = renderers.renderFlagTableGo schema;
@@ -45,7 +44,7 @@ let
     .launcherArtifactsInput;
   quickstartPathTable = import ../lib/quickstart-path-table.nix;
   quickstartPathsFile = renderers.renderQuickstartPathsGo quickstartPathTable;
-  connectorCredentialEnvFile = renderers.renderConnectorCredentialEnvGo connectorKnobs.credentialEnv;
+  consumerStanzasFile = renderers.renderConsumerStanzasGo consumerStanzas;
   subcommands = import ../lib/subcommands.nix;
   subcommandsFile = renderers.renderSubcommandsGo subcommands;
   cliFlags = import ../lib/cli-flags.nix;
@@ -194,8 +193,8 @@ pkgs.writeShellApplication {
     ${writeGenerated "agent/credential-vars" credentialVarsFile}
     ${writeGenerated "cmd/launcher/internal/runner/credentialenv_gen.go" driverCredentialEnvFile}
     ${writeGenerated "cmd/launcher/quickstart/quickstart_paths_gen.go" quickstartPathsFile}
-    ${writeGenerated "cmd/launcher/quickstart/connector_credential_gen.go" connectorCredentialEnvFile}
-    gofmt -w "$root/cmd/launcher/quickstart/connector_credential_gen.go"
+    ${writeGenerated "cmd/launcher/quickstart/consumer_stanzas_gen.go" consumerStanzasFile}
+    gofmt -w "$root/cmd/launcher/quickstart/consumer_stanzas_gen.go"
     ${writeGenerated "cmd/launcher/subcommands_gen.go" subcommandsFile}
     ${writeGenerated "cmd/launcher/cliflags_gen.go" cliFlagsFile}
     ${writeGenerated "cmd/launcher/internal/outcome/status_gen.go" outcomeStatusGoFile}

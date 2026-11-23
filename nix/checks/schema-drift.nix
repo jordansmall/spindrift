@@ -1055,15 +1055,15 @@ checkedMerge {
         touch $out
       '';
 
-  # Regenerate with `nix run .#regen` when a Connector's `backend.credential`
-  # knob changes (nix/connector-knobs.nix).
-  connector-credential-gen = mkGofmtDriftCheck {
-    name = "connector-credential-gen";
+  # Regenerate with `nix run .#regen` when a backend row's Consumer stanza or a
+  # Connector's knobs change (issue #7415).
+  consumer-stanzas-gen = mkGofmtDriftCheck {
+    name = "consumer-stanzas-gen";
     rendered =
-      renderers.renderConnectorCredentialEnvGo
-        (import ../connector-knobs.nix { inherit (pkgs) lib; }).credentialEnv;
-    committedPath = "cmd/launcher/quickstart/connector_credential_gen.go";
-    source = "nix/connector-knobs.nix";
+      renderers.renderConsumerStanzasGo
+        (import ../consumer-stanzas.nix { inherit (pkgs) lib; }).stanzas;
+    committedPath = "cmd/launcher/quickstart/consumer_stanzas_gen.go";
+    source = "nix/consumer-stanzas.nix";
   };
 
   # Regenerate with `nix run .#regen` when lib/subcommands.nix changes

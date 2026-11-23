@@ -2131,17 +2131,20 @@ func TestRender_ForgejoCodeberg_ConfiguresBothSeamsOmitsDefaultBaseURL(t *testin
 }
 
 // Pins that renderHarnessEnv writes the Connector credential stanza for every
-// quickstart backend the generated connectorCredentialEnv rows name, so a
+// quickstart backend whose Consumer stanza names a Connector credential, so a
 // renamed or added Connector credential reaches harness.env without a
 // hand-edit here. A backend with no Connector row writes no such line.
 func TestRenderHarnessEnv_WritesConnectorCredentialForEveryRow(t *testing.T) {
-	if len(connectorCredentialEnv) == 0 {
-		t.Fatal("connectorCredentialEnv is empty, so this test would check nothing")
-	}
-	for name, env := range connectorCredentialEnv {
+	checked := 0
+	for name, stanza := range consumerStanzas {
+		if stanza.Credential == "" {
+			continue
+		}
 		if b, ok := backend.ByName(name); !ok || b.Quickstart == nil {
 			continue
 		}
+		checked++
+		env := stanza.Credential
 		t.Run(name, func(t *testing.T) {
 			out := renderHarnessEnv(name, "faketoken", nil)
 			for _, want := range []string{env + "=faketoken\n", env + "_CMD=", "docs/reference.md#backend-primary-mode"} {
@@ -2151,8 +2154,39 @@ func TestRenderHarnessEnv_WritesConnectorCredentialForEveryRow(t *testing.T) {
 			}
 		})
 	}
+	if checked == 0 {
+		t.Fatal("no consumerStanzas entry names a Credential, so this test would check nothing")
+	}
 	if out := renderHarnessEnv("no-such-backend", "faketoken", nil); strings.Contains(out, "SPINDRIFT_") {
 		t.Errorf("a backend with no Connector row wrote a SPINDRIFT_ line, got:\n%s", out)
+	}
+}
+
+// Pins the generated consumerStanzas table to the Go backend registry: one
+// entry per row and none extra, and a Connector credential is always one of
+// its own stanza's secret lines (a secret with a <NAME>_CMD form).
+func TestConsumerStanzas_MatchTheBackendRegistry(t *testing.T) {
+	for _, d := range backend.Registry {
+		if _, ok := consumerStanzas[d.Name]; !ok {
+			t.Errorf("backend %q has no consumerStanzas entry; regenerate with `nix run .#regen`", d.Name)
+		}
+	}
+	for name, stanza := range consumerStanzas {
+		if _, ok := backend.ByName(name); !ok {
+			t.Errorf("consumerStanzas has an entry for %q, which is not a registered backend", name)
+		}
+		if stanza.Credential == "" {
+			continue
+		}
+		found := false
+		for _, s := range stanza.Secrets {
+			if s.Env == stanza.Credential && s.Secret {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("consumerStanzas[%q].Credential %q is not among its Secrets with Secret = true", name, stanza.Credential)
+		}
 	}
 }
 
@@ -2775,9 +2809,15 @@ func TestHarnessEnvSecretLine_MatchesTemplateHarnessEnvExample(t *testing.T) {
 		i = end
 	}
 
-	// One secret knob per backend Connector (its backend.credential); a Connector
-	// adding a second secret knob must update this count.
-	if expectedSecretCount := countEnvSchemaSecrets(t) + len(connectorCredentialEnv); found != expectedSecretCount {
+	// One secret knob per backend Connector (its backend.credential), counted from
+	// the generated consumerStanzas table.
+	credentials := 0
+	for _, stanza := range consumerStanzas {
+		if stanza.Credential != "" {
+			credentials++
+		}
+	}
+	if expectedSecretCount := countEnvSchemaSecrets(t) + credentials; found != expectedSecretCount {
 		t.Fatalf("expected %d secret stanzas in %s (per the folded schema: lib/env-schema.nix and registry row files, plus one per Connector credential), found %d", expectedSecretCount, templatePath, found)
 	}
 }

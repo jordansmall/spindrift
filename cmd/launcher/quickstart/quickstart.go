@@ -918,7 +918,7 @@ func nixEscape(s string) string {
 func renderHarnessEnv(issueTracker, token string, credentials []credential) string {
 	out := harnessEnvPreamble
 	out += harnessEnvSecretLine(harnessEnvTokenEnvVar(issueTracker), token)
-	if env, ok := connectorCredentialEnv[issueTracker]; ok {
+	if env := consumerStanzas[issueTracker].Credential; env != "" {
 		out += connectorCredentialNote + harnessEnvSecretLine(env, token)
 	}
 	for _, c := range credentials {

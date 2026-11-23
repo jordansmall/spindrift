@@ -20,6 +20,4 @@ in
 {
   # Connector name -> its module row (`{ knobs; backend; ... }`), backend Connectors only.
   rows = backendRows;
-  # backend name -> env var of the knob named by `backend.credential`.
-  credentialEnv = lib.mapAttrs (_: r: r.knobs.${r.backend.credential}.env) backendRows;
 }
