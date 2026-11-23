@@ -6,6 +6,8 @@ result-*
 
 # local config + secrets
 harness.env
+# quickstart goldens: fake tokens only
+!cmd/launcher/quickstart/testdata/golden/*/harness.env
 .env
 .envrc
 

@@ -880,22 +880,34 @@ func renderFlakeNix(a answers) (string, error) {
 	settingsLines := fmt.Sprintf("            %s = \"%s\";\n", pathIssueTracker, nixEscape(a.tracker.name)) +
 		fmt.Sprintf("            %s = \"%s\";\n", pathCodeForge, nixEscape(a.forge.name))
 	for _, choice := range a.chosen() {
-		envs := make([]string, 0, len(choice.knobs))
+		stanza := consumerStanzas[choice.name]
 		for env := range choice.knobs {
-			envs = append(envs, env)
-		}
-		slices.Sort(envs)
-		for _, env := range envs {
-			i := slices.IndexFunc(consumerStanzas[choice.name].Settings, func(s stanzaSetting) bool { return s.Env == env })
-			if i < 0 {
+			if !slices.ContainsFunc(stanza.Settings, func(s stanzaSetting) bool { return s.Env == env }) {
 				return "", fmt.Errorf("backend %q derives knob %s from the remote, but its Consumer stanza has no setting for it", choice.name, env)
 			}
-			knob := consumerStanzas[choice.name].Settings[i]
-			if v := choice.knobs[env]; v != "" {
+		}
+		// A row chosen only as the tracker leaves its forge-group knobs out: the
+		// forge axis is served by another row, so they would configure nothing.
+		// Filtered by option group rather than whole-row, since the forgejo row's
+		// issues.forgejo.baseURL is also its forge's knob.
+		var settings []stanzaSetting
+		for _, s := range stanza.Settings {
+			if choice.name == a.forge.name || !strings.HasPrefix(s.Path, forgeOptionGroup) {
+				settings = append(settings, s)
+			}
+		}
+		if len(settings) == 0 {
+			continue
+		}
+		settingsLines += "\n" + backendHeader("            ", choice.name)
+		for _, knob := range settings {
+			if v := choice.knobs[knob.Env]; v != "" {
 				if lit := `"` + nixEscape(v) + `"`; lit != knob.Default {
 					settingsLines += fmt.Sprintf("            %s = %s;\n", knob.Path, lit)
+					continue
 				}
 			}
+			settingsLines += fmt.Sprintf("            # %s = %s;\n", knob.Path, knob.Default)
 		}
 	}
 
@@ -961,22 +973,40 @@ func nixEscape(s string) string {
 	return r.Replace(s)
 }
 
-// renderHarnessEnv writes only the secrets the wizard collected: for each
-// chosen backend that has one, its token under its TokenEnvVar and again under
-// its Connector credential (when it has one), then the Driver credentials
-// gatherCredentials collected. The generated comments mirror
-// lib/renderers.nix's renderHarnessEnvExample, the source of that wording.
+// backendHeader is the "# <DisplayName> backend (<name>)" line that opens a
+// backend's group.
+func backendHeader(indent, name string) string {
+	return indent + fmt.Sprintf(backendHeaderFormat, consumerStanzas[name].DisplayName, name)
+}
+
+// renderHarnessEnv writes, for each chosen backend whose Consumer stanza has
+// secrets, that stanza's harness.env lines in its order, with the acquired
+// token filled in under the backend's TokenEnvVar and its Connector
+// credential, then the Driver credentials gatherCredentials collected. The
+// generated comments mirror lib/renderers.nix's renderHarnessEnvExample, the
+// source of that wording.
 func renderHarnessEnv(a answers) string {
 	out := harnessEnvPreamble
 	for _, c := range a.chosen() {
-		env := harnessEnvTokenEnvVar(c.name)
-		if env == "" {
+		stanza := consumerStanzas[c.name]
+		if len(stanza.Secrets) == 0 {
 			continue
 		}
-		token := a.tokens[c.name]
-		out += harnessEnvSecretLine(env, token)
-		if cred := consumerStanzas[c.name].Credential; cred != "" {
-			out += connectorCredentialNote + harnessEnvSecretLine(cred, token)
+		out += backendHeader("", c.name) + "\n"
+		tokenEnv := harnessEnvTokenEnvVar(c.name)
+		for _, s := range stanza.Secrets {
+			if s.Env == stanza.Credential {
+				out += connectorCredentialNote
+			}
+			value := ""
+			if s.Env == tokenEnv || s.Env == stanza.Credential {
+				value = a.tokens[c.name]
+			}
+			if s.Secret {
+				out += harnessEnvSecretLine(s.Env, value)
+			} else {
+				out += s.Env + "=" + value + "\n\n"
+			}
 		}
 	}
 	for _, c := range a.credentials {
@@ -1078,3 +1108,7 @@ func ambientCredential(env Environment, names []string) (value, name string, ok 
 	}
 	return "", "", false
 }
+
+// forgeOptionGroup is the nix option group the code-forge knobs live under,
+// derived from pathCodeForge's own prefix ("forge.").
+var forgeOptionGroup = pathCodeForge[:strings.LastIndex(pathCodeForge, ".")+1]

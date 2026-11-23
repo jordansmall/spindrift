@@ -394,6 +394,8 @@ let
     "issue-route:." = "a flake fixture's outPath";
     "promptassembly:cmd/launcher/internal/promptassembly" = "greps its *.go";
     "quickstart-golden:." = "a flake fixture's outPath";
+    "quickstart-golden:cmd/launcher/quickstart/testdata/golden" =
+      "imports each pairing's flake.nix, matched by ci-comment-readers";
     "skills:." = "a harness flake fixture's outPath";
     "skills:nix/checks" = "a path value the skills validator must accept";
   };
