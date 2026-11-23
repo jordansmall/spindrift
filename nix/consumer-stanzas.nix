@@ -4,9 +4,11 @@
 #
 # Returns `{ stanzas; errors; }`. `stanzas` is one entry per backend row, in
 # registry order: `{ name; displayName; settings; secrets; flakeInput;
-# moduleImport; }`, where `settings` is the row's own `flakeOption` knobs and
-# `secrets` is the row's `tokenEnvVar` schema entry (when it has one) followed
-# by the Connector knobs its `consumerStanza.connectorKnobs` lists. Forcing
+# moduleImport; credential; }`, where `settings` is the row's own `flakeOption`
+# knobs, `secrets` is the row's `tokenEnvVar` schema entry (when it has one)
+# followed by the Connector knobs its `consumerStanza.connectorKnobs` lists, and
+# `credential` is the env of the Connector knob its row's `backend.credential`
+# names (null when the backend has no Connector). Forcing
 # `stanzas` throws when `errors` is non-empty; `errors` is also exposed so a
 # check can read the messages, which builtins.tryEval cannot.
 {
@@ -51,6 +53,11 @@ let
         secrets = lib.optional (tokenEntry != null) tokenEntry ++ map (k: declared.${k}) listed;
         flakeInput = stanza.flakeInput or null;
         moduleImport = stanza.moduleImport or null;
+        credential =
+          let
+            connector = connectorRows.${row.name} or { };
+          in
+          if connector ? backend then declared.${connector.backend.credential}.env else null;
       };
     };
   composed = map compose backendRows;

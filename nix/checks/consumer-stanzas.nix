@@ -158,6 +158,14 @@ in
         "SPINDRIFT_GITHUB_CONNECTOR_TOKEN"
       ]
     ) "consumer-stanzas: github lists its row token, then its Connector's credential";
+    assert assertMsg
+      (
+        (builtins.head real).credential == "SPINDRIFT_GITHUB_CONNECTOR_TOKEN"
+        && builtins.all (p: (p.fst.credential == null) == (p.snd.core or false)) (
+          pkgs.lib.zipLists real registry
+        )
+      )
+      "consumer-stanzas: github's credential is its Connector token, and only a core backend (no Connector) has none";
     assert assertMsg (builtins.all (
       s: builtins.all (k: k.flakeOption or false) (builtins.attrValues s.settings)
     ) real) "consumer-stanzas: settings must hold only flakeOption knobs";
