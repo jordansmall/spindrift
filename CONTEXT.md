@@ -20,6 +20,19 @@ packages, prompt, settings). A role, not necessarily a separate repo — it may 
 the same repo as the Target repo.
 _Avoid_: client, user repo, parent flake.
 
+**Consumer stanza**:
+The part of a [[Consumer flake]] and its `harness.env` that one backend row owns,
+declared on the row itself as `consumerStanza`: its settings-block knob lines,
+its secret stanzas (the row's token variable and its [[Connector]]'s credential
+knobs, the secrets each in `<NAME>_CMD` form and the non-secret ones as plain
+values), its flake-input stanza and its module import.
+`nix run .#regen` composes the default env example, the template settings block
+and the quickstart table from every row's stanza, and eval fails when a row's
+Connector declares a secret knob its stanza omits. Not a prompt fragment: a
+[[Conditional fragment]] is a step rendered into an Agent prompt, a Consumer
+stanza is configuration a Consumer writes.
+_Avoid_: fragment, config fragment, snippet.
+
 **Target repo**:
 The repository whose issues the agents work. Always cloned fresh inside the Box
 from a git *remote* — `REPO_SLUG` on GitHub under a `github` Code Forge, or a
