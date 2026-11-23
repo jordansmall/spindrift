@@ -1,5 +1,34 @@
 # Migration Guide
 
+## The backend read shadow is deleted (issue #7456)
+
+No backend keeps a native adapter, so the sampled read shadow that compared a
+backend's reads against one is gone. A `github`, `jira` or `forgejo` row that
+sets `shadow`, `shadowEvery` or `primary` now fails evaluation, naming each
+switch it sets:
+
+``Connector '<name>': `<switches>` cannot be set on a backend row: <name> is
+Connector-only, with no native backend to shadow or replace. Delete the setting
+from spindrift.connectors.<name>.``
+
+Delete the line; the row routes through its Connector without it. A Consumer
+config that never set them evaluates unchanged.
+
+What else changed:
+
+- **Driver rows keep both switches.** `shadow` and `primary` on a `driver` row
+  (opencode, pi) work as before.
+- **`mkHarness` ignores them on `backendRows`.** A `shadow`, `shadowEvery` or
+  `primary` field on a `backendRows` entry is dropped from the launcher input
+  document, not refused.
+- **A stale launcher input document fails to load.** A `backends` entry that
+  still carries `shadow`, `shadowEvery` or `primary` is rejected, so regenerate
+  the document with the new core.
+- **No `shadow-<backend>-*.log` is written, and the connector audit line has no
+  `shadow` mark.** Archived `shadow_summary` records keep their shape.
+
+See [Backend primary mode](docs/reference.md#backend-primary-mode).
+
 ## The native forgejo tracker is deleted (issue #7122)
 
 forgejo's issue tracker is built only from the forgejo Connector row, as its

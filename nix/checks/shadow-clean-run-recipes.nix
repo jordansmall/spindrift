@@ -3,8 +3,8 @@
 # drift.
 #
 # Cases pin: an in-flight run is skipped, not dirty (opencode: an unended Pass
-# whose primary `issue-<n>.log` lacks `dispatch_settled`; github: a live
-# file-name pid); a finished run missing a summary is dirty, a killed `-fix-N`
+# whose primary `issue-<n>.log` lacks `dispatch_settled`; primary record: a
+# live file-name pid); a finished run missing a summary is dirty, a killed `-fix-N`
 # satellite included; a stamp-less log never sorts ahead of stamped ones (the
 # opencode cases run under en_US.UTF-8, whose collation ignores the leading
 # tab, so a plain `sort -r` would put the empty stamp first); stamps with
@@ -37,11 +37,10 @@
             inb { body = body $0 "\n" }' "$docs"
         }
         extract driver=opencode > opencode.sh
-        extract backend=github > github.sh
         extract primary=github > primary.sh
         sed 's/^driver=opencode$/driver=pi/' opencode.sh > pi.sh
         fail=0
-        for r in opencode.sh pi.sh github.sh primary.sh; do
+        for r in opencode.sh pi.sh primary.sh; do
           if ! grep -q '^logs=\.spindrift/logs$' "$r"; then
             echo "FAIL: $r has no logs= line: no recipe extracted into it from docs/reference.md (pi.sh is sed-derived from opencode.sh)" >&2
             exit 1
@@ -90,10 +89,6 @@
           shift
           for dv in "$@"; do summary opencode "$dv" | sed 's/"driver":"opencode"/&,"replayed":true/' >> "$s"; done
         }
-
-        # github log shapes: <file> <summary diverged>
-        g_clean() { summary github "''${2:-0}" > "$1"; noise >> "$1"; }
-        g_none() { noise > "$1"; }
 
         run() { # <name> <recipe> <expected> <dir> [bar]
           actual=$(cd "$4" && bash "$OLDPWD/$2" 2>&1)
@@ -305,47 +300,7 @@
         log_pi "$d/issue-3.log" 11:00:00 "$pi_ok"
         run pi-filter-diverged-flag-alone-ends-streak pi.sh 1 case-f6
 
-        stamp() { echo "shadow-github-$1-$2.log"; }
         dead_pid=999999999 # above Linux's pid_max (4194304), so never a live process
-
-        d=$(mkcase g1)
-        g_clean "$d/$(stamp 20261114T090000Z $dead_pid)"
-        g_clean "$d/$(stamp 20261114T100000Z $dead_pid)"
-        g_clean "$d/$(stamp 20261114T110000Z $dead_pid)"
-        run github-all-clean github.sh 3 case-g1
-
-        d=$(mkcase g2)
-        g_clean "$d/$(stamp 20261114T090000Z $dead_pid)"
-        g_clean "$d/$(stamp 20261114T100000Z $dead_pid)" 2
-        g_clean "$d/$(stamp 20261114T110000Z $dead_pid)"
-        g_clean "$d/$(stamp 20261114T120000Z $dead_pid)"
-        run github-diverged-ends-streak github.sh 2 case-g2
-
-        d=$(mkcase g3)
-        g_clean "$d/$(stamp 20261114T090000Z $dead_pid)"
-        g_none "$d/$(stamp 20261114T100000Z $dead_pid)"
-        g_clean "$d/$(stamp 20261114T110000Z $dead_pid)"
-        g_clean "$d/$(stamp 20261114T120000Z $dead_pid)"
-        run github-dead-no-summary-ends-streak github.sh 2 case-g3
-
-        d=$(mkcase g4)
-        g_clean "$d/$(stamp 20261114T090000Z $dead_pid)"
-        g_clean "$d/$(stamp 20261114T100000Z $dead_pid)"
-        g_none "$d/$(stamp 20261114T110000Z $$)"
-        run github-in-flight-newest github.sh 2 case-g4
-
-        d=$(mkcase g5)
-        g_clean "$d/$(stamp 20261114T090000Z $dead_pid)"
-        g_clean "$d/$(stamp 20261114T100000Z $dead_pid)"
-        g_none "$d/$(stamp 20261114T110000Z $dead_pid)"
-        run github-dead-no-summary-newest github.sh 0 case-g5
-
-        d=$(mkcase g6)
-        g_clean "$d/$(stamp 20261114T090000Z $dead_pid)"
-        g_clean "$d/$(stamp 20261114T100000Z $dead_pid)"
-        g_none "$d/$(stamp 20261114T110000Z $$)"
-        run github-finished-no-summary-dirty github-finished.sh 0 case-g6
-
         # primary record pair: <dir> <stamp> <pid> then the audit lines
         pstem() { echo "$1/primary-github-$2-$3"; }
         p_audit() { # <stem> <decision>...
