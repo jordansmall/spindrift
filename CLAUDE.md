@@ -176,8 +176,9 @@ meet it. Bump `dashboard/go.mod`, `sdk/go.mod`, `connectors/claude/go.mod`,
 `connectors/pi/go.mod`, `nix/fixtures/connector-echo/go.mod`,
 `nix/fixtures/connector-wasm/go.mod`,
 `nix/fixtures/connector/go.mod`,
-`templates/connector-tracker/go.mod`, and
-`templates/connector-driver/go.mod` alongside.
+`templates/connector-tracker/go.mod`,
+`templates/connector-driver/go.mod`, and
+`templates/connector-forge/go.mod` alongside.
 
 ## Shell edits
 

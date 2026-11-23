@@ -3573,9 +3573,10 @@ call to the matching `.log`. The jira row is not on dogfood's
 
 ### Authoring a Connector
 
-A new tracker or Driver Connector starts from a generated repository, not a
-copy of `connectors/jira` or `connectors/opencode`. This section is the walk
-from empty directory to a checked build, for a tracker and then for a Driver
+A new tracker, forge or Driver Connector starts from a generated repository,
+not a copy of `connectors/jira`, `connectors/forgejo` or `connectors/opencode`.
+This section is the walk from empty directory to a checked build, for a tracker
+or forge and then for a Driver
 ([Authoring a Driver Connector](#authoring-a-driver-connector));
 [Connector subflake shape](#connector-subflake-shape) is the reference for what
 the pieces mean.
@@ -3583,15 +3584,18 @@ the pieces mean.
 **Generate.** In an empty directory:
 
 ```sh
-nix run github:jordansmall/spindrift#new-connector -- tracker <name> [<dir>]
+nix run github:jordansmall/spindrift#new-connector -- <kind> <name> [<dir>]
 ```
+
+`<kind>` is `tracker` or `forge` here; `driver` is the third kind, below.
 
 `<dir>` defaults to the working directory. The command refuses a directory that
 is not empty, a `<name>` that does not match `^[a-z][a-z0-9]*$`, and a `<name>`
 that is a core backend row's name, a Nix keyword, or the placeholder
-`connectorname`; `driver` is the other kind. The output
-is a standalone flake that pins core, with a stub reader that already passes
-the generic conformance contract against a scripted backend.
+`connectorname`. The output is a standalone flake that pins core, with a
+skeleton that already passes the generic conformance contract against a
+scripted backend: stub functions for a tracker, a working forgejo-shaped REST
+client for a forge.
 
 **Implement.** `main.go` registers the tracker reader with `tracker.Register`
 (and, when the Connector writes, a `tracker.Writer` with
@@ -3605,12 +3609,22 @@ needs an extra identity knob) and the `backend` row that names the wasm and
 the routes. Prompt fragment files go under `fragments/<name>/`, listed in
 `fragments.nix`.
 
+A forge skeleton's `main.go` instead registers the forge reader with
+`forge.Register`, the branch primitives with `forge.RegisterBranches` and the
+PR primitives with `forge.RegisterPRs`, all written against a forgejo-shaped
+REST API: make each speak your forge's API and declare the routes it calls. It
+leaves `forge.PRs.Open` unset, so set it to let the host open the PR for a
+branch it pushed itself. Its `<name>ConnectorBaseURL` knob names the forge's
+base URL.
+
 **Check.** `nix flake check -L` in the generated repository runs
 `core.lib.connectorChecks`: Go fmt, wasip1 vet and unit tests, and
-`connector-<name>-conformance` on the generic path. It is green before you
-write any logic, so a red check afterwards is yours. The `go.mod` replaces
-`spindrift.dev/sdk` with `github.com/jordansmall/spindrift/sdk` at the spindrift
-commit the generator was built from, so `go build`, `go test` and gopls work
+`connector-<name>-conformance` on the generic path; a forge Connector's
+conformance runs the branch and PR contracts against the scripted backend. It
+is green before you write any logic, so a red check afterwards is yours. The
+`go.mod` replaces `spindrift.dev/sdk` with
+`github.com/jordansmall/spindrift/sdk` at the spindrift commit the generator was
+built from, so `go build`, `go test` and gopls work
 outside Nix (run `go mod tidy` once to record `go.sum`). The Nix build and
 checks repoint the replace at core's SDK source. The pin resolves only
 for a commit pushed to `jordansmall/spindrift`, as `nix run
@@ -3623,15 +3637,17 @@ both cases.
 Consumer's core and import its `flakeModules.default`, as
 [`templates/core-connector/flake.nix`](../templates/core-connector/flake.nix)
 does for github. A Connector not named after a core backend cannot yet be
-selected as `ISSUE_TRACKER` (a follow-up spec covers it), so today it is
-checked and built but not dispatched against.
+selected as `ISSUE_TRACKER` or `CODE_FORGE` (a follow-up spec covers it), so
+today it is checked and built but not dispatched against.
 
-For maintainers: the template is
-[`templates/connector-tracker/`](../templates/connector-tracker/), with
-`connectorname` and `CONNECTORNAME` as its placeholder tokens. The
-`connector-scaffold` check pins its layout to `connectors/jira`, and CI's
-`connector` lane runs `nix run .#connector-dev -- templates/connector-tracker
-flake check`, which generates it under two names and checks each.
+For maintainers: the templates are
+[`templates/connector-tracker/`](../templates/connector-tracker/) and
+[`templates/connector-forge/`](../templates/connector-forge/), with
+`connectorname` and `CONNECTORNAME` as their placeholder tokens. The
+`connector-scaffold` and `connector-scaffold-forge` checks pin their layouts to
+`connectors/jira` and `connectors/forgejo`, and CI's `connector` lane runs `nix
+run .#connector-dev -- templates/connector-<kind> flake check` for each, which
+generates it under two names and checks each.
 
 #### Authoring a Driver Connector
 
