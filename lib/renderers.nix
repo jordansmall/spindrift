@@ -320,11 +320,14 @@ rec {
     in
     renderNode 0 domainTree;
 
-  # templates/default/harness.env.example content: secrets only (ADR 0020).
-  # From #625 onward env configures nothing but secrets, so listing a non-secret
-  # knob here would advertise a channel deprecated the moment it is used.
+  # templates/default/harness.env.example content. Core's knobs are secrets only
+  # (ADR 0020): from #625 onward env configures nothing else, so listing a
+  # non-secret core knob would advertise a channel deprecated the moment it is
+  # used. `connectorKnobs` (nix/connector-knobs.nix) are env-only (`flakeOption
+  # = false`), so env is their one channel and all are listed after core's,
+  # non-secret ones (the jira email) included; those get no `_CMD` hint.
   renderHarnessEnvExample =
-    schema:
+    schema: connectorKnobs:
     let
       secretSchema = filterAttrs (_: e: e.secret or false) schema;
       renderEntry =
@@ -335,10 +338,16 @@ rec {
         + "# read); the command's stdout wins over ${entry.env} and is never baked,\n"
         + "# logged, or written to disk.\n"
         + "${entry.env}=\n\n";
+      # A non-secret Connector knob (the Basic-scheme identity) has no `_CMD`
+      # form at runtime, so it advertises none.
+      renderConnectorEntry =
+        key: entry:
+        if entry.secret or false then renderEntry key entry else "# ${entry.doc}\n${entry.env}=\n\n";
     in
     "# Copy to harness.env (gitignored) and fill in — or export these in your shell.\n"
-    + "# Secrets only: every other knob is set via the Consumer flake's `settings`\n"
-    + "# or an explicit CLI flag (see docs/reference.md and docs/flake-options.md).\n"
+    + "# Secrets and Connector credentials only: every other knob is set via the\n"
+    + "# Consumer flake's `settings` or an explicit CLI flag (see docs/reference.md\n"
+    + "# and docs/flake-options.md).\n"
     + "#\n"
     + "# Sourcing every secret below from an external vault via its <NAME>_CMD form\n"
     + "# (rbw, op, pass, vault, ...) is the preferred, highly encouraged way to\n"
@@ -351,7 +360,9 @@ rec {
     + "# of its own — {name} substitutes the secret's kebab-case env name, e.g.\n"
     + "# SECRET_CMD=\"rbw get spindrift-{name}\" reproduces every per-secret example\n"
     + "# below in one line. A per-secret <NAME>_CMD still wins over this fallback.\n\n"
-    + concatStrings (mapAttrsToList renderEntry secretSchema);
+    + concatStrings (mapAttrsToList renderEntry secretSchema)
+    + "# Connector credentials: host-only, read by each first-party Connector's backend row.\n\n"
+    + concatStrings (mapAttrsToList renderConnectorEntry connectorKnobs);
 
   # cmd/launcher/defaultmodels_gen_test.go content: the Go form of
   # lib/default-model-fixture.nix keyed by the schema's env-var names, so a
