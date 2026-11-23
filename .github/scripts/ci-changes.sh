@@ -37,6 +37,11 @@
 # A path under cmd/launcher/internal/{forge,driver}/<name>/ selects <name> too
 # (when it has a flake.nix at NEW): the subflake's conformance test runs that
 # core package. Plain classify mode still treats it as core, hence code.
+# A Connector template is selected as its path, templates/connector-<kind>
+# (when that directory exists at NEW), which connector-dev generates and checks
+# under two names (issue #7421). A path under it selects it; so does the
+# generator (nix/new-connector.{sh,nix}) and a contract path, which select
+# every such template. Plain classify mode treats all of these as code.
 set -euo pipefail
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -173,9 +178,24 @@ is_comment_only() {
   ! grep -qE "^[-+].*($functional_re)" <<<"$diff"
 }
 
+# The generator's sources: an edit rebuilds every scaffold.
+is_generator_path() {
+  case $1 in nix/new-connector.sh | nix/new-connector.nix) return 0 ;; *) return 1 ;; esac
+}
+
 if [ "$mode" = connectors ]; then
   names=()
   contract=0
+  generator=0
+  # Connector templates at NEW, keyed by their templates/connector-<kind> path.
+  declare -A templates=()
+  if [ -n "$new_rev" ]; then
+    # Captured first, as with the contract's listing below.
+    tdirs=$(git ls-tree --full-tree -d --name-only "$new_rev" templates/)
+    while IFS= read -r dir; do
+      if [[ $dir =~ ^templates/connector-$connector_name_re$ ]]; then templates[$dir]=1; fi
+    done <<<"$tdirs"
+  fi
   # Without revisions there is no set file to read, so the glob never runs.
   scan_contract=0
   if [ -n "$new_rev" ]; then scan_contract=1; fi
@@ -189,6 +209,11 @@ if [ "$mode" = connectors ]; then
       elif [[ $p =~ ^\"?cmd/launcher/internal/(forge|driver)/($connector_name_re)/. ]] &&
         flake_at_new "${BASH_REMATCH[2]}"; then
         names+=("${BASH_REMATCH[2]}")
+      elif [[ $p =~ ^\"?(templates/connector-$connector_name_re)/. ]] &&
+        [ -n "${templates[${BASH_REMATCH[1]}]:-}" ]; then
+        names+=("${BASH_REMATCH[1]}")
+      elif is_generator_path "${p#\"}"; then
+        generator=1
       fi
       # A git-quoted path loses its leading quote so the globs still anchor.
       if [ "$scan_contract" -eq 1 ] && matches_globs ci-connector-contract "${p#\"}"; then contract=1; fi
@@ -203,6 +228,9 @@ if [ "$mode" = connectors ]; then
       # connector_of matches a path inside a Connector dir, so name a child.
       if connector_of "$dir/x"; then names+=("$connector_name"); fi
     done <<<"$dirs"
+  fi
+  if [ "$contract" -eq 1 ] || [ "$generator" -eq 1 ]; then
+    if [ "${#templates[@]}" -gt 0 ]; then names+=("${!templates[@]}"); fi
   fi
   out=
   if [ "${#names[@]}" -gt 0 ]; then
