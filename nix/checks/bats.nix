@@ -100,6 +100,9 @@ let
     NEW_CONNECTOR_SH = ../../nix/new-connector.sh;
     NEW_CONNECTOR_TEMPLATES = ../../templates;
     NEW_CONNECTOR_CORE_NAMES = toString (map (r: r.name) (import ../../lib/backends/default.nix));
+    NEW_CONNECTOR_CORE_DRIVER_NAMES = toString (
+      builtins.attrNames (import ../../lib/drivers/default.nix { inherit (pkgs) lib; }).entries
+    );
     PROMPTS_DIR = ../../templates/default/prompts;
     # The rendered contracts, driver/agent-paths preambles and Claude
     # settings.json the bats harness reads (tests/entrypoint-shim.bats,

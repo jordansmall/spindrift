@@ -8,7 +8,8 @@
 # below, with the uppercase form for env names, so generation is substitution
 # and nothing else. The Nix wrapper exports NEW_CONNECTOR_TEMPLATES (the
 # directory holding the templates), NEW_CONNECTOR_CORE_NAMES (core backend
-# row names, space separated) and NEW_CONNECTOR_SDK_VERSION (the pseudo-version
+# row names) and NEW_CONNECTOR_CORE_DRIVER_NAMES (core Driver row names), both
+# space separated, and NEW_CONNECTOR_SDK_VERSION (the pseudo-version
 # go.mod pins the SDK at; empty for an uncommitted build).
 set -euo pipefail
 
@@ -28,10 +29,22 @@ kind="$1"
 name="$2"
 dir="${3:-.}"
 
-# One arm per kind; a forge or driver template is another arm and directory.
+# One arm per kind; a forge template is another arm and directory.
+# connectorChecks keys its per-row path on a tracker's name against the backend
+# rows and on a driver's against the Driver rows, so each kind refuses only its
+# own list.
 case "$kind" in
-  tracker) template="$NEW_CONNECTOR_TEMPLATES/connector-tracker" ;;
-  *) die "unknown kind '$kind' (known: tracker)" ;;
+  tracker)
+    template="$NEW_CONNECTOR_TEMPLATES/connector-tracker"
+    core_names="$NEW_CONNECTOR_CORE_NAMES"
+    core_what="backend"
+    ;;
+  driver)
+    template="$NEW_CONNECTOR_TEMPLATES/connector-driver"
+    core_names="$NEW_CONNECTOR_CORE_DRIVER_NAMES"
+    core_what="Driver"
+    ;;
+  *) die "unknown kind '$kind' (known: tracker, driver)" ;;
 esac
 
 [[ "$name" =~ ^[a-z][a-z0-9]*$ ]] ||
@@ -46,10 +59,10 @@ case "$name" in
     ;;
 esac
 
-# A core row name routes connectorChecks down its per-backend path, not the
+# A core row name routes connectorChecks down its per-row path, not the
 # generic conformance a new Connector starts green on.
-for core in $NEW_CONNECTOR_CORE_NAMES; do
-  [ "$name" != "$core" ] || die "name '$name' is a core backend; pick another"
+for core in $core_names; do
+  [ "$name" != "$core" ] || die "name '$name' is a core $core_what; pick another"
 done
 
 if [ -e "$dir" ] && [ ! -d "$dir" ]; then

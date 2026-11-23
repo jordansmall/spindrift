@@ -1,7 +1,8 @@
 #!/usr/bin/env bats
 # Issue #7421: nix/new-connector.sh writes templates/connector-tracker with the
 # Connector name substituted at the two token sites and nowhere else. It runs
-# against the real template and the Nix-supplied core row names.
+# against the real template and the Nix-supplied core row names (issue #7423
+# adds the driver kind).
 
 bats_require_minimum_version 1.5.0
 
@@ -14,6 +15,11 @@ setup() {
       --apply 'rs: toString (map (r: r.name) rs)')"
   fi
   export NEW_CONNECTOR_CORE_NAMES
+  if [ -z "${NEW_CONNECTOR_CORE_DRIVER_NAMES:-}" ]; then
+    NEW_CONNECTOR_CORE_DRIVER_NAMES="$(nix eval --impure --raw --expr \
+      "let root = $BATS_TEST_DIRNAME/..; lib = (builtins.getFlake (toString root)).inputs.nixpkgs.lib; in toString (builtins.attrNames (import (root + /lib/drivers/default.nix) { inherit lib; }).entries)")"
+  fi
+  export NEW_CONNECTOR_CORE_DRIVER_NAMES
   TEMPLATE="$NEW_CONNECTOR_TEMPLATES/connector-tracker"
   OUT="$BATS_TEST_TMPDIR/out"
 }
@@ -119,7 +125,7 @@ listing() {
 }
 
 @test "an unknown kind is refused and writes nothing" {
-  for kind in forge driver ""; do
+  for kind in forge butler ""; do
     run bash "$SCRIPT" "$kind" acme "$OUT"
     [ "$status" -eq 1 ]
     [[ "$output" == *"unknown kind"* ]]
@@ -182,4 +188,53 @@ listing() {
   rm -rf "$OUT"
   run --separate-stderr bash "$SCRIPT" tracker acme "$OUT"
   [[ "$stderr" == *"no commit to pin"* ]]
+}
+
+# A Driver Connector (issue #7423): the same generator over templates/connector-driver.
+
+@test "driver: generates the template's file set with the name in paths" {
+  run bash "$SCRIPT" driver acme "$OUT"
+  [ "$status" -eq 0 ]
+  expected="$(listing "$NEW_CONNECTOR_TEMPLATES/connector-driver" | sed 's/connectorname/acme/g')"
+  [ "$(listing "$OUT")" = "$expected" ]
+  [ -f "$OUT/row.nix" ]
+  [ -f "$OUT/testdata/corpus/basic/pass.jsonl" ]
+}
+
+@test "driver: the name replaces the token and no residue is left" {
+  run bash "$SCRIPT" driver acme "$OUT"
+  [ "$status" -eq 0 ]
+  grep -qF 'Name: "acme"' "$OUT/main.go"
+  ! grep -rqiF connectorname "$OUT"
+}
+
+@test "driver: go.mod pins the SDK replace at the supplied pseudo-version" {
+  NEW_CONNECTOR_SDK_VERSION=v0.0.0-20261123000000-0123456789ab \
+    run --separate-stderr bash "$SCRIPT" driver acme "$OUT"
+  [ "$status" -eq 0 ]
+  grep -qxF 'replace spindrift.dev/sdk => github.com/jordansmall/spindrift/sdk v0.0.0-20261123000000-0123456789ab' "$OUT/go.mod"
+  [ -z "$stderr" ]
+}
+
+@test "driver: a core Driver name is refused and writes nothing" {
+  for core in $NEW_CONNECTOR_CORE_DRIVER_NAMES; do
+    run bash "$SCRIPT" driver "$core" "$OUT"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"core Driver"* ]]
+    [ ! -e "$OUT" ]
+  done
+}
+
+# connectorChecks keys the core-Driver path on a Driver Connector's name and the
+# core-backend path on a tracker's, so each kind refuses only its own list.
+@test "a core Driver name is fine for a tracker, a core backend name for a driver" {
+  run bash "$SCRIPT" tracker opencode "$OUT"
+  [ "$status" -eq 0 ]
+  rm -rf "$OUT"
+  for core in $NEW_CONNECTOR_CORE_NAMES; do
+    case " $NEW_CONNECTOR_CORE_DRIVER_NAMES " in *" $core "*) continue ;; esac
+    run bash "$SCRIPT" driver "$core" "$OUT"
+    [ "$status" -eq 0 ]
+    rm -rf "$OUT"
+  done
 }
