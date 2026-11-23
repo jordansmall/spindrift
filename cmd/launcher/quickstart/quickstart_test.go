@@ -2822,7 +2822,20 @@ func TestHarnessEnvSecretLine_MatchesTemplateHarnessEnvExample(t *testing.T) {
 	}
 }
 
-// Pins that harnessEnvPreamble (quickstart.go), a deliberate condensation of
+// Pins that the <NAME>_CMD hint the wizard renders for a secret is, word for
+// word, the hint templates/default/harness.env.example carries for that name:
+// both come from lib/renderers.nix's secretCmdHint.
+func TestSecretCmdHint_AppearsInHarnessEnvExample(t *testing.T) {
+	example := readRepoFile(t, "templates", "default", "harness.env.example")
+	for _, name := range []string{"GH_TOKEN", "JIRA_TOKEN"} {
+		hint := fmt.Sprintf(secretCmdHintFormat, name, toKebab(name))
+		if !strings.Contains(example, hint) {
+			t.Errorf("expected harness.env.example to contain the wizard's hint for %s:\n%s", name, hint)
+		}
+	}
+}
+
+// Pins that harnessEnvPreamble (consumer_stanzas_gen.go), a deliberate condensation of
 // templates/default/harness.env.example's file-level preamble rather than a
 // verbatim copy, still names the same three load-bearing tokens the template's
 // preamble documents: the SECRET_CMD fallback knob, its {name} substitution
@@ -3775,16 +3788,16 @@ func TestGatherCredentials_ClaudeRowPrompts(t *testing.T) {
 	}
 }
 
-// A knob a Strategy derives from the remote but quickstartKnobs omits would
-// silently never reach the rendered flake.
-func TestQuickstartKnobs_CoverEveryKnobsFromRemoteEnv(t *testing.T) {
+// A knob a Strategy derives from the remote but its row's Consumer stanza omits
+// would silently never reach the rendered flake.
+func TestConsumerStanza_CoversEveryKnobsFromRemoteEnv(t *testing.T) {
 	for _, s := range quickstartStrategies() {
 		if s.KnobsFromRemote == nil {
 			continue
 		}
 		for env := range s.KnobsFromRemote("https://example.com/owner/repo.git") {
-			if _, ok := quickstartKnobs[env]; !ok {
-				t.Errorf("%s: KnobsFromRemote env %s has no quickstartKnobs entry", s.Name, env)
+			if !slices.ContainsFunc(consumerStanzas[s.Name].Settings, func(k stanzaSetting) bool { return k.Env == env }) {
+				t.Errorf("%s: KnobsFromRemote env %s has no Consumer stanza setting", s.Name, env)
 			}
 		}
 	}
@@ -3825,13 +3838,13 @@ func mustRender(t *testing.T, a answers) []scaffoldFile {
 	return files
 }
 
-// A remote-derived knob missing from quickstartKnobs must fail the render
+// A remote-derived knob missing from the Consumer stanza must fail the render
 // rather than silently drop out of the flake.
-func TestRenderFlakeNix_KnobWithoutQuickstartKnobsEntry_Errors(t *testing.T) {
+func TestRenderFlakeNix_KnobWithoutStanzaSetting_Errors(t *testing.T) {
 	choice := backendChoice{name: "github", knobs: map[string]string{"STUB_KNOB_NOT_IN_TABLE": "v"}}
 	_, err := renderFlakeNix("o/r", "podman", "Ada", "ada@example.com", choice)
 	if err == nil {
-		t.Fatal("expected an error for a knob with no quickstartKnobs entry")
+		t.Fatal("expected an error for a knob with no stanza setting")
 	}
 	for _, want := range []string{"STUB_KNOB_NOT_IN_TABLE", `"github"`} {
 		if !strings.Contains(err.Error(), want) {

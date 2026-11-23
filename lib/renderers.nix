@@ -215,6 +215,30 @@ rec {
   # the one Nix definition, shared by renderRowKnobsGo.
   emptyIsSetting = e: flagKind e == "bool" || (e.emptyDisables or false);
 
+  # The Nix literal a Consumer writes for a knob's schema default. Placeholder
+  # only for a required knob, so a knob whose placeholder exists only for the
+  # bats fixture (gitUserName's "Test Bot") renders as "" here rather than as a
+  # fake identity in consumer-facing documentation.
+  nixLiteral =
+    e:
+    if e.attrsOfStrings or false then
+      # The flake option is an attrset (lib/flakeModule.nix), so the string
+      # default would not typecheck if a Consumer uncommented the line.
+      "{ }"
+    else if e ? default then
+      if builtins.isBool e.default then
+        (if e.default then "true" else "false")
+      else if builtins.isInt e.default then
+        toString e.default
+      else
+        "\"${toString e.default}\""
+    else if e.required or false then
+      "\"${e.placeholder or ""}\""
+    else if flagKind e == "int" then
+      "null"
+    else
+      "\"\"";
+
   # Display order for the full flag reference: the six domains (ADR 0037).
   # renderFlagTableGo below renders this into
   # cmd/launcher/internal/inputdoc/flagtable_gen.go, so the Go copy cannot
@@ -251,28 +275,6 @@ rec {
       flakeOptionEntries =
         filterAttrs (k: e: (e.flakeOption or false) && !(builtins.elem k ownedByBackends.keys)) schema
         // builtins.foldl' (acc: s: acc // s.settings) { } stanzas;
-      # Placeholder only for a required knob, so a knob whose placeholder exists
-      # only for the bats fixture (gitUserName's "Test Bot") renders as "" here
-      # rather than as a fake identity in consumer-facing documentation.
-      nixLiteral =
-        e:
-        if e.attrsOfStrings or false then
-          # The flake option is an attrset (lib/flakeModule.nix), so the string
-          # default would not typecheck if a Consumer uncommented the line.
-          "{ }"
-        else if e ? default then
-          if builtins.isBool e.default then
-            (if e.default then "true" else "false")
-          else if builtins.isInt e.default then
-            toString e.default
-          else
-            "\"${toString e.default}\""
-        else if e.required or false then
-          "\"${e.placeholder or ""}\""
-        else if flagKind e == "int" then
-          "null"
-        else
-          "\"\"";
       # Insert one schema entry into the nested domain tree at its derived flake
       # path. Each leaf is tagged `__leaf` so renderNode can tell a schema entry
       # from a namespace node, since both are attrsets.
@@ -342,6 +344,35 @@ rec {
     in
     renderNode 0 domainTree;
 
+  # The per-secret `_CMD` hint of harness.env.example. renderConsumerStanzasGo
+  # calls it with Go format verbs so the wizard's harness.env carries the same
+  # words; it must stay free of a literal `%`.
+  secretCmdHint =
+    env: kebab:
+    "# Preferred: fetch this from a vault instead of the plaintext value below —\n"
+    + "# ${env}_CMD=\"rbw get spindrift-${kebab}\" (or an op/pass/vault\n"
+    + "# read); the command's stdout wins over ${env} and is never baked,\n"
+    + "# logged, or written to disk.\n";
+
+  # The wizard's harness.env opening. Per the resolution precedence
+  # (docs/reference.md), both a secret's own <NAME>_CMD and the plaintext value
+  # outrank SECRET_CMD, so that fallback applies only once the operator removes
+  # the plaintext.
+  harnessEnvPreamble =
+    "# Preferred: source each secret below from a vault via its <NAME>_CMD\n"
+    + "# form rather than the plaintext value — harness.env then holds\n"
+    + "# fetch recipes, not live credentials.\n"
+    + "# One vault, uniform naming? SECRET_CMD sets a single templated fetch\n"
+    + "# command (e.g. \"rbw get spindrift-{name}\") for any secret without a\n"
+    + "# <NAME>_CMD, but note the plaintext value below still wins over it\n"
+    + "# too, so remove that value (or add <NAME>_CMD) for SECRET_CMD to apply.\n\n";
+
+  # Precedes the Connector credential stanza: the wizard reuses the token it
+  # verified, but a narrower one is safer.
+  connectorCredentialNote =
+    "# The Connector authorizes its reads and writes with this token. A separate,\n"
+    + "# least-privilege token may replace it: see docs/reference.md#backend-primary-mode.\n";
+
   # templates/default/harness.env.example content. Core's knobs are secrets only
   # (ADR 0020): from #625 onward env configures nothing else, so listing a
   # non-secret core knob would advertise a channel deprecated the moment it is
@@ -356,13 +387,7 @@ rec {
         _: e: (e.secret or false) && !(builtins.elem e.env ownedByBackends.envs)
       ) schema;
       renderEntry =
-        entry:
-        "# ${entry.doc}\n"
-        + "# Preferred: fetch this from a vault instead of the plaintext value below —\n"
-        + "# ${entry.env}_CMD=\"rbw get spindrift-${toKebab entry.env}\" (or an op/pass/vault\n"
-        + "# read); the command's stdout wins over ${entry.env} and is never baked,\n"
-        + "# logged, or written to disk.\n"
-        + "${entry.env}=\n\n";
+        entry: "# ${entry.doc}\n" + secretCmdHint entry.env (toKebab entry.env) + "${entry.env}=\n\n";
       # A non-secret Connector knob (the Basic-scheme identity) has no `_CMD`
       # form at runtime, so it advertises none.
       renderStanzaEntry =
@@ -1628,18 +1653,29 @@ rec {
       goStr = builtins.toJSON;
       settingsOf =
         s:
-        builtins.sort builtins.lessThan (
-          builtins.filter (e: e != null) (map (k: k.env or null) (builtins.attrValues s.settings))
+        builtins.sort (a: b: a.env < b.env) (
+          map (name: {
+            env = s.settings.${name}.env;
+            path = resolveNixPath name s.settings.${name};
+            default = nixLiteral s.settings.${name};
+          }) (builtins.filter (name: s.settings.${name} ? env) (builtins.attrNames s.settings))
         );
       field = name: value: "\t\t${name}: ${value},\n";
       entry =
         s:
         "\t${goStr s.name}: {\n"
+        + field "DisplayName" (goStr s.displayName)
         + (
           if settingsOf s == [ ] then
             ""
           else
-            field "Settings" "[]string{${builtins.concatStringsSep ", " (map goStr (settingsOf s))}}"
+            "\t\tSettings: []stanzaSetting{\n"
+            + concatStrings (
+              map (e: "\t\t\t{Env: ${goStr e.env}, Path: ${goStr e.path}, Default: ${goStr e.default}},\n") (
+                settingsOf s
+              )
+            )
+            + "\t\t},\n"
         )
         + (
           if s.secrets == [ ] then
@@ -1658,6 +1694,9 @@ rec {
         + (if s.moduleImport == null then "" else field "ModuleImport" (goStr s.moduleImport))
         + "\t},\n";
     in
+    assert
+      builtins.length (builtins.split "%" (secretCmdHint "NAME" "kebab")) == 1
+      || throw "secretCmdHint must not contain a literal %: the wizard uses it as a Go format string";
     "// Code generated by nix/regen.nix from nix/consumer-stanzas.nix. DO NOT EDIT.\n"
     + "package main\n"
     + "\n"
@@ -1666,11 +1705,20 @@ rec {
     + "// consumerStanza is a backend row's Consumer stanza: what a Consumer of the\n"
     + "// backend configures (lib/backends/<name>.nix, nix/consumer-stanzas.nix).\n"
     + "type consumerStanza struct {\n"
-    + "\tSettings []string // env names of the row's settings-block knobs, sorted\n"
+    + "\tDisplayName string\n"
+    + "\tSettings []stanzaSetting // the row's settings-block knobs, sorted by Env\n"
     + "\tSecrets []stanzaSecret // harness.env lines, in the env example's order\n"
     + "\tCredential string // env var the Connector reads its credential from; \"\" when none\n"
     + "\tFlakeInput string // \"\" when the batteries flake already carries it\n"
     + "\tModuleImport string // likewise\n"
+    + "}\n"
+    + "\n"
+    + "// stanzaSetting is one settings-block knob of a Consumer stanza: its env name,\n"
+    + "// nix option path, and the Nix literal a Consumer writes for its schema default.\n"
+    + "type stanzaSetting struct {\n"
+    + "\tEnv string\n"
+    + "\tPath string\n"
+    + "\tDefault string\n"
     + "}\n"
     + "\n"
     + "// stanzaSecret is one harness.env line of a Consumer stanza. Secret is false\n"
@@ -1679,6 +1727,16 @@ rec {
     + "\tEnv string\n"
     + "\tSecret bool\n"
     + "}\n"
+    + "\n"
+    + "// secretCmdHintFormat is the <NAME>_CMD hint above a secret in harness.env.\n"
+    + "// Its verbs take the env name (%[1]s) and the kebab-cased vault key (%[2]s).\n"
+    + "const secretCmdHintFormat = ${goStr (secretCmdHint "%[1]s" "%[2]s")}\n"
+    + "\n"
+    + "// harnessEnvPreamble opens the wizard's harness.env.\n"
+    + "const harnessEnvPreamble = ${goStr harnessEnvPreamble}\n"
+    + "\n"
+    + "// connectorCredentialNote precedes the Connector credential stanza.\n"
+    + "const connectorCredentialNote = ${goStr connectorCredentialNote}\n"
     + "\n"
     + "// consumerStanzas maps a backend name to its Consumer stanza.\n"
     + "var consumerStanzas = map[string]consumerStanza{\n"
@@ -1707,17 +1765,6 @@ rec {
         + "// to pre-fill the ${key} prompt.\n"
         + "const hostGitConfigKey${upperFirst key} = ${builtins.toJSON value}\n"
       ) quickstartTable.hostGitConfigKeys;
-      # Padded the way gofmt aligns consecutive map values, since the drift
-      # check diffs this file unformatted.
-      knobKeyWidth = builtins.foldl' (
-        a: n: if builtins.stringLength n > a then builtins.stringLength n else a
-      ) 0 (builtins.attrNames quickstartTable.knobs);
-      knobEntries = mapAttrsToList (
-        env: k:
-        "\t\"${env}\":${
-          padRight (knobKeyWidth - builtins.stringLength env + 1) ""
-        }{path: ${builtins.toJSON k.path}, dflt: ${builtins.toJSON k.dflt}},\n"
-      ) quickstartTable.knobs;
     in
     "// Code generated by nix/regen.nix from lib/quickstart-path-table.nix. DO NOT EDIT.\n"
     + "package main\n"
@@ -1736,16 +1783,7 @@ rec {
     + "// codeForge line when the chosen backend equals it.\n"
     + "const defaultCodeForge = ${builtins.toJSON quickstartTable.defaultCodeForge}\n"
     + "\n"
-    + builtins.concatStringsSep "\n" hostGitConfigKeyBlocks
-    + "\n"
-    + "// quickstartKnob is one flakeOption knob of a quickstart-capable backend row:\n"
-    + "// its nix option path and schema default.\n"
-    + "type quickstartKnob struct{ path, dflt string }\n"
-    + "\n"
-    + "// quickstartKnobs lists those knobs by env name (lib/backends rows' `knobs`).\n"
-    + "var quickstartKnobs = map[string]quickstartKnob{\n"
-    + concatStrings knobEntries
-    + "}\n";
+    + builtins.concatStringsSep "\n" hostGitConfigKeyBlocks;
 
   # cmd/launcher/internal/agentpaths/agentpaths_gen.go content (issue #2531): one
   # Go const per lib/agent-paths.nix key, so the launcher's host-side mount and
