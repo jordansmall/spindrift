@@ -30,3 +30,5 @@ nix/dogfood-defaults.nix
 nix/fixtures.nix
 templates/connector-tracker/*.go
 templates/connector-tracker/*.nix
+templates/connector-driver/*.go
+templates/connector-driver/*.nix
