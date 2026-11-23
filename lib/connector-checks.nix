@@ -1,11 +1,13 @@
 # A Connector's conformance suite, built from core so its own subflake can run
-# it (`nix flake check` in connectors/<name>); root `checks` carry none, and
-# CI's `connector` lane runs it via `nix run .#connector-dev -- <name> flake
-# check`. It covers the Connector's Go fmt, wasip1 vet and unit tests, plus
-# core's `go test ./internal/{driver,forge}/<name>/...` against the
+# it (`nix flake check` in connectors/<name>); root `checks` carry none bar
+# the test-only echo fixture's (nix/checks/connector-checks-any-name.nix),
+# and CI's `connector` lane runs it via `nix run .#connector-dev -- <name>
+# flake check`. It covers the Connector's Go fmt, wasip1 vet and unit tests,
+# plus core's `go test ./internal/{driver,forge}/<name>/...` against the
 # Connector's wasm (a connectorHosted Driver, with no native package, runs the
-# driverrows tests alone), so it works only for a Connector named after a core
-# Driver or backend package.
+# driverrows tests alone). A Driver named after no core Driver has no such
+# package or corpus in core: the kit's RunConnector runs over the Connector's
+# own testdata/corpus instead. A backend still needs a core backend row.
 {
   nixpkgs,
   systems,
@@ -23,8 +25,12 @@ let
       fs = pkgs.lib.fileset;
       goCheckEnv = import ../nix/checks/go-check-env.nix;
       isBackend = connector ? routes;
+      drivers = import ./drivers/default.nix { inherit (pkgs) lib; };
+      coreDriver = pkgs.lib.hasAttr name drivers.entries;
 
-      # go.mod replaces the SDK with ../../sdk, so both trees keep that layout.
+      # Both trees sit at src/sdk and src/connectors/<name>; mk points go.mod's
+      # SDK replace at ../../sdk, since a Connector outside connectors/ (the
+      # fixtures) replaces it with a different relative path.
       # The Connector's own tests read testdata beside them (jira's goldens,
       # claude's corpus and dogfood logs); a Connector without one has none.
       connectorSrc = fs.toSource {
@@ -44,6 +50,7 @@ let
           ${goCheckEnv}
           export GOFLAGS=-mod=mod
           cd src/connectors/${name}
+          go mod edit -replace spindrift.dev/sdk=../../sdk
           ${script}
           touch $out
         '';
@@ -88,7 +95,7 @@ let
           ''
           # Every Driver with a native package gets the Connector's source here;
           # pi's connector_source_parity_test.go reads it.
-          + pkgs.lib.optionalString (!connectorHosted) ''
+          + pkgs.lib.optionalString (coreDriver && !connectorHosted) ''
             mkdir -p ../../connectors/${name}
             cp -r ${connectorSrc}/. ../../connectors/${name}
           '';
@@ -96,22 +103,29 @@ let
       # half: driverrows' TestCorpus registers the claude wasm and replays the
       # corpus beside the Connector, in place of the native-vs-Connector
       # comparison a Driver with a native Strategy gets.
-      connectorHosted =
-        !isBackend
-        && pkgs.lib.elem name (import ./drivers/default.nix { inherit (pkgs) lib; }).connectorHosted;
+      connectorHosted = !isBackend && pkgs.lib.elem name drivers.connectorHosted;
+      connectorOnlyDriver = !isBackend && !coreDriver;
       testPkg = if isBackend then "forge" else "driver";
       # driverrows' primary-row corpus test runs the Connector; the Driver's own
-      # tests cannot, as they may not import the registry root.
+      # tests cannot, as they may not import the registry root. A Driver named
+      # after no core Driver has no row there
+      # (TestPrimaryRowConnectorPassesCorpus fails for it), so the kit's
+      # package, home of TestConnectorCorpus, stands in.
       testPkgs =
-        pkgs.lib.optionalString (!connectorHosted) "./internal/${testPkg}/${name}/..."
-        + pkgs.lib.optionalString (!isBackend) " ./internal/driver/driverrows/...";
+        if connectorOnlyDriver then
+          "./internal/driver/driverkit/conformance/..."
+        else
+          pkgs.lib.optionalString (!connectorHosted) "./internal/${testPkg}/${name}/..."
+          + pkgs.lib.optionalString (!isBackend) " ./internal/driver/driverrows/...";
       # The tests that run the Connector: TestCorpus for a hosted Driver,
       # TestPrimaryRowConnectorPassesCorpus (and the Driver's own
       # TestConnectorResolveExitMatchesNative, if it has one) for one with a
       # native Strategy. The path stays `../cmd/launcher + "..."`: a deeper
       # literal would make ci-connector-contract-covers-reads walk that tree.
       requiredPasses =
-        if connectorHosted then
+        if connectorOnlyDriver then
+          [ "TestConnectorCorpus" ]
+        else if connectorHosted then
           [ "TestCorpus" ]
         else if !isBackend then
           [ "TestPrimaryRowConnectorPassesCorpus" ]
@@ -134,12 +148,19 @@ let
       "connector-${name}-go-test" = mk "test" "go test ./...";
       "connector-${name}-conformance" =
         pkgs.runCommand "connector-${name}-conformance"
-          {
-            nativeBuildInputs = [
-              pkgs.go
-              pkgs.git
-            ];
-          }
+          (
+            {
+              nativeBuildInputs = [
+                pkgs.go
+                pkgs.git
+              ];
+            }
+            # An attribute, not a script export, so a check can overrideAttrs it
+            # to point at a corpus with a drifted golden.
+            // pkgs.lib.optionalAttrs connectorOnlyDriver {
+              SPINDRIFT_DRIVER_CONNECTOR_CORPUS = "${connectorSrc}/testdata/corpus";
+            }
+          )
           ''
             mkdir -p src/cmd
             cp -r ${../cmd/launcher} src/cmd/launcher
