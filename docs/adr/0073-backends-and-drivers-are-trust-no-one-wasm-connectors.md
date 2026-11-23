@@ -1421,3 +1421,119 @@ github and jira, and its `.log` records a failed tracker or Code Forge call by
 guest RPC method, a failed load as `load the Connector`, and a failed Code
 Forge compose. Like github, it records no lost claim race, so an empty `.log`
 marks a clean run.
+
+## Amendment (2026-11-23): the review's decisions, ahead of their implementation
+
+The Connector platform was reviewed on 2026-11-23 and the outcome grilled the
+same day. This amendment records what was decided. Some of it has landed
+since: core's git credential answers only for the exact repository URL
+(#7466), tracker and forge calls share one retry path (#7457), an unopenable
+audit file fails the load (#7461, above), the Route baseline and the
+first-party Connectors' declarations are merge-guarded (#7465), and the backend
+row's shadow and primary switches and the read shadow are deleted (#7456).
+Until the rest lands, the decisions and amendments above describe the code.
+
+**Git's remote is core's, declared and disclosed (decision 6).** Core's git
+used the clone URL a forge Connector returned from `forge.remote`, checked for
+host only, so a hostile Connector could point core's push, bundle relay, Ledger
+push and mirror seed at another repository. Core now builds
+`<web base>/<owner>/<name>.git` itself. The web base is a Git remote
+declaration on the Connector's row, in one of two forms: a literal https origin
+or the name of an operator-set knob. `forge.remote` leaves the protocol. Core's
+git credential helper answers only for that exact repository URL, so a redirect
+or a Target repo's own content cannot spend the credential elsewhere. A
+renamed or transferred repository therefore fails until the operator updates
+the Target repo. Path scoping was chosen over host scoping because one token
+across several repositories is the direction (ADR 0075) and the token's own
+scope is then no bound.
+
+**Protocol 0.4.0 (decision 10).** Removing `forge.remote` is breaking. The same
+bump carries a structured `driver.sessionFlags` result: a flag name and a
+value, where the name must be one the Driver's row declares and the value is
+passed as one argument. Core no longer splits a Connector's string into agent
+arguments.
+
+**One description of the protocol (decisions 10 and 12).** The methods, their
+parameters and results, capabilities, error classes and event vocabulary are
+described once, as data, and rendered into the SDK, core and a JSON schema, as
+the dispatch kinds already are. The description carries, per method, the
+required capability, whether a retry is safe and the result check, so decision
+4's schema check is a table with a guard, not a habit. Core importing the SDK's
+type packages was rejected: it gives no schema and no method table. The rule
+that admits a request stays in core; the SDK's fake host is pinned to it by a
+generated table of shared cases.
+
+**Core treats both axes alike (decision 5).** Tracker and forge calls share one
+path for retry and error-class mapping. The tracker axis had neither.
+
+**One credential per backend.** `SPINDRIFT_GITHUB_CONNECTOR_TOKEN`,
+`SPINDRIFT_FORGEJO_CONNECTOR_TOKEN` and the two `SPINDRIFT_JIRA_CONNECTOR_*`
+knobs were migration names, kept apart from core's own tokens while a native
+path still held those. No native path is left, the Connector never holds the
+credential, and core's git already presents the same one. Each backend takes
+one credential named after the backend (`GH_TOKEN`, `FORGEJO_TOKEN`, and plain
+jira names), read at the moment of use so a refreshed token is never captured
+stale. The old names are removed knobs. This supersedes the #6868 and #7122
+amendments' two-token wording and makes "App refresh is honoured" true.
+
+**The backend name is the Connector.** When a Consumer can select a third-party
+Connector (#7424), `ISSUE_TRACKER=<name>` names that Connector; a first-party
+name always means the first-party Connector. Core derives a third-party
+Connector's credential variable from its row name, so it can never name a
+first-party Connector's or any other host variable. A swappable provider under
+a shared name was rejected: it hands an existing credential to new code
+without a visible change.
+
+**Registration is data (decision 11).** "The registry is the module system" is
+withdrawn. A flake module is arbitrary Nix in the Consumer's configuration: it
+can replace another row past the duplicate check and set any option. A
+Connector now exports plain data (module, Route table, credential, Git remote
+declaration, knobs, fragments) and core alone builds the options. First-party
+Connectors use the same path. The three flake roles are unchanged.
+
+**The baseline covers the whole grant and can refuse (decision 3, #6806).** The
+Route baseline records, per Connector, the Routes, the credential variable, the
+authorization scheme, the base, the Git remote declaration, any declared
+request headers and any declared GraphQL documents. For a third-party Connector
+a declaration beyond the baseline, or a missing entry, fails evaluation. For a
+first-party Connector it stays a report: the Consumer already trusts that code
+by pinning the harness, and a refusal would add an upgrade chore without adding
+protection. A command writes the current declarations to the file, so accepting
+is a reviewed commit. The baseline file is on the default merge guard paths,
+and this repository also guards each first-party Connector's declarations, so
+an agent cannot land either.
+
+**The Host call's policy is finished (decision 2).**
+
+- A request may carry a small fixed set of headers, plus those its row
+  declares. Some can never be declared: `Host`, `Cookie`, `Authorization` and
+  the proxy and forwarding family. The audit line names every header sent.
+- A host named by an operator-set knob may resolve to any address. A host a
+  Connector declared as a literal, and every redirect hop, must resolve to a
+  public address, checked on the address dialled. Behind an environment proxy
+  the Launcher never sees that address and the check cannot apply; the audit
+  line says so.
+- A Route may require the request body to be one of the row's declared
+  documents, matched as text, with variables free. The github row declares its
+  GraphQL documents. This bounds the #7209 residual: a hostile github Connector
+  can run only the declared operations, with arguments of its choosing. Parsing
+  bodies to allow operation names was rejected, to keep a GraphQL parser off
+  the trusted path.
+
+**No audit, no Connector.** A Connector whose audit file cannot be opened does
+not load, first-party or not. It used to run with its audit discarded
+(built by #7461).
+
+**A sandbox per credential (decision 14).** One sandbox hosted every Connector
+in a run and stamped each frame's session itself, so an escaped module could
+speak as a sibling and spend its credential. "Nothing to steal" was true of the
+host only. Each credential-holding Connector now has its own sandbox, Driver
+Connectors share one, and the pipe a frame arrives on identifies the speaker.
+
+**Smaller decisions.** The backend row's shadow and primary switches and the
+read shadow are deleted (#7456); the Driver shadow goes with #6879. One module
+owns each row's load, reload, cooldown and audit, inside one Connector runtime
+that also owns the rows, sandboxes and credentials and replaces the
+process-wide registries in stages. The SDK gains small helpers and a fake host
+that applies the admit rule; a general-purpose client was rejected as a
+published surface too large to keep stable.
