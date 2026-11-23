@@ -175,30 +175,98 @@ in
     pkgs.runCommand "connectors-github-contributes-routes" { } "touch $out";
 
   # Issue #7139: the github Connector registers its row and token knob whatever
-  # `shadow` and `primary` say, so every Consumer that imports it has them.
+  # `primary` says, so every Consumer that imports it has them.
   connectors-github-row-unconditional =
-    let
-      withShadow = fixtures.connectorConsumerVia [
-        coreModule
-        githubConnector.flakeModule
-        { spindrift.connectors.github.shadow = true; }
-      ];
-      shadowSchema = (configOf withShadow).envSchema;
-    in
     assert assertMsg (
       (configOf withGithub).envSchema ? githubConnectorToken
-    ) "with shadow and primary off the env schema must still carry githubConnectorToken";
-    assert assertMsg
-      (
-        (configOf withGithub).connectors.github.knobs ? githubConnectorToken
-        && (configOf withGithub).connectors.github.backend != null
-      )
-      "with shadow and primary off the github row must carry the githubConnectorToken knob and its backend";
+    ) "the env schema must carry githubConnectorToken";
     assert assertMsg (
-      shadowSchema ? githubConnectorToken
-      && shadowSchema.githubConnectorToken.env == "SPINDRIFT_GITHUB_CONNECTOR_TOKEN"
-    ) "with shadow on the env schema must carry githubConnectorToken";
+      (configOf withGithub).connectors.github.knobs ? githubConnectorToken
+      && (configOf withGithub).connectors.github.backend != null
+    ) "the github row must carry the githubConnectorToken knob and its backend";
     pkgs.runCommand "connectors-github-row-unconditional" { } "touch $out";
+
+  # Issue #7456: github, jira and forgejo are Connector-only, so a backend row
+  # has no native backend to shadow or replace and a Consumer setting
+  # `shadow`, `shadowEvery` or `primary` on one is refused. `shadowEvery` has a
+  # default, so a row leaving it alone must still evaluate.
+  connectors-backend-rows-refuse-switches =
+    let
+      evaluatesWith =
+        connector: modules:
+        (builtins.tryEval (
+          builtins.deepSeq
+            (fixtures.connectorConsumerVia (
+              [
+                coreModule
+                connector.flakeModule
+              ]
+              ++ modules
+            )).apps.${system}.default.program
+            true
+        )).success;
+      rows = {
+        github = githubConnector;
+        jira = jiraConnector;
+        forgejo = forgejoConnector;
+      };
+      switches = {
+        shadow = true;
+        shadowEvery = 3;
+        primary = true;
+      };
+      refused =
+        name: switch:
+        !(evaluatesWith rows.${name} [
+          { spindrift.connectors.${name}.${switch} = switches.${switch}; }
+        ]);
+      # Read off the option itself: `refused` alone would pass on any throw.
+      definedWith =
+        name: modules:
+        (configOf (
+          fixtures.connectorConsumerVia (
+            [
+              coreModule
+              rows.${name}.flakeModule
+            ]
+            ++ modules
+          )
+        )).connectors.${name}.definedSwitches;
+    in
+    assert assertMsg (
+      connectorNames.backendSwitchError "github" [ ] == null
+    ) "a row setting no switch must not be refused";
+    assert assertMsg (
+      connectorNames.backendSwitchError "github" [ "shadow" ]
+      == "Connector 'github': `shadow` cannot be set on a backend row: github is Connector-only, with no native backend to shadow or replace. Delete the setting from spindrift.connectors.github."
+    ) "the refusal must name the row and the switch and tell the Consumer to delete it";
+    assert assertMsg (
+      connectorNames.backendSwitchError "jira" [
+        "shadowEvery"
+        "primary"
+      ]
+      == "Connector 'jira': `shadowEvery`, `primary` cannot be set on a backend row: jira is Connector-only, with no native backend to shadow or replace. Delete the setting from spindrift.connectors.jira."
+    ) "the refusal must name every switch the row sets";
+    assert assertMsg (builtins.all (name: evaluatesWith rows.${name} [ ]) (
+      builtins.attrNames rows
+    )) "control: a backend row leaving every switch alone must evaluate";
+    assert assertMsg (builtins.all (name: builtins.all (refused name) (builtins.attrNames switches)) (
+      builtins.attrNames rows
+    )) "every backend row must refuse each of `shadow`, `shadowEvery` and `primary`";
+    assert assertMsg (builtins.all (name: definedWith name [ ] == [ ]) (
+      builtins.attrNames rows
+    )) "a row setting no switch must define none: the `shadowEvery` default does not count";
+    assert assertMsg (builtins.all (
+      name:
+      builtins.all (
+        switch:
+        definedWith name [ { spindrift.connectors.${name}.${switch} = switches.${switch}; } ] == [ switch ]
+      ) (builtins.attrNames switches)
+    ) (builtins.attrNames rows)) "setting one switch must define exactly that switch";
+    assert assertMsg (
+      definedWith "github" [ { spindrift.connectors.github.primary = false; } ] == [ "primary" ]
+    ) "an explicit `primary = false` still counts as set";
+    pkgs.runCommand "connectors-backend-rows-refuse-switches" { } "touch $out";
 
   connectors-forgejo-contributes-routes =
     let

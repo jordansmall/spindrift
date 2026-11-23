@@ -6,29 +6,40 @@
 # Consumer's switch on a registered row (issues #6797, #6810, #6998), not a
 # second registration.
 rec {
-  # Names of the backends with a native adapter. A `connectorOnly` backend has
-  # none, so its Connector row cannot be `primary`. One source for the module
-  # and nix/checks/connector-driver-rows.nix.
-  nativeBackendNames = map (b: b.name) (
-    builtins.filter (b: !(b.connectorOnly or false)) (import ./backends/default.nix)
-  );
+  # The Consumer switches a backend row refuses (issue #7456), in the order
+  # the refusal lists them. One source for the module's `definedSwitches` and
+  # `uniqueRow`'s switch-only defs.
+  switchNames = [
+    "shadow"
+    "shadowEvery"
+    "primary"
+  ];
 
   # Why a row's `primary` (issues #6998, #6999) cannot stand, or null.
-  # `nativeNames` is the native backend registry's names, `nativeDriverNames`
-  # the core Driver registry's. A row with a `driver` is checked as a Driver, one
-  # with a `backend` as a backend, and a row with both as each.
+  # `nativeDriverNames` is the core Driver registry's. A backend row never
+  # reaches here: checkedConnectors refuses its switches first, so only the
+  # `driver` checks remain.
   primaryError =
-    nativeNames: nativeDriverNames: name: r:
+    nativeDriverNames: name: r:
     if r.shadow then
       "Connector '${name}': `primary` and `shadow` are exclusive on one row"
     else if r.driver == null && r.backend == null then
-      "Connector '${name}': `primary` needs a `backend` row to answer reads"
+      "Connector '${name}': `primary` needs a `driver` row to replace the native Driver"
     else if r.driver != null && !(builtins.elem name nativeDriverNames) then
       "Connector '${name}': `primary` needs a native Driver of the same name to replace; none is registered"
-    else if r.backend != null && !(builtins.elem name nativeNames) then
-      "Connector '${name}': `primary` needs a native backend of the same name to replace; none is registered"
     else
       null;
+
+  # Why a backend row's Consumer switches cannot stand, or null. `set` is the
+  # names of `shadow`, `shadowEvery` and `primary` the Consumer defined on the
+  # row (issue #7456): every backend is Connector-only, so none has a native
+  # backend to shadow or replace and the setting only misleads.
+  backendSwitchError =
+    name: set:
+    if set == [ ] then
+      null
+    else
+      "Connector '${name}': `${builtins.concatStringsSep "`, `" set}` cannot be set on a backend row: ${name} is Connector-only, with no native backend to shadow or replace. Delete the setting from spindrift.connectors.${name}.";
 
   duplicateError =
     name: defs:
@@ -57,9 +68,7 @@ rec {
             d:
             builtins.isAttrs d.value
             && builtins.attrNames d.value != [ ]
-            && builtins.all (n: n == "shadow" || n == "shadowEvery" || n == "primary") (
-              builtins.attrNames d.value
-            );
+            && builtins.all (n: builtins.elem n switchNames) (builtins.attrNames d.value);
           err = duplicateError (builtins.elemAt loc (builtins.length loc - 1)) (
             builtins.filter (d: !(switchOnly d)) defs
           );

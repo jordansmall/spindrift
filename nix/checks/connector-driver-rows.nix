@@ -557,9 +557,8 @@ in
       '';
 
   # Issue #7139: the github Connector registers its backend row whatever
-  # `shadow` and `primary` say. Both off, the document carries one row with its
-  # Route table and the accepted baseline doctor diffs that table against, and
-  # neither flag; `shadow` on adds its sampling.
+  # `primary` says. The document carries one row with its Route table and the
+  # accepted baseline doctor diffs that table against, and neither flag.
   connector-driver-rows-github-row-unconditional =
     pkgs.runCommand "connector-driver-rows-github-row-unconditional"
       { nativeBuildInputs = [ pkgs.jq ]; }
@@ -569,12 +568,6 @@ in
           .backends | length == 1 and (.[0]
           | .credentialKnob == "githubConnectorToken"
             and (has("primary") | not) and (has("shadow") | not)
-            and (.routes | length) > 0
-            and .acceptedRoutes == $b[0].github)' "$doc"
-        ${fixtures.runInputDocOf (githubProgramWith [ { spindrift.connectors.github.shadow = true; } ])}
-        jq -e --slurpfile b ${../../spindrift-connector-routes.json} '
-          .backends | length == 1 and (.[0]
-          | .shadow == true and has("shadowEvery")
             and (.routes | length) > 0
             and .acceptedRoutes == $b[0].github)' "$doc"
         touch $out
@@ -639,7 +632,6 @@ in
   connector-driver-rows-primary-refusals =
     let
       names = import ../../lib/connector-names.nix;
-      inherit (names) nativeBackendNames;
       consumerWith =
         modules:
         fixtures.connectorConsumerVia (
@@ -654,10 +646,10 @@ in
         modules:
         (builtins.tryEval (builtins.deepSeq (consumerWith modules).apps.${system}.default.program true))
         .success;
-      # A backend row whose name has no native backend to replace.
+      # A backend row whose name has no native backend to replace. `primary` is
+      # set only when true: a backend row refuses even `primary = false`.
       nativeless = primary: {
         spindrift.connectors.nativeless = {
-          inherit primary;
           knobs.nativelessToken = {
             env = "NATIVELESS_TOKEN";
             group = "dispatch";
@@ -677,11 +669,12 @@ in
             ];
             credential = "nativelessToken";
           };
-        };
+        }
+        // pkgs.lib.optionalAttrs primary { primary = true; };
       };
       errorFor =
         row:
-        names.primaryError [ "github" ] registry.nativeDriverNames "row1" (
+        names.primaryError registry.nativeDriverNames "row1" (
           {
             shadow = false;
             driver = null;
@@ -693,32 +686,11 @@ in
         { shadow = true; }
         { driver = { }; }
         { }
-        { backend = { }; }
       ];
     in
     assert assertMsg (builtins.all (
       e: e != null && pkgs.lib.hasInfix "Connector 'row1'" e
     ) messages) "every `primary` refusal must name the row";
-    assert assertMsg (
-      errorFor {
-        backend = { };
-        driver = null;
-      } != null
-    ) "a row with no native backend of its name must be refused";
-    assert assertMsg (
-      names.primaryError [ "github" ] registry.nativeDriverNames "opencode" {
-        shadow = false;
-        driver = { };
-        backend = { };
-      } != null
-    ) "a row with both a driver and a backend must still pass the backend checks";
-    assert assertMsg (
-      names.primaryError [ "row1" ] registry.nativeDriverNames "row1" {
-        shadow = false;
-        driver = null;
-        backend = { };
-      } == null
-    ) "control: a backend row with a native backend must be accepted";
     assert assertMsg (evaluatesWith [
       (nativeless false)
     ]) "control: the native-less row evaluates without `primary`";
@@ -729,17 +701,6 @@ in
     assert assertMsg (
       !(evaluatesWith [ { spindrift.connectors.github.primary = true; } ])
     ) "`primary` on the github backend row must fail evaluation: no native backend remains";
-    assert assertMsg (
-      !(builtins.elem "github" nativeBackendNames)
-    ) "github must stay out of the native backend names the module checks `primary` against";
-    assert assertMsg (
-      names.primaryError nativeBackendNames [ ] "github" {
-        shadow = false;
-        driver = null;
-        backend = { };
-      }
-      == "Connector 'github': `primary` needs a native backend of the same name to replace; none is registered"
-    ) "the github refusal must be the existing no-native-backend message";
     assert assertMsg (
       !(evaluatesWith [
         {
@@ -773,39 +734,17 @@ in
       ])
     ) "`primary` on the forgejo row must fail evaluation: no native backend remains";
     assert assertMsg (
-      !(builtins.elem "forgejo" nativeBackendNames)
-    ) "forgejo must stay out of the native backend names the module checks `primary` against";
-    assert assertMsg (
-      names.primaryError nativeBackendNames [ ] "forgejo" {
-        shadow = false;
-        driver = null;
-        backend = { };
-      }
-      == "Connector 'forgejo': `primary` needs a native backend of the same name to replace; none is registered"
-    ) "the forgejo refusal must be the existing no-native-backend message";
-    assert assertMsg (
-      !(builtins.elem "jira" nativeBackendNames)
-    ) "jira must stay out of the native backend names the module checks `primary` against";
-    assert assertMsg (
-      names.primaryError nativeBackendNames [ ] "jira" {
-        shadow = false;
-        driver = null;
-        backend = { };
-      }
-      == "Connector 'jira': `primary` needs a native backend of the same name to replace; none is registered"
-    ) "the jira refusal must be the existing no-native-backend message";
-    assert assertMsg (
       !(evaluatesWith [ { spindrift.connectors.claude.primary = true; } ])
     ) "`primary` on the claude driver row must fail evaluation: it has no native Strategy";
     assert assertMsg (
-      names.primaryError [ "github" ] registry.nativeDriverNames "claude" {
+      names.primaryError registry.nativeDriverNames "claude" {
         shadow = false;
         driver = { };
         backend = null;
       } != null
     ) "a Driver row with no native Strategy of its name must be refused";
     assert assertMsg (
-      names.primaryError [ "github" ] registry.nativeDriverNames "opencode" {
+      names.primaryError registry.nativeDriverNames "opencode" {
         shadow = false;
         driver = { };
         backend = null;

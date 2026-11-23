@@ -82,7 +82,7 @@ let
   shadowRows = lib.mapAttrs (
     name: r:
     if r.driver == null && r.backend == null then
-      throw "Connector '${name}': `shadow` needs a `driver` or a `backend` row to shadow"
+      throw "Connector '${name}': `shadow` needs a `driver` row to shadow"
     else
       r
   ) (lib.filterAttrs (_: r: r.shadow) config.spindrift.connectors);
@@ -91,11 +91,13 @@ let
   checkedConnectors = lib.mapAttrs (
     name: r:
     let
-      nativeNames = (import ./connector-names.nix).nativeBackendNames;
+      names = import ./connector-names.nix;
       nativeDriverNames = (import ./drivers/default.nix { inherit lib; }).nativeDriverNames;
       err =
-        if r.primary then
-          (import ./connector-names.nix).primaryError nativeNames nativeDriverNames name r
+        if r.backend != null && r.definedSwitches != [ ] then
+          names.backendSwitchError name r.definedSwitches
+        else if r.primary then
+          names.primaryError nativeDriverNames name r
         else
           null;
     in
@@ -510,7 +512,7 @@ in
       type = types.attrsOf (
         let
           row = types.submodule (
-            { name, ... }:
+            { name, options, ... }:
             {
               freeformType = types.lazyAttrsOf types.raw;
               options = {
@@ -519,6 +521,18 @@ in
                   default = name;
                   readOnly = true;
                   description = "The Connector row's name, its attr name in `spindrift.connectors`.";
+                };
+                # The switches some module defined. `isDefined` counts the option
+                # default, and `shadowEvery` defaults to 10, so only a priority
+                # above the default says a row set one (issue #7456).
+                definedSwitches = mkOption {
+                  type = types.listOf types.str;
+                  internal = true;
+                  readOnly = true;
+                  default = builtins.filter (
+                    n: options.${n}.highestPrio < (lib.mkOptionDefault null).priority
+                  ) (import ./connector-names.nix).switchNames;
+                  description = "The backend-row switches the Consumer set; checkedConnectors refuses them.";
                 };
                 knobs = mkOption {
                   type = types.lazyAttrsOf types.raw;
