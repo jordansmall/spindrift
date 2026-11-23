@@ -328,7 +328,8 @@ test("bold, dim, italic and underline become span styles", () => {
 test("16-colour foreground and background, normal and bright", () => {
   assert.strictEqual(style(one("\x1b[31mx")[0]).color, "#e06c75");
   assert.strictEqual(style(one("\x1b[91mx")[0]).color, "#ff8b94");
-  assert.strictEqual(style(one("\x1b[30mx")[0]).color, "#3d4556");
+  assert.strictEqual(style(one("\x1b[90mx")[0]).color, "#9aa4b8");
+  assert.strictEqual(style(one("\x1b[30mx")[0]).color, "#7a859b");
   assert.strictEqual(style(one("\x1b[97mx")[0]).color, "#ffffff");
   assert.strictEqual(style(one("\x1b[42mx")[0]).backgroundColor, "#98c379");
   assert.strictEqual(style(one("\x1b[102mx")[0]).backgroundColor, "#b5e890");

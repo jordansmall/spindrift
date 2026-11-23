@@ -5,7 +5,7 @@
   --border: #2a3140;
   --text: #dde3ee;
   --muted: #8892a6;
-  --idle: #6b7488;
+  --idle: #7d879b;
   --awaiting_window: #a78bfa;
   --resolving: #38bdf8;
   --running: #34d399;
@@ -87,7 +87,7 @@ code, time, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; f
 .kind.jammed { --c: var(--jammed); }
 .card header { display: flex; justify-content: space-between; align-items: center; margin-bottom: .4rem; }
 .slotno { font-weight: 600; }
-.card.phase-idle { opacity: .55; }
+.card.phase-idle { background: var(--bg); }
 .kindname { color: var(--c); font-weight: 600; }
 .chip { display: inline-block; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 0 .4rem; margin: .1rem .1rem 0 0; }
 .rev, .pass, .model { margin-top: .2rem; color: var(--muted); }
