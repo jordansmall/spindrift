@@ -125,11 +125,9 @@ func closeSharedConnectors() {
 	clear(sharedConnectors.failures)
 }
 
-// routedRow is the github backend row when one is configured and not in shadow
-// mode.
+// routedRow is the github backend row when one is configured.
 func routedRow() (backendrows.Row, bool) {
-	row, ok := backendrows.Lookup(backend.GitHub.Name)
-	return row, ok && !row.Shadow
+	return backendrows.Lookup(backend.GitHub.Name)
 }
 
 // ErrNoRoute is wrapped by every call that has no Connector row to go through,
@@ -139,13 +137,10 @@ func routedRow() (backendrows.Row, bool) {
 var ErrNoRoute = errors.New("github has no Connector route")
 
 // routeRow is routedRow for a call that needs one: the routed row, or
-// ErrNoRoute naming which of the three causes left none.
+// ErrNoRoute naming which of the two causes left none.
 func routeRow() (backendrows.Row, error) {
 	if row, ok := routedRow(); ok {
 		return row, nil
-	}
-	if _, ok := backendrows.Lookup(backend.GitHub.Name); ok {
-		return backendrows.Row{}, fmt.Errorf("%w: the github backend row is in shadow mode, and github has no native implementation left to shadow; drop shadow from the row", ErrNoRoute)
 	}
 	if host := Host(); !strings.EqualFold(host, DefaultHost) {
 		return backendrows.Row{}, fmt.Errorf("%w: GH_HOST=%s is not %s and the github Connector's routes pin api.github.com, so GitHub Enterprise is not served", ErrNoRoute, host, DefaultHost)

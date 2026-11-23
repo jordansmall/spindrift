@@ -328,7 +328,7 @@ func TestNetworkConnectorSendFailureKeepsItsHostSideReason(t *testing.T) {
 
 // The send failure is audited once, on the request's own entry; the fatal
 // call-failure entry describes only the Call's failure, while the error the
-// caller gets still names the host cause. Observers see the same entries.
+// caller gets still names the host cause.
 func TestNetworkConnectorSendFailureIsAuditedOnceOnAFatalCall(t *testing.T) {
 	for name, load := range netLoadersFor(t) {
 		t.Run(name, func(t *testing.T) {
@@ -336,17 +336,14 @@ func TestNetworkConnectorSendFailureIsAuditedOnceOnAFatalCall(t *testing.T) {
 			var audit bytes.Buffer
 			n := netFor(b, &audit, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/down"})
 			n.Authorize = failSendOn("/down")
-			var observed []connectorhost.AuditEntry
-			n.Observe = func(e connectorhost.AuditEntry) { observed = append(observed, e) }
 			c := loadNetWith(t, load, httpCallsGuest(`not json`, getReq(b, "/down")), n)
 			err := c.Call(context.Background(), "m", nil, nil)
 			if !errors.Is(err, connectorhost.ErrCall) || !errors.Is(err, connectorhost.ErrHTTPSend) || !strings.Contains(err.Error(), tokenUnset) {
 				t.Fatalf("err = %v, want ErrCall, ErrHTTPSend and %q", err, tokenUnset)
 			}
-			for what, entries := range map[string][]connectorhost.AuditEntry{"audit": auditLines(t, &audit), "observer": observed} {
-				if withDetail, callFailures := countSendDetailAndCallFailures(entries); withDetail != 1 || callFailures != 1 {
-					t.Errorf("%s has %d entries with the send detail and %d call-failure entries, want 1 and 1: %+v", what, withDetail, callFailures, entries)
-				}
+			entries := auditLines(t, &audit)
+			if withDetail, callFailures := countSendDetailAndCallFailures(entries); withDetail != 1 || callFailures != 1 {
+				t.Errorf("audit has %d entries with the send detail and %d call-failure entries, want 1 and 1: %+v", withDetail, callFailures, entries)
 			}
 		})
 	}

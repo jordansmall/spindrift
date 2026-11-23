@@ -23,10 +23,6 @@ import (
 	"spindrift.dev/launcher/internal/primaryrecord"
 )
 
-func useGithubRowRouted(t *testing.T, host string) {
-	applyGithubRow(t, host, func(r *backendrows.Row) { r.Primary = true })
-}
-
 // routedReads is every read a routed row routes, each driven through the
 // production execClient.
 var routedReads = []struct {
@@ -85,7 +81,7 @@ func routedFiles(t *testing.T, logDir, suffix string) []string {
 // Under a routed row every read the Connector declares is answered by the
 // Connector over the API, never by gh.
 func TestRoutedRow_ReadsGoThroughTheConnector(t *testing.T) {
-	h, c, calls, logDir := routedLogHarness(t, useGithubRowRouted)
+	h, c, calls, logDir := routedLogHarness(t, useGithubRowAt)
 	h.SeedIssue(forge.Issue{Number: "1", Title: "one", Labels: []string{testLabels.Dispatchable}})
 	h.SeedIssue(forge.Issue{Number: "2", Title: "two"})
 	prURL := h.SeedOpenPR("1")
@@ -162,7 +158,7 @@ func TestRoutedRow_ReadsGoThroughTheConnector(t *testing.T) {
 	}
 }
 
-// A plain non-shadow row routes every read through the Connector, never gh.
+// A plain row routes every read through the Connector, never gh.
 func TestPlainRow_ReadsGoThroughTheConnector(t *testing.T) {
 	for _, tc := range routedReads {
 		t.Run(tc.name, func(t *testing.T) {
@@ -278,7 +274,6 @@ func TestPlainRow_RefusedRouteFailsTheReadAndIsAudited(t *testing.T) {
 func TestRoutedRow_FatalCallFailureReloadsTheConnectorForTheNextRead(t *testing.T) {
 	_, c, calls, logDir := routedLogHarness(t, func(t *testing.T, host string) {
 		applyGithubRow(t, host, func(r *backendrows.Row) {
-			r.Primary = true
 			r.Routes = r.Routes[:0:0]
 			for _, rt := range allRoutes(t, host) {
 				if !strings.Contains(rt.Path, "/issues") {
@@ -330,7 +325,7 @@ func allRoutes(t *testing.T, host string) []connectorhost.Route {
 // A Connector lacking the capability a primary read needs fails it as
 // unsupported, never falling back to gh.
 func TestRoutedRow_MissingCapabilityFailsTheReadWithoutGh(t *testing.T) {
-	_, c, calls, _ := routedLogHarness(t, useGithubRowRouted)
+	_, c, calls, _ := routedLogHarness(t, useGithubRowAt)
 	withoutCapability(t, "tracker.nativeDeps")
 
 	_, err := c.NativeDepsOf("1")
@@ -343,7 +338,7 @@ func TestRoutedRow_MissingCapabilityFailsTheReadWithoutGh(t *testing.T) {
 	}
 }
 
-// Every read a non-shadow row routes records its failure: a
+// Every read a row routes records its failure: a
 // Connector that fails to load lands a line in the primary log for each.
 func TestRoutedRow_RoutedReadsRecordTheirFailures(t *testing.T) {
 	for name, read := range map[string]func(c *execClient) error{
@@ -354,7 +349,7 @@ func TestRoutedRow_RoutedReadsRecordTheirFailures(t *testing.T) {
 		"IntrospectToken": func(*execClient) error { _, err := introspectToken("ghp_abc", connectorRepo); return err },
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, c, _, logDir := routedLogHarness(t, useGithubRowRouted)
+			_, c, _, logDir := routedLogHarness(t, useGithubRowAt)
 			boom := errors.New("github connector failed to load")
 			old := loadRowConnector
 			t.Cleanup(func() { loadRowConnector = old })
@@ -381,7 +376,7 @@ func TestRoutedRow_RoutedReadsRecordTheirFailures(t *testing.T) {
 // in the read's error and the primary log, naming the credential variable and
 // never its value.
 func TestRoutedRow_UnsetCredentialIsNamedInTheReadErrorAndRecord(t *testing.T) {
-	_, c, _, logDir := routedLogHarness(t, useGithubRowRouted)
+	_, c, _, logDir := routedLogHarness(t, useGithubRowAt)
 	t.Setenv(tokenCredentialEnv, "")
 
 	_, err := c.Issue("1")
@@ -408,7 +403,7 @@ func TestRoutedRow_TokenIntrospectionAuditsToThePrimaryRecord(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 	b := newTokenBackend(t, "ghp_abc")
-	useGithubRowRouted(t, b.Listener.Addr().String())
+	useGithubRowAt(t, b.Listener.Addr().String())
 	old := connectorClient
 	connectorClient = b.Client()
 	t.Cleanup(func() { connectorClient = old })
@@ -437,7 +432,7 @@ func TestMergeCommitFrom_WithoutTheReaderIsMissingCapability(t *testing.T) {
 // CheckRun is the merge wait's CI poll: under a routed row it reads the state
 // and the in-flight run link from the Connector, never gh.
 func TestRoutedRow_CheckRunComesFromTheConnector(t *testing.T) {
-	h, c, calls, _ := routedLogHarness(t, useGithubRowRouted)
+	h, c, calls, _ := routedLogHarness(t, useGithubRowAt)
 	prURL := h.SeedOpenPR("1")
 	h.SeedCheckStates(prURL, []forge.RollupState{forge.StatePending})
 	runs := h.backend.web + "/actions/runs/"
@@ -460,7 +455,7 @@ func TestRoutedRow_CheckRunComesFromTheConnector(t *testing.T) {
 // A Connector without forge.ciRun is an unsupported read, not a silent gh poll.
 func TestRoutedRow_CheckRunWithoutTheCapabilityFailsWithoutGh(t *testing.T) {
 	withoutCapability(t, "forge.ciRun")
-	h, c, calls, _ := routedLogHarness(t, useGithubRowRouted)
+	h, c, calls, _ := routedLogHarness(t, useGithubRowAt)
 	prURL := h.SeedOpenPR("1")
 
 	_, _, err := c.CheckRun(prURL)
@@ -512,7 +507,7 @@ var knownSandbox = statsSandbox{ok: true, stats: connectorsandbox.Stats{
 }}
 
 func TestRecordRoutedSandboxTotals_AppendsOneLineToTheAuditFile(t *testing.T) {
-	audit := routedSandboxHarness(t, useGithubRowRouted, knownSandbox, []byte(seededAudit))
+	audit := routedSandboxHarness(t, useGithubRowAt, knownSandbox, []byte(seededAudit))
 
 	RecordRoutedSandboxTotals()
 
@@ -533,7 +528,7 @@ func TestRecordRoutedSandboxTotals_AppendsOneLineToTheAuditFile(t *testing.T) {
 		t.Errorf("recording totals created %v, want no .log", got)
 	}
 
-	// The docs promise the keys the read shadow's shadow_summary carries.
+	// The docs promise the keys shadow_summary carries.
 	var keys map[string]any
 	if err := json.Unmarshal([]byte(lines[1]), &keys); err != nil {
 		t.Fatal(err)
@@ -552,7 +547,7 @@ func TestRecordRoutedSandboxTotals_AppendsOneLineToTheAuditFile(t *testing.T) {
 }
 
 func TestRecordRoutedSandboxTotals_WritesNothingWhenTheSandboxNeverStarted(t *testing.T) {
-	audit := routedSandboxHarness(t, useGithubRowRouted, statsSandbox{}, []byte(seededAudit))
+	audit := routedSandboxHarness(t, useGithubRowAt, statsSandbox{}, []byte(seededAudit))
 
 	RecordRoutedSandboxTotals()
 
@@ -561,20 +556,10 @@ func TestRecordRoutedSandboxTotals_WritesNothingWhenTheSandboxNeverStarted(t *te
 	}
 }
 
-func TestRecordRoutedSandboxTotals_WritesNothingUnderAShadowRow(t *testing.T) {
-	audit := routedSandboxHarness(t, useGithubRowShadow, knownSandbox, []byte{})
-
-	RecordRoutedSandboxTotals()
-
-	if b, _ := os.ReadFile(audit); len(b) != 0 {
-		t.Errorf("audit file = %q, want it untouched", b)
-	}
-}
-
 // A process that never read through its primary Connector has no record pair,
 // and recording must not make one: a pair reads as a dirty run.
 func TestRecordRoutedSandboxTotals_CreatesNoRecordPair(t *testing.T) {
-	audit := routedSandboxHarness(t, useGithubRowRouted, knownSandbox, nil)
+	audit := routedSandboxHarness(t, useGithubRowAt, knownSandbox, nil)
 
 	RecordRoutedSandboxTotals()
 

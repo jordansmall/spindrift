@@ -128,9 +128,6 @@ type sandboxMode int
 const (
 	// sandboxRouted is a routed row, loaded at launch.
 	sandboxRouted sandboxMode = iota
-	// sandboxPrimary makes the row the primary read path; like a routed row it
-	// loads at launch.
-	sandboxPrimary
 	// sandboxLocal has no github row: the run reads a local issue and lands by
 	// plain git push, so the only Connector it loads is the Driver's.
 	sandboxLocal
@@ -502,8 +499,8 @@ func sandboxName(argv []string) string {
 }
 
 // sandboxDoc writes a copy of the input document at docPath with row as its
-// github backend row, none in sandboxLocal mode. mode picks the row's primary
-// key. The fixture row is a routed no-tracker Connector, so its lack of the
+// github backend row, none in sandboxLocal mode. The fixture row is a routed
+// no-tracker Connector, so its lack of the
 // tracker capability refuses the first read. artifacts overrides keys of the
 // document's artifacts.
 func sandboxDoc(t *testing.T, docPath string, row map[string]any, mode sandboxMode, artifacts map[string]string) string {
@@ -528,9 +525,6 @@ func sandboxDoc(t *testing.T, docPath string, row map[string]any, mode sandboxMo
 	}
 	var rows []any
 	if mode != sandboxLocal {
-		if mode == sandboxPrimary || mode == sandboxTracker {
-			row["primary"] = true
-		}
 		rows = []any{row}
 	}
 	if doc["backends"], err = json.Marshal(rows); err != nil {
@@ -575,7 +569,7 @@ func bwrapSandboxArtifacts(t *testing.T, host string) map[string]string {
 // file only the totals.
 func TestSeamConnectorSandboxPrimaryTotals(t *testing.T) {
 	t.Parallel()
-	rig := newSandboxRig(t, "podman", sandboxRigOpts{mode: sandboxPrimary, issues: []int{7}})
+	rig := newSandboxRig(t, "podman", sandboxRigOpts{mode: sandboxRouted, issues: []int{7}})
 	res := seamtest.Start(t, rig.cmd).Wait(t)
 	res.WantExit(t, 1)
 	if starts, _ := countRuns("podman", seamtest.ReadRecord(t, filepath.Join(rig.recDir, "podman.jsonl"))); starts != 1 {

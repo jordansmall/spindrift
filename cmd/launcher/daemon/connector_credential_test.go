@@ -24,13 +24,12 @@ import (
 
 const connectorTokenEnv = "SPINDRIFT_GITHUB_CONNECTOR_TOKEN"
 
-// useGithubConnectorRow applies a github backend row; extra is spliced in as
-// further row fields (a leading comma included).
-func useGithubConnectorRow(t *testing.T, extra string) {
+// useGithubConnectorRow applies a github backend row.
+func useGithubConnectorRow(t *testing.T) {
 	t.Helper()
 	t.Cleanup(backendrows.Snapshot())
 	raw := `[{"name":"github","module":"/nonexistent.wasm","credentialEnv":"` + connectorTokenEnv + `",
-"routes":[{"method":"GET","host":"api.github.com","path":"/repos/{repo}/issues"}]` + extra + `}]`
+"routes":[{"method":"GET","host":"api.github.com","path":"/repos/{repo}/issues"}]}]`
 	if err := backendrows.Use([]byte(raw), func(string) string { return "" }); err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +53,7 @@ var workKinds = []daemon.Kind{daemon.KindOf(dispatchkind.Work)}
 
 func TestResolveConnectorCredentials_CmdFormFillsCredentialEnv(t *testing.T) {
 	clearKnobEnvT(t)
-	useGithubConnectorRow(t, "")
+	useGithubConnectorRow(t)
 	t.Setenv(connectorTokenEnv, "")
 	t.Setenv(connectorTokenEnv+"_CMD", "fetch-token")
 	var ran string
@@ -73,7 +72,7 @@ func TestResolveConnectorCredentials_CmdFormFillsCredentialEnv(t *testing.T) {
 
 func TestResolveConnectorCredentials_CmdWinsOverPlainEnv(t *testing.T) {
 	clearKnobEnvT(t)
-	useGithubConnectorRow(t, "")
+	useGithubConnectorRow(t)
 	t.Setenv(connectorTokenEnv, "stale")
 	t.Setenv(connectorTokenEnv+"_CMD", "fetch-token")
 	stubSecretCmd(t, func(string) (string, error) { return "fresh\n", nil })
@@ -91,7 +90,7 @@ func TestResolveConnectorCredentials_CmdWinsOverPlainEnv(t *testing.T) {
 
 func TestResolveConnectorCredentials_SecretCmdTemplateAloneResolves(t *testing.T) {
 	clearKnobEnvT(t)
-	useGithubConnectorRow(t, "")
+	useGithubConnectorRow(t)
 	t.Setenv(connectorTokenEnv, "")
 	t.Setenv(connectorTokenEnv+"_CMD", "")
 	t.Setenv("SECRET_CMD", "rbw get spindrift-{name}")
@@ -132,7 +131,7 @@ func TestResolveConnectorCredentials_SecretCmdTemplateAloneResolves(t *testing.T
 
 func TestResolveConnectorCredentials_RefusesWhenNeitherFormSet(t *testing.T) {
 	clearKnobEnvT(t)
-	useGithubConnectorRow(t, "")
+	useGithubConnectorRow(t)
 	t.Setenv(connectorTokenEnv, "")
 	t.Setenv(connectorTokenEnv+"_CMD", "")
 	stubSecretCmd(t, failIfRun(t))
@@ -149,7 +148,7 @@ func TestResolveConnectorCredentials_RefusesWhenNeitherFormSet(t *testing.T) {
 
 func TestResolveConnectorCredentials_CmdFailureRefusesWithoutSecret(t *testing.T) {
 	clearKnobEnvT(t)
-	useGithubConnectorRow(t, "")
+	useGithubConnectorRow(t)
 	t.Setenv(connectorTokenEnv, "")
 	t.Setenv(connectorTokenEnv+"_CMD", "fetch-token")
 	stubSecretCmd(t, func(string) (string, error) { return "partial-secret", errors.New("boom partial-secret") })
@@ -171,17 +170,15 @@ func TestResolveConnectorCredentials_UnreadRowsNeverRunCmd(t *testing.T) {
 	butler := []daemon.Kind{daemon.KindOf(dispatchkind.Butler)}
 	for _, tc := range []struct {
 		name    string
-		extra   string
 		tracker string
 		kinds   []daemon.Kind
 	}{
-		{"shadow row", `,"shadow":true,"shadowEvery":2`, "github", workKinds},
-		{"inactive backend", "", "local", workKinds},
-		{"no tracker-probe kind", "", "github", butler},
+		{"inactive backend", "local", workKinds},
+		{"no tracker-probe kind", "github", butler},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			clearKnobEnvT(t)
-			useGithubConnectorRow(t, tc.extra)
+			useGithubConnectorRow(t)
 			t.Setenv(connectorTokenEnv, "")
 			t.Setenv(connectorTokenEnv+"_CMD", "fetch-token")
 			t.Setenv("SECRET_CMD", "rbw get spindrift-{name}")
@@ -195,24 +192,15 @@ func TestResolveConnectorCredentials_UnreadRowsNeverRunCmd(t *testing.T) {
 			}
 		})
 	}
-	t.Run("no credential at all is not an error", func(t *testing.T) {
-		clearKnobEnvT(t)
-		useGithubConnectorRow(t, `,"shadow":true,"shadowEvery":2`)
-		t.Setenv(connectorTokenEnv, "")
-		t.Setenv(connectorTokenEnv+"_CMD", "")
-		if _, err := resolveConnectorCredentials(demandDocT(map[string]string{"ISSUE_TRACKER": "github"}), workKinds, &bytes.Buffer{}); err != nil {
-			t.Fatal(err)
-		}
-	})
 }
 
 const jiraTokenEnv = "SPINDRIFT_JIRA_CONNECTOR_TOKEN"
 
-func useJiraConnectorRow(t *testing.T, extra string) {
+func useJiraConnectorRow(t *testing.T) {
 	t.Helper()
 	t.Cleanup(backendrows.Snapshot())
 	raw := `[{"name":"jira","module":"/nonexistent.wasm","credentialEnv":"` + jiraTokenEnv + `",
-"routes":[{"method":"GET","host":"jira.example","path":"/x"}]` + extra + `}]`
+"routes":[{"method":"GET","host":"jira.example","path":"/x"}]}]`
 	if err := backendrows.Use([]byte(raw), func(string) string { return "" }); err != nil {
 		t.Fatal(err)
 	}
@@ -221,36 +209,27 @@ func useJiraConnectorRow(t *testing.T, extra string) {
 }
 
 // jira's Strategy is ConnectorRouted, so its row's credential is in the
-// Daemon's probe path with or without `primary`.
-func TestResolveConnectorCredentials_JiraRowResolvesWithOrWithoutPrimary(t *testing.T) {
-	for _, tc := range []struct {
-		name, extra string
-	}{
-		{"primary", `,"primary":true`},
-		{"not primary", ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			clearKnobEnvT(t)
-			useJiraConnectorRow(t, tc.extra)
-			t.Setenv("SECRET_CMD", "vault get {name}")
-			var ran []string
-			stubSecretCmd(t, func(cmd string) (string, error) { ran = append(ran, cmd); return "tok\n", nil })
-			if _, err := resolveConnectorCredentials(demandDocT(map[string]string{"ISSUE_TRACKER": "jira"}), workKinds, &bytes.Buffer{}); err != nil {
-				t.Fatal(err)
-			}
-			if len(ran) == 0 {
-				t.Error("secret command did not run, want the jira credential resolved")
-			}
-			if os.Getenv(jiraTokenEnv) != "tok" {
-				t.Errorf("%s = %q, want tok", jiraTokenEnv, os.Getenv(jiraTokenEnv))
-			}
-		})
+// Daemon's probe path.
+func TestResolveConnectorCredentials_JiraRowResolves(t *testing.T) {
+	clearKnobEnvT(t)
+	useJiraConnectorRow(t)
+	t.Setenv("SECRET_CMD", "vault get {name}")
+	var ran []string
+	stubSecretCmd(t, func(cmd string) (string, error) { ran = append(ran, cmd); return "tok\n", nil })
+	if _, err := resolveConnectorCredentials(demandDocT(map[string]string{"ISSUE_TRACKER": "jira"}), workKinds, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(ran) == 0 {
+		t.Error("secret command did not run, want the jira credential resolved")
+	}
+	if os.Getenv(jiraTokenEnv) != "tok" {
+		t.Errorf("%s = %q, want tok", jiraTokenEnv, os.Getenv(jiraTokenEnv))
 	}
 }
 
-func TestResolveConnectorCredentials_PrimaryJiraRowRefusesWithoutCredential(t *testing.T) {
+func TestResolveConnectorCredentials_JiraRowRefusesWithoutCredential(t *testing.T) {
 	clearKnobEnvT(t)
-	useJiraConnectorRow(t, `,"primary":true`)
+	useJiraConnectorRow(t)
 	stubSecretCmd(t, failIfRun(t))
 	_, err := resolveConnectorCredentials(demandDocT(map[string]string{"ISSUE_TRACKER": "jira"}), workKinds, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), jiraTokenEnv) {
@@ -260,7 +239,7 @@ func TestResolveConnectorCredentials_PrimaryJiraRowRefusesWithoutCredential(t *t
 
 func TestResolveConnectorCredentials_RefreshReResolvesCmdCredentials(t *testing.T) {
 	clearKnobEnvT(t)
-	useGithubConnectorRow(t, "")
+	useGithubConnectorRow(t)
 	t.Setenv(connectorTokenEnv, "")
 	t.Setenv(connectorTokenEnv+"_CMD", "fetch-token")
 	out, fail := "tok-1", false
@@ -294,7 +273,7 @@ func TestResolveConnectorCredentials_RefreshReResolvesCmdCredentials(t *testing.
 
 func TestResolveConnectorCredentials_PlainEnvIsNotRefreshed(t *testing.T) {
 	clearKnobEnvT(t)
-	useGithubConnectorRow(t, "")
+	useGithubConnectorRow(t)
 	t.Setenv(connectorTokenEnv, "plain")
 	t.Setenv(connectorTokenEnv+"_CMD", "")
 	stubSecretCmd(t, failIfRun(t))
@@ -330,13 +309,13 @@ func writeConnectorDocT(t *testing.T, extra string, settings map[string]string) 
 
 // The refusal must precede --check-only's early return, or a successor's
 // smoke test would pass a Daemon that then refuses to start.
-func TestMainRun_PrimaryConnectorRowWithoutCredentialRefusesStart(t *testing.T) {
+func TestMainRun_ConnectorRowWithoutCredentialRefusesStart(t *testing.T) {
 	for _, flags := range [][]string{{"dispatch"}, {"--check-only", "dispatch"}} {
 		t.Run(strings.Join(flags, " "), func(t *testing.T) {
 			clearKnobEnvT(t)
 			t.Cleanup(backendrows.Snapshot())
 			stubSecretCmd(t, failIfRun(t))
-			docPath := writeConnectorDocT(t, `,"primary":true,"credentialKnob":"githubConnectorToken"`, map[string]string{"ISSUE_TRACKER": "github"})
+			docPath := writeConnectorDocT(t, `,"credentialKnob":"githubConnectorToken"`, map[string]string{"ISSUE_TRACKER": "github"})
 
 			var stdout, stderr bytes.Buffer
 			if got := mainRun(append([]string{"--input", docPath}, flags...), &stdout, &stderr); got != 1 {
@@ -356,7 +335,7 @@ func TestMainRun_CheckOnlyRefusesAFailingCredentialCommand(t *testing.T) {
 	t.Cleanup(backendrows.Snapshot())
 	t.Setenv(connectorTokenEnv+"_CMD", "fetch-token")
 	stubSecretCmd(t, func(string) (string, error) { return "", errors.New("vault locked") })
-	docPath := writeConnectorDocT(t, `,"primary":true`, map[string]string{"ISSUE_TRACKER": "github"})
+	docPath := writeConnectorDocT(t, "", map[string]string{"ISSUE_TRACKER": "github"})
 
 	var stdout, stderr bytes.Buffer
 	if got := mainRun([]string{"--input", docPath, "--check-only", "dispatch"}, &stdout, &stderr); got != 1 {
@@ -368,9 +347,8 @@ func TestMainRun_CheckOnlyRefusesAFailingCredentialCommand(t *testing.T) {
 }
 
 func TestMainRun_UnreadConnectorRowsNeitherRunCmdNorRefuseStart(t *testing.T) {
-	for _, tc := range []struct{ name, extra, tracker string }{
-		{"shadow row", `,"shadow":true,"shadowEvery":2`, "github"},
-		{"inactive backend", `,"primary":true`, "local"},
+	for _, tc := range []struct{ name, tracker string }{
+		{"inactive backend", "local"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			clearKnobEnvT(t)
@@ -378,7 +356,7 @@ func TestMainRun_UnreadConnectorRowsNeitherRunCmdNorRefuseStart(t *testing.T) {
 			t.Cleanup(backendrows.Snapshot())
 			t.Setenv("SECRET_CMD", "rbw get spindrift-{name}")
 			stubSecretCmd(t, failIfRun(t))
-			docPath := writeConnectorDocT(t, tc.extra, map[string]string{"ISSUE_TRACKER": tc.tracker, "CODE_FORGE": "local"})
+			docPath := writeConnectorDocT(t, "", map[string]string{"ISSUE_TRACKER": tc.tracker, "CODE_FORGE": "local"})
 
 			var stdout, stderr bytes.Buffer
 			if got := mainRun([]string{"--input", docPath, "--check-only", "dispatch"}, &stdout, &stderr); got != 0 {
@@ -395,7 +373,7 @@ const (
 	connectorRoutesEnv = "SPINDRIFT_BACKEND_CONNECTOR_ROUTES"
 )
 
-// useCompiledGithubRow applies a primary github row running the compiled
+// useCompiledGithubRow applies a github row running the compiled
 // Connector with its Routes pointed at host, skipping when none was built.
 func useCompiledGithubRow(t *testing.T, host string) {
 	t.Helper()
@@ -411,7 +389,7 @@ func useCompiledGithubRow(t *testing.T, host string) {
 		routes[i].Host = host
 	}
 	raw, err := json.Marshal([]backendrows.Row{{
-		Name: "github", Module: wasm, Routes: routes, CredentialEnv: connectorTokenEnv, Primary: true,
+		Name: "github", Module: wasm, Routes: routes, CredentialEnv: connectorTokenEnv,
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -423,9 +401,9 @@ func useCompiledGithubRow(t *testing.T, host string) {
 }
 
 // With only the credential's `_CMD` form set, the Daemon's Demand probe counts
-// ready issues through the primary Connector row, authenticated by the token
+// ready issues through the Connector row, authenticated by the token
 // the command printed.
-func TestDemandProbe_CountsThroughThePrimaryConnectorWithACmdCredential(t *testing.T) {
+func TestDemandProbe_CountsThroughTheConnectorWithACmdCredential(t *testing.T) {
 	clearKnobEnvT(t)
 	var mu sync.Mutex
 	var auths []string
@@ -500,7 +478,7 @@ func TestMainRun_StartsTheConnectorCredentialWatcherForACmdSourcedRow(t *testing
 			t.Setenv(connectorTokenEnv+"_CMD", "fetch-token")
 			stubSecretCmd(t, func(string) (string, error) { return "tok", nil })
 			started := stubConnectorWatch(t)
-			docPath := writeConnectorDocT(t, `,"primary":true`, map[string]string{"ISSUE_TRACKER": "github"})
+			docPath := writeConnectorDocT(t, "", map[string]string{"ISSUE_TRACKER": "github"})
 			t.Chdir(t.TempDir())
 
 			var stdout, stderr bytes.Buffer
@@ -515,25 +493,22 @@ func TestMainRun_StartsTheConnectorCredentialWatcherForACmdSourcedRow(t *testing
 	}
 }
 
-// A forgejo row is read as the CODE_FORGE and as the ISSUE_TRACKER whether or
-// not it is primary, so the credential gate resolves its credential on either
-// axis.
+// A forgejo row is read as the CODE_FORGE and as the ISSUE_TRACKER, so the
+// credential gate resolves its credential on either axis.
 func TestResolveConnectorCredentials_ForgejoRowResolvesAsForgeOrTracker(t *testing.T) {
 	for _, tc := range []struct {
-		name, extra, template, forge string
-		wantRan, wantErr             bool
+		name, template, forge string
+		wantRan, wantErr      bool
 	}{
-		{"primary resolves", `,"primary":true`, "rbw get {name}", "forgejo", true, false},
-		{"primary unset refuses", `,"primary":true`, "", "forgejo", false, true},
-		{"plain forge resolves", ``, "rbw get {name}", "forgejo", true, false},
-		{"primary tracker only resolves", `,"primary":true`, "rbw get {name}", "git", true, false},
-		{"plain tracker only resolves", ``, "rbw get {name}", "git", true, false},
+		{"unset refuses", "", "forgejo", false, true},
+		{"forge resolves", "rbw get {name}", "forgejo", true, false},
+		{"tracker only resolves", "rbw get {name}", "git", true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			clearKnobEnvT(t)
 			t.Cleanup(backendrows.Snapshot())
 			raw := `[{"name":"forgejo","module":"/nonexistent.wasm","credentialEnv":"` + connectorTokenEnv + `",
-"routes":[{"method":"GET","host":"codeberg.org","path":"/api/v1/x"}]` + tc.extra + `}]`
+"routes":[{"method":"GET","host":"codeberg.org","path":"/api/v1/x"}]}]`
 			if err := backendrows.Use([]byte(raw), func(string) string { return "" }); err != nil {
 				t.Fatal(err)
 			}
@@ -559,11 +534,11 @@ func TestResolveConnectorCredentials_ForgejoRowResolvesAsForgeOrTracker(t *testi
 	}
 }
 
-// A routed github row is read as the CODE_FORGE through its Connector with or
-// without `primary`, so its credential resolves even with a local tracker.
-func TestResolveConnectorCredentials_GithubForgeRowResolvesWithoutPrimary(t *testing.T) {
+// A routed github row is read as the CODE_FORGE through its Connector, so its
+// credential resolves even with a local tracker.
+func TestResolveConnectorCredentials_GithubForgeRowResolves(t *testing.T) {
 	clearKnobEnvT(t)
-	useGithubConnectorRow(t, "")
+	useGithubConnectorRow(t)
 	t.Setenv(connectorTokenEnv, "")
 	t.Setenv(connectorTokenEnv+"_CMD", "")
 	t.Setenv("SECRET_CMD", "rbw get {name}")

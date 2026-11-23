@@ -481,8 +481,8 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 	// the token probe of any chosen row whose tracker side is the Connector.
 	// The false arguments mean "not primary".
 	deferChecks := !connectorsandbox.Installed() &&
-		(backendkit.TrackerReadsThroughConnector(trackerChoice.name, false) ||
-			backendkit.ForgeReadsThroughConnector(forgeChoice.name, false))
+		(backendkit.TrackerReadsThroughConnector(trackerChoice.name) ||
+			backendkit.ForgeReadsThroughConnector(forgeChoice.name))
 	tokens := map[string]string{}
 	for _, c := range a.chosen() {
 		row, knobs := c.row, c.knobs
@@ -500,7 +500,7 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 				PromptMasked: promptMasked,
 				AmbientToken: env.GHAuthToken,
 				Probe: func(token string) error {
-					if deferChecks && backendkit.TrackerReadsThroughConnector(row.Name, false) {
+					if deferChecks && backendkit.TrackerReadsThroughConnector(row.Name) {
 						return connectorsandbox.ErrNoConnectorSandbox
 					}
 					// The row is built as both axes so the probe needs nothing

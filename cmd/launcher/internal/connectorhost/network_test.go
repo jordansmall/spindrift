@@ -346,41 +346,6 @@ func TestAuditLogConcurrentRecordsAreWholeLines(t *testing.T) {
 	}
 }
 
-func TestNetworkAuditShadowMarkAndObserve(t *testing.T) {
-	b := newBackend(t, func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "ok") })
-	route := connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"}
-	sent := []byte(fmt.Sprintf(`{"method":"GET","url":"%s/repos"}`, b.URL))
-	for _, shadow := range []bool{false, true} {
-		var audit bytes.Buffer
-		var seen []connectorhost.AuditEntry
-		n := netFor(b, &audit, route)
-		n.Shadow = shadow
-		n.Observe = func(e connectorhost.AuditEntry) { seen = append(seen, e) }
-		if _, _, err := n.Do(context.Background(), sent, 1<<10); err != nil {
-			t.Fatal(err)
-		}
-		if _, _, err := n.Do(context.Background(), []byte(`{`), 1<<10); !errors.Is(err, connectorhost.ErrRouteRefused) {
-			t.Fatal(err)
-		}
-		n.RecordFailure(connectorhost.DecisionFailed, errors.New("boom"))
-		lines := auditLines(t, &audit)
-		if len(lines) != 3 || len(seen) != 3 {
-			t.Fatalf("shadow=%v: %d audit lines, %d observed, want 3 each", shadow, len(lines), len(seen))
-		}
-		for i := range lines {
-			if lines[i].Shadow != shadow || seen[i] != lines[i] {
-				t.Errorf("shadow=%v entry %d: audit %+v, observed %+v", shadow, i, lines[i], seen[i])
-			}
-		}
-		if got := strings.Contains(audit.String(), `"shadow":true`); got != shadow {
-			t.Errorf("shadow=%v: shadow key present = %v in %q", shadow, got, audit.String())
-		}
-		if !shadow && strings.Contains(audit.String(), `"shadow"`) {
-			t.Errorf("non-shadow audit carries a shadow key: %q", audit.String())
-		}
-	}
-}
-
 func TestNetworkAuditClassifiesRateLimits(t *testing.T) {
 	cases := map[string]struct {
 		status         int

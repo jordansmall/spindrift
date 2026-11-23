@@ -4,8 +4,8 @@
 # token knob are registered unconditionally, so a Consumer importing this module
 # always has the row; the Connector token is needed on every run whose
 # CODE_FORGE or ISSUE_TRACKER is github. No native github adapter remains
-# (issue #6888), so neither `shadow` nor `primary` applies: a `shadow` row
-# fails at runtime.
+# (issue #6888), so neither `shadow` nor `primary` applies: the row refuses both
+# at evaluation (issue #7456).
 { core }:
 _:
 let
@@ -27,7 +27,7 @@ in
     env = "SPINDRIFT_GITHUB_CONNECTOR_TOKEN";
     group = "dispatch";
     secret = true;
-    doc = "bearer token the github Connector's backend row authorizes its reads and writes with (read-only under `shadow`, scope list in docs/reference.md#backend-read-shadow; write-capable otherwise, permission table in docs/reference.md#backend-primary-mode); host-only, never reaches the Box; needed on every run whose CODE_FORGE or ISSUE_TRACKER is github, since the Connector answers github's reads and writes for every Consumer";
+    doc = "bearer token the github Connector's backend row authorizes its reads and writes with (write-capable, permission table in docs/reference.md#backend-primary-mode); host-only, never reaches the Box; needed on every run whose CODE_FORGE or ISSUE_TRACKER is github, since the Connector answers github's reads and writes for every Consumer";
     flakeOption = false;
     boxEnv = false;
   };

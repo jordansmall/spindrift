@@ -475,55 +475,41 @@ func TestUseSubstitutesTheConfiguredBaseURLIntoRoutes(t *testing.T) {
 // baseSearch is the one {base} route the base-URL tests below resolve.
 var baseSearch = connectorhost.Route{Method: "GET", Host: "{base}", Path: "/rest"}
 
-func TestUseRefusesAnInvalidBaseURLNamingTheBackend(t *testing.T) {
-	cases := map[string]struct {
-		row  backendrows.Row
-		base string
-	}{
-		"plaintext":        {shadowedBaseRow(baseSearch), "http://acme.example.net"},
-		"ipv6 zone":        {shadowedBaseRow(baseSearch), "https://[fe80::1%25en0]"},
-		"no scheme":        {shadowedBaseRow(baseSearch), "acme.example.net"},
-		"userinfo":         {shadowedBaseRow(baseSearch), "https://u:p@acme.example.net"},
-		"query":            {shadowedBaseRow(baseSearch), "https://acme.example.net/?x=1"},
-		"fragment":         {shadowedBaseRow(baseSearch), "https://acme.example.net/#x"},
-		"escaped path":     {shadowedBaseRow(baseSearch), "https://acme.example.net/ji%2Fra"},
-		"bad escape":       {shadowedBaseRow(baseSearch), "https://u:p%zz@acme.example.net"},
-		"empty host":       {shadowedBaseRow(baseSearch), "https:///jira"},
-		"malformed host":   {shadowedBaseRow(baseSearch), "https://acme.example.net:"},
-		"unparseable":      {shadowedBaseRow(baseSearch), "https://acme example.net"},
-		"host with no env": {row("site", baseSearch), "https://acme.example.net"},
-		"non-canonical":    {shadowedBaseRow(baseSearch), "https://acme.example.net/jira//"},
-		"root doubled":     {shadowedBaseRow(baseSearch), "https://acme.example.net//"},
+func TestUseRefusesABaseHostWithNoBaseEnvNamingTheBackend(t *testing.T) {
+	isolate(t)
+	err := backendrows.Use(rows(t, []backendrows.Row{row("good", getRepos), row("site", baseSearch)}), envOf("https://acme.example.net"))
+	if err == nil {
+		t.Fatal("Use() = nil, want an error")
 	}
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
+	if !strings.Contains(err.Error(), `backend "site"`) {
+		t.Errorf("err = %q, want it to name the backend", err)
+	}
+	if _, ok := backendrows.Lookup("good"); ok {
+		t.Error("good row stored although the document was refused")
+	}
+}
+
+// The shadow and primary fields are gone from the row; a stale document that
+// still carries one is refused rather than silently changing routing.
+func TestUseRefusesTheRetiredShadowAndPrimaryFields(t *testing.T) {
+	for _, field := range []string{`"shadow":true`, `"shadowEvery":20`, `"primary":true`} {
+		t.Run(field, func(t *testing.T) {
 			isolate(t)
-			err := backendrows.Use(rows(t, []backendrows.Row{row("good", getRepos), tc.row}), envOf(tc.base))
-			if err == nil {
-				t.Fatal("Use() = nil, want an error")
-			}
-			if !strings.Contains(err.Error(), `backend "site"`) {
-				t.Errorf("err = %q, want it to name the backend", err)
-			}
-			if strings.Contains(err.Error(), "p%zz") {
-				t.Errorf("err = %q, want it to leave the base URL value out", err)
-			}
-			if _, ok := backendrows.Lookup("good"); ok {
-				t.Error("good row stored although the document was refused")
+			doc := rows(t, []backendrows.Row{row("gh", getRepos)})
+			doc = append(bytes.TrimSuffix(doc, []byte("}]")), []byte(","+field+"}]")...)
+			if err := backendrows.Use(doc, noEnv); err == nil || !strings.Contains(err.Error(), "unknown field") {
+				t.Errorf("Use(%s) = %v, want an unknown-field error", doc, err)
 			}
 		})
 	}
 }
 
-func shadowedBaseRow(routes ...connectorhost.Route) backendrows.Row {
-	r := baseRow(routes...)
-	r.Shadow, r.ShadowEvery = true, 20
-	return r
-}
-
-func TestUseSkipsANonShadowBaseRowWithAnUnusableBase(t *testing.T) {
+func TestUseSkipsABaseRowWithAnUnusableBase(t *testing.T) {
 	for name, base := range map[string]string{
 		"unset":                 "",
+		"no scheme":             "acme.example.net",
+		"fragment":              "https://acme.example.net/#x",
+		"bad escape":            "https://u:p%zz@acme.example.net",
 		"plaintext":             "http://jira.corp:8080",
 		"ipv6 zone":             "https://[fe80::1%25en0]",
 		"query":                 "https://acme.example.net/?x=1",
@@ -582,14 +568,6 @@ func TestUseStillValidatesAnUnconfiguredBaseRow(t *testing.T) {
 	}
 }
 
-func TestUseRefusesAShadowedBaseRowWithAnUnsetBase(t *testing.T) {
-	isolate(t)
-	err := backendrows.Use(rows(t, []backendrows.Row{shadowedBaseRow(baseSearch)}), envOf(""))
-	if err == nil || !strings.Contains(err.Error(), "SITE_BASE_URL is not set") {
-		t.Errorf("err = %v, want it to name SITE_BASE_URL as not set", err)
-	}
-}
-
 func TestUseMapsARootBaseRouteToTheBarePrefix(t *testing.T) {
 	isolate(t)
 	root := connectorhost.Route{Method: "GET", Host: "{base}", Path: "/"}
@@ -599,108 +577,6 @@ func TestUseMapsARootBaseRouteToTheBarePrefix(t *testing.T) {
 	got, _ := backendrows.Lookup("site")
 	if want := (connectorhost.Route{Method: "GET", Host: "acme.example.net", Path: "/jira"}); got.Routes[0] != want {
 		t.Errorf("Routes[0] = %v, want %v", got.Routes[0], want)
-	}
-}
-
-func TestUseRoundTripsAndValidatesShadowRows(t *testing.T) {
-	shadowed := func(shadow bool, every int) backendrows.Row {
-		r := row("gh", getRepos)
-		r.Shadow, r.ShadowEvery = shadow, every
-		return r
-	}
-	t.Run("round trip", func(t *testing.T) {
-		isolate(t)
-		if err := backendrows.Use(rows(t, []backendrows.Row{shadowed(true, 20)}), noEnv); err != nil {
-			t.Fatal(err)
-		}
-		got, _ := backendrows.Lookup("gh")
-		if !got.Shadow || got.ShadowEvery != 20 {
-			t.Errorf("Lookup = %+v, want shadow every 20", got)
-		}
-		if strings.Contains(string(rows(t, []backendrows.Row{row("x", getRepos)})), "shadow") {
-			t.Error("a non-shadow row renders a shadow key")
-		}
-	})
-	for name, tc := range map[string]struct {
-		row  backendrows.Row
-		want string
-	}{
-		"negative":              {shadowed(true, -1), "negative shadowEvery"},
-		"negative without flag": {shadowed(false, -1), "negative shadowEvery"},
-		"every without shadow":  {shadowed(false, 5), "shadowEvery without shadow"},
-		"shadow without every":  {shadowed(true, 0), "shadow without shadowEvery"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			isolate(t)
-			err := backendrows.Use(rows(t, []backendrows.Row{tc.row}), noEnv)
-			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), `"gh"`) {
-				t.Errorf("err = %v, want it to name gh and contain %q", err, tc.want)
-			}
-		})
-	}
-}
-
-func TestUseRoundTripsAndValidatesPrimaryRows(t *testing.T) {
-	primary := func() backendrows.Row {
-		r := row("gh", getRepos)
-		r.Primary = true
-		return r
-	}
-	t.Run("round trip", func(t *testing.T) {
-		isolate(t)
-		if err := backendrows.Use(rows(t, []backendrows.Row{primary()}), noEnv); err != nil {
-			t.Fatal(err)
-		}
-		got, _ := backendrows.Lookup("gh")
-		if !got.Primary {
-			t.Errorf("Lookup = %+v, want primary", got)
-		}
-		if strings.Contains(string(rows(t, []backendrows.Row{row("x", getRepos)})), "primary") {
-			t.Error("a non-primary row renders a primary key")
-		}
-	})
-	t.Run("refused with shadow", func(t *testing.T) {
-		isolate(t)
-		r := primary()
-		r.Shadow, r.ShadowEvery = true, 20
-		err := backendrows.Use(rows(t, []backendrows.Row{r}), noEnv)
-		if err == nil || !strings.Contains(err.Error(), "primary and shadow are exclusive") || !strings.Contains(err.Error(), `"gh"`) {
-			t.Errorf("err = %v, want it to name gh and refuse primary with shadow", err)
-		}
-	})
-	t.Run("unusable base is refused", func(t *testing.T) {
-		isolate(t)
-		r := baseRow(baseSearch)
-		r.Primary = true
-		err := backendrows.Use(rows(t, []backendrows.Row{r}), envOf(""))
-		if err == nil || !strings.Contains(err.Error(), "SITE_BASE_URL is not set") {
-			t.Errorf("err = %v, want it to name SITE_BASE_URL as not set", err)
-		}
-	})
-}
-
-func TestLoadPassesShadowAndObserveToTheNetwork(t *testing.T) {
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "ok") }))
-	t.Cleanup(srv.Close)
-	var audit bytes.Buffer
-	var seen []connectorhost.AuditEntry
-	r := backendrows.Row{
-		Name: "fixture-network", Module: fixtureWasm(t), CredentialEnv: "FIXTURE_TOKEN",
-		Routes: []connectorhost.Route{{Method: "GET", Host: srv.Listener.Addr().String(), Path: "/repos"}},
-	}
-	c, err := backendrows.Load(context.Background(), r, backendrows.Options{
-		Getenv: func(string) string { return "tok" }, Audit: &audit, Client: srv.Client(),
-		Shadow: true, Observe: func(e connectorhost.AuditEntry) { seen = append(seen, e) },
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = c.Close(context.Background()) })
-	if err := c.Call(context.Background(), "fetch", map[string]string{"url": srv.URL + "/repos/x", "method": "GET"}, new(fetched)); err != nil {
-		t.Fatal(err)
-	}
-	if len(seen) != 1 || !seen[0].Shadow || seen[0].Status != 200 || !strings.Contains(audit.String(), `"shadow":true`) {
-		t.Errorf("observed %+v, audit %q", seen, audit.String())
 	}
 }
 

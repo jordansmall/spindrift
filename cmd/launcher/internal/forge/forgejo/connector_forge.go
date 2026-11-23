@@ -21,7 +21,7 @@ import (
 	"spindrift.dev/launcher/internal/hostpaths"
 )
 
-// ErrMergeMethod is why a non-shadow forgejo row refuses a MERGE_METHOD
+// ErrMergeMethod is why a forgejo row refuses a MERGE_METHOD
 // other than rebase: the Connector always merges by rebase, so honouring the
 // knob is impossible and ignoring it would be silent.
 var ErrMergeMethod = errors.New("MERGE_METHOD must be rebase or unset: the forgejo Connector merges by rebase only")
@@ -38,16 +38,15 @@ var loadRowConnector = backendrows.Load
 var connectorClient *http.Client
 
 // ErrNoConnectorRow is why neither forgejo's Code Forge nor its issue tracker
-// can be built without a forgejo backend row that is not shadow: both run only
-// through the Connector, and a shadow row only observes, so it never answers.
-var ErrNoConnectorRow = errors.New("forgejo runs only through its Connector, which needs a non-shadow forgejo backend row with a usable base")
+// can be built without a forgejo backend row: both run only through the
+// Connector.
+var ErrNoConnectorRow = errors.New("forgejo runs only through its Connector, which needs a forgejo backend row with a usable base")
 
-// connectorRow is the forgejo backend row both halves are built from: any row
-// that is not shadow, with or without primary. Otherwise it returns
-// ErrNoConnectorRow, wrapping the row set's base error when that is why the
-// row is absent.
+// connectorRow is the forgejo backend row both halves are built from.
+// Otherwise it returns ErrNoConnectorRow, wrapping the row set's base error
+// when that is why the row is absent.
 func connectorRow() (backendrows.Row, error) {
-	if row, ok := backendrows.Lookup(backend.Forgejo.Name); ok && !row.Shadow {
+	if row, ok := backendrows.Lookup(backend.Forgejo.Name); ok {
 		return row, nil
 	}
 	if baseErr := backendrows.BaseError(backend.Forgejo.Name); baseErr != nil {

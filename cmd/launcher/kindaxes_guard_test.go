@@ -198,7 +198,7 @@ var workKindFacts = map[string]map[string]int{
 
 var (
 	kindNameRef       = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`\bdispatchkind\.` + kindVarAlternation() + `\b`) })
-	kindBootstrapCall = regexp.MustCompile(`\b(bootstrap|bootstrapShadowed|applyDispatchKind)\(`)
+	kindBootstrapCall = regexp.MustCompile(`\b(bootstrap|applyDispatchKind)\(`)
 )
 
 // namesKind reports whether line, read from path, names one kind outside an

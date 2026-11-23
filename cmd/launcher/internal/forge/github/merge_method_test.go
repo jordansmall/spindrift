@@ -22,7 +22,7 @@ func TestRoutedRow_MergeMethodOtherThanRebaseIsRefused(t *testing.T) {
 			{"EnqueueAutoMerge", func(c *execClient, u string) error { return c.EnqueueAutoMerge(u) }},
 		} {
 			t.Run(op.name+"/"+method, func(t *testing.T) {
-				h, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
+				h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
 				url := h.SeedLandablePR("9")
 				before := h.backend.hitCount()
 				c := NewExecClient(connectorRepo, testLabels, WithMergeMethod(method))
@@ -40,48 +40,33 @@ func TestRoutedRow_MergeMethodOtherThanRebaseIsRefused(t *testing.T) {
 	}
 }
 
-// A routed (non-shadow) row refuses MERGE_METHOD at forge build time, as the
-// forgejo row does, so a misconfigured launch fails before any Box starts;
-// `primary` changes nothing.
+// A routed row refuses MERGE_METHOD at forge build time, as the forgejo row
+// does, so a misconfigured launch fails before any Box starts.
 func TestStrategy_RoutedRowRefusesMergeMethodAtBuild(t *testing.T) {
-	builds := map[string]func(backendkit.Shared) (forge.CodeForge, error){
-		"NewCodeForge": func(s backendkit.Shared) (forge.CodeForge, error) {
-			return Strategy.NewCodeForge(s, nil, forge.SanitizedParent{}, nil)
-		},
-	}
-	rows := map[string]func(*testing.T, string){
-		"plain":   useGithubRowAt,
-		"primary": useGithubRowRouted,
-	}
-	for name, build := range builds {
-		for _, tc := range []struct {
-			method  string
-			row     string
-			refused bool
-		}{
-			{"squash", "plain", true},
-			{"merge", "plain", true},
-			{"rebase", "plain", false},
-			{"", "plain", false},
-			{"squash", "primary", true},
-			{"rebase", "primary", false},
-		} {
-			t.Run(name+"/"+tc.method+"/"+tc.row, func(t *testing.T) {
-				rows[tc.row](t, "127.0.0.1:1")
+	for _, tc := range []struct {
+		method  string
+		refused bool
+	}{
+		{"squash", true},
+		{"merge", true},
+		{"rebase", false},
+		{"", false},
+	} {
+		t.Run(tc.method, func(t *testing.T) {
+			useGithubRowAt(t, "127.0.0.1:1")
 
-				_, err := build(backendkit.Shared{RepoSlug: connectorRepo, MergeMethod: tc.method})
+			_, err := Strategy.NewCodeForge(backendkit.Shared{RepoSlug: connectorRepo, MergeMethod: tc.method}, nil, forge.SanitizedParent{}, nil)
 
-				if tc.refused != errors.Is(err, ErrRoutedMergeMethod) || (!tc.refused && err != nil) {
-					t.Errorf("err = %v, want refused=%v", err, tc.refused)
-				}
-			})
-		}
+			if tc.refused != errors.Is(err, ErrRoutedMergeMethod) || (!tc.refused && err != nil) {
+				t.Errorf("err = %v, want refused=%v", err, tc.refused)
+			}
+		})
 	}
 }
 
 // An explicit rebase is the Connector's own method and passes.
 func TestRoutedRow_MergeMethodRebasePasses(t *testing.T) {
-	h, _, _, _ := routedLogHarness(t, useGithubRowRouted)
+	h, _, _, _ := routedLogHarness(t, useGithubRowAt)
 	url := h.SeedLandablePR("9")
 	c := NewExecClient(connectorRepo, testLabels, WithMergeMethod("rebase"))
 

@@ -1,7 +1,7 @@
 // Package shadowrecord is the recording half of a shadow: it compares the
 // native and Connector answers to one check, emits a clipped shadow_divergence
 // op for each mismatch, and closes with one shadow_summary, in one shape for
-// the Pass-log replay (driver/shadow) and the backend read shadow. A shadow
+// the Pass-log replay (driver/shadow). A shadow
 // must never fail or delay its run, so nothing here returns an error: callers
 // put failures in Sum.Error.
 package shadowrecord

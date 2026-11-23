@@ -45,12 +45,12 @@ func routedGithubSides(c config) []githubSide {
 	return sides
 }
 
-// routedGithubApplies reports whether the github backend row is routed (not
-// shadow) and the Connector carries github writes. It looks the row up per call:
+// routedGithubApplies reports whether the github backend row is routed
+// and the Connector carries github writes. It looks the row up per call:
 // backendrows loads after package init, when gateRegistry is built.
 func routedGithubApplies(c config) bool {
 	row, ok := backendrows.Lookup(backend.GitHub.Name)
-	routed := ok && !row.Shadow && backendkit.ForgeReadsThroughConnector(row.Name, row.Primary)
+	routed := ok && backendkit.ForgeReadsThroughConnector(row.Name)
 	return routed && len(routedGithubSides(c)) > 0
 }
 

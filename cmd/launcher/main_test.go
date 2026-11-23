@@ -3492,7 +3492,7 @@ func useForgejoFixtureRow(t *testing.T) string {
 	}
 	useConnectorRows(t, backendrows.Row{
 		Name: "forgejo", Module: filepath.Join(dir, "forge-pr.wasm"), CredentialEnv: "FIXTURE_TOKEN",
-		Routes: []connectorhost.Route{{Method: "GET", Host: u.Host, Path: "/repos"}}, Primary: true,
+		Routes: []connectorhost.Route{{Method: "GET", Host: u.Host, Path: "/repos"}},
 	})
 	t.Chdir(t.TempDir()) // the Connector's audit file lands under the working directory
 	t.Setenv("FIXTURE_TOKEN", "connector-token")

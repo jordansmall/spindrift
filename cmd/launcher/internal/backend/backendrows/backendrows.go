@@ -56,15 +56,6 @@ type Row struct {
 	// the base URL's path prefix prepended to its Path; Use resolves them, so a
 	// stored Row carries concrete hosts.
 	BaseEnv string `json:"baseEnv,omitempty"`
-	// Shadow asks the launcher to run this Connector in sampled shadow mode
-	// beside the native backend of the same name, answering every ShadowEvery-th
-	// call per read operation. ShadowEvery is required with Shadow.
-	Shadow      bool `json:"shadow,omitempty"`
-	ShadowEvery int  `json:"shadowEvery,omitempty"`
-	// Primary makes the Connector answer in place of the native adapter of the
-	// same name. Refused with Shadow; Nix evaluation (lib/flakeModule.nix) also
-	// refuses it on every shipped backend row, none having a native adapter.
-	Primary bool `json:"primary,omitempty"`
 }
 
 // BaseHost is the Route host that stands for the host of the row's BaseEnv URL.
@@ -112,7 +103,7 @@ var (
 // or built-in name, no module, credentialEnv or routes, or an invalid Route
 // table or non-empty accepted baseline is an error. A row's BaseHost routes
 // are resolved from lookup(BaseEnv) first, so validation sees the concrete
-// table (resolveBase says when an unusable base is an error); BaseHost without
+// table (an unusable base drops the row, see resolveBase); BaseHost without
 // a BaseEnv is an error. The credential is only required at request time (see
 // Load). Rows are validated whole before any is stored.
 func Use(raw json.RawMessage, lookup func(string) string) error {
@@ -166,17 +157,16 @@ func gateAllows(name string, lookup func(string) string) bool {
 	return !ok || applies(lookup)
 }
 
-// unsetHost is the placeholder base host an unusable plain row (neither
-// Shadow nor Primary) resolves against, so its routes still validate whole before it is dropped.
+// unsetHost is the placeholder base host an unusable row resolves against, so
+// its routes still validate whole before it is dropped.
 const unsetHost = "unset.invalid"
 
 // resolveBase returns row with every BaseHost route host and path prefix
 // replaced from the base URL its BaseEnv names, so ValidateRoutes judges the
 // table the Connector will actually be held to. A base is unusable when
-// BaseEnv is unset or names anything but a bare https URL. On a plain row,
-// unusable carries that error and the caller drops the row, since a Consumer
-// importing every Connector need not configure a tracker it does not use. A
-// Shadow or Primary row opted in, so its base error is returned as the error.
+// BaseEnv is unset or names anything but a bare https URL. Then unusable
+// carries that error and the caller drops the row, since a Consumer importing
+// every Connector need not configure a tracker it does not use.
 func resolveBase(row Row, lookup func(string) string) (_ Row, unusable, _ error) {
 	uses := func(routes []connectorhost.Route) bool {
 		return slices.ContainsFunc(routes, func(r connectorhost.Route) bool { return r.Host == BaseHost })
@@ -213,9 +203,6 @@ func resolveBase(row Row, lookup func(string) string) (_ Row, unusable, _ error)
 		err = fmt.Errorf("backend %q: %s must have a canonical path", row.Name, row.BaseEnv)
 	}
 	if err != nil {
-		if row.Shadow || row.Primary {
-			return row, nil, err
-		}
 		u, prefix, unusable = &url.URL{Scheme: "https", Host: unsetHost}, "", err
 	}
 	host := u.Host
@@ -274,14 +261,6 @@ func validate(row Row, seen map[string]bool) error {
 		return fmt.Errorf("backend %q: the basic credentialScheme needs an identityEnv", row.Name)
 	case row.CredentialScheme != SchemeBasic && row.IdentityEnv != "":
 		return fmt.Errorf("backend %q: identityEnv applies only to the basic credentialScheme", row.Name)
-	case row.Primary && row.Shadow:
-		return fmt.Errorf("backend %q: primary and shadow are exclusive", row.Name)
-	case row.ShadowEvery < 0:
-		return fmt.Errorf("backend %q has a negative shadowEvery", row.Name)
-	case row.ShadowEvery > 0 && !row.Shadow:
-		return fmt.Errorf("backend %q has shadowEvery without shadow", row.Name)
-	case row.Shadow && row.ShadowEvery == 0:
-		return fmt.Errorf("backend %q has shadow without shadowEvery", row.Name)
 	}
 	seen[row.Name] = true
 	if err := connectorhost.ValidateRoutes(row.Routes); err != nil {
@@ -322,10 +301,6 @@ type Options struct {
 	Audit io.Writer
 	// Client is the transport; nil means a default client.
 	Client *http.Client
-	// Shadow marks every audit entry as a shadow Connector's.
-	Shadow bool
-	// Observe, when non-nil, sees each audit entry after it is recorded.
-	Observe func(connectorhost.AuditEntry)
 }
 
 // Load compiles the row's module as a network Connector bound to its Route
@@ -364,7 +339,6 @@ func Load(ctx context.Context, row Row, o Options) (*connectorhost.Connector, er
 		},
 		Client: o.Client,
 		Audit:  connectorhost.NewAuditLog(o.Audit),
-		Shadow: o.Shadow, Observe: o.Observe,
 	})
 }
 

@@ -62,7 +62,7 @@ func routedWriteClient() *execClient {
 func TestRoutedRow_TrackerWritesGoThroughTheConnector(t *testing.T) {
 	for _, tc := range routedWrites {
 		t.Run(tc.name, func(t *testing.T) {
-			h, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
+			h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
 			h.SeedIssue(tc.seed)
 
 			if err := tc.write(routedWriteClient()); err != nil {
@@ -90,7 +90,7 @@ func TestRoutedRow_TrackerWritesGoThroughTheConnector(t *testing.T) {
 // settle's own sweep is not driven here: the backend go-test fileset leaves
 // settle out (nix/checks/go.nix backendGoTestShared).
 func TestRoutedRow_PostedIssueKeepsItsMarkerAndLabels(t *testing.T) {
-	h, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
+	h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
 	c := routedWriteClient()
 	marker := dedupmarker.Build([]string{"pkg/a.go"})
 	labels := []string{"agent-butler-finding", "ready-for-agent"}
@@ -128,7 +128,7 @@ func TestRoutedRow_PostedIssueKeepsItsMarkerAndLabels(t *testing.T) {
 // A claim on an issue already in progress is refused by the Connector path
 // with forge.ErrAlreadyClaimed, and without gh.
 func TestRoutedRow_ClaimOfAClaimedIssueIsRefused(t *testing.T) {
-	h, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
+	h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
 	h.SeedIssue(forge.Issue{Number: "7", Labels: []string{testLabels.InProgress}})
 
 	err := routedWriteClient().TransitionState("7", forge.Dispatchable, forge.InProgress)
@@ -141,26 +141,19 @@ func TestRoutedRow_ClaimOfAClaimedIssueIsRefused(t *testing.T) {
 	}
 }
 
-// A plain non-shadow row routes the writes through the Connector; a shadow
-// row has no native write left to shadow, so each fails with ErrNoRoute and
-// never reaches gh.
-func TestTrackerWrites_PlainRowRoutesShadowFailsNamed(t *testing.T) {
-	for rowName, useRow := range map[string]func(*testing.T, string){"plain": useGithubRowAt, "shadow": useGithubRowShadow} {
-		for _, tc := range routedWrites {
-			t.Run(rowName+"/"+tc.name, func(t *testing.T) {
-				h, _, calls, _ := routedLogHarness(t, useRow)
-				h.SeedIssue(tc.seed)
+// A plain row routes the writes through the Connector, never gh.
+func TestTrackerWrites_PlainRowRoutesWrites(t *testing.T) {
+	for _, tc := range routedWrites {
+		t.Run(tc.name, func(t *testing.T) {
+			h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
+			h.SeedIssue(tc.seed)
 
-				err := tc.write(routedWriteClient())
+			_ = tc.write(routedWriteClient())
 
-				if n := calls(); n != 0 {
-					t.Errorf("%s under a %s row ran gh %d times", tc.name, rowName, n)
-				}
-				if rowName == "shadow" && !errors.Is(err, ErrNoRoute) {
-					t.Errorf("%s under a shadow row = %v, want ErrNoRoute", tc.name, err)
-				}
-			})
-		}
+			if n := calls(); n != 0 {
+				t.Errorf("%s under a plain row ran gh %d times", tc.name, n)
+			}
+		})
 	}
 }
 
@@ -229,7 +222,7 @@ func TestRoutedRow_MissingCapabilityFailsTheWrite(t *testing.T) {
 		{"CloseMergedIssue", "tracker.closeIssue"},
 	} {
 		t.Run(tc.write+"/"+tc.capName, func(t *testing.T) {
-			h, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
+			h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
 			withoutCapability(t, tc.capName)
 			matched := false
 			for _, w := range routedWrites {
@@ -255,7 +248,7 @@ func TestRoutedRow_MissingCapabilityFailsTheWrite(t *testing.T) {
 // A lost claim race is core policy, not a Connector fault, so it leaves the
 // primary log empty; any other failed write is recorded.
 func TestNotePrimary_SkipsALostClaimRace(t *testing.T) {
-	_, _, _, logDir := routedLogHarness(t, useGithubRowRouted)
+	_, _, _, logDir := routedLogHarness(t, useGithubRowAt)
 
 	claimed := fmt.Errorf("tracker: issue 7: %w", forge.ErrAlreadyClaimed)
 	if got := noteRouted("transition an issue", claimed); got != claimed {
