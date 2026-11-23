@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -114,5 +115,62 @@ func TestBudgetExpiredBeforePauseStaysExpired(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	if !errors.Is(context.Cause(ctx), ErrBudget) {
 		t.Fatalf("an expired budget was revived: %v", context.Cause(ctx))
+	}
+}
+
+// Slow requests are cut off once their total time reaches the cap, even though
+// the clock stops while each is served and no request count is near its limit.
+func TestBudgetStopsAtTheHTTPTimeCap(t *testing.T) {
+	defer SetHTTPTimeCap(100 * time.Millisecond)()
+	ctx, b := newBudget(context.Background(), time.Minute)
+	defer b.close()
+	host := &stubHost{delay: 40 * time.Millisecond}
+	var err error
+	for range 10 {
+		if _, _, _, err = b.httpRequest(ctx, host, nil, 0); err != nil {
+			break
+		}
+	}
+	if !errors.Is(err, ErrHTTPRequestLimit) {
+		t.Fatalf("err = %v, want ErrHTTPRequestLimit", err)
+	}
+	if !strings.Contains(err.Error(), httpTimeCap.String()) {
+		t.Errorf("err = %v, want it to name the cap %s", err, httpTimeCap)
+	}
+	if host.calls > 4 {
+		t.Errorf("host served %d requests, want the cap to stop it by the fourth", host.calls)
+	}
+}
+
+// The cap cuts off the request in flight: a host that honours its context and
+// reports the cut as success or as a send failure still fails the call.
+func TestBudgetHTTPTimeCapOverridesTheCutRequestsResult(t *testing.T) {
+	defer SetHTTPTimeCap(50 * time.Millisecond)()
+	ctx, b := newBudget(context.Background(), time.Minute)
+	defer b.close()
+	start := time.Now()
+	_, _, _, err := b.httpRequest(ctx, &ctxHost{}, nil, 0)
+	if !errors.Is(err, ErrHTTPRequestLimit) {
+		t.Fatalf("err = %v, want ErrHTTPRequestLimit", err)
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("request ran %v, want it cut off near the %v cap", d, httpTimeCap)
+	}
+}
+
+// ctxHost blocks until its context ends and reports that as a send failure the
+// guest could survive.
+type ctxHost struct{ stubHost }
+
+func (*ctxHost) httpRequest(ctx context.Context, raw []byte, bufCap int) (int, []byte, http.Header, error) {
+	<-ctx.Done()
+	return 0, []byte("send failed"), nil, nil
+}
+
+func TestHTTPTimeCapErrorWrapsTheLimitAndNamesTheCap(t *testing.T) {
+	var err error = httpTimeCapError{2 * time.Minute}
+	var capErr httpTimeCapError
+	if !errors.Is(err, ErrHTTPRequestLimit) || !errors.As(err, &capErr) || !strings.Contains(err.Error(), "took more than 2m0s in one call") {
+		t.Fatalf("err = %v, want a cap error wrapping ErrHTTPRequestLimit", err)
 	}
 }

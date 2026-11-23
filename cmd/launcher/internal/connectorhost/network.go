@@ -413,13 +413,13 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 	timeoutCause := fmt.Errorf("no response within %s", timeout)
 	ctx, cancelTimeout := context.WithTimeoutCause(ctx, timeout, timeoutCause)
 	defer cancelTimeout()
-	// sendFailed names the timeout when it, not the caller, ended the request;
-	// context.DeadlineExceeded alone would not say which clock ran out. The
-	// timeout cannot end a request before it is sent, so pre-send failures
-	// pass through unchanged.
+	// sendFailed names the clock that ended the request, the timeout above or
+	// the budget's http_request time cap, when one did; context.DeadlineExceeded
+	// alone would not say which ran out. A context ended with no cause of its
+	// own, and any pre-send failure, passes through unchanged.
 	sendFailed := func(what string, cause error) error {
-		if errors.Is(context.Cause(ctx), timeoutCause) {
-			cause = timeoutCause
+		if c := context.Cause(ctx); ctx.Err() != nil && c != ctx.Err() {
+			cause = c
 		}
 		if what != "" {
 			what += ": "

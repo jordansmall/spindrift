@@ -370,3 +370,34 @@ func TestNetworkFixtureRequestTimeoutIsASendFailureNotABudgetOverrun(t *testing.
 		})
 	}
 }
+
+// A Connector whose requests are each within the per-request timeout but slow
+// together is stopped at the cap on their total time, with the cap named, on
+// every engine.
+func TestNetworkFixtureSlowRequestsStopAtTheHTTPTimeCap(t *testing.T) {
+	const httpCap = 300 * time.Millisecond
+	// Set on the serial parent, before its parallel subtests start.
+	t.Cleanup(connectorhost.SetHTTPTimeCap(httpCap))
+	for name, ld := range netLoadersFor(t) {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			b := newBackend(t, func(w http.ResponseWriter, r *http.Request) {
+				time.Sleep(httpCap / 3)
+				fmt.Fprint(w, "slow")
+			})
+			n := netFor(b, &bytes.Buffer{}, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
+			c := loadNetWith(t, ld, fixture(t, "network-flood.wasm"), n)
+			params := map[string]string{"url": b.URL + "/repos/x", "method": "GET"}
+			err := c.Call(context.Background(), "fetch", params, new(fetched))
+			if !errors.Is(err, connectorhost.ErrHTTPRequestLimit) {
+				t.Fatalf("err = %v, want ErrHTTPRequestLimit", err)
+			}
+			if !strings.Contains(err.Error(), httpCap.String()) {
+				t.Errorf("err = %v, want it to name the httpCap %s", err, httpCap)
+			}
+			if got := int(b.hits.Load()); got >= connectorhost.MaxHTTPRequests {
+				t.Errorf("backend saw %d requests, want the time httpCap to stop it first", got)
+			}
+		})
+	}
+}

@@ -24,7 +24,7 @@ const ProtocolVersion = "0.3.0"
 // Connector's cost grows with its input, while a hostile one is still bounded
 // by what the host chose to send. The time budget also stops during an
 // http_request and grows with the response bytes delivered (budget), capped
-// by maxHTTPRequests and maxResponseCredit.
+// by maxHTTPRequests, maxHTTPTime and maxResponseCredit.
 const (
 	callBudget = 5 * time.Second
 	// initBudget covers _initialize, which boots Go's runtime inside the
@@ -51,8 +51,12 @@ const (
 	memoryPerRequestByte = 16
 	outputPerRequestByte = 6
 	// maxHTTPRequests bounds the http_requests in one call. The clock stops while
-	// one is served, so this, not the budget, bounds a guest looping on them.
+	// one is served, so this and maxHTTPTime, not the budget, bound a guest
+	// looping on them.
 	maxHTTPRequests = 128
+	// maxHTTPTime bounds the wall-clock time one call spends in http_requests
+	// together; 128 requests of httpRequestTimeout each would run over two hours.
+	maxHTTPTime = 5 * time.Minute
 	// maxResponseCredit bounds the response bytes one call earns budgetPerMiB for,
 	// so the credit is at most 32 min however much the host delivers.
 	maxResponseCredit = 32 << 20
@@ -87,6 +91,9 @@ var memoryCap uint64 = memoryCapBytes
 
 // callBudgetBase is the base call budget: a var only so tests can lower it.
 var callBudgetBase = callBudget
+
+// httpTimeCap is maxHTTPTime: a var only so tests can lower it.
+var httpTimeCap = maxHTTPTime
 
 // guestEnv is the guest's environment: nil in production, set only from tests.
 var guestEnv map[string]string
@@ -145,7 +152,8 @@ var (
 	// instruction budget, so wall-clock time is the only bound on a looping guest.
 	ErrBudget = errors.New("connector call exceeded its time budget")
 	// ErrHTTPRequestLimit marks a call that made more than maxHTTPRequests
-	// http_requests; the host refuses the one past the limit.
+	// http_requests or spent more than maxHTTPTime in them; the host refuses the
+	// one past the count and cuts off the one that runs the time out.
 	ErrHTTPRequestLimit = errors.New("connector call exceeded its http_request limit")
 	// ErrTrap marks a module that trapped or exited during a call. Go's wasip1
 	// runtime turns a panic into proc_exit(2), so a panic surfaces here too.
