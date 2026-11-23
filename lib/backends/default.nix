@@ -102,6 +102,17 @@
 # generated Descriptor carries it too: the Bundle's no-native-network-adapter
 # check reads it (issue #6888).
 
+# consumerStanza (required) declares what a Consumer of the backend
+# configures (issue #7415): `connectorKnobs`, the names of its Connector's
+# credential knobs (connectors/<name>/module.nix), each a secret stanza beside
+# the row's own tokenEnvVar; `flakeInput`, the flake-input stanza; and
+# `moduleImport`, the module import. A null flakeInput or moduleImport means
+# the batteries flake (`flakeModules.default`) already carries the backend. The
+# settings-block knob lines are the row's own `knobs` with flakeOption = true.
+# nix/consumer-stanzas.nix composes them and fails eval when the Connector
+# declares a secret knob `connectorKnobs` omits. The generated Descriptor
+# ignores the field.
+
 # labelRegistry marks a tracker whose labels are registered objects that
 # ListLabels/CreateLabel manage; local and jira omit it (issue #4400).
 # issuesWearLabels marks a tracker whose issue labels are reliable

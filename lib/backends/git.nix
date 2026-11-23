@@ -7,6 +7,11 @@
   # ADR 0068, decision 7: core keeps this backend; read by nix/checks/go.nix.
   core = true;
   displayName = "Git";
+  consumerStanza = {
+    connectorKnobs = [ ];
+    flakeInput = null;
+    moduleImport = null;
+  };
   validAsCodeForge = true;
   # Bundle relay only (issue #6898): git has no pull requests, so no draft-PR
   # seam and no outboxRelayCapable.

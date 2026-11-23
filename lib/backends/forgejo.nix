@@ -13,6 +13,11 @@
   routeKinds = [ "label" ];
   connectorOnly = true;
   tokenEnvVar = "FORGEJO_TOKEN";
+  consumerStanza = {
+    connectorKnobs = [ "forgejoConnectorToken" ];
+    flakeInput = null;
+    moduleImport = null;
+  };
   doctorTokenHint = "FORGEJO_TOKEN";
   doctorSlugHint = "FORGEJO_BASE_URL";
   outboxRelayCapable = true;

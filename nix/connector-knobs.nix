@@ -18,6 +18,8 @@ let
   backendRows = lib.filterAttrs (_: r: r ? backend) rows;
 in
 {
+  # Connector name -> its module row (`{ knobs; backend; ... }`), backend Connectors only.
+  rows = backendRows;
   # Every backend Connector's knob entries, keyed by knob name.
   knobs = lib.foldl' (acc: r: acc // (r.knobs or { })) { } (lib.attrValues backendRows);
   # backend name -> env var of the knob named by `backend.credential`.

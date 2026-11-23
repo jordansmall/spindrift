@@ -7,6 +7,11 @@
   # ADR 0068, decision 7: core keeps this backend; read by nix/checks/go.nix.
   core = true;
   displayName = "local";
+  consumerStanza = {
+    connectorKnobs = [ ];
+    flakeInput = null;
+    moduleImport = null;
+  };
   validAsTracker = true;
   validAsCodeForge = true;
   # ADR 0033: local has no writable remote to push to.

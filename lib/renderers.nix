@@ -1234,6 +1234,7 @@ rec {
         "goTestRepoFiles"
         "goTestBuildsOn"
         "core"
+        "consumerStanza"
       ]
       ++ map (f: f.attr) rowFields;
       quickstartAxes = [
