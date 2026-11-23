@@ -142,6 +142,7 @@ let
     // (import ./connector-backend-rows.nix common)
     // (import ./connector-driver-rows.nix common)
     // (import ./connector-escape-guard.nix common)
+    // (import ./connector-scaffold.nix common)
     // (import ./connector-checks-parity.nix common)
     // (import ./connector-checks-any-name.nix common)
     // (import ./connector-checks-generic.nix common)
@@ -252,6 +253,9 @@ let
     # Reads no docs, but scans every Connector's *.nix as text, which a
     # comment-only edit can reach.
     "connector-escape-guard"
+    # Reads no docs, but scans the scaffold's text for "example" and compares
+    # jira's main.go, which a comment-only edit can reach.
+    "connector-scaffold"
     # Reads .release-please-manifest.json, on the docs allowlist.
     "connector-ownership"
     "driver-map"
