@@ -502,7 +502,9 @@ publishes. Don't hand-tag or `gh release create`.
 
 A Connector is a subflake under `connectors/<name>/` that adds backend or
 Driver rows from outside core; its shape is in
-[Connector subflake shape](docs/reference.md#connector-subflake-shape). It
+[Connector subflake shape](docs/reference.md#connector-subflake-shape). To
+start a tracker Connector from a generated, already-green scaffold, follow
+[Authoring a Connector](docs/reference.md#authoring-a-connector). It
 releases and is owned separately from core, so wire these besides the code:
 
 1. A release-please package: add

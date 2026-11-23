@@ -3571,6 +3571,66 @@ otherwise. Each process appends the Connector's audit lines to
 call to the matching `.log`. The jira row is not on dogfood's
 `nix/dogfood-primary.nix`, so no streak recipe counts its runs.
 
+### Authoring a Connector
+
+A new tracker Connector starts from a generated repository, not a copy of
+`connectors/jira`. This section is the walk from empty directory to a checked
+build; [Connector subflake shape](#connector-subflake-shape) is the reference
+for what the pieces mean.
+
+**Generate.** In an empty directory:
+
+```sh
+nix run github:jordansmall/spindrift#new-connector -- tracker <name> [<dir>]
+```
+
+`<dir>` defaults to the working directory. The command refuses a directory that
+is not empty, a `<name>` that does not match `^[a-z][a-z0-9]*$`, and a `<name>`
+that is a core backend row's name, a Nix keyword, or the placeholder
+`connectorname`; `tracker` is the only kind today. The output
+is a standalone flake that pins core, with a stub reader that already passes
+the generic conformance contract against a scripted backend.
+
+**Implement.** `main.go` registers the tracker reader with `tracker.Register`
+(and, when the Connector writes, a `tracker.Writer` with
+`tracker.RegisterWrites`); replace the stub functions with calls to your
+tracker's API through `http_request`. `routes.nix` is the whole
+of the Connector's network authority: list every method, host and path subtree
+it requests and no more, with `{base}` for the tracker's base URL and `{repo}`
+for the project. `module.nix` holds the row: the `<name>ConnectorToken` and
+`<name>ConnectorBaseURL` knobs, the `scheme` (`bearer` by default; `basic`
+needs an extra identity knob) and the `backend` row that names the wasm and
+the routes. Prompt fragment files go under `fragments/<name>/`, listed in
+`fragments.nix`.
+
+**Check.** `nix flake check -L` in the generated repository runs
+`core.lib.connectorChecks`: Go fmt, wasip1 vet and unit tests, and
+`connector-<name>-conformance` on the generic path. It is green before you
+write any logic, so a red check afterwards is yours. The `go.mod` replaces
+`spindrift.dev/sdk` with `github.com/jordansmall/spindrift/sdk` at the spindrift
+commit the generator was built from, so `go build`, `go test` and gopls work
+outside Nix (run `go mod tidy` once to record `go.sum`). The Nix build and
+checks repoint the replace at core's SDK source. The pin resolves only
+for a commit pushed to `jordansmall/spindrift`, as `nix run
+github:jordansmall/spindrift#new-connector` builds. A generator run from an
+uncommitted tree leaves a placeholder version in `go.mod`, and one built from a
+local or fork commit pins a version Go cannot fetch; set the version by hand in
+both cases.
+
+**Wire into a Consumer.** Add the Connector as a flake input that follows the
+Consumer's core and import its `flakeModules.default`, as
+[`templates/core-connector/flake.nix`](../templates/core-connector/flake.nix)
+does for github. A Connector not named after a core backend cannot yet be
+selected as `ISSUE_TRACKER` (a follow-up spec covers it), so today it is
+checked and built but not dispatched against.
+
+For maintainers: the template is
+[`templates/connector-tracker/`](../templates/connector-tracker/), with
+`connectorname` and `CONNECTORNAME` as its placeholder tokens. The
+`connector-scaffold` check pins its layout to `connectors/jira`, and CI's
+`connector` lane runs `nix run .#connector-dev -- templates/connector-tracker
+flake check`, which generates it under two names and checks each.
+
 ### Connector protocol
 
 The protocol, not the SDK, is the contract between core and a Connector
