@@ -907,10 +907,10 @@ M	connectors/claude/b.go
   [ "$status" -ne 0 ]
 }
 
-# The tracker scaffold (issue #7421) is checked in the connector lane as the
-# path templates/connector-<kind>: connector-dev generates it under two names.
-# Its template files, the generator, and the Connector contract all select it;
-# plain classify mode keeps them code.
+# The tracker and forge scaffolds (issues #7421, #7422) are checked in the
+# connector lane as the path templates/connector-<kind>: connector-dev generates
+# each under two names. Their template files, the generator, and the Connector
+# contract all select them; plain classify mode keeps them code.
 # Stderr carries why a Go or Nix edit is code (nothing to parse at base), so
 # the verdict is read from stdout alone.
 classify_code() {
@@ -959,6 +959,21 @@ template_repo() {
   connector_names <<<'M	sdk/connector.go
 '
   [ "$output" = '["bar","foo","templates/connector-tracker"]' ]
+}
+
+@test "connector template: the forge scaffold is selected by its own files, and with the tracker on a contract diff" {
+  template_repo
+  mkdir -p templates/connector-forge
+  printf '{ }' >templates/connector-forge/flake.nix
+  git add -A
+  git commit -qm forge
+  git tag -f head
+  connector_names <<<'M	templates/connector-forge/main.go
+'
+  [ "$output" = '["templates/connector-forge"]' ]
+  connector_names <<<'M	sdk/connector.go
+'
+  [ "$output" = '["bar","foo","templates/connector-forge","templates/connector-tracker"]' ]
 }
 
 @test "connector template: a Connector edit beside a template edit names each" {
