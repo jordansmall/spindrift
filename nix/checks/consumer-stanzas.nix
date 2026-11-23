@@ -5,6 +5,9 @@
 { pkgs, ... }:
 let
   inherit (pkgs.lib) assertMsg hasInfix;
+  renderers = import ../../lib/renderers.nix;
+  envSchema = import ../../lib/env-schema.nix;
+  structuralExamples = import ../../lib/structural-template-examples.nix { inherit (pkgs) lib; };
   compose = args: import ../consumer-stanzas.nix ({ inherit (pkgs) lib; } // args);
   real = (compose { }).stanzas;
   registry = import ../../lib/backends;
@@ -76,6 +79,62 @@ let
   fails = args: !(builtins.tryEval (builtins.deepSeq (compose args).stanzas true)).success;
   messages = args: builtins.concatStringsSep "\n" (compose args).errors;
   secretEnvs = s: map (e: e.env) s.secrets;
+
+  # One pairing, a jira tracker with the github forge it writes through:
+  # rendering only these stanzas must carry exactly their knobs and secrets,
+  # none of forgejo's, local's or git's. Picked by row facts, not names, so
+  # backend-name-guard holds (ADR 0068).
+  trackerOnly = pkgs.lib.findFirst (
+    r: (r.validAsTracker or false) && !(r.validAsCodeForge or false)
+  ) null registry;
+  pairedNames = map (r: r.name) (
+    builtins.filter (
+      r: r == trackerOnly || pkgs.lib.toUpper r.name == trackerOnly.trackerAxisWrite
+    ) registry
+  );
+  pairing = builtins.filter (s: builtins.elem s.name pairedNames) real;
+  # How a settings knob shows in the rendered block: its leaf as `leaf = `, and
+  # a dotted nixSubPath's namespace as `ns = {`.
+  settingsForms =
+    stanzas:
+    builtins.concatMap (
+      s:
+      pkgs.lib.mapAttrsToList (
+        k: e:
+        let
+          segs = pkgs.lib.splitString "." (e.nixSubPath or k);
+        in
+        {
+          leaf = "${pkgs.lib.last segs} = ";
+          ns = if builtins.length segs > 1 then "${builtins.head segs} = {" else null;
+        }
+      ) s.settings
+    ) stanzas;
+  formsOf =
+    stanzas:
+    builtins.filter (f: f != null) (
+      builtins.concatMap (f: [
+        f.leaf
+        f.ns
+      ]) (settingsForms stanzas)
+    );
+  pairingSettingsForms = formsOf pairing;
+  # A form an unselected row shares with a selected one (both name a `baseURL`)
+  # is not evidence of leakage, so only forms no selected row emits count.
+  droppedSettingsForms = builtins.filter (f: !(builtins.elem f pairingSettingsForms)) (
+    formsOf (builtins.filter (s: !(builtins.elem s pairing)) real)
+  );
+  envExample = renderers.renderHarnessEnvExample envSchema pairing;
+  settingsBlock = renderers.renderTemplateSettingsBlock envSchema pairing structuralExamples;
+  envNames = map (pkgs.lib.removeSuffix "=") (
+    builtins.filter (l: builtins.match "[A-Z][A-Z0-9_]*=" l != null) (
+      pkgs.lib.splitString "\n" envExample
+    )
+  );
+  backendOwned = builtins.concatMap secretEnvs real;
+  pairingOwned = builtins.sort builtins.lessThan (
+    builtins.filter (n: builtins.elem n backendOwned) envNames
+  );
 in
 {
   consumer-stanzas =
@@ -128,5 +187,26 @@ in
       && !(hasInfix "driverOnly" (messages orphanConnector))
     ) "consumer-stanzas: the orphan message must name the Connector and ignore non-backend Connectors";
     assert assertMsg (fails noStanza) "consumer-stanzas: a row without a consumerStanza must fail eval";
+    assert assertMsg
+      (
+        pairingOwned == [
+          "GH_TOKEN"
+          "JIRA_TOKEN"
+          "SPINDRIFT_GITHUB_CONNECTOR_TOKEN"
+          "SPINDRIFT_JIRA_CONNECTOR_EMAIL"
+          "SPINDRIFT_JIRA_CONNECTOR_TOKEN"
+        ]
+      )
+      "consumer-stanzas: a jira+github pairing's env example must list exactly their secrets, got ${toString pairingOwned}";
+    assert assertMsg (builtins.all (n: builtins.elem n envNames) [
+      "ANTHROPIC_API_KEY"
+      "CLAUDE_CODE_OAUTH_TOKEN"
+    ]) "consumer-stanzas: a pairing's env example must keep the core secrets";
+    assert assertMsg (builtins.all (k: hasInfix k settingsBlock)
+      pairingSettingsForms
+    ) "consumer-stanzas: a pairing's settings block must carry its selected rows' settings knobs";
+    assert assertMsg (
+      droppedSettingsForms != [ ] && builtins.all (k: !(hasInfix k settingsBlock)) droppedSettingsForms
+    ) "consumer-stanzas: a pairing's settings block must drop the unselected rows' settings knobs";
     pkgs.runCommand "consumer-stanzas" { } "touch $out";
 }

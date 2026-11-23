@@ -1135,9 +1135,9 @@ checkedMerge {
   # (issue #109).
   harness-env-example =
     let
-      connectorKnobs = (import ../connector-knobs.nix { inherit (pkgs) lib; }).knobs;
+      consumerStanzas = (import ../consumer-stanzas.nix { inherit (pkgs) lib; }).stanzas;
       generated = pkgs.writeText "harness.env.example.generated" (
-        renderers.renderHarnessEnvExample schema connectorKnobs
+        renderers.renderHarnessEnvExample schema consumerStanzas
       );
     in
     pkgs.runCommand "harness-env-example"

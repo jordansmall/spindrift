@@ -29,6 +29,23 @@ let
         value = attrs.${n};
       }) (builtins.filter (n: pred n attrs.${n}) (builtins.attrNames attrs))
     );
+  # What the backend rows own, so a generated example lists them only through
+  # a selected row's Consumer stanza (nix/consumer-stanzas.nix) and never as
+  # core: an unselected backend's knobs and secrets must vanish, not fall back
+  # into the core walk.
+  ownedByBackends =
+    let
+      rows = import ./backends;
+      knobsOf = row: row.knobs or { };
+    in
+    {
+      keys = builtins.concatMap (row: builtins.attrNames (knobsOf row)) rows;
+      envs = builtins.concatMap (
+        row:
+        map (k: k.env) (builtins.attrValues (knobsOf row))
+        ++ (if row ? tokenEnvVar then [ row.tokenEnvVar ] else [ ])
+      ) rows;
+    };
   # ASCII-only; every caller here feeds it a SCREAMING_SNAKE_CASE env var name.
   chars = s: builtins.genList (i: builtins.substring i 1 s) (builtins.stringLength s);
   toLower = builtins.replaceStrings (chars "ABCDEFGHIJKLMNOPQRSTUVWXYZ") (
@@ -222,13 +239,18 @@ rec {
   # templates/default/flake.nix's generated settings example: every flakeOption
   # knob as a nested domain tree keyed by its derived flake path, so a new knob
   # reaches the template without a hand-edit (ADR 0037, issue #520, #2179).
+  # Core's knobs come from the schema; each backend row's come from the Consumer
+  # stanzas passed in, so a pairing's render drops unselected backends' knobs
+  # (issue #7415).
   # structuralExamples (issue #2572) splices in roster/byName, which have no
   # schema-default literal a `nixLiteral` line could be derived from.
   renderTemplateSettingsBlock =
-    schema: structuralExamples:
+    schema: stanzas: structuralExamples:
     let
       ind = "            # ";
-      flakeOptionEntries = filterAttrs (_: e: e.flakeOption or false) schema;
+      flakeOptionEntries =
+        filterAttrs (k: e: (e.flakeOption or false) && !(builtins.elem k ownedByBackends.keys)) schema
+        // builtins.foldl' (acc: s: acc // s.settings) { } stanzas;
       # Placeholder only for a required knob, so a knob whose placeholder exists
       # only for the bats fixture (gitUserName's "Test Bot") renders as "" here
       # rather than as a fake identity in consumer-facing documentation.
@@ -323,15 +345,18 @@ rec {
   # templates/default/harness.env.example content. Core's knobs are secrets only
   # (ADR 0020): from #625 onward env configures nothing else, so listing a
   # non-secret core knob would advertise a channel deprecated the moment it is
-  # used. `connectorKnobs` (nix/connector-knobs.nix) are env-only (`flakeOption
-  # = false`), so env is their one channel and all are listed after core's,
-  # non-secret ones (the jira email) included; those get no `_CMD` hint.
+  # used. Core secrets come first; each backend's follow in its own group, from
+  # the Consumer stanzas passed in (nix/consumer-stanzas.nix, issue #7415).
+  # Connector knobs are env-only (`flakeOption = false`), so env is their one
+  # channel; non-secret ones (the jira email) are listed too, with no `_CMD` hint.
   renderHarnessEnvExample =
-    schema: connectorKnobs:
+    schema: stanzas:
     let
-      secretSchema = filterAttrs (_: e: e.secret or false) schema;
+      coreSecrets = filterAttrs (
+        _: e: (e.secret or false) && !(builtins.elem e.env ownedByBackends.envs)
+      ) schema;
       renderEntry =
-        _key: entry:
+        entry:
         "# ${entry.doc}\n"
         + "# Preferred: fetch this from a vault instead of the plaintext value below —\n"
         + "# ${entry.env}_CMD=\"rbw get spindrift-${toKebab entry.env}\" (or an op/pass/vault\n"
@@ -340,9 +365,10 @@ rec {
         + "${entry.env}=\n\n";
       # A non-secret Connector knob (the Basic-scheme identity) has no `_CMD`
       # form at runtime, so it advertises none.
-      renderConnectorEntry =
-        key: entry:
-        if entry.secret or false then renderEntry key entry else "# ${entry.doc}\n${entry.env}=\n\n";
+      renderStanzaEntry =
+        entry: if entry.secret or false then renderEntry entry else "# ${entry.doc}\n${entry.env}=\n\n";
+      renderGroup =
+        s: "# ${s.displayName} backend (${s.name})\n\n" + concatStrings (map renderStanzaEntry s.secrets);
     in
     "# Copy to harness.env (gitignored) and fill in — or export these in your shell.\n"
     + "# Secrets and Connector credentials only: every other knob is set via the\n"
@@ -360,9 +386,8 @@ rec {
     + "# of its own — {name} substitutes the secret's kebab-case env name, e.g.\n"
     + "# SECRET_CMD=\"rbw get spindrift-{name}\" reproduces every per-secret example\n"
     + "# below in one line. A per-secret <NAME>_CMD still wins over this fallback.\n\n"
-    + concatStrings (mapAttrsToList renderEntry secretSchema)
-    + "# Connector credentials: host-only, read by each first-party Connector's backend row.\n\n"
-    + concatStrings (mapAttrsToList renderConnectorEntry connectorKnobs);
+    + concatStrings (map renderEntry (builtins.attrValues coreSecrets))
+    + concatStrings (map renderGroup (builtins.filter (s: s.secrets != [ ]) stanzas));
 
   # cmd/launcher/defaultmodels_gen_test.go content: the Go form of
   # lib/default-model-fixture.nix keyed by the schema's env-var names, so a
