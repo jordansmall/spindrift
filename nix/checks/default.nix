@@ -92,6 +92,7 @@ let
     // (import ./network-mode.nix common)
     // (import ./nix-store-writable.nix common)
     // (import ./row-knobs.nix common)
+    // (import ./consumer-stanzas.nix common)
     // (import ./runner-names-guard.nix common)
     // (import ./runners-unique-runtime.nix common)
     // (import ./merge-guard-paths.nix common)

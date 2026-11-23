@@ -12,6 +12,11 @@
   routeKinds = [ "label" ];
   connectorOnly = true;
   tokenEnvVar = "GH_TOKEN";
+  consumerStanza = {
+    connectorKnobs = [ "githubConnectorToken" ];
+    flakeInput = null;
+    moduleImport = null;
+  };
   outboxRelayCapable = true;
   relayCapable = true;
   hostPostingCapable = true;
