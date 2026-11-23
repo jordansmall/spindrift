@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -169,8 +170,18 @@ func (f *prForge) HeadCommitSHA(prURL string) (string, error) {
 
 func (f *prForge) MergeCommit(prURL string) (string, error) {
 	w, _, err := f.pr(prURL)
-	return w.MergeCommit, err
+	if err != nil {
+		return "", err
+	}
+	if w.MergeCommit != "" && !fullHexCommit.MatchString(w.MergeCommit) {
+		return "", fmt.Errorf("%w: PR %s merge commit %q is not a full hex commit id", ErrAnswer, w.Number, w.MergeCommit)
+	}
+	return w.MergeCommit, nil
 }
+
+// fullHexCommit matches a lowercase SHA-1 or SHA-256 object id, the form git
+// prints; "" (no merge commit) is accepted separately by the caller.
+var fullHexCommit = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
 
 func (f *prForge) NeedsUpdate(prURL string) (bool, error) {
 	var res struct {

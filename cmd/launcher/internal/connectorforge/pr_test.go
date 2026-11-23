@@ -370,12 +370,45 @@ func TestMergeableFailsClosed(t *testing.T) {
 	}
 }
 
+const sha40 = "0123456789abcdef0123456789abcdef01234567"
+
+func TestMergeCommitMustBeFullHex(t *testing.T) {
+	for name, tc := range map[string]struct {
+		commit  string
+		wantErr bool
+	}{
+		"empty (not merged)": {"", false},
+		"sha1":               {sha40, false},
+		"sha256":             {strings.Repeat("a1", 32), false},
+		"short":              {"def", true},
+		"not hex":            {"not-a-sha", true},
+		"39 hex":             {sha40[:39], true},
+		"non-hex char":       {sha40[:39] + "g", true},
+		"uppercase":          {strings.ToUpper(sha40), true},
+		"41 hex":             {sha40 + "a", true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newPRHarness(t, nil, map[string]any{"forge.pr": prJSON + `,"mergeCommit":"` + tc.commit + `"}`})
+			got, err := h.caps.MergeCommitReader.MergeCommit(prURL7)
+			if tc.wantErr {
+				if got != "" || !errors.Is(err, ErrAnswer) {
+					t.Errorf("MergeCommit = (%q, %v), want ErrAnswer", got, err)
+				}
+				return
+			}
+			if got != tc.commit || err != nil {
+				t.Errorf("MergeCommit = (%q, %v), want %q", got, err, tc.commit)
+			}
+		})
+	}
+}
+
 func TestHeadCommitSHAAndMergeCommit(t *testing.T) {
-	h := newPRHarness(t, nil, map[string]any{"forge.pr": prJSON + `,"headSha":"abc","mergeCommit":"def"}`})
+	h := newPRHarness(t, nil, map[string]any{"forge.pr": prJSON + `,"headSha":"abc","mergeCommit":"` + sha40 + `"}`})
 	if sha, err := h.pr().HeadCommitSHA(prURL7); sha != "abc" || err != nil {
 		t.Errorf("HeadCommitSHA = (%q, %v)", sha, err)
 	}
-	if c, err := h.caps.MergeCommitReader.MergeCommit(prURL7); c != "def" || err != nil {
+	if c, err := h.caps.MergeCommitReader.MergeCommit(prURL7); c != sha40 || err != nil {
 		t.Errorf("MergeCommit = (%q, %v)", c, err)
 	}
 	h = newPRHarness(t, nil, map[string]any{"forge.pr": prJSON + `}`})
