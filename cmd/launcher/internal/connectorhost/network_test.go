@@ -788,3 +788,58 @@ func TestNetworkRequestTimeoutLeavesACallersCancellationAlone(t *testing.T) {
 		t.Fatalf("err = %v, want a failure that does not blame the request timeout", err)
 	}
 }
+
+// A failed or timed-out hop must name only the hop's host: Go's client error
+// quotes the whole hop URL, and a signed redirect target carries its secret in
+// the query.
+func TestNetworkFollowRedirectHopFailureNamesOnlyTheHopHost(t *testing.T) {
+	cases := map[string]struct {
+		handler func(w http.ResponseWriter, r *http.Request)
+		timeout time.Duration
+	}{
+		"send failure": {handler: func(w http.ResponseWriter, r *http.Request) {
+			conn, _, err := w.(http.Hijacker).Hijack()
+			if err == nil {
+				_ = conn.Close()
+			}
+		}},
+		"hop timeout": {handler: func(w http.ResponseWriter, r *http.Request) {
+			select {
+			case <-r.Context().Done():
+			case <-time.After(5 * time.Second):
+			}
+		}, timeout: time.Second},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			target := newBackend(t, tc.handler)
+			origin := redirectingOrigin(t, target.URL+"/hop/path?sig=SECRETSIG")
+			var audit bytes.Buffer
+			n := netFor(origin, &audit, connectorhost.Route{Method: "GET", Host: origin.host(), Path: "/logs", FollowRedirect: true})
+			if tc.timeout > 0 {
+				n.SetRequestTimeout(tc.timeout)
+			}
+			_, _, err := n.Do(context.Background(), []byte(fmt.Sprintf(`{"method":"GET","url":"%s/logs"}`, origin.URL)), 1<<10)
+			if !errors.Is(err, connectorhost.ErrHTTPSend) {
+				t.Fatalf("err = %v, want ErrHTTPSend", err)
+			}
+			lines := auditLines(t, &audit)
+			if len(lines) != 1 {
+				t.Fatalf("audit = %+v, want one entry", lines)
+			}
+			for what, got := range map[string]string{"error": err.Error(), "audit": audit.String()} {
+				for _, leak := range []string{"SECRETSIG", "sig=", "/hop/path"} {
+					if strings.Contains(got, leak) {
+						t.Errorf("%s leaks %q: %s", what, leak, got)
+					}
+				}
+			}
+			if !strings.Contains(err.Error(), target.host()) {
+				t.Errorf("err = %v, want it to name the hop host %s", err, target.host())
+			}
+			if !strings.Contains(lines[0].Reason, target.host()) {
+				t.Errorf("audit reason = %q, want it to name the hop host %s", lines[0].Reason, target.host())
+			}
+		})
+	}
+}

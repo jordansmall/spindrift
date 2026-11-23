@@ -468,9 +468,19 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 				hopCtx, cancel = context.WithTimeout(ctx, time.Until(dl)/redirectHopShare)
 				defer cancel()
 			}
+			// The client's and url.Parse's *url.Error quote the hop URL, whose
+			// signed query is a secret; the inner error names the failure
+			// without it.
+			hopFailed := func(err error) error {
+				var uerr *url.Error
+				if errors.As(err, &uerr) {
+					err = uerr.Err
+				}
+				return sendFailed("redirect to "+loc.Host, err)
+			}
 			hop, herr := http.NewRequestWithContext(hopCtx, http.MethodGet, loc.String(), nil)
 			if herr != nil {
-				return status, nil, nil, sendFailed("", herr)
+				return status, nil, nil, hopFailed(herr)
 			}
 			// A server honouring the suffix range sends only the tail; one that
 			// ignores it sends the whole body, which readTail trims. A suffix
@@ -479,7 +489,7 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 			hop.Header.Set("Range", fmt.Sprintf("bytes=-%d", maxBody))
 			resp, serr = client.Do(hop)
 			if serr != nil {
-				return status, nil, nil, sendFailed("redirect to "+loc.Host, serr)
+				return status, nil, nil, hopFailed(serr)
 			}
 		} else {
 			entry.Reason = "redirect not followed: " + lerr.Error()
