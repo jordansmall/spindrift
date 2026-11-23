@@ -30,9 +30,22 @@ const maxHTTPResponse = 4 << 20
 // generous enough for a slow GitHub.
 const httpRequestTimeout = 60 * time.Second
 
+// maxHTTPURL caps a guest's request URL before it is parsed or routed, so an
+// oversized one is neither logged nor echoed.
+const maxHTTPURL = 8 << 10
+
+// httpMethods is the fixed set an http_request may use and a Route may
+// declare. lib/connector-routes.nix mirrors it.
+var httpMethods = []string{
+	http.MethodGet, http.MethodHead, http.MethodPost,
+	http.MethodPut, http.MethodPatch, http.MethodDelete,
+}
+
+var errMethodNotAllowed = errors.New("method is not one of " + strings.Join(httpMethods, ", "))
+
 var (
 	// ErrRouteTable marks a Route table that does not validate: a path that
-	// breaks the registry-route rules, a method that is not an uppercase token,
+	// breaks the registry-route rules, a method outside the fixed set,
 	// or a host that is not a bare host[:port].
 	ErrRouteTable = errors.New("connector route table invalid")
 	// ErrRouteRefused marks an http_request the host refused without sending: no
@@ -94,8 +107,8 @@ func ValidateRoutes(routes []Route) error {
 }
 
 func (r Route) validate() error {
-	if !registryvocab.IsValidHeaderFieldName(r.Method) || r.Method != strings.ToUpper(r.Method) {
-		return errors.New("method is not an uppercase HTTP token")
+	if !slices.Contains(httpMethods, r.Method) {
+		return errMethodNotAllowed
 	}
 	u, err := url.Parse("https://" + r.Host)
 	if err != nil || u.Host != r.Host || u.Hostname() == "" || strings.HasSuffix(r.Host, ":") ||
@@ -363,6 +376,12 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 	}
 	if dec.More() {
 		return 0, nil, nil, refuse("malformed request: trailing data after the request object")
+	}
+	if len(in.URL) > maxHTTPURL {
+		return 0, nil, nil, refuse("url is %d bytes, over the %d-byte limit", len(in.URL), maxHTTPURL)
+	}
+	if !slices.Contains(httpMethods, in.Method) {
+		return 0, nil, nil, refuse("%v", errMethodNotAllowed)
 	}
 	entry.Method = in.Method
 	u, perr := url.Parse(in.URL)

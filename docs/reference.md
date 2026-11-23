@@ -2363,8 +2363,9 @@ mean at runtime is issue #6751. The worked example is the fixture Connector in
 - **Route table.** A tracker or forge Connector's row may carry `routes`, a
   list of `{method, host, path}` submodules (default `[ ]`): the only HTTP
   traffic its `http_request` Host call may send (see Network Connectors under [Connector
-  protocol](#connector-protocol)). `method` is an exact uppercase verb, `host`
-  an exact `host[:port]`, and `path` a subtree root. `{repo}` in a `path` stands
+  protocol](#connector-protocol)). `method` is one of `GET`, `HEAD`, `POST`,
+  `PUT`, `PATCH` or `DELETE`, `host` an exact `host[:port]`, and `path` a
+  subtree root. `{repo}` in a `path` stands
   for the repository's `owner/name` slug, which `connectortracker.Routes` fills at
   run time because the slug is config, not something the Connector's package
   can know. The option is a declaration only: the host validates the table when
@@ -2554,9 +2555,10 @@ run fails naming the https requirement, and github's reads fail with
 base fails at load.
 
 Evaluation fails, naming the Connector and the route, on a Route table the host
-would refuse at load: a method that is not an uppercase token, a bad
-`host[:port]`, or a path that is not canonical, is the blanket `/`, or holds `?`
-or `#` (the registry-route rules). It also fails on a row named `git` or
+would refuse at load: a method outside `GET`, `HEAD`, `POST`, `PUT`, `PATCH`
+and `DELETE`, a bad `host[:port]`, or a path that is not canonical, is the
+blanket `/`, or holds `?` or `#` (the registry-route rules). It also fails on a
+row named `git` or
 `local`, which stay built in, on a `credential` that is not one of the
 Connector's own secret, host-only knobs (a core knob included), on a credential
 knob with no `env` or whose `env` aliases a core one such as `GH_TOKEN`, and on

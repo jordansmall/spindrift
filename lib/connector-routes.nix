@@ -7,8 +7,16 @@
 # `problems` is a pure list of messages because builtins.tryEval cannot see
 # thrown text; `check` throws them.
 let
-  # RFC 7230 token, uppercase only: the Go side requires method == ToUpper.
-  methodOk = m: builtins.match "[!#$%&'*+.^_`|~0-9A-Z-]+" m != null;
+  # The fixed set the Go host admits (connectorhost.httpMethods).
+  httpMethods = [
+    "GET"
+    "HEAD"
+    "POST"
+    "PUT"
+    "PATCH"
+    "DELETE"
+  ];
+  methodOk = m: builtins.elem m httpMethods;
 
   # A bare host[:port]: no userinfo, path, query, fragment or trailing ":".
   # The whole-host literal `{base}` stands for the host of the row's base URL;
@@ -68,7 +76,7 @@ let
     then
       "is not an attrset of exactly the strings `method`, `host` and `path` and an optional boolean `followRedirect`"
     else if !(methodOk r.method) then
-      "method is not an uppercase HTTP token"
+      "method is not one of ${builtins.concatStringsSep ", " httpMethods}"
     else if !(hostOk r.host) then
       "host is not a bare host[:port]"
     else if (r.followRedirect or false) && r.method != "GET" then

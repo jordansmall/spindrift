@@ -127,13 +127,19 @@ let
       route = goodRoute // {
         method = "get";
       };
-      why = "uppercase HTTP token";
+      why = "GET, HEAD, POST, PUT, PATCH, DELETE";
     }
     {
       route = goodRoute // {
         method = "GE T";
       };
-      why = "uppercase HTTP token";
+      why = "GET, HEAD, POST, PUT, PATCH, DELETE";
+    }
+    {
+      route = goodRoute // {
+        method = "TRACE";
+      };
+      why = "GET, HEAD, POST, PUT, PATCH, DELETE";
     }
     {
       route = goodRoute // {

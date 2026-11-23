@@ -242,3 +242,10 @@ func (c *Connector) RawBatchDecoderAnswering(answer string) driverkit.BatchDecod
 
 // SetClock replaces the wall clock the Connector hands a guest decoder.
 func (c *Connector) SetClock(now func() time.Time) { c.now = now }
+
+// maxEchoLen bounds how much of a refused guest URL or method a refusal error
+// or audit entry may echo back: the refusal text is fixed, not the guest's.
+const maxEchoLen = 512
+
+// MaxEchoLen is maxEchoLen, for the external tests.
+const MaxEchoLen = maxEchoLen
