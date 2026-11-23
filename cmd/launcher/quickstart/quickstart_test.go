@@ -874,7 +874,7 @@ func TestRunQuickstart_DefaultTracker_WritesGithubIssueTracker(t *testing.T) {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
-	if !strings.Contains(out.String(), "Issue tracker (github/forgejo/local) [github]: ") {
+	if !strings.Contains(out.String(), "Issue tracker (github/forgejo/jira/local) [github]: ") {
 		t.Errorf("expected the issue-tracker prompt to default to github, got:\n%s", out.String())
 	}
 
@@ -2310,6 +2310,7 @@ var goldenPairings = []struct{ tracker, forge string }{
 	{"github", "github"},
 	{"forgejo", "forgejo"},
 	{"forgejo", "github"},
+	{"jira", "github"},
 	{"local", "git"},
 	{"local", "local"},
 }
@@ -2371,7 +2372,7 @@ func TestRender_PairingGoldens(t *testing.T) {
 				gitUserEmail: "ada@example.com",
 				tracker:      goldenChoice(p.tracker),
 				forge:        goldenChoice(p.forge),
-				tokens:       map[string]string{"github": "ghp_faketoken", "forgejo": "forgejo-faketoken"},
+				tokens:       map[string]string{"github": "ghp_faketoken", "forgejo": "forgejo-faketoken", "jira": "jira-faketoken"},
 				credentials:  []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}},
 			}
 			files := mustRender(t, a)
@@ -2635,13 +2636,13 @@ func TestOfferedOn_NewRegistryEntryNeedsNoQuickstartEdit(t *testing.T) {
 	}
 }
 
-// A forge-only row (git) is never offered as a tracker, and a row whose token
-// quickstart cannot collect (jira: JIRA_TOKEN, no AcquireToken hook) is offered
-// on neither axis.
+// A forge-only row (git) is never offered as a tracker, a tracker-only row
+// (jira) never as a forge, and a row whose token quickstart cannot collect (a
+// token env var, no AcquireToken hook) is offered on neither axis.
 func TestOfferedOn_PerAxisRules(t *testing.T) {
 	rows := quickstartStrategies()
 	for axis, want := range map[string]string{
-		axisTracker: "github,local,forgejo",
+		axisTracker: "github,local,forgejo,jira",
 		axisForge:   "github,git,local,forgejo",
 	} {
 		names := strategyNames(offeredOn(axis, rows))
@@ -2656,7 +2657,7 @@ func TestOfferedOn_PerAxisRules(t *testing.T) {
 		t.Error("tracker validator accepted git, want a rejection: git is forge-only")
 	}
 	if err := validateBackendChoice(strategyNames(offeredOn(axisForge, rows)))("jira"); err == nil {
-		t.Error("forge validator accepted jira, want a rejection: quickstart cannot collect its token")
+		t.Error("forge validator accepted jira, want a rejection: jira is tracker-only")
 	}
 }
 
@@ -3052,7 +3053,7 @@ func TestRunQuickstart_CodebergRemote_UsesForgejoBackend(t *testing.T) {
 	if !strings.Contains(transcript, "codeberg.org") {
 		t.Errorf("expected transcript to mention codeberg.org, got:\n%s", transcript)
 	}
-	for _, want := range []string{"Issue tracker (github/forgejo/local) [forgejo]: ", "Code forge (github/forgejo/local/git) [forgejo]: "} {
+	for _, want := range []string{"Issue tracker (github/forgejo/jira/local) [forgejo]: ", "Code forge (github/forgejo/local/git) [forgejo]: "} {
 		if !strings.Contains(transcript, want) {
 			t.Errorf("expected the codeberg.org remote to pre-select forgejo on both axes (%q), got:\n%s", want, transcript)
 		}
@@ -3110,7 +3111,7 @@ func TestRunQuickstart_SelfHostedForgejo_AsksBackendAndEmitsBaseURL(t *testing.T
 	}
 
 	transcript := out.String()
-	if !strings.Contains(transcript, "Issue tracker (github/forgejo/local)") || !strings.Contains(transcript, "Code forge (github/forgejo/local/git)") {
+	if !strings.Contains(transcript, "Issue tracker (github/forgejo/jira/local)") || !strings.Contains(transcript, "Code forge (github/forgejo/local/git)") {
 		t.Errorf("expected transcript to ask for backend on an unrecognized host, got:\n%s", transcript)
 	}
 
@@ -3412,7 +3413,7 @@ func TestRunQuickstart_UnclaimedHost_PromptsOverOfferedRows(t *testing.T) {
 	}
 
 	transcript := out.String()
-	for _, want := range []string{"Issue tracker (github/forgejo/local) [github]: ", "Code forge (github/forgejo/local/git) [github]: "} {
+	for _, want := range []string{"Issue tracker (github/forgejo/jira/local) [github]: ", "Code forge (github/forgejo/local/git) [github]: "} {
 		if !strings.Contains(transcript, want) {
 			t.Errorf("expected the per-axis prompt %q defaulting to the first offered row, got:\n%s", want, transcript)
 		}
@@ -3467,7 +3468,7 @@ func TestRunQuickstart_GHHostOverride_GithubComRemoteFallsToBackendPrompt(t *tes
 	if strings.Contains(transcript, "detected a github.com remote") {
 		t.Errorf("expected github.com not to be detected under GH_HOST=ghe.corp, got:\n%s", transcript)
 	}
-	if !strings.Contains(transcript, "Issue tracker (github/forgejo/local) [github]: ") {
+	if !strings.Contains(transcript, "Issue tracker (github/forgejo/jira/local) [github]: ") {
 		t.Errorf("expected the backend prompt, got:\n%s", transcript)
 	}
 }
@@ -4194,11 +4195,11 @@ func TestRunQuickstart_GitIsNeverOfferedAsTracker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runQuickstart: %v\n%s", err, transcript)
 	}
-	if !strings.Contains(transcript, `invalid input: expected one of github, forgejo, local, got "git"`) {
+	if !strings.Contains(transcript, `invalid input: expected one of github, forgejo, jira, local, got "git"`) {
 		t.Errorf("tracker prompt did not reject git:\n%s", transcript)
 	}
-	if strings.Contains(transcript, "Issue tracker (github/forgejo/local/git)") || strings.Contains(transcript, "jira") {
-		t.Errorf("a prompt offers git as a tracker or jira at all:\n%s", transcript)
+	if strings.Contains(transcript, "Issue tracker (github/forgejo/jira/local/git)") || strings.Contains(transcript, "Code forge (github/forgejo/jira") {
+		t.Errorf("a prompt offers git as a tracker or jira as a forge:\n%s", transcript)
 	}
 }
 

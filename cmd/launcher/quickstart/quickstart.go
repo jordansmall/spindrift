@@ -600,7 +600,7 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 	}
 
 	if deferChecks {
-		fmt.Fprintln(w, "the finish-line checks need the Connector sandbox, which quickstart does not run — deferred to `spindrift doctor`.")
+		fmt.Fprintln(w, "the finish-line checks need the Connector sandbox, which quickstart does not run — deferred to `spindrift doctor`. Before running it, fill in any settings left commented out in flake.nix and any blank values in harness.env.")
 	} else {
 		it, cf, err := forgeBuilder(a.tracker.row, a.forge.row, shared, a.lookup())
 		if err != nil {
@@ -911,6 +911,24 @@ func renderFlakeNix(a answers) (string, error) {
 		}
 	}
 
+	var extraInputs, moduleImports string
+	for _, choice := range a.chosen() {
+		stanza := consumerStanzas[choice.name]
+		if stanza.FlakeInput != "" {
+			for _, line := range strings.Split(strings.TrimSuffix(stanza.FlakeInput, "\n"), "\n") {
+				extraInputs += "    " + line + "\n"
+			}
+		}
+		if stanza.ModuleImport != "" {
+			moduleImports += "        " + stanza.ModuleImport + "\n"
+		}
+	}
+	// nixfmt keeps a one-element list on one line.
+	imports := "      imports = [ spindrift.flakeModules.default ];"
+	if moduleImports != "" {
+		imports = "      imports = [\n        spindrift.flakeModules.default\n" + moduleImports + "      ];"
+	}
+
 	out := fmt.Sprintf(`{
   description = "A spindrift consumer — headless coding agents, one disposable container per issue";
 
@@ -918,7 +936,7 @@ func renderFlakeNix(a answers) (string, error) {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-parts.url = "github:hercules-ci/flake-parts";
     spindrift.url = "github:jordansmall/spindrift";
-  };
+%s  };
 
   outputs =
     inputs@{
@@ -933,7 +951,7 @@ func renderFlakeNix(a answers) (string, error) {
         "x86_64-linux"
       ];
 
-      imports = [ spindrift.flakeModules.default ];
+%s
 
       perSystem =
         { config, pkgs, ... }:
@@ -953,7 +971,8 @@ func renderFlakeNix(a answers) (string, error) {
         };
     };
 }
-`, pathRuntime, nixEscape(a.runtime),
+`, extraInputs, imports,
+		pathRuntime, nixEscape(a.runtime),
 		pathRepoSlug, nixEscape(a.repoSlug),
 		pathGitUserName, nixEscape(a.gitUserName),
 		pathGitUserEmail, nixEscape(a.gitUserEmail),
