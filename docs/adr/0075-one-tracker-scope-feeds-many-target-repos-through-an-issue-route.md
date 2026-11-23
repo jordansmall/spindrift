@@ -121,7 +121,8 @@ Facts that shape the decision:
 - One instance still serves exactly one Target repo. A Daemon serving
   several repos remains future work.
 - A ticket that matches no route sits unclaimed, and nothing reports it.
-  The docs tell routed teams to give every ticket a routing value.
+  [The docs](../reference.md#routed-deployments) tell routed teams to give
+  every ticket a routing value.
 - Overlapping routes can still double-claim a ticket, because the claim
   is not atomic.
 - The Connector protocol's `Query` gains an optional route field and
