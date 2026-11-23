@@ -68,6 +68,8 @@ func TestRunQuickstart_RepoSlugDetected_ShownAsDefault_AcceptedWithEnter(t *test
 	var out bytes.Buffer
 	env := fakeEnvironment{runtimes: map[string]bool{"podman": true}, remoteURL: "git@github.com:jordansmall/spindrift.git"}
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"",
 		"",
 		"Ada Lovelace",
@@ -98,6 +100,8 @@ func TestRunQuickstart_RepoSlugDetected_CanBeOverridden(t *testing.T) {
 	var out bytes.Buffer
 	env := fakeEnvironment{runtimes: map[string]bool{"podman": true}, remoteURL: "git@github.com:jordansmall/spindrift.git"}
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"someoneelse/other-repo",
 		"",
 		"Ada Lovelace",
@@ -128,6 +132,8 @@ func TestRunQuickstart_RepoSlugInvalid_RejectedAndReprompted(t *testing.T) {
 	var out bytes.Buffer
 	env := withPodman()
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"notaslug",
 		"owner/repo",
 		"",
@@ -157,7 +163,7 @@ func TestRunQuickstart_RepoSlugInvalidAtEOF_ReturnsErrorInsteadOfHanging(t *test
 	dir := t.TempDir()
 	var out bytes.Buffer
 	env := withPodman()
-	stdin := strings.NewReader("notaslug\n")
+	stdin := strings.NewReader("\n\nnotaslug\n")
 
 	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
 	if err == nil {
@@ -177,6 +183,8 @@ func TestRunQuickstart_RuntimeInvalid_RejectedAndReprompted(t *testing.T) {
 	var out bytes.Buffer
 	env := withPodman()
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"nonsense",
 		"docker",
@@ -212,6 +220,8 @@ func TestRunQuickstart_RuntimeChosen_AbsentFromPATH_WarnsAndAsksConfirmation(t *
 	var out bytes.Buffer
 	env := withPodman()
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"docker",
 		"n",
@@ -248,6 +258,8 @@ func TestRunQuickstart_RuntimeChosen_AbsentFromPATH_ConfirmedProceeds(t *testing
 	var out bytes.Buffer
 	env := withPodman()
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"docker",
 		"y",
@@ -283,6 +295,8 @@ func TestRunQuickstart_RancherSelected_WarningNamesNerdctl(t *testing.T) {
 	// triggers the WARNING and the confirmation.
 	env := fakeEnvironment{runtimes: map[string]bool{"bwrap": true}}
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"rancher",
 		"n",
@@ -324,6 +338,8 @@ func TestRunQuickstart_GitIdentityDetected_ShownAsDefault_AcceptedWithEnter(t *t
 		gitConfig: map[string]string{"user.name": "Ada Lovelace", "user.email": "ada@example.com"},
 	}
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"",
 		"",
@@ -359,6 +375,8 @@ func TestRunQuickstart_GitIdentityDetected_CanBeOverridden(t *testing.T) {
 		gitConfig: map[string]string{"user.name": "Ada Lovelace", "user.email": "ada@example.com"},
 	}
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"",
 		"Grace Hopper",
@@ -389,6 +407,8 @@ func TestRunQuickstart_RuntimeDefault_FallsBackToDockerThenBwrap(t *testing.T) {
 	var out bytes.Buffer
 	env := fakeEnvironment{runtimes: map[string]bool{"docker": true, "bwrap": true}}
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"",
 		"Ada Lovelace",
@@ -412,6 +432,8 @@ func TestRunQuickstart_RuntimeDefault_BwrapWhenOnlyOneAvailable(t *testing.T) {
 	var out bytes.Buffer
 	env := fakeEnvironment{runtimes: map[string]bool{"bwrap": true}}
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"",
 		"Ada Lovelace",
@@ -435,6 +457,8 @@ func TestRunQuickstart_RuntimeDefault_NerdctlDetected_OffersRancher(t *testing.T
 	var out bytes.Buffer
 	env := fakeEnvironment{runtimes: map[string]bool{"nerdctl": true, "bwrap": true}}
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"",
 		"Ada Lovelace",
@@ -465,6 +489,8 @@ func TestRunQuickstart_RuntimeDefault_DockerPreferredOverNerdctl(t *testing.T) {
 	var out bytes.Buffer
 	env := fakeEnvironment{runtimes: map[string]bool{"docker": true, "nerdctl": true}}
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"",
 		"Ada Lovelace",
@@ -538,6 +564,8 @@ func TestRunQuickstart_DeclineRuntimeConfirmation_ForceDoesNotBackUpExistingFile
 	// WARNING and the "Proceed anyway...?" confirmation, which "n" declines.
 	env := fakeEnvironment{runtimes: map[string]bool{"bwrap": true}}
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"podman",
 		"n",
@@ -566,6 +594,8 @@ func TestRunQuickstart_RuntimeDefault_PrefersPodmanOverDockerAndBwrap(t *testing
 	var out bytes.Buffer
 	env := fakeEnvironment{runtimes: map[string]bool{"podman": true, "docker": true, "bwrap": true}}
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"",
 		"Ada Lovelace",
@@ -676,6 +706,8 @@ func TestRunQuickstart_HappyPath_WritesFiles(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
+		"",                      // issue tracker, default
+		"",                      // code forge, default
 		"jordansmall/spindrift", // repoSlug
 		"podman",                // runtime
 		"Ada Lovelace",          // git user name
@@ -822,11 +854,13 @@ func TestRunQuickstart_NotInsideGitWorkTree_FinishLineOmitsGitAddReminder(t *tes
 	}
 }
 
-func TestRunQuickstart_WritesGithubIssueTrackerWithoutPrompting(t *testing.T) {
+func TestRunQuickstart_DefaultTracker_WritesGithubIssueTracker(t *testing.T) {
 	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
+		"",                      // issue tracker, default
+		"",                      // code forge, default
 		"jordansmall/spindrift", // repoSlug
 		"podman",                // runtime
 		"Ada Lovelace",          // git user name
@@ -840,8 +874,8 @@ func TestRunQuickstart_WritesGithubIssueTrackerWithoutPrompting(t *testing.T) {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
-	if strings.Contains(out.String(), "Issue Tracker") {
-		t.Errorf("expected no issue-tracker prompt in transcript, got:\n%s", out.String())
+	if !strings.Contains(out.String(), "Issue tracker (github/forgejo/local) [github]: ") {
+		t.Errorf("expected the issue-tracker prompt to default to github, got:\n%s", out.String())
 	}
 
 	flakeNix, err := os.ReadFile(filepath.Join(dir, "flake.nix"))
@@ -864,6 +898,8 @@ func TestRunQuickstart_AmbientGHToken_SkipsPrompt(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
+		"",                      // issue tracker, default
+		"",                      // code forge, default
 		"jordansmall/spindrift", // repoSlug
 		"podman",                // runtime
 		"Ada Lovelace",          // git user name
@@ -893,6 +929,8 @@ func TestRunQuickstart_FineGrainedToken_PrintsRequiredPermissions(t *testing.T) 
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"podman",
 		"Ada Lovelace",
@@ -928,6 +966,8 @@ func TestRunQuickstart_ClassicTokenNarrowScope_AcceptedWithoutGate(t *testing.T)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"podman",
 		"Ada Lovelace",
@@ -961,6 +1001,8 @@ func TestRunQuickstart_ClassicTokenBroadScope_AcceptWritesToken(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"podman",
 		"Ada Lovelace",
@@ -993,6 +1035,8 @@ func TestRunQuickstart_ClassicTokenBroadScope_DeclineAbortsWithoutWriting(t *tes
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"podman",
 		"Ada Lovelace",
@@ -1017,6 +1061,8 @@ func TestRunQuickstart_NoAmbientToken_PrintsGuidedPATInstructions(t *testing.T) 
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"podman",
 		"Ada Lovelace",
@@ -1043,6 +1089,8 @@ func TestRunQuickstart_BlankTokenInput_FallsBackToGHAuthToken(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"podman",
 		"Ada Lovelace",
@@ -1074,6 +1122,8 @@ func TestRunQuickstart_GHAuthTokenFallbackFails_AbortsWithoutWriting(t *testing.
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"podman",
 		"Ada Lovelace",
@@ -1096,6 +1146,8 @@ func TestRunQuickstart_TokenScopesReadError_AbortsWithoutWriting(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"podman",
 		"Ada Lovelace",
@@ -1119,6 +1171,8 @@ func TestRunQuickstart_UnknownTokenPrefix_AcceptedWithoutAudit(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"podman",
 		"Ada Lovelace",
@@ -1148,6 +1202,8 @@ func TestRunQuickstart_AmbientTokenBroadScope_StillRequiresACCEPT(t *testing.T) 
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
+		"",                      // issue tracker, default
+		"",                      // code forge, default
 		"jordansmall/spindrift", // repoSlug
 		"podman",                // runtime
 		"Ada Lovelace",          // git user name
@@ -1183,6 +1239,8 @@ func TestRunQuickstart_GHAuthTokenEmpty_AbortsWithoutWriting(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"podman",
 		"Ada Lovelace",
@@ -1212,6 +1270,8 @@ func TestRunQuickstart_Force_BacksUpExistingFiles(t *testing.T) {
 	}
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"podman",
 		"Ada Lovelace",
@@ -1308,6 +1368,8 @@ func TestQuickstartGitignore_MatchesTemplateDefaultGitignore(t *testing.T) {
 // failure/backup tests (issue #2563).
 func defaultQuickstartStdin() *strings.Reader {
 	return strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"podman",
 		"Ada Lovelace",
@@ -1628,6 +1690,8 @@ func TestRunQuickstart_DeclineSetupToken_PromptsForAPIKey(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"podman",
 		"Ada Lovelace",
@@ -1662,6 +1726,8 @@ func TestRunQuickstart_AcceptSetupToken_EmptyPaste_Errors(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"podman",
 		"Ada Lovelace",
@@ -1690,6 +1756,8 @@ func TestRunQuickstart_AcceptSetupToken_RunsItAndPastesToken(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"podman",
 		"Ada Lovelace",
@@ -1724,6 +1792,8 @@ func TestRunQuickstart_AmbientClaudeOAuthToken_ReusedWithoutPrompt(t *testing.T)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"podman",
 		"Ada Lovelace",
@@ -1757,6 +1827,8 @@ func TestRunQuickstart_BothAmbientCredentials_OAuthTokenTakesPrecedence(t *testi
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"podman",
 		"Ada Lovelace",
@@ -1790,6 +1862,8 @@ func TestRunQuickstart_AmbientAnthropicAPIKey_ReusedWithoutPrompt(t *testing.T) 
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"podman",
 		"Ada Lovelace",
@@ -1835,7 +1909,7 @@ func passingForge() *forge.Fake {
 // IssueTracker and CodeForge seams regardless of the collected settings, so
 // tests can inject a forge.Fake instead of shelling out to gh/Jira.
 func fakeForgeBuilder(f *forge.Fake) ForgeBuilder {
-	return func(backendkit.Strategy, backendkit.Shared, backendkit.Lookup) (forge.IssueTracker, forge.CodeForge, error) {
+	return func(_, _ backendkit.Strategy, _ backendkit.Shared, _ backendkit.Lookup) (forge.IssueTracker, forge.CodeForge, error) {
 		return f, f, nil
 	}
 }
@@ -1845,6 +1919,8 @@ func TestRunQuickstart_FinishLine_ProbesForgeThenCreatesLabelsThenBuilds(t *test
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
+		"",                      // issue tracker, default
+		"",                      // code forge, default
 		"jordansmall/spindrift", // repoSlug
 		"podman",                // runtime
 		"Ada Lovelace",          // git user name
@@ -2031,8 +2107,9 @@ func TestRender_HappyPath_ReturnsFourFiles(t *testing.T) {
 		runtime:      "podman",
 		gitUserName:  "Ada Lovelace",
 		gitUserEmail: "ada@example.com",
-		choice:       backendChoice{name: "github"},
-		token:        "ghp_faketoken",
+		tracker:      backendChoice{name: "github"},
+		forge:        backendChoice{name: "github"},
+		tokens:       map[string]string{"github": "ghp_faketoken"},
 		credentials:  []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}},
 	}
 
@@ -2087,8 +2164,9 @@ func TestRender_ForgejoCodeberg_ConfiguresBothSeamsOmitsDefaultBaseURL(t *testin
 		runtime:      "podman",
 		gitUserName:  "Ada",
 		gitUserEmail: "ada@example.com",
-		choice:       backendChoice{name: "forgejo", knobs: map[string]string{"FORGEJO_BASE_URL": "https://codeberg.org"}},
-		token:        "forgejo-faketoken",
+		tracker:      backendChoice{name: "forgejo", knobs: map[string]string{"FORGEJO_BASE_URL": "https://codeberg.org"}},
+		forge:        backendChoice{name: "forgejo", knobs: map[string]string{"FORGEJO_BASE_URL": "https://codeberg.org"}},
+		tokens:       map[string]string{"forgejo": "forgejo-faketoken"},
 		credentials:  []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}},
 	}
 
@@ -2146,10 +2224,10 @@ func TestRenderHarnessEnv_WritesConnectorCredentialForEveryRow(t *testing.T) {
 		checked++
 		env := stanza.Credential
 		t.Run(name, func(t *testing.T) {
-			out := renderHarnessEnv(name, "faketoken", nil)
+			out := harnessEnvFor(name, "faketoken", nil)
 			for _, want := range []string{env + "=faketoken\n", env + "_CMD=", "docs/reference.md#backend-primary-mode"} {
 				if !strings.Contains(out, want) {
-					t.Errorf("renderHarnessEnv(%q, ...) does not contain %q, got:\n%s", name, want, out)
+					t.Errorf("harnessEnvFor(%q, ...) does not contain %q, got:\n%s", name, want, out)
 				}
 			}
 		})
@@ -2157,7 +2235,7 @@ func TestRenderHarnessEnv_WritesConnectorCredentialForEveryRow(t *testing.T) {
 	if checked == 0 {
 		t.Fatal("no consumerStanzas entry names a Credential, so this test would check nothing")
 	}
-	if out := renderHarnessEnv("no-such-backend", "faketoken", nil); strings.Contains(out, "SPINDRIFT_") {
+	if out := harnessEnvFor("no-such-backend", "faketoken", nil); strings.Contains(out, "SPINDRIFT_") {
 		t.Errorf("a backend with no Connector row wrote a SPINDRIFT_ line, got:\n%s", out)
 	}
 }
@@ -2209,8 +2287,9 @@ func TestRender_ForgejoSelfHosted_EmitsBaseURL(t *testing.T) {
 		runtime:      "podman",
 		gitUserName:  "Ada",
 		gitUserEmail: "ada@example.com",
-		choice:       backendChoice{name: "forgejo", knobs: map[string]string{"FORGEJO_BASE_URL": "https://git.example.com"}},
-		token:        "forgejo-faketoken",
+		tracker:      backendChoice{name: "forgejo", knobs: map[string]string{"FORGEJO_BASE_URL": "https://git.example.com"}},
+		forge:        backendChoice{name: "forgejo", knobs: map[string]string{"FORGEJO_BASE_URL": "https://git.example.com"}},
+		tokens:       map[string]string{"forgejo": "forgejo-faketoken"},
 		credentials:  []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}},
 	}
 
@@ -2233,8 +2312,9 @@ func TestRender_Github_Golden(t *testing.T) {
 		runtime:      "podman",
 		gitUserName:  "Ada Lovelace",
 		gitUserEmail: "ada@example.com",
-		choice:       backendChoice{name: "github"},
-		token:        "ghp_faketoken",
+		tracker:      backendChoice{name: "github"},
+		forge:        backendChoice{name: "github"},
+		tokens:       map[string]string{"github": "ghp_faketoken"},
 		credentials:  []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}},
 	}
 
@@ -2260,8 +2340,9 @@ func TestRender_Forgejo_Golden(t *testing.T) {
 		runtime:      "podman",
 		gitUserName:  "Ada Lovelace",
 		gitUserEmail: "ada@example.com",
-		choice:       backendChoice{name: "forgejo", knobs: map[string]string{"FORGEJO_BASE_URL": "https://git.example.com"}},
-		token:        "forgejo-faketoken",
+		tracker:      backendChoice{name: "forgejo", knobs: map[string]string{"FORGEJO_BASE_URL": "https://git.example.com"}},
+		forge:        backendChoice{name: "forgejo", knobs: map[string]string{"FORGEJO_BASE_URL": "https://git.example.com"}},
+		tokens:       map[string]string{"forgejo": "forgejo-faketoken"},
 		credentials:  []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}},
 	}
 
@@ -2390,8 +2471,9 @@ func TestRender_AnthropicAPIKey_WrittenWhenNoOAuthToken(t *testing.T) {
 		runtime:      "podman",
 		gitUserName:  "Ada Lovelace",
 		gitUserEmail: "ada@example.com",
-		choice:       backendChoice{name: "github"},
-		token:        "ghp_faketoken",
+		tracker:      backendChoice{name: "github"},
+		forge:        backendChoice{name: "github"},
+		tokens:       map[string]string{"github": "ghp_faketoken"},
 		credentials:  []credential{{env: "ANTHROPIC_API_KEY", value: "sk-ant-faketoken"}},
 	}
 
@@ -2415,8 +2497,9 @@ func TestRender_NixSpecialChars_AreEscaped(t *testing.T) {
 		runtime:      "podman",
 		gitUserName:  "Ada Lovelace",
 		gitUserEmail: "ada@example.com",
-		choice:       backendChoice{name: "github"},
-		token:        "ghp_faketoken",
+		tracker:      backendChoice{name: "github"},
+		forge:        backendChoice{name: "github"},
+		tokens:       map[string]string{"github": "ghp_faketoken"},
 	}
 
 	cases := []struct {
@@ -2488,19 +2571,40 @@ func stubRow(name, host string) backendkit.Strategy {
 	}
 }
 
-// Pins that validateBackendChoice is registry-driven: a quickstart row added
-// to the strategy source passes with no quickstart-side change, while the
-// block-less jira and local rows are rejected.
-func TestValidateBackendChoice_NewRegistryEntryNeedsNoQuickstartEdit(t *testing.T) {
+// Pins that the offered rows are registry-driven: a row added to the strategy
+// source is offered on both axes with no quickstart-side change.
+func TestOfferedOn_NewRegistryEntryNeedsNoQuickstartEdit(t *testing.T) {
 	withQuickstartRow(t, stubRow("gitlab", "gitlab.example.com"))
 
-	if err := validateBackendChoice("gitlab"); err != nil {
-		t.Errorf("validateBackendChoice(\"gitlab\") = %v, want nil", err)
-	}
-	for _, name := range []string{"jira", "local", "git"} {
-		if err := validateBackendChoice(name); err == nil {
-			t.Errorf("validateBackendChoice(%q) = nil, want a rejection: no quickstart block", name)
+	for _, axis := range []string{axisTracker, axisForge} {
+		if err := validateBackendChoice(strategyNames(offeredOn(axis, quickstartStrategies())))("gitlab"); err != nil {
+			t.Errorf("%s axis rejects gitlab: %v", axis, err)
 		}
+	}
+}
+
+// A forge-only row (git) is never offered as a tracker, and a row whose token
+// quickstart cannot collect (jira: JIRA_TOKEN, no AcquireToken hook) is offered
+// on neither axis.
+func TestOfferedOn_PerAxisRules(t *testing.T) {
+	rows := quickstartStrategies()
+	for axis, want := range map[string]string{
+		axisTracker: "github,local,forgejo",
+		axisForge:   "github,git,local,forgejo",
+	} {
+		names := strategyNames(offeredOn(axis, rows))
+		slices.Sort(names)
+		wantNames := strings.Split(want, ",")
+		slices.Sort(wantNames)
+		if !slices.Equal(names, wantNames) {
+			t.Errorf("%s axis offers %v, want %v", axis, names, wantNames)
+		}
+	}
+	if err := validateBackendChoice(strategyNames(offeredOn(axisTracker, rows)))("git"); err == nil {
+		t.Error("tracker validator accepted git, want a rejection: git is forge-only")
+	}
+	if err := validateBackendChoice(strategyNames(offeredOn(axisForge, rows)))("jira"); err == nil {
+		t.Error("forge validator accepted jira, want a rejection: quickstart cannot collect its token")
 	}
 }
 
@@ -2553,7 +2657,7 @@ func TestRenderHarnessEnv_RegistryDriven(t *testing.T) {
 	})
 	defer func() { backend.Registry = original }()
 
-	out := renderHarnessEnv("gitlab", "gitlab-faketoken", []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}})
+	out := harnessEnvFor("gitlab", "gitlab-faketoken", []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}})
 
 	if !strings.Contains(out, "GITLAB_TOKEN=gitlab-faketoken") {
 		t.Errorf("expected harness.env to contain GITLAB_TOKEN, got:\n%s", out)
@@ -2567,7 +2671,7 @@ func TestRenderHarnessEnv_RegistryDriven(t *testing.T) {
 // documenting the <NAME>_CMD vault-indirection convention from
 // templates/default/harness.env.example, not just the bare plaintext line.
 func TestRenderHarnessEnv_DocumentsCommandFormIndirection(t *testing.T) {
-	out := renderHarnessEnv("github", "ghp_faketoken", []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}})
+	out := harnessEnvFor("github", "ghp_faketoken", []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}})
 
 	if !strings.Contains(out, `GH_TOKEN_CMD="rbw get spindrift-gh-token"`) {
 		t.Errorf("expected harness.env to document GH_TOKEN_CMD indirection, got:\n%s", out)
@@ -2589,7 +2693,7 @@ func TestRenderHarnessEnv_DocumentsCommandFormIndirection(t *testing.T) {
 // docs/reference.md's precedence, the plaintext value the wizard always writes
 // wins too, so SECRET_CMD is a no-op until the operator removes that value.
 func TestRenderHarnessEnv_FileLevelPreamble(t *testing.T) {
-	out := renderHarnessEnv("github", "ghp_faketoken", []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}})
+	out := harnessEnvFor("github", "ghp_faketoken", []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}})
 
 	if !strings.Contains(out, "SECRET_CMD") {
 		t.Errorf("expected harness.env to mention the SECRET_CMD fallback, got:\n%s", out)
@@ -2878,6 +2982,8 @@ func TestRunQuickstart_CodebergRemote_UsesForgejoBackend(t *testing.T) {
 		runtimes:  map[string]bool{"podman": true},
 	}
 	stdin := strings.NewReader(strings.Join([]string{
+		"",                  // issue tracker, default
+		"",                  // code forge, default
 		"",                  // repoSlug default owner/repo
 		"",                  // runtime default podman
 		"Ada Lovelace",      // git user name
@@ -2893,8 +2999,10 @@ func TestRunQuickstart_CodebergRemote_UsesForgejoBackend(t *testing.T) {
 	if !strings.Contains(transcript, "codeberg.org") {
 		t.Errorf("expected transcript to mention codeberg.org, got:\n%s", transcript)
 	}
-	if strings.Contains(transcript, "Backend (github/forgejo)") {
-		t.Errorf("expected no backend prompt for a codeberg.org remote, got:\n%s", transcript)
+	for _, want := range []string{"Issue tracker (github/forgejo/local) [forgejo]: ", "Code forge (github/forgejo/local/git) [forgejo]: "} {
+		if !strings.Contains(transcript, want) {
+			t.Errorf("expected the codeberg.org remote to pre-select forgejo on both axes (%q), got:\n%s", want, transcript)
+		}
 	}
 	if !strings.Contains(transcript, "Forgejo token validated") {
 		t.Errorf("expected transcript to confirm forgejo token validation, got:\n%s", transcript)
@@ -2935,7 +3043,8 @@ func TestRunQuickstart_SelfHostedForgejo_AsksBackendAndEmitsBaseURL(t *testing.T
 		runtimes:  map[string]bool{"podman": true},
 	}
 	stdin := strings.NewReader(strings.Join([]string{
-		"forgejo",           // backend
+		"forgejo",           // issue tracker
+		"forgejo",           // code forge
 		"",                  // repoSlug default team/proj
 		"",                  // runtime default podman
 		"Ada Lovelace",      // git user name
@@ -2948,7 +3057,7 @@ func TestRunQuickstart_SelfHostedForgejo_AsksBackendAndEmitsBaseURL(t *testing.T
 	}
 
 	transcript := out.String()
-	if !strings.Contains(transcript, "Backend (github/forgejo)") {
+	if !strings.Contains(transcript, "Issue tracker (github/forgejo/local)") || !strings.Contains(transcript, "Code forge (github/forgejo/local/git)") {
 		t.Errorf("expected transcript to ask for backend on an unrecognized host, got:\n%s", transcript)
 	}
 
@@ -3129,6 +3238,8 @@ func TestRunQuickstart_FlakeNix_NoDeprecatedPathSpellings(t *testing.T) {
 		dir := t.TempDir()
 		var out bytes.Buffer
 		stdin := strings.NewReader(strings.Join([]string{
+			"",                      // issue tracker, default
+			"",                      // code forge, default
 			"jordansmall/spindrift", // repoSlug
 			"podman",                // runtime
 			"Ada Lovelace",          // git user name
@@ -3153,7 +3264,8 @@ func TestRunQuickstart_FlakeNix_NoDeprecatedPathSpellings(t *testing.T) {
 			runtimes:  map[string]bool{"podman": true},
 		}
 		stdin := strings.NewReader(strings.Join([]string{
-			"forgejo",           // backend
+			"forgejo",           // issue tracker
+			"forgejo",           // code forge
 			"",                  // repoSlug default team/proj
 			"",                  // runtime default podman
 			"Ada Lovelace",      // git user name
@@ -3189,6 +3301,8 @@ func TestRunQuickstart_NewBackend_TokenAcquisitionNeedsNoRunQuickstartEdit(t *te
 		runtimes:  map[string]bool{"podman": true},
 	}
 	stdin := strings.NewReader(strings.Join([]string{
+		"",                 // issue tracker, default
+		"",                 // code forge, default
 		"",                 // repoSlug default team/proj
 		"",                 // runtime default podman
 		"Ada Lovelace",     // git user name
@@ -3201,11 +3315,11 @@ func TestRunQuickstart_NewBackend_TokenAcquisitionNeedsNoRunQuickstartEdit(t *te
 	}
 
 	transcript := out.String()
-	if !strings.Contains(transcript, "detected a gitlab.example.com remote — using the gitlab backend") {
+	if !strings.Contains(transcript, "detected a gitlab.example.com remote — pre-selecting the gitlab backend") {
 		t.Errorf("expected the stub row to be detected from its host, got:\n%s", transcript)
 	}
-	if strings.Contains(transcript, "Backend (") {
-		t.Errorf("expected no backend prompt for a host a row claims, got:\n%s", transcript)
+	if n := strings.Count(transcript, "[gitlab]: "); n != 2 {
+		t.Errorf("expected the claimed host to pre-select gitlab on both axes, saw %d defaults:\n%s", n, transcript)
 	}
 	harnessEnv, err := os.ReadFile(filepath.Join(dir, "harness.env"))
 	if err != nil {
@@ -3219,9 +3333,9 @@ func TestRunQuickstart_NewBackend_TokenAcquisitionNeedsNoRunQuickstartEdit(t *te
 	}
 }
 
-// A host no row lists is asked, offering exactly the rows with a quickstart
-// block, with the first row as the default answer.
-func TestRunQuickstart_UnclaimedHost_PromptsOverQuickstartRowsOnly(t *testing.T) {
+// A host no row lists falls back to the first offered row on each axis, asking
+// with the full per-axis offer.
+func TestRunQuickstart_UnclaimedHost_PromptsOverOfferedRows(t *testing.T) {
 	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
@@ -3231,7 +3345,8 @@ func TestRunQuickstart_UnclaimedHost_PromptsOverQuickstartRowsOnly(t *testing.T)
 		runtimes:  map[string]bool{"podman": true},
 	}
 	stdin := strings.NewReader(strings.Join([]string{
-		"",                // backend default
+		"",                // issue tracker, default
+		"",                // code forge, default
 		"",                // repoSlug default team/proj
 		"",                // runtime default podman
 		"Ada Lovelace",    // git user name
@@ -3243,13 +3358,16 @@ func TestRunQuickstart_UnclaimedHost_PromptsOverQuickstartRowsOnly(t *testing.T)
 	}
 
 	transcript := out.String()
-	if !strings.Contains(transcript, "Backend (github/forgejo) [github]: ") {
-		t.Errorf("expected the backend prompt over the quickstart rows defaulting to the first, got:\n%s", transcript)
+	for _, want := range []string{"Issue tracker (github/forgejo/local) [github]: ", "Code forge (github/forgejo/local/git) [github]: "} {
+		if !strings.Contains(transcript, want) {
+			t.Errorf("expected the per-axis prompt %q defaulting to the first offered row, got:\n%s", want, transcript)
+		}
 	}
 }
 
-// A github.com remote is claimed by the github row, which carries no knobs.
-func TestRunQuickstart_GithubRemote_DetectedWithoutBackendPrompt(t *testing.T) {
+// A github.com remote is claimed by the github row, which carries no knobs,
+// and pre-selects it on both axes.
+func TestRunQuickstart_GithubRemote_PreselectsGithubOnBothAxes(t *testing.T) {
 	requireConnector(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
@@ -3258,18 +3376,18 @@ func TestRunQuickstart_GithubRemote_DetectedWithoutBackendPrompt(t *testing.T) {
 		env:       map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken", "GH_TOKEN": "ghp_faketoken"},
 		runtimes:  map[string]bool{"podman": true},
 	}
-	stdin := strings.NewReader("\n\nAda Lovelace\nada@example.com\n")
+	stdin := strings.NewReader("\n\n\n\nAda Lovelace\nada@example.com\n")
 
 	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
 	transcript := out.String()
-	if !strings.Contains(transcript, "detected a github.com remote — using the github backend") {
+	if !strings.Contains(transcript, "detected a github.com remote — pre-selecting the github backend") {
 		t.Errorf("expected github.com to be detected, got:\n%s", transcript)
 	}
-	if strings.Contains(transcript, "Backend (") {
-		t.Errorf("expected no backend prompt, got:\n%s", transcript)
+	if n := strings.Count(transcript, "[github]: "); n != 2 {
+		t.Errorf("expected the claimed host to pre-select github on both axes, saw %d defaults:\n%s", n, transcript)
 	}
 }
 
@@ -3285,7 +3403,7 @@ func TestRunQuickstart_GHHostOverride_GithubComRemoteFallsToBackendPrompt(t *tes
 		env:       map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken", "GH_TOKEN": "ghp_faketoken"},
 		runtimes:  map[string]bool{"podman": true},
 	}
-	stdin := strings.NewReader("\n\n\nAda Lovelace\nada@example.com\n")
+	stdin := strings.NewReader("\n\n\n\nAda Lovelace\nada@example.com\n")
 
 	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
@@ -3295,7 +3413,7 @@ func TestRunQuickstart_GHHostOverride_GithubComRemoteFallsToBackendPrompt(t *tes
 	if strings.Contains(transcript, "detected a github.com remote") {
 		t.Errorf("expected github.com not to be detected under GH_HOST=ghe.corp, got:\n%s", transcript)
 	}
-	if !strings.Contains(transcript, "Backend (github/forgejo) [github]: ") {
+	if !strings.Contains(transcript, "Issue tracker (github/forgejo/local) [github]: ") {
 		t.Errorf("expected the backend prompt, got:\n%s", transcript)
 	}
 }
@@ -3311,7 +3429,7 @@ func TestRunQuickstart_UnclaimedHost_SlugDefaultParsedFromRemote(t *testing.T) {
 		env:       map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken", "GH_TOKEN": "ghp_faketoken"},
 		runtimes:  map[string]bool{"podman": true},
 	}
-	stdin := strings.NewReader("github\n\n\nAda Lovelace\nada@example.com\n")
+	stdin := strings.NewReader("github\ngithub\n\n\nAda Lovelace\nada@example.com\n")
 
 	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
@@ -3319,14 +3437,6 @@ func TestRunQuickstart_UnclaimedHost_SlugDefaultParsedFromRemote(t *testing.T) {
 
 	if !strings.Contains(out.String(), "Repo slug (owner/repo) [o/r]: ") {
 		t.Errorf("expected the repo slug prompt to default to o/r, got:\n%s", out.String())
-	}
-}
-
-// Jira and local carry no quickstart block, so no host detects them.
-func TestQuickstartStrategies_ExcludeBlocklessBackends(t *testing.T) {
-	names := quickstartBackendNames()
-	if got := strings.Join(names, ","); got != "github,forgejo" {
-		t.Errorf("quickstartBackendNames() = %q, want github,forgejo", got)
 	}
 }
 
@@ -3399,6 +3509,8 @@ func TestRunQuickstart_ForgejoTokenAcquisitionFailures_AbortWithActionableGuidan
 				runtimes:  map[string]bool{"podman": true},
 			}
 			stdin := strings.NewReader(strings.Join([]string{
+				"",                // issue tracker, default
+				"",                // code forge, default
 				"",                // repoSlug default owner/repo
 				"",                // runtime default podman
 				"Ada Lovelace",    // git user name
@@ -3442,6 +3554,8 @@ func runQuickstartSeeded(t *testing.T, seed map[string]string, force bool) (stri
 	}
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift", "podman", "Ada Lovelace", "ada@example.com", "ghp_faketoken",
 	}, "\n") + "\n")
 	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
@@ -3545,6 +3659,8 @@ func TestRunQuickstart_GitignoreUnreadable_Errors(t *testing.T) {
 	}
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift", "podman", "Ada Lovelace", "ada@example.com", "ghp_faketoken",
 	}, "\n") + "\n")
 	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
@@ -3620,6 +3736,8 @@ func TestRunQuickstart_OpencodeDriver_PrintsRemedyAndRunsNoCommand(t *testing.T)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"podman",
 		"Ada Lovelace",
@@ -3803,32 +3921,6 @@ func TestConsumerStanza_CoversEveryKnobsFromRemoteEnv(t *testing.T) {
 	}
 }
 
-// The forge line follows the row's declared axes, not its name.
-func TestRender_ForgeLineFollowsRowAxes(t *testing.T) {
-	for _, tc := range []struct {
-		axes      []string
-		wantForge bool
-	}{
-		{[]string{axisTracker, axisForge}, true},
-		{[]string{axisTracker}, false},
-	} {
-		t.Run(strings.Join(tc.axes, "+"), func(t *testing.T) {
-			s := stubRow("stubby", "stubby.example")
-			s.Quickstart.Axes = tc.axes
-			withQuickstartRow(t, s)
-			a := validAnswers()
-			a.choice = backendChoice{name: "stubby"}
-			flakeNix := flakeNixFor(t, mustRender(t, a))
-			if !strings.Contains(flakeNix, pathIssueTracker+` = "stubby"`) {
-				t.Errorf("want tracker line, got:\n%s", flakeNix)
-			}
-			if got := strings.Contains(flakeNix, pathCodeForge+` = "stubby"`); got != tc.wantForge {
-				t.Errorf("forge line present = %v, want %v", got, tc.wantForge)
-			}
-		})
-	}
-}
-
 func mustRender(t *testing.T, a answers) []scaffoldFile {
 	t.Helper()
 	files, err := render(a)
@@ -3841,8 +3933,9 @@ func mustRender(t *testing.T, a answers) []scaffoldFile {
 // A remote-derived knob missing from the Consumer stanza must fail the render
 // rather than silently drop out of the flake.
 func TestRenderFlakeNix_KnobWithoutStanzaSetting_Errors(t *testing.T) {
-	choice := backendChoice{name: "github", knobs: map[string]string{"STUB_KNOB_NOT_IN_TABLE": "v"}}
-	_, err := renderFlakeNix("o/r", "podman", "Ada", "ada@example.com", choice)
+	a := validAnswers()
+	a.tracker.knobs = map[string]string{"STUB_KNOB_NOT_IN_TABLE": "v"}
+	_, err := renderFlakeNix(a)
 	if err == nil {
 		t.Fatal("expected an error for a knob with no stanza setting")
 	}
@@ -3861,6 +3954,8 @@ func TestRunQuickstart_FinishLine_NoConnectorSandboxDefersDoctor(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift",
 		"podman",
 		"Ada Lovelace",
@@ -3905,7 +4000,8 @@ func TestRunQuickstart_FinishLine_NoConnectorSandboxDefersForgejoWithoutBuilding
 		runtimes:  map[string]bool{"podman": true},
 	}
 	stdin := strings.NewReader(strings.Join([]string{
-		"forgejo",           // backend
+		"forgejo",           // issue tracker
+		"forgejo",           // code forge
 		"",                  // repoSlug default team/proj
 		"",                  // runtime default podman
 		"Ada Lovelace",      // git user name
@@ -3913,7 +4009,7 @@ func TestRunQuickstart_FinishLine_NoConnectorSandboxDefersForgejoWithoutBuilding
 		"forgejo-faketoken", // Forgejo token
 	}, "\n") + "\n")
 	runner := &fakeCommandRunner{}
-	builder := func(backendkit.Strategy, backendkit.Shared, backendkit.Lookup) (forge.IssueTracker, forge.CodeForge, error) {
+	builder := func(_, _ backendkit.Strategy, _ backendkit.Shared, _ backendkit.Lookup) (forge.IssueTracker, forge.CodeForge, error) {
 		t.Error("forge builder called without a Connector sandbox")
 		return nil, nil, connectorsandbox.ErrNoConnectorSandbox
 	}
@@ -3941,4 +4037,272 @@ type noRequestTransport struct{ t *testing.T }
 func (n noRequestTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	n.t.Errorf("unexpected HTTP request to %s", r.URL)
 	return nil, errors.New("no requests expected")
+}
+
+// withRegistryDescriptors makes the stub rows' descriptors resolvable through
+// backend.ByName, which the harness.env token name and doctor hints use.
+func withRegistryDescriptors(t *testing.T, rows ...backendkit.Strategy) {
+	t.Helper()
+	original := backend.Registry
+	backend.Registry = append([]backend.Descriptor{}, original...)
+	for _, s := range rows {
+		backend.Registry = append(backend.Registry, s.Descriptor)
+	}
+	t.Cleanup(func() { backend.Registry = original })
+}
+
+func quickstartRun(t *testing.T, env fakeEnvironment, builder ForgeBuilder, lines ...string) (dir, transcript string, err error) {
+	t.Helper()
+	dir = t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join(lines, "\n") + "\n")
+	err = runQuickstart(dir, env, &fakeCommandRunner{}, builder, &out, stdin, true, false)
+	return dir, out.String(), err
+}
+
+func readScaffold(t *testing.T, dir, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		t.Fatalf("read %s: %v", name, err)
+	}
+	return string(b)
+}
+
+// Local needs no credential, so a local tracker on a local forge completes
+// without any token prompt and writes no token line.
+func TestRunQuickstart_LocalTrackerAndForge_NeedsNoToken(t *testing.T) {
+	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
+	dir, transcript, err := quickstartRun(t, env, fakeForgeBuilder(passingForge()),
+		"local", "local", "owner/repo", "", "Ada Lovelace", "ada@example.com")
+	if err != nil {
+		t.Fatalf("runQuickstart: %v\n%s", err, transcript)
+	}
+	if strings.Contains(transcript, "token (") || strings.Contains(transcript, "No ambient GH_TOKEN") {
+		t.Errorf("a local/local scaffold prompted for a token:\n%s", transcript)
+	}
+	flakeNix := readScaffold(t, dir, "flake.nix")
+	for _, want := range []string{`issues.tracker = "local"`, `forge.backend = "local"`} {
+		if !strings.Contains(flakeNix, want) {
+			t.Errorf("flake.nix missing %q:\n%s", want, flakeNix)
+		}
+	}
+	harnessEnv := readScaffold(t, dir, "harness.env")
+	for _, absent := range []string{"GH_TOKEN", "FORGEJO_TOKEN", "SPINDRIFT_GITHUB_CONNECTOR_TOKEN"} {
+		if strings.Contains(harnessEnv, absent) {
+			t.Errorf("harness.env carries %s for a local/local scaffold:\n%s", absent, harnessEnv)
+		}
+	}
+}
+
+// A git forge takes the clone remote from the git remote, and a local tracker
+// beside it still needs no token.
+func TestRunQuickstart_LocalTrackerOnGitForge_CarriesRemoteURL(t *testing.T) {
+	env := fakeEnvironment{
+		remoteURL: "git@git.example.org:o/r.git",
+		env:       map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"},
+		runtimes:  map[string]bool{"podman": true},
+	}
+	dir, transcript, err := quickstartRun(t, env, fakeForgeBuilder(passingForge()),
+		"local", "git", "owner/repo", "", "Ada Lovelace", "ada@example.com")
+	if err != nil {
+		t.Fatalf("runQuickstart: %v\n%s", err, transcript)
+	}
+	flakeNix := readScaffold(t, dir, "flake.nix")
+	for _, want := range []string{`issues.tracker = "local"`, `forge.backend = "git"`, `forge.remoteURL = "git@git.example.org:o/r.git"`} {
+		if !strings.Contains(flakeNix, want) {
+			t.Errorf("flake.nix missing %q:\n%s", want, flakeNix)
+		}
+	}
+	if strings.Contains(transcript, "token (") {
+		t.Errorf("a local/git scaffold prompted for a token:\n%s", transcript)
+	}
+}
+
+// git is a forge only: the tracker prompt neither lists nor accepts it.
+func TestRunQuickstart_GitIsNeverOfferedAsTracker(t *testing.T) {
+	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
+	_, transcript, err := quickstartRun(t, env, fakeForgeBuilder(passingForge()),
+		"git", "local", "local", "owner/repo", "", "Ada Lovelace", "ada@example.com")
+	if err != nil {
+		t.Fatalf("runQuickstart: %v\n%s", err, transcript)
+	}
+	if !strings.Contains(transcript, `invalid input: expected one of github, forgejo, local, got "git"`) {
+		t.Errorf("tracker prompt did not reject git:\n%s", transcript)
+	}
+	if strings.Contains(transcript, "Issue tracker (github/forgejo/local/git)") || strings.Contains(transcript, "jira") {
+		t.Errorf("a prompt offers git as a tracker or jira at all:\n%s", transcript)
+	}
+}
+
+// The detected row pre-selects both axes, and the operator can override either
+// one: here the tracker moves to local while the forge keeps the detected row.
+func TestRunQuickstart_DetectedRow_PreselectsBothAxes_OperatorOverridesOne(t *testing.T) {
+	stub := stubRow("gitlab", "gitlab.example.com")
+	withQuickstartRow(t, stub)
+	withRegistryDescriptors(t, stub)
+	env := fakeEnvironment{
+		remoteURL: "https://gitlab.example.com/team/proj.git",
+		env:       map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"},
+		runtimes:  map[string]bool{"podman": true},
+	}
+	dir, transcript, err := quickstartRun(t, env, fakeForgeBuilder(passingForge()),
+		"local", "", "", "", "Ada Lovelace", "ada@example.com", "gitlab-faketoken")
+	if err != nil {
+		t.Fatalf("runQuickstart: %v\n%s", err, transcript)
+	}
+	if !strings.Contains(transcript, "Code forge (github/forgejo/local/git/gitlab) [gitlab]: ") {
+		t.Errorf("forge prompt did not default to the detected row:\n%s", transcript)
+	}
+	flakeNix := readScaffold(t, dir, "flake.nix")
+	for _, want := range []string{`issues.tracker = "local"`, `forge.backend = "gitlab"`} {
+		if !strings.Contains(flakeNix, want) {
+			t.Errorf("flake.nix missing %q:\n%s", want, flakeNix)
+		}
+	}
+	if harnessEnv := readScaffold(t, dir, "harness.env"); !strings.Contains(harnessEnv, "GITLAB_TOKEN=gitlab-faketoken") {
+		t.Errorf("harness.env missing the forge's token:\n%s", harnessEnv)
+	}
+}
+
+// A tracker and a forge on different backends each acquire their own token,
+// tracker first, and the builder gets one Strategy per axis.
+func TestRunQuickstart_DifferentTrackerAndForge_AcquiresBothTokens(t *testing.T) {
+	tracker, codeForge := stubRow("gitlab", "gitlab.example.com"), stubRow("gitea", "gitea.example.com")
+	withQuickstartRow(t, tracker)
+	withQuickstartRow(t, codeForge)
+	withRegistryDescriptors(t, tracker, codeForge)
+	var built [][2]string
+	builder := func(tr, cf backendkit.Strategy, _ backendkit.Shared, l backendkit.Lookup) (forge.IssueTracker, forge.CodeForge, error) {
+		built = append(built, [2]string{tr.Name, cf.Name})
+		for env, want := range map[string]string{"GITLAB_TOKEN": "gitlab-faketoken", "GITEA_TOKEN": "gitea-faketoken"} {
+			// The probe-time lookups only know the token under test; the
+			// finish-line lookup knows both.
+			if v, ok := l(env); ok && v != want {
+				t.Errorf("lookup(%s) = %q, want %q", env, v, want)
+			}
+		}
+		f := passingForge()
+		return f, f, nil
+	}
+	env := fakeEnvironment{
+		remoteURL: "https://gitlab.example.com/team/proj.git",
+		env:       map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"},
+		runtimes:  map[string]bool{"podman": true},
+	}
+	dir, transcript, err := quickstartRun(t, env, builder,
+		"", "gitea", "", "", "Ada Lovelace", "ada@example.com", "gitlab-faketoken", "gitea-faketoken")
+	if err != nil {
+		t.Fatalf("runQuickstart: %v\n%s", err, transcript)
+	}
+	harnessEnv := readScaffold(t, dir, "harness.env")
+	for _, want := range []string{"GITLAB_TOKEN=gitlab-faketoken", "GITEA_TOKEN=gitea-faketoken"} {
+		if !strings.Contains(harnessEnv, want) {
+			t.Errorf("harness.env missing %q:\n%s", want, harnessEnv)
+		}
+	}
+	if last := built[len(built)-1]; last != [2]string{"gitlab", "gitea"} {
+		t.Errorf("finish line built (tracker, forge) = %v, want (gitlab, gitea)", last)
+	}
+	flakeNix := readScaffold(t, dir, "flake.nix")
+	for _, want := range []string{`issues.tracker = "gitlab"`, `forge.backend = "gitea"`} {
+		if !strings.Contains(flakeNix, want) {
+			t.Errorf("flake.nix missing %q:\n%s", want, flakeNix)
+		}
+	}
+}
+
+// The checkout remote is the forge's remote. A tracker on another backend
+// takes no knobs from it: forgejo issues beside a github forge must not be
+// pointed at github.com.
+func TestRunQuickstart_SplitPairing_TrackerTakesNoKnobsFromForgeRemote(t *testing.T) {
+	ghScopes(t, narrowTokenScopes)
+	env := fakeEnvironment{
+		remoteURL:   "https://github.com/o/r.git",
+		ghAuthToken: "gho_faketoken",
+		env:         map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"},
+		runtimes:    map[string]bool{"podman": true},
+	}
+	dir, transcript, err := quickstartRun(t, env, fakeForgeBuilder(passingForge()),
+		"forgejo", "github", "", "", "", "Ada Lovelace", "ada@example.com", "forgejo-faketoken", "ghp_faketoken")
+	if err != nil {
+		t.Fatalf("runQuickstart: %v\n%s", err, transcript)
+	}
+	flakeNix := readScaffold(t, dir, "flake.nix")
+	for _, want := range []string{`issues.tracker = "forgejo"`, `forge.backend = "github"`} {
+		if !strings.Contains(flakeNix, want) {
+			t.Errorf("flake.nix missing %q:\n%s", want, flakeNix)
+		}
+	}
+	if strings.Contains(flakeNix, `issues.forgejo.baseURL = "https://github.com"`) {
+		t.Errorf("forgejo tracker was pointed at the github forge's host:\n%s", flakeNix)
+	}
+}
+
+// The same rule with a forge stub that needs no Connector: the forgejo
+// tracker must not take the forge remote's host as its base URL.
+func TestRunQuickstart_SplitPairing_TrackerOmitsForgeRemoteHost(t *testing.T) {
+	stub := stubRow("gitlab", "gitlab.example.com")
+	withQuickstartRow(t, stub)
+	withRegistryDescriptors(t, stub)
+	env := fakeEnvironment{
+		remoteURL: "https://gitlab.example.com/team/proj.git",
+		env:       map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"},
+		runtimes:  map[string]bool{"podman": true},
+	}
+	dir, transcript, err := quickstartRun(t, env, fakeForgeBuilder(passingForge()),
+		"forgejo", "gitlab", "", "", "", "Ada Lovelace", "ada@example.com", "forgejo-faketoken", "gitlab-faketoken")
+	if err != nil {
+		t.Fatalf("runQuickstart: %v\n%s", err, transcript)
+	}
+	flakeNix := readScaffold(t, dir, "flake.nix")
+	if strings.Contains(flakeNix, "issues.forgejo.baseURL") && strings.Contains(flakeNix, "gitlab.example.com") {
+		t.Errorf("forgejo tracker was pointed at the forge's remote host:\n%s", flakeNix)
+	}
+}
+
+// A tracker that does not take the checkout remote's knobs asks for its own
+// instance's repo URL, so its base URL is not left to the default.
+func TestRunQuickstart_SplitPairing_TrackerRepoURLSetsKnobs(t *testing.T) {
+	stub := stubRow("gitlab", "gitlab.example.com")
+	withQuickstartRow(t, stub)
+	withRegistryDescriptors(t, stub)
+	env := fakeEnvironment{
+		remoteURL: "https://gitlab.example.com/team/proj.git",
+		env:       map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"},
+		runtimes:  map[string]bool{"podman": true},
+	}
+	dir, transcript, err := quickstartRun(t, env, fakeForgeBuilder(passingForge()),
+		"forgejo", "gitlab", "https://forgejo.example.org/o/r.git", "", "", "Ada Lovelace", "ada@example.com", "forgejo-faketoken", "gitlab-faketoken")
+	if err != nil {
+		t.Fatalf("runQuickstart: %v\n%s", err, transcript)
+	}
+	flakeNix := readScaffold(t, dir, "flake.nix")
+	if want := `issues.forgejo.baseURL = "https://forgejo.example.org";`; !strings.Contains(flakeNix, want) {
+		t.Errorf("flake.nix missing %q:\n%s", want, flakeNix)
+	}
+}
+
+// A non-blank tracker repo URL its row cannot parse re-prompts rather than
+// silently falling back to the default instance.
+func TestRunQuickstart_SplitPairing_UnparseableTrackerRepoURLReprompts(t *testing.T) {
+	stub := stubRow("gitlab", "gitlab.example.com")
+	withQuickstartRow(t, stub)
+	withRegistryDescriptors(t, stub)
+	env := fakeEnvironment{
+		remoteURL: "https://gitlab.example.com/team/proj.git",
+		env:       map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"},
+		runtimes:  map[string]bool{"podman": true},
+	}
+	dir, transcript, err := quickstartRun(t, env, fakeForgeBuilder(passingForge()),
+		"forgejo", "gitlab", "not a url", "https://forgejo.example.org/o/r.git", "", "", "Ada Lovelace", "ada@example.com", "forgejo-faketoken", "gitlab-faketoken")
+	if err != nil {
+		t.Fatalf("runQuickstart: %v\n%s", err, transcript)
+	}
+	if !strings.Contains(transcript, "invalid input") {
+		t.Errorf("transcript has no re-prompt:\n%s", transcript)
+	}
+	if want := `issues.forgejo.baseURL = "https://forgejo.example.org";`; !strings.Contains(readScaffold(t, dir, "flake.nix"), want) {
+		t.Errorf("flake.nix missing %q", want)
+	}
 }

@@ -336,8 +336,8 @@ func TestQuickstartProbe_GoesThroughTheConnectorWithTheWizardsToken(t *testing.T
 			t.Setenv("GH_TOKEN", "ghp_wizardtoken")
 			before := ghCalls()
 
-			it, _, err := buildForge(githubStrategy(t), quickstartShared(probeSlug, "Ada", "ada@example.com"),
-				knobLookup(nil, "GH_TOKEN", "ghp_wizardtoken"))
+			it, _, err := buildForge(githubStrategy(t), githubStrategy(t), quickstartShared(probeSlug, "Ada", "ada@example.com"),
+				knobLookup(nil, map[string]string{"GH_TOKEN": "ghp_wizardtoken"}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -369,6 +369,8 @@ func TestQuickstartScopeAudit_GoesThroughTheConnectorWithThePastedToken(t *testi
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
+		"", // issue tracker, default
+		"", // code forge, default
 		"jordansmall/spindrift", "podman", "Ada Lovelace", "ada@example.com",
 		"ghp_pastedtoken", "ACCEPT", "claude-oauth-faketoken",
 	}, "\n") + "\n")
@@ -418,8 +420,8 @@ func TestQuickstartDoctorPass_RunsNoGh(t *testing.T) {
 	api := requireConnector(t)
 	t.Setenv("GH_TOKEN", "ghp_wizardtoken")
 	before := ghCalls()
-	it, cf, err := buildForge(githubStrategy(t), quickstartShared(probeSlug, "Ada", "ada@example.com"),
-		knobLookup(nil, "GH_TOKEN", "ghp_wizardtoken"))
+	it, cf, err := buildForge(githubStrategy(t), githubStrategy(t), quickstartShared(probeSlug, "Ada", "ada@example.com"),
+		knobLookup(nil, map[string]string{"GH_TOKEN": "ghp_wizardtoken"}))
 	if err != nil {
 		t.Fatal(err)
 	}

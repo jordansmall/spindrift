@@ -64,3 +64,14 @@ func TestStrategyRemoteMatch(t *testing.T) {
 		})
 	}
 }
+
+func TestStrategyKnobsFromRemote(t *testing.T) {
+	got := Strategy.KnobsFromRemote("git@example.com:o/r.git")
+	want := map[string]string{"CODE_FORGE_REMOTE_URL": "git@example.com:o/r.git"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("KnobsFromRemote = %v, want %v", got, want)
+	}
+	if got := Strategy.KnobsFromRemote(""); got != nil {
+		t.Errorf("KnobsFromRemote(\"\") = %v, want nil", got)
+	}
+}

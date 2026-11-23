@@ -63,7 +63,7 @@ func TestAcquireToken_Failures(t *testing.T) {
 		is    error
 	}{
 		{"blank", "", nil, []string{"no Forgejo token provided", rerun}, nil},
-		{"auth", "t", forge.ErrAuthFailure, []string{"rejected by the API at https://forge.example", "git remote set-url", rerun}, forge.ErrAuthFailure},
+		{"auth", "t", forge.ErrAuthFailure, []string{"rejected by the API at https://forge.example", "point the git remote", rerun}, forge.ErrAuthFailure},
 		{"not found", "t", forge.ErrNotFound, []string{"unreachable or the repo slug is wrong", "check both", rerun}, forge.ErrNotFound},
 		{"other", "t", errors.New("dial tcp"), []string{"unreachable or the repo slug is wrong", rerun}, nil},
 	}

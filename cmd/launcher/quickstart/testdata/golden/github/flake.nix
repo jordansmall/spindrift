@@ -33,6 +33,7 @@
             git.user.name = "Ada Lovelace";
             git.user.email = "ada@example.com";
             issues.tracker = "github";
+            forge.backend = "github";
           };
 
           devShells.default = pkgs.mkShell {

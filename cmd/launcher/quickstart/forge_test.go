@@ -21,7 +21,7 @@ func mustStrategy(t *testing.T, name string) backendkit.Strategy {
 
 func TestBuildForge_GithubTracker_BuildsBothSeams(t *testing.T) {
 	sh := backendkit.Shared{RepoSlug: "owner/repo", Labels: defaultDispatchLabels}
-	it, cf, err := buildForge(mustStrategy(t, "github"), sh, knobLookup(nil, "", ""))
+	it, cf, err := buildForge(mustStrategy(t, "github"), mustStrategy(t, "github"), sh, knobLookup(nil, nil))
 	if err != nil {
 		t.Fatalf("buildForge: %v", err)
 	}
@@ -30,13 +30,13 @@ func TestBuildForge_GithubTracker_BuildsBothSeams(t *testing.T) {
 	}
 }
 
-// A row without the forge axis borrows the default code forge; a row that
-// declares the axis supplies its own.
-func TestBuildForge_CodeForgeStrategy_FollowsForgeAxis(t *testing.T) {
+// The tracker comes from the tracker row and the code forge from the forge
+// row, whichever backend each is.
+func TestBuildForge_BuildsEachSeamFromItsOwnRow(t *testing.T) {
 	var trackerBuilt, forgeBuilt []string
-	stub := func(name string, axes ...string) backendkit.Strategy {
+	stub := func(name string) backendkit.Strategy {
 		return backendkit.Strategy{
-			Descriptor: backend.Descriptor{Name: name, Quickstart: &backend.QuickstartBlock{Axes: axes}},
+			Descriptor: backend.Descriptor{Name: name},
 			NewIssueTracker: func(backendkit.Shared, backendkit.Lookup) (forge.IssueTracker, error) {
 				trackerBuilt = append(trackerBuilt, name)
 				return forge.NewFake(), nil
@@ -49,17 +49,14 @@ func TestBuildForge_CodeForgeStrategy_FollowsForgeAxis(t *testing.T) {
 	}
 	sh := backendkit.Shared{RepoSlug: "owner/repo", Labels: defaultDispatchLabels}
 
-	if _, _, err := buildForge(stub("tracker-only", axisTracker), sh, knobLookup(nil, "", "")); err != nil {
+	if _, _, err := buildForge(stub("a"), stub("b"), sh, knobLookup(nil, nil)); err != nil {
 		t.Fatalf("buildForge: %v", err)
 	}
-	if _, _, err := buildForge(stub("both", axisTracker, axisForge), sh, knobLookup(nil, "", "")); err != nil {
-		t.Fatalf("buildForge: %v", err)
+	if got := strings.Join(trackerBuilt, ","); got != "a" {
+		t.Errorf("trackers built = %q, want a", got)
 	}
-	if got := strings.Join(trackerBuilt, ","); got != "tracker-only,both" {
-		t.Errorf("trackers built = %q, want tracker-only,both", got)
-	}
-	if got := strings.Join(forgeBuilt, ","); got != "both" {
-		t.Errorf("stub code forges built = %q, want only both (tracker-only borrows github's)", got)
+	if got := strings.Join(forgeBuilt, ","); got != "b" {
+		t.Errorf("code forges built = %q, want b", got)
 	}
 }
 
@@ -71,7 +68,7 @@ func TestBuildForge_ConstructorError_IsReturnedNotPanicked(t *testing.T) {
 			return nil, boom
 		},
 	}
-	if _, _, err := buildForge(s, backendkit.Shared{}, knobLookup(nil, "", "")); !errors.Is(err, boom) {
+	if _, _, err := buildForge(s, s, backendkit.Shared{}, knobLookup(nil, nil)); !errors.Is(err, boom) {
 		t.Errorf("buildForge error = %v, want it to wrap %v", err, boom)
 	}
 }

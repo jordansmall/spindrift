@@ -41,6 +41,4 @@ in
       value = schema.${name}.hostGitConfigKey;
     }) (builtins.filter (name: schema.${name} ? hostGitConfigKey) (builtins.attrNames schema))
   );
-  # Quickstart omits the codeForge line when the chosen row equals this.
-  defaultCodeForge = schema.codeForge.default;
 }

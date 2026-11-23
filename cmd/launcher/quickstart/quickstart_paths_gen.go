@@ -27,10 +27,6 @@ const pathRepoSlug = "forge.repoSlug"
 // pathRuntime is the nix option path for the quickstart wizard's runtime knob.
 const pathRuntime = "infra.runtime"
 
-// defaultCodeForge is the CODE_FORGE schema default; the wizard omits the
-// codeForge line when the chosen backend equals it.
-const defaultCodeForge = "github"
-
 // hostGitConfigKeyGitUserEmail is the host git config key the wizard reads
 // to pre-fill the gitUserEmail prompt.
 const hostGitConfigKeyGitUserEmail = "user.email"
