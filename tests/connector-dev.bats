@@ -129,3 +129,95 @@ assert_nix_call() {
   [[ "$output" == *"spindrift checkout"* ]]
   [ ! -e "$NIX_LOG" ]
 }
+
+# Issue #7421: a Connector template is no Connector itself (its name is a
+# placeholder), so connector-dev generates it under two names with new-connector
+# and runs the same nix args in each generated dir. new-connector is the real
+# script on a fixture template; nix is the recording stub, which fails in a dir
+# whose flake.nix holds $NIX_FAIL_NAME.
+template_setup() {
+  export NEW_CONNECTOR_TEMPLATES="$ROOT/templates"
+  export NEW_CONNECTOR_CORE_NAMES="github forgejo"
+  mkdir -p "$ROOT/templates/connector-tracker"
+  echo '{ description = "connectorname"; }' >"$ROOT/templates/connector-tracker/flake.nix"
+  echo "replace sdk => ./sdk v0.0.0-00010101000000-000000000000" >"$ROOT/templates/connector-tracker/go.mod"
+  cat >"$STUBS/new-connector" <<STUB
+#!$BASH
+exec bash "${NEW_CONNECTOR_SH:-$BATS_TEST_DIRNAME/../nix/new-connector.sh}" "\$@"
+STUB
+  chmod +x "$STUBS/new-connector"
+  cat >"$STUBS/nix" <<STUB
+#!$BASH
+{ pwd -P; printf '%s\n' "\$@"; echo ---; } >>"$NIX_LOG.calls"
+[ -z "\${NIX_FAIL_NAME:-}" ] || ! grep -q "\$NIX_FAIL_NAME" flake.nix
+STUB
+}
+
+# calls: the cwds of the recorded nix calls, in order.
+calls() {
+  awk 'BEGIN { first = 1 } first { print; first = 0 } /^---$/ { first = 1 }' "$NIX_LOG.calls"
+}
+
+@test "a template runs the nix args in two generated Connectors with distinct names" {
+  template_setup
+  cd "$ROOT"
+  run bash "$SCRIPT" templates/connector-tracker flake check -L
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^---$' "$NIX_LOG.calls")" -eq 2 ]
+  mapfile -t dirs < <(calls)
+  [ "${#dirs[@]}" -eq 2 ]
+  [ "${dirs[0]}" != "${dirs[1]}" ]
+  # Both calls carry the same args with the override injected.
+  [ "$(grep -c '^--override-input$' "$NIX_LOG.calls")" -eq 2 ]
+  [ "$(grep -c "^git+file://$ROOT?dir=core\$" "$NIX_LOG.calls")" -eq 2 ]
+  [ "$(grep -c '^--no-write-lock-file$' "$NIX_LOG.calls")" -eq 2 ]
+  # The generated dirs are gone once connector-dev exits.
+  [ ! -e "${dirs[0]}" ]
+  [ ! -e "${dirs[1]}" ]
+  # The template itself is never the nix cwd.
+  [ "${dirs[0]}" != "$ROOT/templates/connector-tracker" ]
+}
+
+@test "a template's two generated flakes carry different names" {
+  template_setup
+  # Capture each flake.nix as the nix stub sees it.
+  cat >"$STUBS/nix" <<STUB
+#!$BASH
+cat flake.nix >>"$NIX_LOG.flakes"
+STUB
+  cd "$ROOT"
+  run bash "$SCRIPT" templates/connector-tracker flake check
+  [ "$status" -eq 0 ]
+  [ "$(sort "$NIX_LOG.flakes" | uniq | wc -l)" -eq 2 ]
+  [[ "$(cat "$NIX_LOG.flakes")" != *connectorname* ]]
+  grep -q 'acme' "$NIX_LOG.flakes"
+  grep -q 'zeta' "$NIX_LOG.flakes"
+}
+
+@test "a template fails when either generated Connector fails, running both" {
+  template_setup
+  cd "$ROOT"
+  for n in acme zeta; do
+    rm -f "$NIX_LOG.calls"
+    NIX_FAIL_NAME=$n run bash "$SCRIPT" templates/connector-tracker flake check
+    [ "$status" -ne 0 ]
+    [ "$(grep -c '^---$' "$NIX_LOG.calls")" -eq 2 ]
+  done
+}
+
+@test "a template path given relatively is recognised as a template" {
+  template_setup
+  cd "$ROOT/core"
+  run bash "$SCRIPT" ../templates/connector-tracker flake check
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^---$' "$NIX_LOG.calls")" -eq 2 ]
+}
+
+@test "an ordinary Connector is not generated" {
+  template_setup
+  cd "$ROOT"
+  run bash "$SCRIPT" alpha flake check
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^---$' "$NIX_LOG.calls")" -eq 1 ]
+  [ "$(head -n1 "$NIX_LOG.calls")" = "$ROOT/connectors/alpha" ]
+}
