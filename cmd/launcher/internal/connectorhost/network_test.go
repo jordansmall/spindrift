@@ -726,6 +726,25 @@ func TestNetworkRequestTimeoutFailsAStalledSendNamingTheTimeout(t *testing.T) {
 	}
 }
 
+// The budget's time cap cancels the caller's context, not the request's own
+// timeout; the audit reason must still say which clock ran out.
+func TestNetworkAuditNamesTheHTTPTimeCapThatCutARequestOff(t *testing.T) {
+	release := make(chan struct{})
+	b := newBackend(t, func(w http.ResponseWriter, r *http.Request) { <-release })
+	t.Cleanup(func() { close(release) })
+	audit := &bytes.Buffer{}
+	n := netFor(b, audit, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
+	ctx, cancel := context.WithTimeoutCause(context.Background(), 100*time.Millisecond, connectorhost.HTTPTimeCapCause(time.Minute))
+	defer cancel()
+	_, _, err := n.Do(ctx, []byte(fmt.Sprintf(`{"method":"GET","url":"%s/repos/x"}`, b.URL)), 1<<10)
+	if !errors.Is(err, connectorhost.ErrHTTPSend) {
+		t.Errorf("err = %v, want ErrHTTPSend", err)
+	}
+	if lines := auditLines(t, audit); len(lines) != 1 || !strings.Contains(lines[0].Reason, "http_requests took more than 1m0s") {
+		t.Errorf("audit = %+v, want the cap in the audit reason", lines)
+	}
+}
+
 func TestNetworkRequestTimeoutCutsABodyThatTrickles(t *testing.T) {
 	b := newBackend(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "x")

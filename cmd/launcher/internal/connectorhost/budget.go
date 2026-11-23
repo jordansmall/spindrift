@@ -2,6 +2,7 @@ package connectorhost
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -21,8 +22,9 @@ type budget struct {
 	paused  bool
 	expired bool
 
-	requests int // http_requests served or refused so far
-	credited int // response bytes credited so far
+	requests  int           // http_requests served or refused so far
+	httpSpent time.Duration // wall-clock time spent inside http_requests so far
+	credited  int           // response bytes credited so far
 }
 
 // newBudget returns a context derived from parent, cancelled with ErrBudget once
@@ -82,22 +84,52 @@ func (b *budget) resume(credit time.Duration) {
 }
 
 // httpRequest serves one http_request through h with the clock stopped, then
-// credits the response bytes it returned. It refuses the call past
-// maxHTTPRequests, since the pause would otherwise let a looping guest hold
-// the caller for as long as the host answers.
+// credits the response bytes it returned. The pause would otherwise let a
+// looping or slow-served guest hold the caller for as long as the host answers,
+// so it refuses the call past maxHTTPRequests, and past httpTimeCap of time
+// spent in http_requests: the request in flight when the cap runs out is cut
+// off and fails the call.
 func (b *budget) httpRequest(ctx context.Context, h hostCalls, raw []byte, bufCap int) (int, []byte, http.Header, error) {
 	b.mu.Lock()
 	b.requests++
 	over := b.requests > maxHTTPRequests
+	remaining := httpTimeCap - b.httpSpent
 	b.mu.Unlock()
 	if over {
 		return 0, nil, nil, fmt.Errorf("%w: more than %d http_requests in one call", ErrHTTPRequestLimit, maxHTTPRequests)
 	}
+	capErr := httpTimeCapError{httpTimeCap}
+	if remaining <= 0 {
+		return 0, nil, nil, capErr
+	}
+	reqCtx, cancel := context.WithTimeoutCause(ctx, remaining, capErr)
+	defer cancel()
 	b.pause()
-	status, body, header, err := h.httpRequest(ctx, raw, bufCap)
+	start := time.Now()
+	status, body, header, err := h.httpRequest(reqCtx, raw, bufCap)
+	elapsed := time.Since(start)
+	b.mu.Lock()
+	b.httpSpent += elapsed
+	b.mu.Unlock()
 	b.resume(b.credit(len(body)))
+	var cut httpTimeCapError
+	if errors.As(context.Cause(reqCtx), &cut) {
+		// h reports a cut-off request as a send failure the guest can survive;
+		// the cap must end the call instead.
+		return 0, nil, nil, cut
+	}
 	return status, body, header, err
 }
+
+// httpTimeCapError is the cause a request is cancelled with when the call's
+// http_request time runs out.
+type httpTimeCapError struct{ cap time.Duration }
+
+func (e httpTimeCapError) Error() string {
+	return fmt.Sprintf("%s: http_requests took more than %s in one call", ErrHTTPRequestLimit, e.cap)
+}
+
+func (httpTimeCapError) Unwrap() error { return ErrHTTPRequestLimit }
 
 // credit returns the extra time n response bytes earn, within the cap on the
 // bytes credited over the whole call.

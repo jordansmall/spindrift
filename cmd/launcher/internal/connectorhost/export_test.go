@@ -210,6 +210,14 @@ func SetCallBudget(d time.Duration) (restore func()) {
 	return func() { callBudgetBase = old }
 }
 
+// SetHTTPTimeCap sets the cap on the time one call spends in http_requests and
+// returns the restore. The launcher-side budget enforces it on every engine.
+func SetHTTPTimeCap(d time.Duration) (restore func()) {
+	old := httpTimeCap
+	httpTimeCap = d
+	return func() { httpTimeCap = old }
+}
+
 // SetGuestEnv sets the environment of Connectors the in-process engine loads
 // after it and returns the restore; a remote engine's child keeps its own.
 func SetGuestEnv(env map[string]string) (restore func()) {
@@ -249,3 +257,7 @@ const maxEchoLen = 512
 
 // MaxEchoLen is maxEchoLen, for the external tests.
 const MaxEchoLen = maxEchoLen
+
+// HTTPTimeCapCause returns the cause the budget cancels a request with when
+// the call's http_request time cap runs out.
+func HTTPTimeCapCause(d time.Duration) error { return httpTimeCapError{d} }
