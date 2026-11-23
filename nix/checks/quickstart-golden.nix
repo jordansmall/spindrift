@@ -1,8 +1,10 @@
 # Golden-scaffold eval guards (issue #2565, nix half). The Go golden tests pin
 # the wizard's rendered bytes, not whether they evaluate, so this module imports
 # each golden's own `outputs` function and wires its `spindrift` input to the
-# in-repo lib/flakeModule.nix. It never evaluates a golden's `inputs` block, so
-# a corrupt `inputs.nixpkgs.url` passes here but breaks a real `nix develop`.
+# in-repo lib/flakeModule.nix. It never resolves a golden's `inputs` block, so
+# a corrupt `inputs.nixpkgs.url` passes here but breaks a real `nix develop`;
+# it only reads the block as data, to hold every Connector input to the one
+# core (`inputs.core.follows = "spindrift"`).
 {
   pkgs,
   nixpkgs,
@@ -26,22 +28,47 @@ let
   # lib/flakeModule.nix rather than a fetched copy of this repo. The
   # `self.inputs` stub is required because flake-parts computes a perSystem's
   # `inputs'` from it, and forcing `devShells.default` forces that computation.
+  # `lib` rides along because a Connector's package reads core.lib.sdkSrc.
   mkSpindriftInput = mod: {
+    inherit (import ../../core) lib;
     flakeModules.default = mod;
   };
+  # The Connector inputs a golden's `inputs` block declares: one per backend
+  # row whose Consumer stanza declares a flakeInput, built on the same core
+  # stub the golden's `spindrift` input is.
+  connectorInputs =
+    core:
+    builtins.listToAttrs (
+      map
+        (row: {
+          inherit (row) name;
+          value.flakeModules.default =
+            ((import ../../connectors/${row.name}).lib.connector { inherit core; }).flakeModule;
+        })
+        (
+          builtins.filter (row: row.consumerStanza.flakeInput != null) (import ../../lib/backends/default.nix)
+        )
+    );
   evalGoldenWith =
     spindriftInputArg: goldenPath:
-    (import goldenPath).outputs {
-      inherit nixpkgs flake-parts;
-      self = {
-        outPath = ../../.;
-        inputs = {
-          inherit nixpkgs flake-parts;
-          spindrift = spindriftInputArg;
+    let
+      connectors = connectorInputs spindriftInputArg;
+    in
+    (import goldenPath).outputs (
+      {
+        inherit nixpkgs flake-parts;
+        self = {
+          outPath = ../../.;
+          inputs = {
+            inherit nixpkgs flake-parts;
+            spindrift = spindriftInputArg;
+          }
+          // connectors;
         };
-      };
-      spindrift = spindriftInputArg;
-    };
+        spindrift = spindriftInputArg;
+      }
+      // connectors
+    );
   spindriftInput = mkSpindriftInput ../../lib/flakeModule.nix;
   evalGolden = evalGoldenWith spindriftInput;
 
@@ -115,6 +142,35 @@ let
     );
   patchedSpindriftInput = mkSpindriftInput patchedFlakeModule;
 
+  # One core in the lock graph: a golden's Connector input must follow the
+  # `spindrift` input's core rather than lock its own, and nothing may pin the
+  # core subflake (`?dir=core`) beside the batteries root. The root flake has
+  # no `core` input, so `follows = "spindrift"` is the valid spelling.
+  assertOneCore =
+    name: goldenPath:
+    let
+      inputs = (import goldenPath).inputs;
+      connectorNames = builtins.filter (
+        n:
+        !builtins.elem n [
+          "nixpkgs"
+          "flake-parts"
+          "spindrift"
+        ]
+      ) (builtins.attrNames inputs);
+    in
+    assert builtins.all (
+      n:
+      assertMsg (inputs.${n}.inputs.core.follows or null == "spindrift")
+        "${name}: golden input `${n}` must set inputs.core.follows = \"spindrift\" so the lock graph holds one core"
+    ) connectorNames;
+    assert builtins.all (
+      n:
+      assertMsg (!pkgs.lib.hasInfix "dir=core" (inputs.${n}.url or ""))
+        "${name}: golden input `${n}` points at the core subflake (?dir=core), a second core beside spindrift"
+    ) (builtins.attrNames inputs);
+    true;
+
   # Forces the packages output to prove the module actually ran, not just that
   # flake-parts.lib.mkFlake accepted the shape, and forces the golden's own
   # devShells.default block, which is no part of the spindrift module and would
@@ -122,7 +178,10 @@ let
   mkEvaluatesCheckWith =
     evalFn: name: goldenPath:
     let
-      outputs = evalFn goldenPath;
+      oneCore = assertOneCore name goldenPath;
+      outputs =
+        assert oneCore;
+        evalFn goldenPath;
       spindrift = outputs.packages.${system}.spindrift;
       devShell = outputs.devShells.${system}.default;
     in

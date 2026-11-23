@@ -22,6 +22,7 @@ var errNoConnectorRow = errors.New("ISSUE_TRACKER=jira needs the jira Connector:
 var Strategy = backendkit.Strategy{
 	Descriptor:      backend.Jira,
 	ConnectorRouted: true,
+	AcquireToken:    acquireToken,
 	ValidateTracker: func(_ backendkit.Shared, l backendkit.Lookup) error {
 		k, err := ReadKnobs(l)
 		if err != nil {
