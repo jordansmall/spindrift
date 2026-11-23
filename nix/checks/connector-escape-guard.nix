@@ -3,7 +3,7 @@
 # argument, as a third-party Connector must. Their one privilege is the
 # first-party mark, which only lets the Box load a Driver Connector in-process;
 # the Launcher has no first-party exception (ADR 0073, #7019). Fails when any
-# *.nix under connectors/<name>/ (or the fixture Connector) holds a relative
+# *.nix under connectors/<name>/ (or the fixture or scaffold Connector) holds a relative
 # path literal that resolves above that root.
 # Known limits: text-based, so comments and strings are matched too (an
 # over-report, the safe direction). Blind to absolute paths (an absolute
@@ -148,6 +148,7 @@ let
   # Written as `+` so the tree need not hold connectors/ yet (#6751 adds it).
   connectorsDir = ../.. + "/connectors";
   fixtureDir = ../fixtures/connector;
+  scaffoldDir = ../../templates/connector-tracker;
 
   roots =
     (optionalAttrs (pathExists connectorsDir) (
@@ -157,6 +158,7 @@ let
     ))
     // {
       "nix/fixtures/connector" = fixtureDir;
+      "templates/connector-tracker" = scaffoldDir;
     };
 
   filesOf =
@@ -182,6 +184,9 @@ in
     assert assertMsg (elem "module.nix" (
       map (f: f.rel) scanned."nix/fixtures/connector"
     )) "connector-escape-guard scanned no fixture module.nix; the scan is vacuous";
+    assert assertMsg (elem "module.nix" (
+      map (f: f.rel) scanned."templates/connector-tracker"
+    )) "connector-escape-guard scanned no scaffold module.nix; the scan is vacuous";
     assert assertMsg (hits == [ ])
       "a Connector's Nix reaches outside its own directory (ADR 0073 decision 11):\n${concatStringsSep "\n" hits}";
     pkgs.runCommand "connector-escape-guard" { } "touch $out";
