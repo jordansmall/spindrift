@@ -106,7 +106,7 @@ func (c *Connector) DriverStrategyWithout(caps ...string) (driverkit.Strategy, e
 		cd = c.rawCodec()
 	}
 	if !has("driver") {
-		return driverkit.Strategy{}, fmt.Errorf("%w: capabilities %v lack \"driver\"", ErrNotDriver, c.Capabilities)
+		return driverkit.Strategy{}, fmt.Errorf("%w: capabilities %s lack \"driver\"", ErrNotDriver, capText(fmt.Sprint(c.Capabilities)))
 	}
 	ctx := context.Background()
 	var d describeResult
@@ -124,11 +124,11 @@ func (c *Connector) DriverStrategyWithout(caps ...string) (driverkit.Strategy, e
 	// An absent name is the zero value, so a guest built before it existed stays valid.
 	totals, ok := map[string]driverkit.TotalsSource{"": driverkit.PerCallTotals, "perCall": driverkit.PerCallTotals, "session": driverkit.SessionTotals}[d.Totals]
 	if !ok {
-		return driverkit.Strategy{}, fmt.Errorf("%w: unknown totals %q", ErrCall, d.Totals)
+		return driverkit.Strategy{}, fmt.Errorf("%w: unknown totals %q", ErrCall, capText(d.Totals))
 	}
 	result, ok := map[string]driverkit.ResultReader{"": driverkit.ResultEvents, "events": driverkit.ResultEvents, "lastMessage": driverkit.LastMessage}[d.Result]
 	if !ok {
-		return driverkit.Strategy{}, fmt.Errorf("%w: unknown result %q", ErrCall, d.Result)
+		return driverkit.Strategy{}, fmt.Errorf("%w: unknown result %q", ErrCall, capText(d.Result))
 	}
 	oversized := logscan.SkipOversized
 	if d.Classify.ChunkOversized {
@@ -229,7 +229,7 @@ func patterns(ws []wirePattern) ([]driverkit.Pattern, error) {
 	for _, w := range ws {
 		r := driverkit.Reason(w.Reason)
 		if !slices.Contains(driverkit.AllReasons, r) {
-			return nil, fmt.Errorf("%w: pattern %q has unknown reason %q", ErrCall, w.Substr, w.Reason)
+			return nil, fmt.Errorf("%w: pattern %q has unknown reason %q", ErrCall, capText(w.Substr), capText(w.Reason))
 		}
 		out = append(out, driverkit.Pattern{Substr: w.Substr, Reason: r})
 	}

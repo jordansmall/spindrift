@@ -3676,6 +3676,12 @@ This is protocol version **0.3.0**. The host is
   wraps `ErrCall`. After any failed guest call, `ErrExport` and
   `ErrRequestTooLarge` aside, the Connector is closed and refuses further
   calls with `ErrUnusable`.
+  A Connector-reported error's text, and any guest string a Driver-call error
+  embeds, is cut to 256 bytes on a rune boundary, ending ` [truncated]` when
+  cut, whatever the response cap allows. Control characters, ANSI escapes,
+  format (Cf) characters and line or paragraph separators are stripped and
+  tabs and newlines become spaces, so the text is one safe line to print, log
+  or post. The error's class is unaffected.
 - **Driver capabilities.** A Driver Connector advertises
   capability `"driver"`, meaning it serves the first six methods below, and
   optionally `"driver.resolveExit"`, `"driver.toolPhase"`, `"driver.toolKind"`,
