@@ -76,17 +76,26 @@ let
     "primaryrecord"
     "seambundle"
   ];
-  # connectorforgetest is a test kit importing forge/forgetest, which the Box
-  # does not carry; `go mod vendor` would fail on it.
-  backendBundleFiles = lib.fileset.difference (lib.fileset.unions (
-    [ ../cmd/launcher/internal/driver/bundle/backends.go ]
-    ++ map (
-      d:
-      lib.fileset.fileFilter (f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name) (
-        ../cmd/launcher/internal + "/${d}"
-      )
-    ) backendBundleDirs
-  )) ../cmd/launcher/internal/connectorforge/connectorforgetest;
+  # connectorforgetest and connectortrackertest are test kits importing
+  # forge/forgetest, which the Box does not carry; `go mod vendor` would fail
+  # on them.
+  backendBundleFiles =
+    lib.fileset.difference
+      (lib.fileset.unions (
+        [ ../cmd/launcher/internal/driver/bundle/backends.go ]
+        ++ map (
+          d:
+          lib.fileset.fileFilter (f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name) (
+            ../cmd/launcher/internal + "/${d}"
+          )
+        ) backendBundleDirs
+      ))
+      (
+        lib.fileset.unions [
+          ../cmd/launcher/internal/connectorforge/connectorforgetest
+          ../cmd/launcher/internal/connectortracker/connectortrackertest
+        ]
+      );
 
   # In-box Driver runner (issue #626): runs one Driver invocation, direct or
   # inside the Project devShell, tees the stream to a log path, and filters
