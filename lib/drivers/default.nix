@@ -506,6 +506,7 @@ in
     assertRow
     descriptorFacts
     requiredAttrs
+    knownAttrs
     renderPreamble
     renderEnvFiles
     credentialEnv

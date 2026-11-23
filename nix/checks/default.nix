@@ -387,6 +387,8 @@ let
     "bats:templates" = "new-connector.bats diffs and greps the generated template text";
     "box-access-default:." = "a consumer flake fixture's outPath";
     "baked-skills:cmd/launcher" = "spliced and built; its marker files are under promptassembly/";
+    "connector-checks-any-name:templates/connector-driver" =
+      "builds and golden-diffs the scaffold; its text is matched by ci-comment-readers";
     "connector-checks-parity:connectors" = "imports each Connector's flake.nix, never reads its text";
     "dashboard-js:dashboard" = "a fileset root over the JS tree only";
     "default:." = "the coverage guards' path probes";
