@@ -6,6 +6,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/forge"
 )
 
 type fakeConn struct {
@@ -137,5 +140,61 @@ func TestReloaderNotesAFailedCallAndAFailedReload(t *testing.T) {
 	want := []noted{{"tracker.get", callErr}, {"tracker.list", loadErr}}
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Errorf("noted = %v, want %v", got, want)
+	}
+}
+
+// scriptedConn answers each call from errs in order, then succeeds. Err reports
+// deadOnFail once a call has failed, as a real Connector closes itself.
+type scriptedConn struct {
+	errs             []error
+	calls            int
+	deadOnFail, dead error
+}
+
+func (s *scriptedConn) Call(context.Context, string, any, any) error {
+	s.calls++
+	if len(s.errs) > 0 {
+		err := s.errs[0]
+		s.errs = s.errs[1:]
+		s.dead = s.deadOnFail
+		return err
+	}
+	return nil
+}
+func (s *scriptedConn) Err() error { return s.dead }
+
+// A Connector closes itself on a failed call, so the retry only works when the
+// wrap sits outside the reloader: the second attempt then passes the
+// dead-Connector check and reloads.
+func TestReloadingTrackerRetriesAReadOnTheReloadedConnector(t *testing.T) {
+	transient := &connectorhost.CallError{Class: connectorhost.Transient, Message: "upstream 503"}
+	first := &scriptedConn{errs: []error{transient}, deadOnFail: errors.New("closed after a failed call")}
+	second := &scriptedConn{}
+	loads := 0
+	var noted []error
+	r := &reloader{cur: first, load: func() (conn, error) { loads++; return second, nil },
+		note: func(_ string, err error) { noted = append(noted, err) }}
+	clock, slept := fakeClock()
+	c := &connectorhost.Connector{Capabilities: []string{"tracker", CapComments}}
+	tr, err := newFrom(c, r.call, &forge.IssueTrackerFake{}, testLifecycle, testTarget, clock)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cl, ok := forge.As[forge.CommentLister](tr)
+	if !ok {
+		t.Fatal("tracker lacks CommentLister")
+	}
+	if _, err := cl.Comments("1"); err != nil {
+		t.Fatalf("Comments: %v", err)
+	}
+	if first.calls != 1 || second.calls != 1 || loads != 1 {
+		t.Errorf("first=%d second=%d loads=%d, want the retry on one reloaded connector", first.calls, second.calls, loads)
+	}
+	if len(*slept) != 1 {
+		t.Errorf("slept %v, want one backoff", *slept)
+	}
+	if len(noted) != 1 || !errors.Is(noted[0], transient) {
+		t.Errorf("noted = %v, want the first failure", noted)
 	}
 }
