@@ -706,7 +706,12 @@ func TestRunQuickstart_HappyPath_WritesFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read harness.env: %v", err)
 	}
-	for _, want := range []string{"GH_TOKEN=ghp_faketoken", "CLAUDE_CODE_OAUTH_TOKEN=claude-oauth-faketoken"} {
+	for _, want := range []string{
+		"GH_TOKEN=ghp_faketoken",
+		"CLAUDE_CODE_OAUTH_TOKEN=claude-oauth-faketoken",
+		"SPINDRIFT_GITHUB_CONNECTOR_TOKEN_CMD=",
+		"SPINDRIFT_GITHUB_CONNECTOR_TOKEN=ghp_faketoken\n",
+	} {
 		if !strings.Contains(string(harnessEnv), want) {
 			t.Errorf("expected harness.env to contain %q, got:\n%s", want, harnessEnv)
 		}
@@ -2112,6 +2117,43 @@ func TestRender_ForgejoCodeberg_ConfiguresBothSeamsOmitsDefaultBaseURL(t *testin
 	if strings.Contains(harnessEnv.content, "GH_TOKEN=") {
 		t.Errorf("expected harness.env to omit GH_TOKEN when the tracker is forgejo, got:\n%s", harnessEnv.content)
 	}
+	for _, want := range []string{
+		"SPINDRIFT_FORGEJO_CONNECTOR_TOKEN_CMD=",
+		"SPINDRIFT_FORGEJO_CONNECTOR_TOKEN=forgejo-faketoken\n",
+	} {
+		if !strings.Contains(harnessEnv.content, want) {
+			t.Errorf("expected harness.env to contain %q, got:\n%s", want, harnessEnv.content)
+		}
+	}
+	if strings.Contains(harnessEnv.content, "SPINDRIFT_GITHUB_CONNECTOR_TOKEN") {
+		t.Errorf("expected harness.env to omit the github Connector credential when the tracker is forgejo, got:\n%s", harnessEnv.content)
+	}
+}
+
+// Pins that renderHarnessEnv writes the Connector credential stanza for every
+// quickstart backend the generated connectorCredentialEnv rows name, so a
+// renamed or added Connector credential reaches harness.env without a
+// hand-edit here. A backend with no Connector row writes no such line.
+func TestRenderHarnessEnv_WritesConnectorCredentialForEveryRow(t *testing.T) {
+	if len(connectorCredentialEnv) == 0 {
+		t.Fatal("connectorCredentialEnv is empty, so this test would check nothing")
+	}
+	for name, env := range connectorCredentialEnv {
+		if b, ok := backend.ByName(name); !ok || b.Quickstart == nil {
+			continue
+		}
+		t.Run(name, func(t *testing.T) {
+			out := renderHarnessEnv(name, "faketoken", nil)
+			for _, want := range []string{env + "=faketoken\n", env + "_CMD=", "docs/reference.md#backend-primary-mode"} {
+				if !strings.Contains(out, want) {
+					t.Errorf("renderHarnessEnv(%q, ...) does not contain %q, got:\n%s", name, want, out)
+				}
+			}
+		})
+	}
+	if out := renderHarnessEnv("no-such-backend", "faketoken", nil); strings.Contains(out, "SPINDRIFT_") {
+		t.Errorf("a backend with no Connector row wrote a SPINDRIFT_ line, got:\n%s", out)
+	}
 }
 
 // flakeNixFor extracts the flake.nix scaffoldFile's content from a rendered
@@ -2733,8 +2775,10 @@ func TestHarnessEnvSecretLine_MatchesTemplateHarnessEnvExample(t *testing.T) {
 		i = end
 	}
 
-	if expectedSecretCount := countEnvSchemaSecrets(t); found != expectedSecretCount {
-		t.Fatalf("expected %d secret stanzas in %s (per the folded schema: lib/env-schema.nix and registry row files), found %d", expectedSecretCount, templatePath, found)
+	// One secret knob per backend Connector (its backend.credential); a Connector
+	// adding a second secret knob must update this count.
+	if expectedSecretCount := countEnvSchemaSecrets(t) + len(connectorCredentialEnv); found != expectedSecretCount {
+		t.Fatalf("expected %d secret stanzas in %s (per the folded schema: lib/env-schema.nix and registry row files, plus one per Connector credential), found %d", expectedSecretCount, templatePath, found)
 	}
 }
 
