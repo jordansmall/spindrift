@@ -83,7 +83,9 @@ var consumerStanzas = map[string]consumerStanza{
 			{Env: "SPINDRIFT_JIRA_CONNECTOR_TOKEN", Secret: true},
 			{Env: "SPINDRIFT_JIRA_CONNECTOR_EMAIL"},
 		},
-		Credential: "SPINDRIFT_JIRA_CONNECTOR_TOKEN",
+		Credential:   "SPINDRIFT_JIRA_CONNECTOR_TOKEN",
+		FlakeInput:   "jira = {\n  url = \"github:jordansmall/spindrift?dir=connectors/jira\";\n  inputs.core.follows = \"spindrift\";\n};\n",
+		ModuleImport: "inputs.jira.flakeModules.default",
 	},
 	"forgejo": {
 		DisplayName: "Forgejo",
