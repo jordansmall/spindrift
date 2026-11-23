@@ -95,6 +95,11 @@ let
     # tests/connector-dev.bats (issue #6769) runs the Connector dev wrapper
     # against a stubbed nix.
     CONNECTOR_DEV_SH = ../../nix/connector-dev.sh;
+    # tests/new-connector.bats (issue #7421) runs the scaffold script on the
+    # real templates and the core row names the app bakes in.
+    NEW_CONNECTOR_SH = ../../nix/new-connector.sh;
+    NEW_CONNECTOR_TEMPLATES = ../../templates;
+    NEW_CONNECTOR_CORE_NAMES = toString (map (r: r.name) (import ../../lib/backends/default.nix));
     PROMPTS_DIR = ../../templates/default/prompts;
     # The rendered contracts, driver/agent-paths preambles and Claude
     # settings.json the bats harness reads (tests/entrypoint-shim.bats,
@@ -192,6 +197,7 @@ in
           ${../../.github/scripts/eval-probe.sh} \
           ${../../nix/gate.sh} \
           ${../../nix/connector-dev.sh} \
+          ${../../nix/new-connector.sh} \
           ${../../.github/scripts/eval-profile-top.sh} \
           ${../../tests/fakes/runtime} \
           ${../../tests/fakes/gh} \

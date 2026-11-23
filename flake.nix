@@ -298,6 +298,18 @@
                 program = "${import ./nix/connector-dev.nix { inherit pkgs; }}/bin/connector-dev";
               };
 
+              # Scaffolds a Connector from templates/connector-<kind> with the
+              # name substituted (issue #7421).
+              new-connector = {
+                type = "app";
+                program = "${
+                  import ./nix/new-connector.nix {
+                    inherit pkgs;
+                    self = inputs.self;
+                  }
+                }/bin/new-connector";
+              };
+
               # Rewrites the opencode session-store fixture from the baked
               # opencode (issue #5492); nix/checks/opencode-session-schema.nix
               # pins it to the derivation built here.
