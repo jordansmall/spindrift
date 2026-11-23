@@ -7,8 +7,8 @@
 
   // Fixed palette tuned for the dark theme; "black" is lifted so it stays legible.
   var PALETTE = [
-    "#3d4556", "#e06c75", "#98c379", "#e5c07b", "#61afef", "#c678dd", "#56b6c2", "#c8ccd4",
-    "#6b7488", "#ff8b94", "#b5e890", "#f5d98b", "#7ec3ff", "#e0a0ff", "#7fdbe6", "#ffffff"
+    "#7a859b", "#e06c75", "#98c379", "#e5c07b", "#61afef", "#c678dd", "#56b6c2", "#c8ccd4",
+    "#9aa4b8", "#ff8b94", "#b5e890", "#f5d98b", "#7ec3ff", "#e0a0ff", "#7fdbe6", "#ffffff"
   ];
 
   // CSI (any final byte), OSC (BEL or ESC \ terminated; an unterminated one
