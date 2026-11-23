@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
+	"unicode"
+	"unicode/utf8"
 
 	"spindrift.dev/launcher/internal/backendkit"
 )
@@ -81,5 +84,55 @@ func TestIntrospectTokenPassesTheConnectorsErrorThrough(t *testing.T) {
 	_, err := introspectToken(call, []string{capTokenGrant}, testTarget, "ghp_x")
 	if !errors.Is(err, boom) || errors.Is(err, ErrNoTokenGrant) {
 		t.Fatalf("err = %v, want the Connector's own error", err)
+	}
+}
+
+func grantCall(raw string) guestCall {
+	return func(_ context.Context, _ string, _, result any) error {
+		return json.Unmarshal([]byte(raw), result)
+	}
+}
+
+func TestIntrospectTokenRefusesAnInconsistentGrant(t *testing.T) {
+	for name, raw := range map[string]string{
+		"write without introspectable":  `{"introspectable":false,"writeCapable":true}`,
+		"scopes without introspectable": `{"introspectable":false,"scopes":["repo"]}`,
+		"empty scope":                   `{"introspectable":true,"scopes":["repo",""]}`,
+		"scope with a space":            `{"introspectable":true,"scopes":["repo admin"]}`,
+		"scope with an escape":          `{"introspectable":true,"scopes":["repo\u001b[31m"]}`,
+		"scope with a newline":          `{"introspectable":true,"scopes":["repo\nforged: ok"]}`,
+		"overlong scope":                `{"introspectable":true,"scopes":["` + strings.Repeat("a", maxScopeLen+1) + `"]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := introspectToken(grantCall(raw), []string{capTokenGrant}, testTarget, "ghp_x")
+			if !errors.Is(err, ErrAnswer) {
+				t.Errorf("err = %v, want ErrAnswer", err)
+			}
+		})
+	}
+}
+
+func TestIntrospectTokenAcceptsRealScopes(t *testing.T) {
+	raw := `{"introspectable":true,"writeCapable":true,"scopes":["repo","public_repo","write:repository","read:org","admin:repo_hook"]}`
+	got, err := introspectToken(grantCall(raw), []string{capTokenGrant}, testTarget, "ghp_x")
+	if err != nil || len(got.Scopes) != 5 || !got.WriteCapable {
+		t.Fatalf("introspectToken = %+v, %v", got, err)
+	}
+}
+
+func TestIntrospectTokenSanitisesAndCapsTheReason(t *testing.T) {
+	raw := `{"introspectable":false,"reason":"\u001b[2Jfine\nINJECTED\u0007‮ ` + strings.Repeat("x", 2*maxReasonLen) + `"}`
+	got, err := introspectToken(grantCall(raw), []string{capTokenGrant}, testTarget, "ghp_x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.IndexFunc(got.Reason, unicode.IsControl) >= 0 {
+		t.Errorf("reason %q keeps a control character", got.Reason)
+	}
+	if n := utf8.RuneCountInString(got.Reason); n > maxReasonLen {
+		t.Errorf("reason has %d runes, want at most %d", n, maxReasonLen)
+	}
+	if !strings.HasPrefix(got.Reason, "fine INJECTED ") {
+		t.Errorf("reason = %q", got.Reason)
 	}
 }

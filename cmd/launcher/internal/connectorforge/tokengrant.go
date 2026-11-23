@@ -3,11 +3,13 @@ package connectorforge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/retry"
 )
 
@@ -46,5 +48,54 @@ func introspectToken(call guestCall, caps []string, t Target, token string) (bac
 	if err := call(context.Background(), "forge.tokenGrant", p, &g); err != nil {
 		return backendkit.TokenIntrospection{}, err
 	}
+	if err := checkGrant(g); err != nil {
+		return backendkit.TokenIntrospection{}, err
+	}
+	g.Reason = cleanReason(g.Reason)
 	return backendkit.TokenIntrospection(g), nil
+}
+
+const (
+	maxScopeLen  = 64
+	maxReasonLen = 200
+)
+
+// checkGrant refuses a grant whose fields contradict each other or whose
+// scopes are not plain tokens: core prints scopes and acts on writeCapable,
+// so neither may reach it unchecked from a Connector.
+func checkGrant(g wireGrant) error {
+	if !g.Introspectable && g.WriteCapable {
+		return fmt.Errorf("%w: forge.tokenGrant reports writeCapable without introspectable", ErrAnswer)
+	}
+	if !g.Introspectable && len(g.Scopes) > 0 {
+		return fmt.Errorf("%w: forge.tokenGrant reports scopes without introspectable", ErrAnswer)
+	}
+	for _, s := range g.Scopes {
+		if !wellFormedScope(s) {
+			return fmt.Errorf("%w: forge.tokenGrant scope %q is not a well-formed token", ErrAnswer, s)
+		}
+	}
+	return nil
+}
+
+// wellFormedScope admits the charset real forges use (repo, write:repository,
+// admin:repo_hook), bounded in length.
+func wellFormedScope(s string) bool {
+	if s == "" || len(s) > maxScopeLen {
+		return false
+	}
+	return !strings.ContainsFunc(s, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune(":._/-", r))
+	})
+}
+
+// cleanReason flattens line breaks to spaces, strips what SanitizeLine strips
+// (whole ANSI sequences, controls, bidi and other format runes), then caps the
+// runes: the write gate prints it verbatim.
+func cleanReason(s string) string {
+	s = driverkit.SanitizeLine(strings.NewReplacer("\n", " ", "\r", " ", "\t", " ").Replace(s))
+	if rs := []rune(s); len(rs) > maxReasonLen {
+		s = string(rs[:maxReasonLen])
+	}
+	return s
 }
