@@ -109,7 +109,9 @@
 # credential knobs (connectors/<name>/module.nix), each a secret stanza beside
 # the row's own tokenEnvVar; `flakeInput`, the flake-input stanza; and
 # `moduleImport`, the module import. A null flakeInput or moduleImport means
-# the batteries flake (`flakeModules.default`) already carries the backend. The
+# the batteries flake (`flakeModules.default`) already carries the backend;
+# otherwise the input text goes, re-indented, inside the Consumer's `inputs = { ... };`
+# with its `core` following the Consumer's `spindrift` input. The
 # settings-block knob lines are the row's own `knobs` with flakeOption = true.
 # nix/consumer-stanzas.nix composes them and fails eval when the Connector
 # declares a secret knob `connectorKnobs` omits. The generated Descriptor
