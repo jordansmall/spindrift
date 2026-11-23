@@ -23,7 +23,7 @@ type stubTransport struct{ sent []*http.Request }
 func (s *stubTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	s.sent = append(s.sent, r)
 	resp := &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("ok")), Request: r}
-	if r.URL.Host == "api.example.com" {
+	if strings.EqualFold(r.URL.Host, "api.example.com") {
 		resp.StatusCode = 302
 		resp.Header.Set("Location", "https://blob.example.com/log?sig=secret")
 	}
@@ -85,10 +85,10 @@ func FuzzHTTPRequest(f *testing.F) {
 			if r.URL.Scheme != "https" || r.URL.User != nil || r.URL.Fragment != "" || len(r.URL.String()) > maxHTTPURL {
 				t.Fatalf("sent %s for %q", r.URL.Redacted(), raw)
 			}
-			if r.URL.Host == "api.example.com" && !slices.Contains(httpMethods, r.Method) {
+			if strings.EqualFold(r.URL.Host, "api.example.com") && !slices.Contains(httpMethods, r.Method) {
 				t.Fatalf("sent method %q for %q", r.Method, raw)
 			}
-			if r.URL.Host != "api.example.com" && r.URL.Host != "blob.example.com" {
+			if h := strings.ToLower(r.URL.Host); h != "api.example.com" && h != "blob.example.com" {
 				t.Fatalf("sent to host %q for %q", r.URL.Host, raw)
 			}
 		}
@@ -102,13 +102,17 @@ func FuzzHTTPRequest(f *testing.F) {
 			t.Fatalf("audit line %q: %v", lines[0], jerr)
 		}
 
-		// Echoing is judged on what the guest actually asked for, read leniently.
+		// Echoing is judged only on a request that decodes as the host decodes
+		// it: the JSON decoder quotes a malformed one back, bounded by the
+		// request size rather than the URL cap.
 		var in httpRequest
-		if json.Unmarshal(raw, &in) != nil || err == nil {
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.DisallowUnknownFields()
+		if dec.Decode(&in) != nil || dec.More() || err == nil {
 			return
 		}
 		if (len(in.URL) > maxHTTPURL || !slices.Contains(httpMethods, in.Method)) && errors.Is(err, ErrRouteRefused) {
-			if len(err.Error()) > 512 || len(e.Reason) > 512 || len(e.Method) > len("DELETE") || e.Host != "" {
+			if len(err.Error()) > maxEchoLen || len(e.Reason) > maxEchoLen || len(e.Method) > len("DELETE") || e.Host != "" {
 				t.Fatalf("refusal of url=%d bytes method=%d bytes echoed it: err=%d bytes, audit=%q", len(in.URL), len(in.Method), len(err.Error()), lines[0])
 			}
 		}
