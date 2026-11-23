@@ -15,11 +15,16 @@ import (
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/primaryrecord"
+	"spindrift.dev/launcher/internal/retry"
 )
 
 // connectorClient is the transport the host-side Connector loads send with; nil
 // is the default client. Tests swap it through ConnectorClientForTest.
 var connectorClient *http.Client
+
+// connectorClock paces the retry backoff of the Connector tracker; the zero
+// value sleeps for real. ConnectorClientForTest swaps it for one that does not.
+var connectorClock retry.Clock
 
 // loadRowConnector loads a backend row's Connector; a test seam.
 var loadRowConnector = backendrows.Load
@@ -98,7 +103,7 @@ func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (for
 		API:     strings.TrimRight(k.JiraBaseURL, "/"),
 		Repo:    k.JiraProjectKey,
 		Dialect: dialect,
-	})
+	}, connectorClock)
 	if err != nil {
 		recordPrimaryFailure("load the Connector", err)
 		return nil, err

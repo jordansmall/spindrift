@@ -15,6 +15,9 @@ type Clock struct {
 // RealClock returns a Clock backed by time.Now and time.Sleep.
 func RealClock() Clock { return Clock{Now: time.Now, Sleep: time.Sleep} }
 
+// NoSleepClock returns a Clock whose Sleep returns at once, for tests.
+func NoSleepClock() Clock { return Clock{Now: time.Now, Sleep: func(time.Duration) {}} }
+
 // LinearBackoff waits Unit*N + Jitter on attempt N (1-based), sleeping through
 // the Clock. A negative Unit or Jitter clamps to zero, so a misconfigured knob
 // retries immediately instead of sleeping a negative duration.

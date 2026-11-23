@@ -15,6 +15,7 @@ import (
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/dedupmarker"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/retry"
 )
 
 var testLabels = forge.DispatchLabels{Dispatchable: "ready-for-agent"}
@@ -31,6 +32,13 @@ type recordedCall struct {
 // stubGuest answers each method with the JSON in replies and records the calls.
 func stubGuest(t *testing.T, replies map[string]string) (func(context.Context, string, any, any) error, *[]recordedCall) {
 	t.Helper()
+	return stubGuestErrs(t, replies, nil)
+}
+
+// stubGuestErrs is stubGuest where each method in errs first fails with its
+// queued errors, one per call, before it answers from replies.
+func stubGuestErrs(t *testing.T, replies map[string]string, errs map[string][]error) (func(context.Context, string, any, any) error, *[]recordedCall) {
+	t.Helper()
 	var calls []recordedCall
 	return func(_ context.Context, method string, params, result any) error {
 		raw, err := json.Marshal(params)
@@ -42,6 +50,10 @@ func stubGuest(t *testing.T, replies map[string]string) (func(context.Context, s
 			t.Fatal(err)
 		}
 		calls = append(calls, recordedCall{method, p})
+		if q := errs[method]; len(q) > 0 {
+			errs[method] = q[1:]
+			return q[0]
+		}
 		reply, ok := replies[method]
 		if !ok {
 			return errors.New("guest: no such method " + method)
@@ -50,9 +62,15 @@ func stubGuest(t *testing.T, replies map[string]string) (func(context.Context, s
 	}, &calls
 }
 
+// fakeClock is a retry.Clock that records its sleeps and never waits.
+func fakeClock() (retry.Clock, *[]time.Duration) {
+	var slept []time.Duration
+	return retry.Clock{Now: time.Now, Sleep: func(d time.Duration) { slept = append(slept, d) }}, &slept
+}
+
 func TestNewRequiresCapability(t *testing.T) {
 	c := &connectorhost.Connector{Capabilities: []string{"driver"}}
-	_, err := New(c, &forge.IssueTrackerFake{}, testLifecycle, testTarget)
+	_, err := New(c, &forge.IssueTrackerFake{}, testLifecycle, testTarget, retry.Clock{})
 	if !errors.Is(err, ErrNotTracker) {
 		t.Fatalf("err = %v, want ErrNotTracker", err)
 	}

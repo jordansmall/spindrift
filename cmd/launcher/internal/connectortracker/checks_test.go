@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -382,5 +383,33 @@ func TestStatusesLayerIgnoresMalformedCategories(t *testing.T) {
 	checker, _ := forge.As[forge.StatusMappingChecker](tr)
 	if missing, err := checker.CheckMappedStatuses(); err != nil || missing != nil {
 		t.Errorf("missing = %v, %v; want nil, nil", missing, err)
+	}
+}
+
+// Probe keeps its not-found mapping for every call error, but the Connector's
+// auth and rate-limit classes match their own sentinels as well, which callers
+// check first; doctor's probe check hand-builds this shape, so this pins it.
+func TestProbeClassifiedErrorsMatchNotFoundAndTheirSentinels(t *testing.T) {
+	for _, tc := range []struct {
+		class connectorhost.Class
+		want  error
+	}{
+		{connectorhost.RateLimited, forge.ErrRateLimit},
+		{connectorhost.Auth, forge.ErrAuthFailure},
+		{connectorhost.Permanent, forge.ErrRepoNotFound},
+	} {
+		t.Run(string(tc.class), func(t *testing.T) {
+			call, _ := stubGuestErrs(t, nil, map[string][]error{CapProbe: {&connectorhost.CallError{Class: tc.class, Message: "x"}}})
+			c := &connectorhost.Connector{Capabilities: []string{"tracker", CapProbe}, ProtocolVersion: "0.2.0"}
+			clk, _ := fakeClock()
+			tr, err := newFrom(c, call, newNative(), testLifecycle, testTarget, clk)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = tr.Probe()
+			if !errors.Is(err, forge.ErrRepoNotFound) || !errors.Is(err, tc.want) {
+				t.Fatalf("Probe err = %v, want both ErrRepoNotFound and %v", err, tc.want)
+			}
+		})
 	}
 }
