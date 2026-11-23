@@ -33,6 +33,12 @@ Connector declares a secret knob its stanza omits. Not a prompt fragment: a
 stanza is configuration a Consumer writes.
 _Avoid_: fragment, config fragment, snippet.
 
+**Operator**:
+The person who runs the Harness against a Target repo: they maintain the
+Consumer flake, supply its credentials and commit what it accepts from a
+Connector. Never the Connector's author, and never the Agent.
+_Avoid_: user, admin, maintainer (that is a role on the Target repo).
+
 **Target repo**:
 The repository whose issues the agents work. Always cloned fresh inside the Box
 from a git *remote* — `REPO_SLUG` on GitHub under a `github` Code Forge, or a
@@ -753,6 +759,31 @@ The host, method and path patterns a Connector's row declares. The Connector
 host refuses any `http_request` outside it, unsent, and attaches the
 credential only on a match, so the table is the Connector's permissions
 manifest (ADR 0073). _Avoid_: allowlist, scopes.
+
+**Route baseline**:
+The file in the Consumer flake that records what the [[Operator]] has accepted
+from each Connector: its [[Route table]], its credential and its
+[[Git remote declaration]]. A Connector cannot write it, so it cannot accept
+its own grant (ADR 0073). _Avoid_: allowlist, lockfile, accepted routes.
+
+**Git remote declaration**:
+The web base a forge Connector's row declares, from which core alone builds
+the URL its git pushes to: a literal https origin or the name of an
+Operator-set knob. Decided 2026-11-23 and not yet built (ADR 0073).
+_Avoid_: clone URL (core derives that), remote (the git remote itself).
+
+**First-party Connector** / **third-party Connector**:
+A Connector shipped in the [[Batteries flake]], or one from anywhere else.
+Both are untrusted at run time; they differ in what the Operator must accept
+before one runs, since pinning the Harness already accepts the first kind
+(ADR 0073). _Avoid_: built-in Connector (a [[Built-in backend]] is native and
+has no Connector), official, community.
+
+**Connector runtime**:
+The one value a binary builds to own every Connector it uses: the rows, the
+[[Connector sandbox]]es, the credentials and the live Connectors, with one
+shutdown. Decided 2026-11-23 and not yet built (ADR 0073). _Avoid_: Connector
+host (that loads and polices one Connector), registry, bootstrap.
 
 **Built-in backend**:
 A backend that stays native in core because it needs capabilities Connectors
