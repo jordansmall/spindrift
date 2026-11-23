@@ -1,20 +1,27 @@
 # A Connector's conformance suite, built from core so its own subflake can run
 # it (`nix flake check` in connectors/<name>); root `checks` carry none bar
-# the test-only echo fixture's (nix/checks/connector-checks-any-name.nix),
-# and CI's `connector` lane runs it via `nix run .#connector-dev -- <name>
-# flake check`. It covers the Connector's Go fmt, wasip1 vet and unit tests,
-# plus core's `go test ./internal/{driver,forge}/<name>/...` against the
-# Connector's wasm (a connectorHosted Driver, with no native package, runs the
-# driverrows tests alone). A Driver named after no core Driver has no such
-# package or corpus in core: the kit's RunConnector runs over the Connector's
-# own testdata/corpus instead. A backend still needs a core backend row.
+# the test-only fixtures' (nix/checks/connector-checks-any-name.nix and
+# nix/checks/connector-checks-generic.nix), and CI's `connector` lane runs it
+# via `nix run .#connector-dev -- <name> flake check`. It covers the
+# Connector's Go fmt, wasip1 vet and unit tests, plus core's
+# `go test ./internal/{driver,forge}/<name>/...` against the Connector's wasm
+# (a connectorHosted Driver, with no native package, runs the driverrows tests
+# alone). A Driver named after no core Driver has no such package or corpus
+# in core: the kit's RunConnector runs over the Connector's own
+# testdata/corpus instead. A backend Connector (one with `routes`) named after
+# no core backend row has no per-backend tests either; it runs the
+# connectorconformance kit against its wasm and declared Routes instead, for
+# whichever tracker and forge capabilities it registers.
 {
   nixpkgs,
   systems,
   name,
   # The Connector's own directory.
   src,
-  # The subflake's `entry.lib.connector { inherit core; }`.
+  # The subflake's `entry.lib.connector { inherit core; }`. A backend
+  # Connector adds `routes`; on the generic path its optional `script` (a list
+  # of {method, path, status, body}) is answered ahead of the scripted
+  # backend's own model.
   connector,
 }:
 let
@@ -62,14 +69,27 @@ let
           src = ../cmd/launcher;
           vendorHash = (import ./build-constants.nix).launcherVendorHash;
         }).goModules;
-      row =
-        pkgs.lib.findFirst (r: r.name == name)
-          (throw "core.lib.connectorChecks: no core backend row named ${name}")
-          (import ./backends/default.nix);
+      row = pkgs.lib.findFirst (r: r.name == name) null (import ./backends/default.nix);
+      # A backend Connector no core row names has no per-backend tests to run,
+      # but one under core's own connectors/ must have a row.
+      generic =
+        isBackend
+        && row == null
+        && pkgs.lib.throwIf (builtins.pathExists (
+          ../connectors + "/${name}"
+        )) "core.lib.connectorChecks: no core backend row named ${name}" true;
       # The conformance tests skip, not fail, when their env var is unset, so the
       # setup below always exports it.
       setup =
-        if isBackend then
+        if generic then
+          ''
+            export SPINDRIFT_BACKEND_CONNECTOR_WASM=${connector.package pkgs}/${name}.wasm
+            export SPINDRIFT_BACKEND_CONNECTOR_ROUTES=${pkgs.lib.escapeShellArg (builtins.toJSON connector.routes)}
+          ''
+          + pkgs.lib.optionalString (connector ? script) ''
+            export SPINDRIFT_BACKEND_CONNECTOR_SCRIPT=${pkgs.lib.escapeShellArg (builtins.toJSON connector.script)}
+          ''
+        else if isBackend then
           ''
             export SPINDRIFT_CONNECTOR_FIXTURES_DIR=${(import ../nix/connector-wasm.nix { inherit pkgs; })}
             export SPINDRIFT_BACKEND_CONNECTOR_WASM=${connector.package pkgs}/${name}.wasm
@@ -114,6 +134,8 @@ let
       testPkgs =
         if connectorOnlyDriver then
           "./internal/driver/driverkit/conformance/..."
+        else if generic then
+          "./internal/connectorconformance -run '^TestConnectorConformance$'"
         else
           pkgs.lib.optionalString (!connectorHosted) "./internal/${testPkg}/${name}/..."
           + pkgs.lib.optionalString (!isBackend) " ./internal/driver/driverrows/...";
@@ -127,6 +149,8 @@ let
           [ "TestConnectorCorpus" ]
         else if connectorHosted then
           [ "TestCorpus" ]
+        else if generic then
+          [ "TestConnectorConformance" ]
         else if !isBackend then
           [ "TestPrimaryRowConnectorPassesCorpus" ]
           ++ pkgs.lib.optional (builtins.pathExists (
