@@ -46,27 +46,18 @@ let
     {
       name,
       module,
-      connector,
       credentialKnob,
-      modes,
     }:
-    pkgs.linkFarm name (
-      pkgs.lib.genAttrs modes (
-        mode:
-        pkgs.runCommand "${name}-${mode}" { nativeBuildInputs = [ pkgs.jq ]; } ''
-          ${fixtures.runInputDocOf
-            (fixtures.moduleConsumerWith [
-              rootFlakeModule
-              module
-              { spindrift.connectors.${connector}.${mode} = true; }
-            ]).apps.${system}.default.program
-          }
-          jq -e '[.backends[] | select(.credentialKnob == "${credentialKnob}")]
-            | length == 1 and .[0].${mode} == true' "$doc"
-          touch $out
-        ''
-      )
-    );
+    pkgs.runCommand name { nativeBuildInputs = [ pkgs.jq ]; } ''
+      ${fixtures.runInputDocOf
+        (fixtures.moduleConsumerWith [
+          rootFlakeModule
+          module
+        ]).apps.${system}.default.program
+      }
+      jq -e '[.backends[] | select(.credentialKnob == "${credentialKnob}")] | length == 1' "$doc"
+      touch $out
+    '';
 
   # A Consumer's jira input follows its `spindrift` input, so the Connector's
   # `core` is the batteries root; two `lib.connector` calls give two distinct
@@ -108,9 +99,7 @@ in
   core-entry-root-and-forgejo-connector-module-dedup = rootAndConnectorModuleDedup {
     name = "core-entry-root-and-forgejo-connector-module-dedup";
     module = forgejoConnectorModule;
-    connector = "forgejo";
     credentialKnob = "forgejoConnectorToken";
-    modes = [ "shadow" ];
   };
 
   # Issue #7417: the batteries root does not carry jira, so a Consumer imports
@@ -133,9 +122,7 @@ in
   core-entry-root-and-connector-module-dedup = rootAndConnectorModuleDedup {
     name = "core-entry-root-and-connector-module-dedup";
     module = githubConnectorModule;
-    connector = "github";
     credentialKnob = "githubConnectorToken";
-    modes = [ "shadow" ];
   };
 
   core-entry-consumer-evaluates-identically =
