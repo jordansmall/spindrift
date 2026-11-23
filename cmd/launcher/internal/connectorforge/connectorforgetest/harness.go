@@ -411,6 +411,9 @@ func (h *Harness) Unreachable() forge.CodeForge {
 
 func (h *base) BranchPrefix() string { return prefix }
 
+// BranchForge returns the composed forge, whichever harness embeds base.
+func (h *base) BranchForge() forge.CodeForge { return h.cf }
+
 func (h *Harness) IsPushOnly() {}
 
 func (h *base) SeedLandable(num string) string {
