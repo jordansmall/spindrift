@@ -24,7 +24,6 @@ let
   forgejoConnector = (import ../connectors/forgejo).lib.connector { core = import ../core; };
   jiraConnector = (import ../connectors/jira).lib.connector { core = import ../core; };
   dogfoodDriverPrimaries = builtins.filter (n: dogfoodDriverRows ? ${n}) dogfoodPrimary;
-  dogfoodBackendPrimaries = builtins.filter (n: !(dogfoodDriverRows ? ${n})) dogfoodPrimary;
   # Every Driver Connector's row, as the module registers it, so the
   # nix/dogfood-*.nix lists alone decide which are shadowed or primary. A
   # backend Connector has no `driverRow`; the directory name is the row's name.
@@ -123,8 +122,8 @@ let
     # Connectors and running those in nix/dogfood-primary.nix as primary, so
     # the module path hands mkHarness all of it. A Driver row is shadowed or
     # primary by name in `shadowDrivers` / `primaryDrivers`, and a shadowed row
-    # bakes only into the Harness running that Driver; a backend row carries
-    # the flag itself. claude's row is neither: it has no native Strategy
+    # bakes only into the Harness running that Driver; a backend row is never
+    # either (issue #7456). claude's row is neither: it has no native Strategy
     # (issue #6799).
     driverRows = dogfoodDriverRows;
     shadowDrivers = builtins.filter (n: dogfoodDriverRows ? ${n}) dogfoodShadow;
@@ -138,9 +137,7 @@ let
       credentialKnob = "githubConnectorToken";
       acceptedRoutes = (builtins.fromJSON (builtins.readFile ../spindrift-connector-routes.json)).github;
     };
-    # Registered but not primary: the Connector is the tracker and Code Forge
-    # (`primary` is refused on it, no native backend remains), so
-    # nix/dogfood-primary.nix omits it.
+    # The Connector is the tracker and Code Forge.
     backendRows.forgejo = {
       module = p: "${forgejoConnector.package p}/forgejo.wasm";
       inherit (forgejoConnector) routes;
@@ -149,8 +146,7 @@ let
       baseEnv = "FORGEJO_BASE_URL";
       acceptedRoutes = (builtins.fromJSON (builtins.readFile ../spindrift-connector-routes.json)).forgejo;
     };
-    # jira's Connector is its only tracker, so the row loads for ISSUE_TRACKER=jira;
-    # `primary` is refused on it, and nix/dogfood-primary.nix omits it.
+    # jira's Connector is its only tracker, so the row loads for ISSUE_TRACKER=jira.
     backendRows.jira = {
       module = p: "${jiraConnector.package p}/jira.wasm";
       inherit (jiraConnector) routes;
@@ -873,7 +869,6 @@ in
   inherit
     dogfoodSkills
     dogfoodDriverPrimaries
-    dogfoodBackendPrimaries
     ghFakeOverlay
     batsHarness
     multiDriverBatsHarness
