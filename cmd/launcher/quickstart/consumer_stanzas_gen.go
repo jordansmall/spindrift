@@ -6,11 +6,20 @@ package main
 // consumerStanza is a backend row's Consumer stanza: what a Consumer of the
 // backend configures (lib/backends/<name>.nix, nix/consumer-stanzas.nix).
 type consumerStanza struct {
-	Settings     []string       // env names of the row's settings-block knobs, sorted
-	Secrets      []stanzaSecret // harness.env lines, in the env example's order
-	Credential   string         // env var the Connector reads its credential from; "" when none
-	FlakeInput   string         // "" when the batteries flake already carries it
-	ModuleImport string         // likewise
+	DisplayName  string
+	Settings     []stanzaSetting // the row's settings-block knobs, sorted by Env
+	Secrets      []stanzaSecret  // harness.env lines, in the env example's order
+	Credential   string          // env var the Connector reads its credential from; "" when none
+	FlakeInput   string          // "" when the batteries flake already carries it
+	ModuleImport string          // likewise
+}
+
+// stanzaSetting is one settings-block knob of a Consumer stanza: its env name,
+// nix option path, and the Nix literal a Consumer writes for its schema default.
+type stanzaSetting struct {
+	Env     string
+	Path    string
+	Default string
 }
 
 // stanzaSecret is one harness.env line of a Consumer stanza. Secret is false
@@ -20,9 +29,20 @@ type stanzaSecret struct {
 	Secret bool
 }
 
+// secretCmdHintFormat is the <NAME>_CMD hint above a secret in harness.env.
+// Its verbs take the env name (%[1]s) and the kebab-cased vault key (%[2]s).
+const secretCmdHintFormat = "# Preferred: fetch this from a vault instead of the plaintext value below —\n# %[1]s_CMD=\"rbw get spindrift-%[2]s\" (or an op/pass/vault\n# read); the command's stdout wins over %[1]s and is never baked,\n# logged, or written to disk.\n"
+
+// harnessEnvPreamble opens the wizard's harness.env.
+const harnessEnvPreamble = "# Preferred: source each secret below from a vault via its <NAME>_CMD\n# form rather than the plaintext value — harness.env then holds\n# fetch recipes, not live credentials.\n# One vault, uniform naming? SECRET_CMD sets a single templated fetch\n# command (e.g. \"rbw get spindrift-{name}\") for any secret without a\n# <NAME>_CMD, but note the plaintext value below still wins over it\n# too, so remove that value (or add <NAME>_CMD) for SECRET_CMD to apply.\n\n"
+
+// connectorCredentialNote precedes the Connector credential stanza.
+const connectorCredentialNote = "# The Connector authorizes its reads and writes with this token. A separate,\n# least-privilege token may replace it: see docs/reference.md#backend-primary-mode.\n"
+
 // consumerStanzas maps a backend name to its Consumer stanza.
 var consumerStanzas = map[string]consumerStanza{
 	"github": {
+		DisplayName: "GitHub",
 		Secrets: []stanzaSecret{
 			{Env: "GH_TOKEN", Secret: true},
 			{Env: "SPINDRIFT_GITHUB_CONNECTOR_TOKEN", Secret: true},
@@ -30,13 +50,30 @@ var consumerStanzas = map[string]consumerStanza{
 		Credential: "SPINDRIFT_GITHUB_CONNECTOR_TOKEN",
 	},
 	"git": {
-		Settings: []string{"CODE_FORGE_REMOTE_URL"},
+		DisplayName: "Git",
+		Settings: []stanzaSetting{
+			{Env: "CODE_FORGE_REMOTE_URL", Path: "forge.remoteURL", Default: "\"\""},
+		},
 	},
 	"local": {
-		Settings: []string{"CODE_FORGE_ACCUMULATION_REPO_DIR", "LOCAL_ISSUES_DIR", "LOCAL_ISSUE_REFERENCE"},
+		DisplayName: "local",
+		Settings: []stanzaSetting{
+			{Env: "CODE_FORGE_ACCUMULATION_REPO_DIR", Path: "forge.accumulationRepoDir", Default: "\"\""},
+			{Env: "LOCAL_ISSUES_DIR", Path: "issues.localDir", Default: "\".spindrift/issues\""},
+			{Env: "LOCAL_ISSUE_REFERENCE", Path: "issues.localReference", Default: "false"},
+		},
 	},
 	"jira": {
-		Settings: []string{"JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_INCLUDE_COMMENTS", "JIRA_ISSUE_TYPE", "JIRA_LIFECYCLE", "JIRA_PROJECT_KEY", "JIRA_STATUS_MAPPING"},
+		DisplayName: "Jira",
+		Settings: []stanzaSetting{
+			{Env: "JIRA_BASE_URL", Path: "issues.jira.baseURL", Default: "\"\""},
+			{Env: "JIRA_EMAIL", Path: "issues.jira.email", Default: "\"\""},
+			{Env: "JIRA_INCLUDE_COMMENTS", Path: "issues.jira.includeComments", Default: "false"},
+			{Env: "JIRA_ISSUE_TYPE", Path: "issues.jira.issueType", Default: "\"Task\""},
+			{Env: "JIRA_LIFECYCLE", Path: "issues.jira.lifecycle", Default: "\"hybrid\""},
+			{Env: "JIRA_PROJECT_KEY", Path: "issues.jira.projectKey", Default: "\"\""},
+			{Env: "JIRA_STATUS_MAPPING", Path: "issues.jira.statusMapping", Default: "\"\""},
+		},
 		Secrets: []stanzaSecret{
 			{Env: "JIRA_TOKEN", Secret: true},
 			{Env: "SPINDRIFT_JIRA_CONNECTOR_TOKEN", Secret: true},
@@ -45,7 +82,10 @@ var consumerStanzas = map[string]consumerStanza{
 		Credential: "SPINDRIFT_JIRA_CONNECTOR_TOKEN",
 	},
 	"forgejo": {
-		Settings: []string{"FORGEJO_BASE_URL"},
+		DisplayName: "Forgejo",
+		Settings: []stanzaSetting{
+			{Env: "FORGEJO_BASE_URL", Path: "issues.forgejo.baseURL", Default: "\"https://codeberg.org\""},
+		},
 		Secrets: []stanzaSecret{
 			{Env: "FORGEJO_TOKEN", Secret: true},
 			{Env: "SPINDRIFT_FORGEJO_CONNECTOR_TOKEN", Secret: true},

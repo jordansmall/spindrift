@@ -38,12 +38,3 @@ const hostGitConfigKeyGitUserEmail = "user.email"
 // hostGitConfigKeyGitUserName is the host git config key the wizard reads
 // to pre-fill the gitUserName prompt.
 const hostGitConfigKeyGitUserName = "user.name"
-
-// quickstartKnob is one flakeOption knob of a quickstart-capable backend row:
-// its nix option path and schema default.
-type quickstartKnob struct{ path, dflt string }
-
-// quickstartKnobs lists those knobs by env name (lib/backends rows' `knobs`).
-var quickstartKnobs = map[string]quickstartKnob{
-	"FORGEJO_BASE_URL": {path: "issues.forgejo.baseURL", dflt: "https://codeberg.org"},
-}

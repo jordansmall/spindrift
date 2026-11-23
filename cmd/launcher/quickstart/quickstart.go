@@ -839,12 +839,15 @@ func renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail string, choice 
 	}
 	slices.Sort(envs)
 	for _, env := range envs {
-		knob, ok := quickstartKnobs[env]
-		if !ok {
-			return "", fmt.Errorf("backend %q derives knob %s from the remote, but quickstartKnobs has no entry for it", choice.name, env)
+		i := slices.IndexFunc(consumerStanzas[choice.name].Settings, func(s stanzaSetting) bool { return s.Env == env })
+		if i < 0 {
+			return "", fmt.Errorf("backend %q derives knob %s from the remote, but its Consumer stanza has no setting for it", choice.name, env)
 		}
-		if v := choice.knobs[env]; v != "" && v != knob.dflt {
-			settingsLines += fmt.Sprintf("            %s = \"%s\";\n", knob.path, nixEscape(v))
+		knob := consumerStanzas[choice.name].Settings[i]
+		if v := choice.knobs[env]; v != "" {
+			if lit := `"` + nixEscape(v) + `"`; lit != knob.Default {
+				settingsLines += fmt.Sprintf("            %s = %s;\n", knob.Path, lit)
+			}
 		}
 	}
 
@@ -927,11 +930,6 @@ func renderHarnessEnv(issueTracker, token string, credentials []credential) stri
 	return out
 }
 
-// connectorCredentialNote precedes the Connector credential stanza: the
-// wizard reuses the token it verified, but a narrower one is safer.
-const connectorCredentialNote = "# The Connector authorizes its reads and writes with this token. A separate,\n" +
-	"# least-privilege token may replace it: see docs/reference.md#backend-primary-mode.\n"
-
 // harnessEnvTokenEnvVar returns the env var name the wizard writes the
 // backend credential under, falling back to GH_TOKEN. Keep it the only source,
 // so the scaffold and the doctor row cannot drift.
@@ -942,31 +940,11 @@ func harnessEnvTokenEnvVar(issueTracker string) string {
 	return "GH_TOKEN"
 }
 
-// harnessEnvPreamble condenses templates/default/harness.env.example's
-// preamble. Per the resolution precedence (docs/reference.md), both a
-// secret's own <NAME>_CMD and the plaintext value below outrank SECRET_CMD,
-// so that fallback applies only once the operator removes the plaintext.
-const harnessEnvPreamble = "" +
-	"# Preferred: source each secret below from a vault via its <NAME>_CMD\n" +
-	"# form rather than the plaintext value — harness.env then holds\n" +
-	"# fetch recipes, not live credentials.\n" +
-	"# One vault, uniform naming? SECRET_CMD sets a single templated fetch\n" +
-	"# command (e.g. \"rbw get spindrift-{name}\") for any secret without a\n" +
-	"# <NAME>_CMD, but note the plaintext value below still wins over it\n" +
-	"# too, so remove that value (or add <NAME>_CMD) for SECRET_CMD to apply.\n\n"
-
 // harnessEnvSecretLine renders one secret's stanza: the <NAME>_CMD
 // indirection comment matching templates/default/harness.env.example, then
 // the bare NAME=value line.
 func harnessEnvSecretLine(name, value string) string {
-	return fmt.Sprintf(
-		"# Preferred: fetch this from a vault instead of the plaintext value below —\n"+
-			"# %s_CMD=%q (or an op/pass/vault\n"+
-			"# read); the command's stdout wins over %s and is never baked,\n"+
-			"# logged, or written to disk.\n"+
-			"%s=%s\n\n",
-		name, "rbw get spindrift-"+toKebab(name), name, name, value,
-	)
+	return fmt.Sprintf(secretCmdHintFormat, name, toKebab(name)) + name + "=" + value + "\n\n"
 }
 
 // toKebab derives the "spindrift-<kebab-name>" vault key suffix from an env
