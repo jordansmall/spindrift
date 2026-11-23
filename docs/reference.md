@@ -3573,10 +3573,12 @@ call to the matching `.log`. The jira row is not on dogfood's
 
 ### Authoring a Connector
 
-A new tracker Connector starts from a generated repository, not a copy of
-`connectors/jira`. This section is the walk from empty directory to a checked
-build; [Connector subflake shape](#connector-subflake-shape) is the reference
-for what the pieces mean.
+A new tracker or Driver Connector starts from a generated repository, not a
+copy of `connectors/jira` or `connectors/opencode`. This section is the walk
+from empty directory to a checked build, for a tracker and then for a Driver
+([Authoring a Driver Connector](#authoring-a-driver-connector));
+[Connector subflake shape](#connector-subflake-shape) is the reference for what
+the pieces mean.
 
 **Generate.** In an empty directory:
 
@@ -3587,7 +3589,7 @@ nix run github:jordansmall/spindrift#new-connector -- tracker <name> [<dir>]
 `<dir>` defaults to the working directory. The command refuses a directory that
 is not empty, a `<name>` that does not match `^[a-z][a-z0-9]*$`, and a `<name>`
 that is a core backend row's name, a Nix keyword, or the placeholder
-`connectorname`; `tracker` is the only kind today. The output
+`connectorname`; `driver` is the other kind. The output
 is a standalone flake that pins core, with a stub reader that already passes
 the generic conformance contract against a scripted backend.
 
@@ -3630,6 +3632,55 @@ For maintainers: the template is
 `connector-scaffold` check pins its layout to `connectors/jira`, and CI's
 `connector` lane runs `nix run .#connector-dev -- templates/connector-tracker
 flake check`, which generates it under two names and checks each.
+
+#### Authoring a Driver Connector
+
+A Driver Connector is a Driver's host half: the wasm that decodes the CLI's
+output stream and shapes its result. Generate it the same way, with `driver` as
+the kind:
+
+```sh
+nix run github:jordansmall/spindrift#new-connector -- driver <name> [<dir>]
+```
+
+The refusals match the tracker's, except that the name may not be a core
+Driver row's (`lib/drivers/default.nix`) rather than a core backend's. The
+layout follows `connectors/opencode`.
+
+**Implement.** `main.go` registers a `driver.Strategy` with `driver.Register`:
+`NewDecoder` turns each output line into events, `ResultEvent` renders the
+final result, `SessionFlags` returns the CLI's session flags, and `Result`
+picks the answer text (`driver.LastMessage` by default). The stub decodes every
+line as text; decode the CLI's own stream instead. `row.nix` is the whole
+Driver row, since no core row names it: the CLI `package`, its `bin`, the
+`argvShape` and the `credentials` it needs. `module.nix` registers the row.
+
+**Check.** `nix flake check -L` runs `core.lib.connectorChecks`, whose
+`connector-<name>-conformance` runs the Driver Conformance kit over
+`testdata/corpus/<case>/`. A case holds a `pass.jsonl`, the CLI's recorded
+output with private content scrubbed, and six goldens: `classification`,
+`heartbeat`, `resolve-exit` and `usage` (JSON), `result` and `transcript`
+(text). Add a case by adding its directory with all six. The Connector cannot
+regenerate goldens (it refuses `UPDATE_GOLDENS`); a mismatch names the first
+differing line, so edit the golden by hand to the produced output once you
+have confirmed the change is intended.
+
+**Limitation.** The scaffold proves conformance, not runnability. A Driver
+Connector without the first-party mark is refused when a Box loads it, with
+`driverrows.ErrNotFirstParty`: `mkHarness` derives the mark only for the
+batteries flake's own Connectors and no row can set it. Third-party Driver
+Connectors wait for a later design that decodes somewhere empty ([ADR
+0073](adr/0073-backends-and-drivers-are-trust-no-one-wasm-connectors.md#amendment-issue-7019-first-party-marks-gate-only-the-box)).
+
+For maintainers: the template is
+[`templates/connector-driver/`](../templates/connector-driver/), with
+`connectorname` as its one placeholder token. The `connector-scaffold-driver`
+check pins its layout to `connectors/opencode`, and
+`connector-driver-template-conformance` and
+`connector-driver-template-golden-drift` check the template, under its
+placeholder name, in the gate. Only CI's `connector` lane checks generated
+output: `nix run .#connector-dev -- templates/connector-driver flake check`
+generates the scaffold under two names and checks each.
 
 ### Connector protocol
 
