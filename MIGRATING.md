@@ -285,7 +285,26 @@ What changed for a Jira Consumer:
   `JIRA_BASE_URL` to a base the row accepts (see [Running jira through its
   Connector](docs/reference.md#running-jira-through-its-connector)). Without
   the module, or with a base the Connector row rejects,
-  the run fails with `ISSUE_TRACKER=jira needs the jira Connector`.
+  the run fails with `ISSUE_TRACKER=jira needs the jira Connector`. Add an
+  input whose `core` follows your `spindrift` input (one core in the lock
+  graph) and import its module beside the batteries flake's:
+
+  ```nix
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    flake-parts.url = "github:hercules-ci/flake-parts";
+    spindrift.url = "github:jordansmall/spindrift";
+    jira = {
+      url = "github:jordansmall/spindrift?dir=connectors/jira";
+      inputs.core.follows = "spindrift";
+    };
+  };
+  # ...
+  imports = [
+    spindrift.flakeModules.default
+    inputs.jira.flakeModules.default
+  ];
+  ```
 - **Set `SPINDRIFT_JIRA_CONNECTOR_TOKEN` and `SPINDRIFT_JIRA_CONNECTOR_EMAIL`.**
   The Connector authorizes with them (Basic) on every jira run. A Server/Data
   Center site needs a username and password or token there, not a Bearer PAT.

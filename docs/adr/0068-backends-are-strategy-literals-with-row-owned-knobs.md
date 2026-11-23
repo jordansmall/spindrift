@@ -104,7 +104,11 @@ package, and its Nix row owns its knobs.
 8. **Quickstart reads the rows.** A row's optional `quickstart` block names
    the remote hosts that identify the backend and which axes it sets. A row
    without the block is hand-edit only, which is what jira and local are
-   today.
+   today. (Amended by issue #7416: local is offered, and the block now only
+   opts a row into remote-host detection; a row is offered when the wizard can
+   collect its credential. Amended by issue #7417: jira is offered as a
+   tracker, its Connector's flake input and module import coming from its
+   Consumer stanza.)
 
 ## Considered Options
 

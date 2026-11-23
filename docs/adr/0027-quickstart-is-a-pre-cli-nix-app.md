@@ -38,7 +38,8 @@ letting the Code Forge follow as github; `driver` is fixed at `claude` (the
 only one). The Jira and local Issue Tracker adapters, and the runtime
 `ISSUE_TRACKER` validation, stay available for an operator who hand-edits the
 generated flake — the wizard just never offers them. (Amended by issue #7416:
-it now offers local, and Jira is still to come.) Detected values
+it now offers local, and Jira is still to come. Amended by issue #7417: it
+now offers Jira as a tracker.) Detected values
 (runtime by `podman → docker → nerdctl(⇒ rancher) → bwrap` precedence, git
 identity from host `git config`, repoSlug from `git remote`) appear as inline
 pre-filled defaults. nerdctl is probed after docker since Rancher Desktop's
@@ -110,7 +111,8 @@ A `forgejo` choice sets both the Issue Tracker and the Code Forge to
 #7416: the forge is now its own prompt). The generated flake
 carries a Forgejo base URL only for a non-Codeberg instance, since Codeberg is
 the default. Unchanged: `driver` stays fixed at `claude`. (Amended by issue #7416: local is
-now offered, and Jira is still available by hand-editing the generated flake.)
+now offered, and Jira is still available by hand-editing the generated flake.
+Amended by issue #7417: Jira is offered as a tracker.)
 
 ## Amendment (issue #7416): the wizard picks the tracker and the forge separately, composed from Consumer stanzas
 
@@ -123,7 +125,8 @@ claims, each axis defaults to its first offered row, `github`.
 A row is offered on an axis when it is valid for that axis and the wizard can
 collect its credential, meaning the row reads no token or its Strategy has an
 `AcquireToken` hook. So `local` is offered on both axes, `git` as a forge only,
-and `jira` on neither until a later ticket gives it one. The `quickstart`
+and `jira` as a tracker only. (Amended by issue #7417: jira was offered on
+neither until then.) The `quickstart`
 block now only opts a row into remote-host detection. A `git` forge takes its
 `CODE_FORGE_REMOTE_URL` from the checkout's remote.
 
@@ -145,3 +148,16 @@ the settings block) and quickstart's output are both rendered from one
 row-owned source, the Consumer stanzas, so neither hand-copies the other's
 shape. The wizard still writes a minimal flake rather than patching the
 template.
+
+## Amendment (issue #7417): jira is offered as a tracker
+
+The wizard now offers `jira` as a tracker, never as a forge. Its `AcquireToken`
+hook prompts for the Connector API token, which lands in both `JIRA_TOKEN` and
+`SPINDRIFT_JIRA_CONNECTOR_TOKEN`; the Connector email stays blank.
+
+The batteries flake carries only the github and forgejo Connectors. A Consumer
+stanza whose backend it does not carry names a flake input and a module
+import, which the wizard splices into the generated `flake.nix`. The input
+points at the Connector's subflake with `core` following `spindrift`, so the
+lock graph holds one core. The Connector module carries a dedup `key`, so a
+second import of it dedups instead of failing.
