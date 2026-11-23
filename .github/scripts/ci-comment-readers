@@ -28,3 +28,5 @@ lib/structural-paths.nix
 nix/checks/equivalence.nix
 nix/dogfood-defaults.nix
 nix/fixtures.nix
+templates/connector-tracker/*.go
+templates/connector-tracker/*.nix

@@ -384,6 +384,7 @@ let
   # checks-docs-covers-docs-readers.
   commentTreeReaders = {
     "bats:.github/scripts" = "the classifier suite builds ci-go-tokens.go";
+    "bats:templates" = "new-connector.bats diffs and greps the generated template text";
     "box-access-default:." = "a consumer flake fixture's outPath";
     "baked-skills:cmd/launcher" = "spliced and built; its marker files are under promptassembly/";
     "connector-checks-parity:connectors" = "imports each Connector's flake.nix, never reads its text";
