@@ -76,9 +76,10 @@ let
     else
       { };
   # Connectors whose row asks for shadow mode (ADR 0073, issues #6797, #6810).
-  # A row with a `driver` is shadowed through mkHarness's `shadowDrivers`, one
-  # with a `backend` on its own backend row; a row with neither has nothing to
-  # shadow, so it is refused by name rather than ignored.
+  # A row with a `driver` is shadowed through mkHarness's `shadowDrivers`; a
+  # `backend` row refuses `shadow` in checkedConnectors (issue #7456), and a
+  # row with neither has nothing to shadow, so it is refused by name rather
+  # than ignored.
   shadowRows = lib.mapAttrs (
     name: r:
     if r.driver == null && r.backend == null then
@@ -143,11 +144,6 @@ let
       // lib.optionalAttrs (b.scheme != "bearer") { credentialScheme = b.scheme; }
       // lib.optionalAttrs (b.identity != null) { identityEnv = ownKnobEnv "identity" b.identity false; }
       // lib.optionalAttrs (b.base != null) { inherit baseEnv; }
-      // lib.optionalAttrs (shadowRows ? ${name}) {
-        shadow = true;
-        inherit (r) shadowEvery;
-      }
-      // lib.optionalAttrs r.primary { primary = true; }
   ) (lib.filterAttrs (_: r: r.backend != null) checkedConnectors);
   shadowConnectors = lib.attrNames (lib.filterAttrs (_: r: r.driver != null) shadowRows);
   # Driver rows asking for primary mode, already checked by checkedConnectors.
@@ -692,12 +688,10 @@ in
                     Pass log through the row's Driver `module`, recording any
                     divergence from the native decode. A `driver` row must
                     name a core Driver and carry a `module`; only the Harness
-                    running that Driver bakes the module. A `backend` row
-                    instead names a backend with a native read to sample
-                    beside; no shipped backend has one left (forgejo, github
-                    and jira are Connector-only), so a backend shadow row has
-                    nothing to compare and every read fails with `ErrNoRoute`
-                    or a named refusal. A row with neither throws. mkHarness
+                    running that Driver bakes the module. A Driver-only
+                    switch: a `backend` row refuses it at evaluation, since
+                    every backend is Connector-only with no native read to
+                    sample beside. A row with neither throws. mkHarness
                     throws on any other mismatch. Off by default, which
                     leaves the Consumer's outputs byte-identical.
                   '';
@@ -708,10 +702,9 @@ in
                   description = ''
                     Make this Connector authoritative over the native
                     implementation of the same name (issues #6998, #6999).
-                    On a `backend` row it would answer in place of the native
-                    backend, but every shipped backend (forgejo, github, jira)
-                    is Connector-only with no native backend to replace, so
-                    `primary` is refused on their rows. On a `driver`
+                    A Driver-only switch: a `backend` row refuses it at
+                    evaluation, since every backend is Connector-only with no
+                    native backend to replace. On a `driver`
                     row it is the Driver in place of the native Strategy, in
                     the Box during the Pass and on the host when it reads
                     Pass logs back; a Connector that fails to load fails the
@@ -728,11 +721,9 @@ in
                   type = types.ints.positive;
                   default = 10;
                   description = ''
-                    With `shadow` on a `backend` row, sample one read in this
-                    many per operation through the Connector (1 samples every
-                    read). The rate is the row's, not a knob: it is carried
-                    only onto a shadowed backend row and is ignored while
-                    `shadow` is off.
+                    Retired with backend shadowing (issue #7456): no Driver
+                    samples, so the rate has no effect, and a `backend` row
+                    refuses it at evaluation, like `shadow` and `primary`.
                   '';
                 };
               };

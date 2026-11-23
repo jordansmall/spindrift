@@ -624,65 +624,35 @@ in
       touch $out
     '';
 
-  # Issue #6810: shadow mode on a backend row. mkHarness carries `shadow` and
-  # `shadowEvery` into the document only when set, and refuses the shapes the Go
-  # `backendrows.validate` refuses, naming the backend.
+  # Issue #7456: a backend row carries no shadow or primary field. mkHarness
+  # ignores one a Consumer hands it, so the document never grows the retired
+  # switches.
   connector-backend-rows-shadow-fields =
     let
-      shadowed = row // {
+      switched = row // {
         shadow = true;
         shadowEvery = 3;
+        primary = true;
       };
-      refused =
-        r:
-        !(evaluates (withRows {
-          fixture = r;
-        }));
     in
     assert assertMsg (evaluates (withRows {
-      fixture = shadowed;
-    })) "control: a shadowed backend row must evaluate";
-    assert assertMsg (refused (row // { shadow = "yes"; })) "a non-bool shadow must fail evaluation";
-    assert assertMsg (refused (shadowed // { shadowEvery = 0; })) "shadowEvery 0 must fail evaluation";
-    assert assertMsg (refused (
-      shadowed // { shadowEvery = -1; }
-    )) "a negative shadowEvery must fail evaluation";
-    assert assertMsg (refused (
-      shadowed // { shadowEvery = "3"; }
-    )) "a non-int shadowEvery must fail evaluation";
-    assert assertMsg (refused (
-      row // { shadowEvery = 3; }
-    )) "shadowEvery without shadow must fail evaluation";
-    assert assertMsg (refused (
-      row
-      // {
-        shadow = false;
-        shadowEvery = 3;
-      }
-    )) "shadowEvery with shadow off must fail evaluation";
-    assert assertMsg (refused (
-      row // { shadow = true; }
-    )) "shadow without shadowEvery must fail evaluation";
+      fixture = switched;
+    })) "control: a row carrying stale switches must still evaluate";
     pkgs.runCommand "connector-backend-rows-shadow-fields" { nativeBuildInputs = [ pkgs.jq ]; } ''
-      jq -e '.backends[0] | .shadow == true and .shadowEvery == 3' ${
-        (withRows { fixture = shadowed; }).internals.runInputDocumentFile
+      jq -e '.backends[0] | has("shadow") or has("shadowEvery") or has("primary") | not' ${
+        (withRows { fixture = switched; }).internals.runInputDocumentFile
       }
-      jq -e '.backends[0] | has("shadow") or has("shadowEvery") | not' ${
+      jq -e '.backends[0] | has("shadow") or has("shadowEvery") or has("primary") | not' ${
         (withRows { fixture = row; }).internals.runInputDocumentFile
       }
       touch $out
     '';
 
-  # Issue #6810: `spindrift.connectors.<name>.shadow` on a backend row reaches
-  # the input document with the row's `shadowEvery` (default 10); off, the app
-  # is the unshadowed Consumer's; a row with neither a driver nor a backend has
-  # nothing to shadow and is refused; `shadowEvery` below 1 or non-int is
-  # refused by the option type.
+  # Issue #7456: `shadow` on a backend row, or on a row with neither a driver
+  # nor a backend, is refused at evaluation; the document carries no switch.
   connector-backend-rows-flake-module-shadow =
     let
       consumerWith = modules: fixtures.connectorConsumerVia ([ ../../lib/flakeModule.nix ] ++ modules);
-      # Backend-only: a row that also had a non-core `driver` would send
-      # `shadow` to shadowDrivers, which refuses it.
       probeModule = {
         spindrift.connectors.probe = {
           knobs.probeToken = {
@@ -700,62 +670,23 @@ in
           };
         };
       };
-      withFixture =
-        extra:
-        consumerWith [
-          probeModule
-          { spindrift.connectors.probe = extra; }
-        ];
       programOf = c: c.apps.${system}.default.program;
       builds = c: (builtins.tryEval (builtins.seq (programOf c) true)).success;
-      unshadowed = consumerWith [ probeModule ];
+      plain = consumerWith [ probeModule ];
     in
-    assert assertMsg (builds unshadowed) "control: the unshadowed fixture Consumer must evaluate";
+    assert assertMsg (builds plain) "control: the fixture Consumer must evaluate";
     assert assertMsg (
-      programOf (withFixture {
-        shadow = false;
-        shadowEvery = 3;
-      }) == programOf unshadowed
-    ) "shadow off must leave the app unchanged whatever shadowEvery says";
-    assert assertMsg (builds (withFixture {
-      shadow = true;
-    })) "shadow on a backend row must evaluate with the default rate";
-    assert assertMsg (
-      programOf (withFixture {
-        shadow = true;
-      }) != programOf unshadowed
-    ) "shadow on a backend row must reach the input document";
-    assert assertMsg (
-      !(builds (withFixture {
-        shadow = true;
-        shadowEvery = 0;
-      }))
-    ) "shadowEvery 0 must fail evaluation";
-    assert assertMsg (
-      !(builds (withFixture {
-        shadow = true;
-        shadowEvery = "3";
-      }))
-    ) "a non-int shadowEvery must fail evaluation";
+      !(builds (consumerWith [
+        probeModule
+        { spindrift.connectors.probe.shadow = true; }
+      ]))
+    ) "shadow on a backend row must fail evaluation";
     assert assertMsg (
       !(builds (consumerWith [ { spindrift.connectors.nothing.shadow = true; } ]))
     ) "a shadowed row with neither a driver nor a backend must fail evaluation";
     pkgs.runCommand "connector-backend-rows-flake-module-shadow" { nativeBuildInputs = [ pkgs.jq ]; } ''
-      ${fixtures.runInputDocOf (
-        programOf (withFixture {
-          shadow = true;
-        })
-      )}
-      jq -e '.backends[0] | .shadow == true and .shadowEvery == 10' "$doc"
-      ${fixtures.runInputDocOf (
-        programOf (withFixture {
-          shadow = true;
-          shadowEvery = 3;
-        })
-      )}
-      jq -e '.backends[0] | .shadow == true and .shadowEvery == 3' "$doc"
-      ${fixtures.runInputDocOf (programOf unshadowed)}
-      jq -e '.backends[0] | has("shadow") or has("shadowEvery") | not' "$doc"
+      ${fixtures.runInputDocOf (programOf plain)}
+      jq -e '.backends[0] | has("shadow") or has("shadowEvery") or has("primary") | not' "$doc"
       touch $out
     '';
 }

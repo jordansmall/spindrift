@@ -35,10 +35,8 @@ let
     driverRows.fixture = fixtureRow;
   };
   plain = mkHarness { };
-  # The dogfood's primary Connectors: backend rows carry `primary` themselves,
-  # Driver rows are named in mkHarness's `primaryDrivers`. Derived so no
-  # backend name is spelled in a test (ADR 0068, backend-name-guard).
-  backendPrimaries = fixtures.dogfoodBackendPrimaries;
+  # The dogfood's primary Connectors are Drivers, named in mkHarness's
+  # `primaryDrivers`; a backend row carries no `primary` (issue #7456).
   driverPrimaries = fixtures.dogfoodDriverPrimaries;
   claudeConnector = (import ../../connectors/claude).lib.connector { core = import ../../core; };
   githubConnector = (import ../../connectors/github).lib.connector { core = import ../../core; };
@@ -527,12 +525,7 @@ in
       ' "$doc"
       jq -e '[.drivers[] | select(.name == "claude")]
         | length == 1 and (.[0] | has("module") and (has("shadow") | not) and (has("primary") | not))' "$doc"
-      jq -e --argjson names '${builtins.toJSON backendPrimaries}' '
-        [.backends[] | select(.name as $n | $names | index($n))] as $rows
-        | ($rows | length) == ($names | length)
-          and all($rows[]; .primary == true and (has("shadow") | not) and (has("shadowEvery") | not))
-      ' "$doc"
-      jq -e 'all(.backends[]; has("shadow") | not)' "$doc"
+      jq -e 'all(.backends[]; has("shadow") or has("shadowEvery") or has("primary") | not)' "$doc"
       touch $out
     '';
 
