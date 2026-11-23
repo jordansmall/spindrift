@@ -26,11 +26,15 @@ let
     concatStringsSep
     elem
     filter
+    filterAttrs
     hasInfix
     hasPrefix
     hasSuffix
     head
+    mapAttrs'
     match
+    nameValuePair
+    optionals
     removePrefix
     sort
     subtractLists
@@ -45,6 +49,7 @@ let
     inputs.nixpkgs = nixpkgs;
   };
   registry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
+  inherit (import ../../lib/fragment-paths.nix) declaredBy;
 
   relFiles = root: map (f: removePrefix "${toString root}/" (toString f)) (listFilesRecursive root);
 
@@ -58,6 +63,28 @@ let
     ++ map (r: "${r}: in the template but not ${ref}'s skeleton") (subtractLists refFiles tmpl);
 
   sorted = xs: sort (a: b: a < b) xs;
+
+  # The reference's fragment files for the `shipped` keys the template omits;
+  # they are dropped from the skeleton the template is compared against.
+  omittedFragmentFiles =
+    omits: refShipped:
+    map (p: "fragments/${p}") (declaredBy (filterAttrs (k: _: elem k omits) refShipped));
+  fragmentFilesOf = rs: map (removePrefix "fragments/") (filter (hasPrefix "fragments/") rs);
+  fragmentFileProblems =
+    declared: files:
+    map (r: "fragments/${r}: declared in fragments.nix shipped but absent") (
+      subtractLists files declared
+    )
+    ++ map (r: "fragments/${r}: present but not declared in fragments.nix shipped") (
+      subtractLists declared files
+    );
+
+  # The template's `shipped` (`toRef` maps its token) must equal the reference's
+  # minus the keys in `omits`, which must each be a key the reference ships.
+  shippedMatches =
+    toRef: omits: ref: tmpl:
+    all (k: ref ? ${k}) omits
+    && mapAttrs' (k: v: nameValuePair (toRef k) (map toRef v)) tmpl == removeAttrs ref omits;
 
   # `got` must hold every name in `required` and none outside `allowed`.
   namesProblems =
@@ -77,8 +104,8 @@ let
   # What a template of one kind must keep from its reference `ref`. `tmplFiles`
   # narrows the template's file set before the compare (a driver template
   # carries a starter corpus the reference's own testdata outgrows);
-  # `refFiles` narrows the reference's skeleton, given the template's mapped
-  # file set. `mainCalls` are SDK calls main.go must make beyond
+  # `omitsFragments` names the reference `shipped` fragments the template
+  # deliberately leaves out. `mainCalls` are SDK calls main.go must make beyond
   # `<sdkPackage>.Register(`; `extra` adds the kind's own pins, given the
   # trees and `outputs`.
   scaffold =
@@ -86,7 +113,7 @@ let
       tmplDir,
       ref,
       tmplFiles ? (fs: fs),
-      refFiles ? (_: fs: fs),
+      omitsFragments ? [ ],
       sdkPackage,
       mainCalls ? [ ],
       extra,
@@ -102,7 +129,13 @@ let
       sameArgs = what: f: sameNames what (argNames (f refDir)) (argNames (f tmplDir));
 
       tmplSet = sorted (map toRef (tmplFiles (relFiles tmplDir)));
-      fileSet = fileSetProblems ref tmplSet (sorted (refFiles tmplSet (skeletonOf (relFiles refDir))));
+      # Guarded: a Driver reference carries no fragments.nix.
+      omittedFiles = optionals (omitsFragments != [ ]) (
+        omittedFragmentFiles omitsFragments (load refDir "fragments.nix").shipped
+      );
+      fileSet = fileSetProblems ref tmplSet (
+        sorted (subtractLists omittedFiles (skeletonOf (relFiles refDir)))
+      );
 
       flakes = forBoth (d: load d "flake.nix");
       entries = forBoth (d: ((load d "default.nix").lib.connector { inherit core; }));
@@ -177,6 +210,8 @@ let
             tmplDir
             refDir
             toRef
+            tmplSet
+            omitsFragments
             ;
         };
     in
@@ -197,8 +232,11 @@ let
       tmplDir,
       refDir,
       toRef,
+      tmplSet,
+      omitsFragments,
     }:
     let
+      frag = d: load d "fragments.nix";
       rowOf = dir: name: ((load dir "module.nix") { inherit core; } { }).spindrift.connectors.${name};
       rows = {
         tmpl = rowOf tmplDir token;
@@ -219,21 +257,13 @@ let
     ++ namesProblems "module.nix knob fields" [ "env" "group" "doc" ] (allKnobFields rows.ref) (
       allKnobFields rows.tmpl
     )
-    ++ sameNames "fragments.nix attrs" (attrNames (load refDir "fragments.nix")) (
-      attrNames (load tmplDir "fragments.nix")
-    )
-    ++ (
-      let
-        frag = d: load d "fragments.nix";
-        # A template may ship fewer fragments than its reference (a forge-only
-        # scaffold omits the tracker-axis ones), never more or different ones.
-        shippedOk = all (
-          k: (frag refDir).shipped.${toRef k} or null == map toRef (frag tmplDir).shipped.${k}
-        ) (attrNames (frag tmplDir).shipped);
-      in
-      expect (
-        toRef (frag tmplDir).name == (frag refDir).name && shippedOk
-      ) "fragments.nix: name differs, or shipped is not a subset of ${ref}'s"
+    ++ sameNames "fragments.nix attrs" (attrNames (frag refDir)) (attrNames (frag tmplDir))
+    ++ expect (
+      toRef (frag tmplDir).name == (frag refDir).name
+      && shippedMatches toRef omitsFragments (frag refDir).shipped (frag tmplDir).shipped
+    ) "fragments.nix: name differs, or shipped is not ${ref}'s minus omitsFragments"
+    ++ fragmentFileProblems (sorted (map toRef (declaredBy (frag tmplDir).shipped))) (
+      sorted (fragmentFilesOf tmplSet)
     )
     ++ namesProblems "routes.nix route attrs" [ "method" "host" "path" ] (routeAttrs refDir) (
       routeAttrs tmplDir
@@ -273,9 +303,9 @@ let
   forgeScaffold = scaffold {
     tmplDir = ../../templates/connector-forge;
     ref = "forgejo";
-    # Fragment files the template omits are fine; backendExtra's `shipped`
-    # check keeps the declaration consistent with them.
-    refFiles = tmpl: filter (r: !hasPrefix "fragments/" r || elem r tmpl);
+    # forgejo's filer-dedup.md is tracker-axis; the forge scaffold contributes
+    # to the forge axis only.
+    omitsFragments = [ "filer-dedup.md" ];
     sdkPackage = "forge";
     mainCalls = [
       "forge.RegisterBranches("
@@ -312,6 +342,59 @@ let
     corpusCaseFound = hasCorpusCase [ "testdata/corpus/basic/pass.jsonl" ];
     corpusCaseNeedsPass = !(hasCorpusCase [ "testdata/corpus/basic/result.golden.txt" ]);
     corpusCaseNeedsACaseDir = !(hasCorpusCase [ "testdata/pass.jsonl" ]);
+    undeclaredFragmentFile = fragmentFileProblems [ "t/a.md" ] [ "t/a.md" "t/b.md" ] != [ ];
+    declaredFragmentFileAbsent = fragmentFileProblems [ "t/a.md" "t/b.md" ] [ "t/a.md" ] != [ ];
+    declaredFragmentFilesPresent = fragmentFileProblems [ "t/a.md" ] [ "t/a.md" ] == [ ];
+    fragmentFilesOfKeepsOnlyFragments =
+      fragmentFilesOf [
+        "main.go"
+        "fragments/t/a.md"
+      ] == [ "t/a.md" ];
+    omittedFragmentFilesDropsOnlyThose =
+      omittedFragmentFiles [ "b.md" ] {
+        "a.md" = [ "t" ];
+        "b.md" = [
+          "t"
+          "u"
+        ];
+      } == [
+        "fragments/t/b.md"
+        "fragments/u/b.md"
+      ];
+    noOmissionDropsNothing = omittedFragmentFiles [ ] { "a.md" = [ "t" ]; } == [ ];
+    shippedEqualPasses = shippedMatches (x: x) [ ] { "a.md" = [ "t" ]; } { "a.md" = [ "t" ]; };
+    shippedOmissionPasses = shippedMatches (x: x) [ "b.md" ] {
+      "a.md" = [ "t" ];
+      "b.md" = [ "t" ];
+    } { "a.md" = [ "t" ]; };
+    shippedTemplateMissingKey =
+      !shippedMatches (x: x) [ ] {
+        "a.md" = [ "t" ];
+        "b.md" = [ "t" ];
+      } { "a.md" = [ "t" ]; };
+    shippedKeyRefLacks = !shippedMatches (x: x) [ ] { "a.md" = [ "t" ]; } { "b.md" = [ "t" ]; };
+    shippedTemplateKeepsOmittedKey =
+      !shippedMatches (x: x) [ "b.md" ]
+        {
+          "a.md" = [ "t" ];
+          "b.md" = [ "t" ];
+        }
+        {
+          "a.md" = [ "t" ];
+          "b.md" = [ "t" ];
+        };
+    shippedFolderListDiffers =
+      !shippedMatches (x: x) [ ] {
+        "a.md" = [
+          "t"
+          "u"
+        ];
+      } { "a.md" = [ "t" ]; };
+    shippedOmissionRefLacks =
+      !shippedMatches (x: x) [ "nope.md" ] { "a.md" = [ "t" ]; } { "a.md" = [ "t" ]; };
+    shippedMapsToken = shippedMatches (builtins.replaceStrings [ "tok" ] [ "ref" ]) [ ] {
+      "ref.md" = [ "ref" ];
+    } { "tok.md" = [ "tok" ]; };
   };
   failedControls = filter (n: !controls.${n}) (attrNames controls);
 
