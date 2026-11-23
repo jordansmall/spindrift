@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"spindrift.dev/launcher/internal/connectorcall"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/retry"
@@ -103,7 +104,7 @@ type (
 
 // guestCall is the Connector.Call signature, a seam so the adapter's policy
 // runs against a stub guest.
-type guestCall func(ctx context.Context, method string, params, result any) error
+type guestCall = connectorcall.Call
 
 // reads serves the PR reads from a Connector and leaves everything else to the
 // embedded native adapter. It hides the native adapter's optional

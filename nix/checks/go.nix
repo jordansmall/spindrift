@@ -289,6 +289,7 @@ let
       "agentpaths"
       "backend"
       "backendkit"
+      "connectorcall"
       "connectorforge"
       "connectorhost"
       "connectorsandbox"

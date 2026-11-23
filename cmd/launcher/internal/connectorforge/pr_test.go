@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/connectorcall"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/retry"
@@ -233,13 +234,13 @@ func TestMergeReturnsARefusedCallAsIsWithoutRereadingThePR(t *testing.T) {
 func TestClassifyDoesNotRetryNonIdempotentWrites(t *testing.T) {
 	clock := retry.Clock{Now: time.Now, Sleep: func(time.Duration) {}}
 	for method, wantCalls := range map[string]int{
-		"forge.merge": 1, "forge.openPR": 1, "forge.comment": 1, "forge.pr": callAttempts, "forge.setDraft": callAttempts,
+		"forge.merge": 1, "forge.openPR": 1, "forge.comment": 1, "forge.pr": connectorcall.Attempts, "forge.setDraft": connectorcall.Attempts,
 	} {
 		calls := 0
-		call := classify(func(context.Context, string, any, any) error {
+		call := connectorcall.Classify(func(context.Context, string, any, any) error {
 			calls++
 			return classed(connectorhost.Transient)
-		}, clock)
+		}, clock, CallPolicy())
 		err := call(context.Background(), method, nil, nil)
 		if connectorhost.ErrorClass(err) != connectorhost.Transient {
 			t.Errorf("%s: err = %v, want the transient error", method, err)
@@ -641,4 +642,8 @@ func (auditStub) DeclaredHosts() []string { return nil }
 func (s auditStub) AuditRefusal(method string, refusal error) error {
 	s.audit.WriteString("refused " + method + ": " + refusal.Error() + "\n")
 	return refusal
+}
+
+func classed(c connectorhost.Class) error {
+	return &connectorhost.CallError{Class: c, Message: "x"}
 }

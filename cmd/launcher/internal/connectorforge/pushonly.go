@@ -8,8 +8,8 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
-	"time"
 
+	"spindrift.dev/launcher/internal/connectorcall"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/bundlerelay"
@@ -47,13 +47,6 @@ var ErrRemoteCredentials = errors.New("connector remote URL carries credentials"
 // so this is the check that credential rides on.
 var ErrRemoteHost = errors.New("connector remote URL is not https on a declared host")
 
-// The retry schedule for every Connector call core makes: three attempts, two
-// seconds longer between each.
-const (
-	callAttempts    = 3
-	callBackoffUnit = 2 * time.Second
-)
-
 // Git is the core-side git plumbing the composed forge runs Merge and Rebase
 // in: the Connector never touches git or the credential.
 type Git struct {
@@ -76,48 +69,29 @@ type Git struct {
 	Note func(method string, err error)
 }
 
-// notRetried are the methods whose request is not idempotent: a retry after a
-// transient failure could repeat a merge, open a second PR or post a second
-// comment when the first attempt landed and only its response was lost. Their
-// caller owns the retry decision.
-var notRetried = []string{"forge.merge", "forge.openPR", "forge.comment"}
-
-// classedCall is c.Call made to read as core does: a transient failure is
-// retried, then the Connector's error class is mapped onto core's sentinels (a
-// rate limit matches forge.ErrRateLimit and an auth failure forge.ErrAuthFailure).
-// The class stays readable through connectorhost.ErrorClass.
-func classedCall(c *connectorhost.Connector, clock retry.Clock) guestCall {
-	return classify(c.Call, clock)
-}
-
-// classify is classedCall over any raw call, a seam for tests.
-func classify(raw guestCall, clock retry.Clock) guestCall {
-	clock = realIfZero(clock)
-	b := retry.LinearBackoff{Unit: callBackoffUnit, Clock: clock}
-	return func(ctx context.Context, method string, params, result any) error {
-		attempt := 0
-		attempts := callAttempts
-		if slices.Contains(notRetried, method) {
-			attempts = 1
-		}
-		err := retryTransient(attempts, b, func() error {
-			attempt++
-			err := raw(ctx, method, params, result)
+// CallPolicy is the forge axis's retry policy.
+func CallPolicy() connectorcall.Policy {
+	return connectorcall.Policy{
+		// Not idempotent: a retry after a transient failure could repeat a
+		// merge, open a second PR or post a second comment when the first
+		// attempt landed and only its response was lost. Their caller owns
+		// the retry decision.
+		NotRetried: []string{"forge.merge", "forge.openPR", "forge.comment"},
+		OnRetryFailure: func(method string, err error) error {
 			// A retried DELETE may find its own earlier attempt already landed,
 			// its 5xx lost on the way back: that not-found is success.
-			if attempt > 1 && method == "forge.deleteBranch" && connectorhost.ErrorClass(err) == connectorhost.NotFound {
+			if method == "forge.deleteBranch" && connectorhost.ErrorClass(err) == connectorhost.NotFound {
 				return nil
 			}
 			return err
-		})
-		switch connectorhost.ErrorClass(err) {
-		case connectorhost.RateLimited:
-			return &forge.RateLimitError{Err: err}
-		case connectorhost.Auth:
-			return fmt.Errorf("%w: %w", forge.ErrAuthFailure, err)
-		}
-		return err
+		},
 	}
+}
+
+// classedCall is c.Call through the shared retry and error-class path under
+// the forge's CallPolicy.
+func classedCall(c *connectorhost.Connector, clock retry.Clock) guestCall {
+	return connectorcall.Classify(c.Call, clock, CallPolicy())
 }
 
 // pushOnly is a Code Forge with no PR concept: the Connector answers the forge
@@ -262,20 +236,6 @@ func (p *pushOnly) DeleteBranch(branch, base string) error {
 	return p.call(context.Background(), "forge.deleteBranch", branchParams{p.target, branch}, nil)
 }
 
-// retryTransient calls fn up to attempts times, sleeping b.Do(n) after the nth
-// failure, and retries only a Transient Connector error. Any other error
-// returns at once: RateLimited belongs to core's rate-limit hold, and a short
-// loop there would only burn its budget. It returns the last error.
-func retryTransient(attempts int, b retry.LinearBackoff, fn func() error) error {
-	var err error
-	for n := 1; ; n++ {
-		if err = fn(); err == nil || connectorhost.ErrorClass(err) != connectorhost.Transient || n >= attempts {
-			return err
-		}
-		b.Do(n)
-	}
-}
-
 // cloneInto is a `git clone` step in core's git over the validated clone URL;
 // the credential rides the environment, never the URL, and the error carries
 // only redacted output.
@@ -309,16 +269,8 @@ func (p *pushOnly) pushBranch(srcDir, localRef, branch, base string) error {
 
 // newPushOnly builds a pushOnly whose clock, a zero one included, sleeps.
 func newPushOnly(c *connectorhost.Connector, target Target, clock retry.Clock) *pushOnly {
-	clock = realIfZero(clock)
+	clock = connectorcall.RealIfZero(clock)
 	return &pushOnly{conn: c, call: classedCall(c, clock), clock: clock, target: target}
-}
-
-// realIfZero is clock, or retry.RealClock() when it carries no Sleep.
-func realIfZero(clock retry.Clock) retry.Clock {
-	if clock.Sleep == nil {
-		return retry.RealClock()
-	}
-	return clock
 }
 
 // hostPolicy is the part of *connectorhost.Connector core's own refusals read:
