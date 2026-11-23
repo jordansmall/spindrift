@@ -6312,6 +6312,8 @@ Per [ADR 0013](adr/0013-issue-tracker-and-code-forge-are-independent-seams.md),
 the Issue Tracker (where issues live) and the Code Forge (where code and CI
 live) are independent axes. `ISSUE_TRACKER` selects the tracker and
 `CODE_FORGE` the forge, so pairings like Jira issues with GitHub PRs work.
+To run several instances against one tracker scope, one per Target repo,
+see [Routed deployments](#routed-deployments).
 
 The [Quickstart wizard](../README.md#quick-start) provisions a backend whose
 row declares a `quickstart` block: `github`, or `forgejo` when the repo's
@@ -6472,11 +6474,9 @@ such block and are experimental, so you select them by editing
   unreadable statuses endpoint reports degraded instead, and an empty mapping
   makes no call.
 
-  Under `ISSUE_ROUTE`, a `complete` status in the Done category makes a
-  green PR still awaiting review close the issue and release cross-route
-  dependents before it merges; the routed Daemon warns about it at startup.
-  Map `complete` to an In Review-style status and let Jira's GitHub
-  integration plus Automation close the issue on merge.
+  Several instances can share one Jira project through `ISSUE_ROUTE`;
+  see [Routed deployments](#routed-deployments), which also covers why
+  `complete` should map to a status outside the Done category.
 
   <a id="jira-lifecycle-status"></a>With `JIRA_LIFECYCLE=status` the
   mapped status is the whole work state, for a board that wants no
@@ -6691,6 +6691,58 @@ skip. Setting `SPINDRIFT_PI_CAPTURE_DIR=<dir>` makes each run write pi's raw
 JSON event stream to `<dir>/<TestName>.jsonl` (subtest slashes become `_`; a
 later run in the same test is `<TestName>.<n>.jsonl`),
 which is how Pass logs are captured from the locked version.
+
+#### Routed deployments
+
+A Jira team with N repos runs N spindrift instances, one per repo, each
+with its own `issues.route` (`ISSUE_ROUTE`) and all against one Jira
+project ([ADR
+0075](adr/0075-one-tracker-scope-feeds-many-target-repos-through-an-issue-route.md)).
+The [`ISSUE_ROUTE`](#runtime-configuration) row has the exact semantics;
+this section is the setup checklist.
+
+- **Route kinds.** Every first-party tracker declares `label`, and Jira
+  adds `component`. Selectors in one route combine with AND: a ticket must
+  match every pair.
+- **Disjoint routes.** No ticket may match two instances' routes. The
+  Jira claim is read-then-write, not atomic, so overlapping routes can
+  double-claim a ticket.
+- **Every ticket needs a routing value.** A ticket that matches no route
+  sits unclaimed, and nothing reports it. Check each instance's startup
+  log line, `daemon: <kind>: ISSUE_ROUTE "<route>" matches <n> ready
+  issue(s)`; it prints zero too, so a `0` for a queue you expected to
+  hold work means the route value is wrong or unused.
+- **Startup probe.** Before the runner starts, a routed Daemon runs each
+  queue's routed query once. A tracker rejection is fatal: the Daemon
+  halts as `config-invalid` with `<kind>: ISSUE_ROUTE "<route>":
+  tracker rejected the ready query: <error>` (a resumed self-update
+  rolls back instead). An empty route skips the probe, and only queues
+  counted by a tracker probe run it; a queue with no Demand source is
+  not probed, gets the Daemon's warning saying so, and is scheduled from
+  child exits.
+- **Status mapping.** Map `complete` in `JIRA_STATUS_MAPPING` to an In
+  Review-style status, and let Jira's GitHub integration plus Automation
+  close the ticket on merge. The agent branch is `BRANCH_PREFIX` plus
+  the issue key (default `agent/issue-ENG-123`), so Jira's GitHub
+  integration links the PR with no extra setup. If `complete` maps to a
+  status in the Done category, the Daemon warns at startup (`the
+  complete status is in the Done category`) and does not halt: a green PR
+  still awaiting review then closes the ticket and releases cross-route
+  dependents before it merges. A tracker that cannot report status
+  categories skips the check silently, and a failed read logs `could not
+  check the complete status's category` instead, so no warning does not
+  by itself prove the mapping is outside Done.
+- **Cross-route blockers.** A blocker is read by key, unrouted, and
+  satisfied only when its issue closes, not when the other instance
+  moves it to `complete`. A ticket blocked on another route's ticket
+  waits for that ticket to close, which is why `complete` must not close
+  the ticket early.
+- **Cross-repo work.** The routed Box is told its Target repo
+  (`REPO_SLUG`). A ticket whose spec needs changes in another repo halts
+  the way the pre-implement gate does, possibly after scouting, as
+  `agent-ambiguous-spec` (the mapped `ambiguous` status under
+  `JIRA_LIFECYCLE=status`), asking a human to split it into per-repo
+  routed tickets linked as blockers.
 
 #### Merge guard
 
