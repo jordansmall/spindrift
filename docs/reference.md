@@ -2385,13 +2385,18 @@ mean at runtime is issue #6751. The worked example is the fixture Connector in
   tests, and the launcher's Driver or backend conformance test against its
   wasm (and, for a backend, its Route table), as `connector-<name>-go-fmt`,
   `-go-vet`, `-go-test` and `-conformance`. They live only in the subflake:
-  core's root `checks` carry none, and the root's `drivers-<name>-go-test` and
-  `backends-<name>-go-test` skip their Connector conformance tests. `nix run
-  .#connector-dev -- <connector> flake check` runs them, CI's `connector` lane
-  runs it per touched Connector or Connector core package
-  `cmd/launcher/internal/{forge,driver}/<name>/` (every first-party Connector
-  when a contract path changes), and the `connector-checks-parity` check fails
-  on a Connector without them.
+  core's root `checks` carry none (bar the test-only `echo` fixture's), and
+  the root's `drivers-<name>-go-test` and `backends-<name>-go-test` skip their
+  Connector conformance tests. `nix run .#connector-dev -- <connector> flake
+  check` runs them, CI's `connector` lane runs it per touched Connector or
+  Connector core package `cmd/launcher/internal/{forge,driver}/<name>/` (every
+  first-party Connector when a contract path changes), and the
+  `connector-checks-parity` check fails on a Connector without them. They
+  build the Connector against core's SDK, repointing its go.mod's
+  `spindrift.dev/sdk` replace there. A Driver Connector named after no core
+  Driver gets Driver conformance over its own `testdata/corpus` (one
+  `<case>/pass.jsonl` plus goldens per case); a Driver row without the
+  first-party mark is still refused at Box run time (ADR 0073).
 - **Iterating.** Build or check a Connector against the local core with
   `nix run .#connector-dev -- <connector> <nix-args...>`. `<connector>` is a
   path if it contains `/` or is `.` or `..`; any other word is a bare name
