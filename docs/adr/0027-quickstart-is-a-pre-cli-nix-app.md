@@ -31,12 +31,14 @@ interactive-only: a non-TTY exits with a "write the files directly for
 scripted setup" message.
 
 The wizard is GitHub-only (issue #1559) (Amended by issue #5044: it now picks
-`github` or `forgejo` from the git remote; see the amendment below): it never
-prompts for the Issue Tracker, always writing `issueTracker = "github"` and
+`github` or `forgejo` from the git remote; see the amendment below; amended
+again by issue #7416, which prompts for the tracker and the forge separately):
+it never prompts for the Issue Tracker, always writing `issueTracker = "github"` and
 letting the Code Forge follow as github; `driver` is fixed at `claude` (the
 only one). The Jira and local Issue Tracker adapters, and the runtime
 `ISSUE_TRACKER` validation, stay available for an operator who hand-edits the
-generated flake — the wizard just never offers them. Detected values
+generated flake — the wizard just never offers them. (Amended by issue #7416:
+it now offers local, and Jira is still to come.) Detected values
 (runtime by `podman → docker → nerdctl(⇒ rancher) → bwrap` precedence, git
 identity from host `git config`, repoSlug from `git remote`) appear as inline
 pre-filled defaults. nerdctl is probed after docker since Rancher Desktop's
@@ -59,6 +61,8 @@ remaining step.
   a minimal flake carrying only the user's answers, with a doc link for the
   rest, rather than the template's fully-commented reference block — cleaner
   output, and no second flake-authoring codepath bound to the template's shape.
+  (Amended by issue #7416: that concern is now met differently; see the
+  amendment below.)
 - **Bash `writeShellApplication`.** Fits the harness's shell tooling, but would
   reimplement the forge probe, label creation, and `X-OAuth-Scopes` parsing that
   already exist in Go, with weaker tests. Rejected for the Go path's direct
@@ -94,14 +98,50 @@ remaining step.
 The Forgejo on-ramp (issue #1966), part of [ADR
 0038](0038-the-forgejo-backend-decision-set.md)'s decision set, ended
 "GitHub-only". The wizard now picks the backend from the git remote:
-`github` for a github.com remote or no remote, with no prompt; `forgejo`,
+`github` for a github.com remote or no remote, with no prompt (Amended by
+issue #7416: the wizard now always asks); `forgejo`,
 auto-detected and announced, for a codeberg.org remote; and for any other host
-a `Backend` prompt over the quickstart-eligible backends in the shared backend
+a `Backend` prompt (Amended by issue #7416: now separate tracker and forge prompts) over the quickstart-eligible backends in the shared backend
 registry (the rows with a `quickstart` block, today `github` and `forgejo`),
 defaulting to `github`. The answer is written as `issues.tracker`.
 
 A `forgejo` choice sets both the Issue Tracker and the Code Forge to
-`forgejo`, so the Code Forge still follows the tracker. The generated flake
+`forgejo`, so the Code Forge still follows the tracker (Amended by issue
+#7416: the forge is now its own prompt). The generated flake
 carries a Forgejo base URL only for a non-Codeberg instance, since Codeberg is
-the default. Unchanged: Jira and local are never offered (still available by
-hand-editing the generated flake), and `driver` stays fixed at `claude`.
+the default. Unchanged: `driver` stays fixed at `claude`. (Amended by issue #7416: local is
+now offered, and Jira is still available by hand-editing the generated flake.)
+
+## Amendment (issue #7416): the wizard picks the tracker and the forge separately, composed from Consumer stanzas
+
+The wizard now asks for the Issue Tracker and the Code Forge as two prompts,
+since the two are independent axes. A remote whose host a backend row's
+`quickstart` block lists (github.com, codeberg.org) pre-selects both and is
+announced, and the operator can override either. With no remote, or one no row
+claims, each axis defaults to its first offered row, `github`.
+
+A row is offered on an axis when it is valid for that axis and the wizard can
+collect its credential, meaning the row reads no token or its Strategy has an
+`AcquireToken` hook. So `local` is offered on both axes, `git` as a forge only,
+and `jira` on neither until a later ticket gives it one. The `quickstart`
+block now only opts a row into remote-host detection. A `git` forge takes its
+`CODE_FORGE_REMOTE_URL` from the checkout's remote.
+
+The generated `flake.nix` and `harness.env` are composed from the chosen
+tracker's and forge's [Consumer stanza](../../CONTEXT.md) (`consumerStanza`
+on the row), through a generated table under `cmd/launcher/quickstart/`.
+A row chosen only as the tracker leaves out its `forge.*` settings.
+
+The checkout's remote belongs to the forge. So a tracker takes knobs from it
+only when the tracker is the forge's backend or is the row that claimed the
+remote's host. Any other tracker that derives knobs from a remote, such as a
+forgejo tracker beside a github forge, gets a prompt for a repo URL on its
+own instance. A blank answer leaves it on the default instance.
+
+That also settles the rejected "Regenerate/patch the bundled template in
+place" option. Its objection was a second flake-authoring codepath bound to
+the template's shape. Now the template's composed pieces (the env example and
+the settings block) and quickstart's output are both rendered from one
+row-owned source, the Consumer stanzas, so neither hand-copies the other's
+shape. The wizard still writes a minimal flake rather than patching the
+template.

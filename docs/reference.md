@@ -6320,11 +6320,12 @@ live) are independent axes. `ISSUE_TRACKER` selects the tracker and
 To run several instances against one tracker scope, one per Target repo,
 see [Routed deployments](#routed-deployments).
 
-The [Quickstart wizard](../README.md#quick-start) provisions a backend whose
-row declares a `quickstart` block: `github`, or `forgejo` when the repo's
-remote is on a host that row lists (codeberg.org). For any other
-host, it asks which of those backends to use. `local` and `jira` have no
-such block and are experimental, so you select them by editing
+The [Quickstart wizard](../README.md#quick-start) asks for the issue tracker
+and the code forge separately. A remote on a host a row's `quickstart` block
+lists (github.com, codeberg.org) pre-selects both and you can override either;
+otherwise each defaults to `github`. It offers a row on an axis when it can
+collect that row's credential: `github`, `forgejo` and `local` on both axes,
+`git` as a forge only. `jira` is not offered yet, so select it by editing
 `issues.tracker` in the generated `flake.nix`.
 
 - **`github`** (default) — the label lifecycle described above.
