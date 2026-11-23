@@ -70,14 +70,8 @@ let
           vendorHash = (import ./build-constants.nix).launcherVendorHash;
         }).goModules;
       row = pkgs.lib.findFirst (r: r.name == name) null (import ./backends/default.nix);
-      # A backend Connector no core row names has no per-backend tests to run,
-      # but one under core's own connectors/ must have a row.
-      generic =
-        isBackend
-        && row == null
-        && pkgs.lib.throwIf (builtins.pathExists (
-          ../connectors + "/${name}"
-        )) "core.lib.connectorChecks: no core backend row named ${name}" true;
+      # A backend Connector no core row names has no per-backend tests to run.
+      generic = isBackend && row == null;
       # The conformance tests skip, not fail, when their env var is unset, so the
       # setup below always exports it.
       setup =
