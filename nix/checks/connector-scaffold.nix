@@ -1,13 +1,14 @@
-# The Connector scaffolds (templates/connector-tracker, templates/connector-driver)
-# must keep the layout of a first-party Connector of their kind (connectors/jira,
-# connectors/opencode): the same skeleton file set and, per file, the same
-# shape, so `nix run .#new-connector` hands out what a first-party Connector
-# looks like. A template is a valid Connector named `connectorname`; mapping
-# that token to the reference's name lines the two trees up. Compared at
-# evaluation, with attr names only (no IFD, nothing built), so the reference
-# gaining a skeleton file or a module attr fails here until the scaffold
-# follows. Also refuses the word "example" anywhere in a template: a generated
-# Connector carries no residue.
+# The Connector scaffolds (templates/connector-tracker, templates/connector-driver,
+# templates/connector-forge) must keep the layout of a first-party Connector of
+# their kind (connectors/jira, connectors/opencode, connectors/forgejo): the
+# same skeleton file set and, per file, the same shape, so `nix run
+# .#new-connector` hands out what a first-party Connector looks like. A
+# template is a valid Connector named `connectorname`; mapping that token to
+# the reference's name lines the two trees up. Compared at evaluation, with
+# attr names only (no IFD, nothing built), so the reference gaining a skeleton
+# file or a module attr fails here until the scaffold follows. Also refuses the
+# word "example" anywhere in a template: a generated Connector carries no
+# residue.
 {
   pkgs,
   nixpkgs,
@@ -16,12 +17,14 @@
 }:
 let
   inherit (pkgs.lib)
+    all
     any
     assertMsg
     attrNames
     attrValues
     concatMap
     concatStringsSep
+    elem
     filter
     hasInfix
     hasPrefix
@@ -73,14 +76,19 @@ let
 
   # What a template of one kind must keep from its reference `ref`. `tmplFiles`
   # narrows the template's file set before the compare (a driver template
-  # carries a starter corpus the reference's own testdata outgrows); `extra`
-  # adds the kind's own pins, given the trees and `outputs`.
+  # carries a starter corpus the reference's own testdata outgrows);
+  # `refFiles` narrows the reference's skeleton, given the template's mapped
+  # file set. `mainCalls` are SDK calls main.go must make beyond
+  # `<sdkPackage>.Register(`; `extra` adds the kind's own pins, given the
+  # trees and `outputs`.
   scaffold =
     {
       tmplDir,
       ref,
       tmplFiles ? (fs: fs),
+      refFiles ? (_: fs: fs),
       sdkPackage,
+      mainCalls ? [ ],
       extra,
     }:
     let
@@ -93,9 +101,8 @@ let
       # The reference's and the template's `f` must take the same arguments.
       sameArgs = what: f: sameNames what (argNames (f refDir)) (argNames (f tmplDir));
 
-      fileSet = fileSetProblems ref (sorted (map toRef (tmplFiles (relFiles tmplDir)))) (
-        sorted (skeletonOf (relFiles refDir))
-      );
+      tmplSet = sorted (map toRef (tmplFiles (relFiles tmplDir)));
+      fileSet = fileSetProblems ref tmplSet (sorted (refFiles tmplSet (skeletonOf (relFiles refDir))));
 
       flakes = forBoth (d: load d "flake.nix");
       entries = forBoth (d: ((load d "default.nix").lib.connector { inherit core; }));
@@ -149,12 +156,15 @@ let
                   }
                 ]
             )
-            [
-              "package main\n"
-              "\"spindrift.dev/sdk/${sdkPackage}\""
-              "${sdkPackage}.Register("
-              "\nfunc main() {}\n"
-            ]
+            (
+              [
+                "package main\n"
+                "\"spindrift.dev/sdk/${sdkPackage}\""
+                "${sdkPackage}.Register("
+                "\nfunc main() {}\n"
+              ]
+              ++ mainCalls
+            )
         ++ (
           let
             heading = d: head (pkgs.lib.splitString "\n" (builtins.readFile (d + "/CHANGELOG.md")));
@@ -180,7 +190,8 @@ let
       ) (relFiles tmplDir);
     };
 
-  trackerExtra =
+  # A tracker's and a forge's pins: both are backend Connectors.
+  backendExtra =
     {
       ref,
       tmplDir,
@@ -197,8 +208,8 @@ let
       routeAttrs = d: unique (concatMap attrNames (load d "routes.nix"));
     in
     sameNames "module.nix row attrs" (attrNames rows.ref) (attrNames rows.tmpl)
-    # The template's backend and knobs may use fewer of jira's options (token
-    # auth, not Basic), never one jira does not.
+    # The template's backend and knobs may use fewer of the reference's options
+    # (token auth, not Basic), never one it does not.
     ++ namesProblems "module.nix backend" [
       "module"
       "routes"
@@ -213,9 +224,16 @@ let
     )
     ++ (
       let
-        shape = d: builtins.toJSON { inherit ((load d "fragments.nix")) name shipped; };
+        frag = d: load d "fragments.nix";
+        # A template may ship fewer fragments than its reference (a forge-only
+        # scaffold omits the tracker-axis ones), never more or different ones.
+        shippedOk = all (
+          k: (frag refDir).shipped.${toRef k} or null == map toRef (frag tmplDir).shipped.${k}
+        ) (attrNames (frag tmplDir).shipped);
       in
-      expect (toRef (shape tmplDir) == shape refDir) "fragments.nix: name or shipped differ from ${ref}'s"
+      expect (
+        toRef (frag tmplDir).name == (frag refDir).name && shippedOk
+      ) "fragments.nix: name differs, or shipped is not a subset of ${ref}'s"
     )
     ++ namesProblems "routes.nix route attrs" [ "method" "host" "path" ] (routeAttrs refDir) (
       routeAttrs tmplDir
@@ -250,7 +268,20 @@ let
     tmplDir = ../../templates/connector-tracker;
     ref = "jira";
     sdkPackage = "tracker";
-    extra = trackerExtra;
+    extra = backendExtra;
+  };
+  forgeScaffold = scaffold {
+    tmplDir = ../../templates/connector-forge;
+    ref = "forgejo";
+    # Fragment files the template omits are fine; backendExtra's `shipped`
+    # check keeps the declaration consistent with them.
+    refFiles = tmpl: filter (r: !hasPrefix "fragments/" r || elem r tmpl);
+    sdkPackage = "forge";
+    mainCalls = [
+      "forge.RegisterBranches("
+      "forge.RegisterPRs("
+    ];
+    extra = backendExtra;
   };
   driverScaffold = scaffold {
     tmplDir = ../../templates/connector-driver;
@@ -307,4 +338,8 @@ in
     assert assertMsg (hasCorpusCase driverScaffold.files)
       "templates/connector-driver carries no starter corpus (testdata/corpus/<case>/pass.jsonl)";
     check "connector-scaffold-driver" "templates/connector-driver" driverScaffold;
+
+  connector-scaffold-forge =
+    check "connector-scaffold-forge" "templates/connector-forge"
+      forgeScaffold;
 }
