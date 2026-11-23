@@ -138,9 +138,11 @@ assert_nix_call() {
 template_setup() {
   export NEW_CONNECTOR_TEMPLATES="$ROOT/templates"
   export NEW_CONNECTOR_CORE_NAMES="github forgejo"
-  mkdir -p "$ROOT/templates/connector-tracker"
-  echo '{ description = "connectorname"; }' >"$ROOT/templates/connector-tracker/flake.nix"
-  echo "replace sdk => ./sdk v0.0.0-00010101000000-000000000000" >"$ROOT/templates/connector-tracker/go.mod"
+  for kind in tracker forge; do
+    mkdir -p "$ROOT/templates/connector-$kind"
+    echo '{ description = "connectorname"; }' >"$ROOT/templates/connector-$kind/flake.nix"
+    echo "replace sdk => ./sdk v0.0.0-00010101000000-000000000000" >"$ROOT/templates/connector-$kind/go.mod"
+  done
   cat >"$STUBS/new-connector" <<STUB
 #!$BASH
 exec bash "${NEW_CONNECTOR_SH:-$BATS_TEST_DIRNAME/../nix/new-connector.sh}" "\$@"
@@ -161,21 +163,24 @@ calls() {
 @test "a template runs the nix args in two generated Connectors with distinct names" {
   template_setup
   cd "$ROOT"
-  run bash "$SCRIPT" templates/connector-tracker flake check -L
-  [ "$status" -eq 0 ]
-  [ "$(grep -c '^---$' "$NIX_LOG.calls")" -eq 2 ]
-  mapfile -t dirs < <(calls)
-  [ "${#dirs[@]}" -eq 2 ]
-  [ "${dirs[0]}" != "${dirs[1]}" ]
-  # Both calls carry the same args with the override injected.
-  [ "$(grep -c '^--override-input$' "$NIX_LOG.calls")" -eq 2 ]
-  [ "$(grep -c "^git+file://$ROOT?dir=core\$" "$NIX_LOG.calls")" -eq 2 ]
-  [ "$(grep -c '^--no-write-lock-file$' "$NIX_LOG.calls")" -eq 2 ]
-  # The generated dirs are gone once connector-dev exits.
-  [ ! -e "${dirs[0]}" ]
-  [ ! -e "${dirs[1]}" ]
-  # The template itself is never the nix cwd.
-  [ "${dirs[0]}" != "$ROOT/templates/connector-tracker" ]
+  for kind in tracker forge; do
+    rm -f "$NIX_LOG.calls"
+    run bash "$SCRIPT" templates/connector-$kind flake check -L
+    [ "$status" -eq 0 ]
+    [ "$(grep -c '^---$' "$NIX_LOG.calls")" -eq 2 ]
+    mapfile -t dirs < <(calls)
+    [ "${#dirs[@]}" -eq 2 ]
+    [ "${dirs[0]}" != "${dirs[1]}" ]
+    # Both calls carry the same args with the override injected.
+    [ "$(grep -c '^--override-input$' "$NIX_LOG.calls")" -eq 2 ]
+    [ "$(grep -c "^git+file://$ROOT?dir=core\$" "$NIX_LOG.calls")" -eq 2 ]
+    [ "$(grep -c '^--no-write-lock-file$' "$NIX_LOG.calls")" -eq 2 ]
+    # The generated dirs are gone once connector-dev exits.
+    [ ! -e "${dirs[0]}" ]
+    [ ! -e "${dirs[1]}" ]
+    # The template itself is never the nix cwd.
+    [ "${dirs[0]}" != "$ROOT/templates/connector-$kind" ]
+  done
 }
 
 @test "a template's two generated flakes carry different names" {
