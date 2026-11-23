@@ -22,7 +22,9 @@
 }:
 let
   inherit (pkgs.lib)
+    all
     assertMsg
+    attrNames
     concatStringsSep
     concatLists
     concatMap
@@ -148,8 +150,11 @@ let
   # Written as `+` so the tree need not hold connectors/ yet (#6751 adds it).
   connectorsDir = ../.. + "/connectors";
   fixtureDir = ../fixtures/connector;
-  scaffoldDir = ../../templates/connector-tracker;
-  driverScaffoldDir = ../../templates/connector-driver;
+  scaffoldDirs = {
+    "templates/connector-tracker" = ../../templates/connector-tracker;
+    "templates/connector-driver" = ../../templates/connector-driver;
+    "templates/connector-forge" = ../../templates/connector-forge;
+  };
 
   roots =
     (optionalAttrs (pathExists connectorsDir) (
@@ -159,9 +164,8 @@ let
     ))
     // {
       "nix/fixtures/connector" = fixtureDir;
-      "templates/connector-tracker" = scaffoldDir;
-      "templates/connector-driver" = driverScaffoldDir;
-    };
+    }
+    // scaffoldDirs;
 
   filesOf =
     root:
@@ -186,12 +190,9 @@ in
     assert assertMsg (elem "module.nix" (
       map (f: f.rel) scanned."nix/fixtures/connector"
     )) "connector-escape-guard scanned no fixture module.nix; the scan is vacuous";
-    assert assertMsg (elem "module.nix" (
-      map (f: f.rel) scanned."templates/connector-tracker"
+    assert assertMsg (all (root: elem "module.nix" (map (f: f.rel) scanned.${root})) (
+      attrNames scaffoldDirs
     )) "connector-escape-guard scanned no scaffold module.nix; the scan is vacuous";
-    assert assertMsg (elem "module.nix" (
-      map (f: f.rel) scanned."templates/connector-driver"
-    )) "connector-escape-guard scanned no Driver scaffold module.nix; the scan is vacuous";
     assert assertMsg (hits == [ ])
       "a Connector's Nix reaches outside its own directory (ADR 0073 decision 11):\n${concatStringsSep "\n" hits}";
     pkgs.runCommand "connector-escape-guard" { } "touch $out";
