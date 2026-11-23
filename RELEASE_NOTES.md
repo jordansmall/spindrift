@@ -9,6 +9,50 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.34.0 — 2026-11-23
+
+One tracker, many repos: an instance can take just its slice of a shared
+tracker, and you can scaffold your own Connector from a template.
+
+**⚠ Breaking changes** this release: two tracker reads in the Connector SDK
+changed shape (Go source only).
+
+- **⚠ Breaking: SDK tracker reads changed shape.** `Reader.Statuses` now
+  returns `[]tracker.Status`, which carries each status's category, instead
+  of `[]string`, and `Reader.LabeledPage` takes a route argument after the
+  label. This only affects Connectors written in Go against the SDK: update
+  those calls and rebuild. The Connector wire format is unchanged, so
+  already-built Connectors keep working.
+- **One tracker scope, many repos.** Set `issues.route` (`ISSUE_ROUTE`) to
+  give each instance its slice of a shared tracker, by label on any
+  first-party tracker or by component on Jira. A routed instance only
+  queues, counts and dedups the issues on its route, stamps the route on
+  everything it files, and tells the Box which repo its change must stay
+  in. A route needs `REPO_SLUG`, and naming an off-route issue to
+  `spindrift dispatch` asks before it runs. See "Routed deployments" in
+  the reference for the setup checklist.
+- **A routed daemon checks itself at startup.** It runs each queue's
+  routed query once and halts if the tracker rejects it. It logs how many
+  issues match, so a `0` points at a wrong route value, and it warns when
+  Jira's `complete` status sits in the Done category, since that releases
+  dependents before the PR merges.
+- **Scaffold your own Connector.** `nix run
+  github:jordansmall/spindrift#new-connector -- <kind> <name>` generates a
+  tracker, forge or Driver Connector from a template, and the conformance
+  checks run for a Connector of any name. The reference has a new
+  "Authoring a Connector" guide covering all three.
+- **pi is a Connector.** The pi Driver's host half now ships as its own
+  Connector, alongside claude, opencode, github, forgejo and jira.
+- **Quickstart asks about the tracker and the forge separately.** It
+  offers jira, wires in the matching Connector input and writes the
+  Connector's credential. The generated `harness.env.example` lists
+  Connector credentials too.
+- **Dashboard follows your OS theme.** It switches between light and dark
+  with the system setting, and the dark theme's greys now meet WCAG AA
+  contrast.
+
+---
+
 ## 0.33.0 — 2026-11-21
 
 Connectors take over: github, forgejo, jira and claude now run only through
