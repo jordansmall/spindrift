@@ -29,13 +29,13 @@ func remoteEngine(t *testing.T) Engine {
 // NewVia is New with the Connector loaded through eng.
 func NewVia(t *testing.T, eng Engine) *Harness {
 	t.Helper()
-	return &Harness{newBase(t, eng, "forge.wasm", pushOnlyMethods)}
+	return &Harness{newBase(t, eng, fixtureConnector(t, "forge.wasm", pushOnlyMethods))}
 }
 
 // NewPRVia is NewPR with the Connector loaded through eng.
 func NewPRVia(t *testing.T, eng Engine) *PRHarness {
 	t.Helper()
-	return &PRHarness{newBase(t, eng, PRWasm, prMethods)}
+	return &PRHarness{newBase(t, eng, fixtureConnector(t, PRWasm, prMethods))}
 }
 
 // NewRemote is New with the Connector running in a child connector-host.

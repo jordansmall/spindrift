@@ -21,6 +21,7 @@ import (
 
 	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/fixturebuild"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
@@ -40,6 +41,76 @@ const (
 	prefix     = "agent/issue-"
 )
 
+// Scripted is one canned answer the backend serves to a request whose method
+// and URL path match, ahead of its own model, for a dialect the model does not
+// speak.
+type Scripted struct {
+	Method string `json:"method"`
+	Path   string `json:"path"`
+	Status int    `json:"status"`
+	Body   string `json:"body"`
+}
+
+// Connector is a Connector as the harness loads it: its wasm and its declared
+// Route table, whatever its name.
+type Connector struct {
+	Wasm []byte
+	// Routes is the declared table: any host, and "{repo}" for the repository.
+	// The harness rebinds every host to the backend's and substitutes Repo.
+	Routes []connectorhost.Route
+	// Script is served ahead of the backend's model.
+	Script []Scripted
+}
+
+// ServeScript answers r from the first scripted entry matching its method and
+// path, and reports whether it did.
+func ServeScript(w http.ResponseWriter, r *http.Request, script []Scripted) bool {
+	for _, s := range script {
+		if s.Method == r.Method && s.Path == r.URL.Path {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(s.Status)
+			_, _ = w.Write([]byte(s.Body))
+			return true
+		}
+	}
+	return false
+}
+
+// BoundRoutes is c's declared Routes with Repo substituted and every host
+// rebound to the backend's.
+func (c Connector) BoundRoutes(host string) []connectorhost.Route {
+	routes := connectortracker.Routes(c.Routes, Repo)
+	for i := range routes {
+		routes[i].Host = host
+	}
+	return routes
+}
+
+// FixtureWasm reads the named fixture Connector wasm file.
+func FixtureWasm(t *testing.T, wasmFile string) []byte {
+	t.Helper()
+	dir, err := fixturebuild.ConnectorDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wasm, err := os.ReadFile(filepath.Join(dir, wasmFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return wasm
+}
+
+// fixtureConnector is the named fixture wasm file with one Route per method over
+// the repository's subtree.
+func fixtureConnector(t *testing.T, wasmFile string, methods []string) Connector {
+	t.Helper()
+	c := Connector{Wasm: FixtureWasm(t, wasmFile)}
+	for _, m := range methods {
+		c.Routes = append(c.Routes, connectorhost.Route{Method: m, Host: "forge.example", Path: apiPath + "/repos/{repo}"})
+	}
+	return c
+}
+
 // Backend is the scripted forgejo-shaped REST backend. Branch requests are
 // answered from the real bare repo, so BranchExists reflects reality.
 type Backend struct {
@@ -47,7 +118,8 @@ type Backend struct {
 	// Host is the backend's host:port, the one host its Route table declares.
 	Host string
 
-	bare string
+	bare   string
+	script []Scripted
 
 	mu       sync.Mutex
 	clone    string
@@ -103,10 +175,15 @@ func (b *Backend) RemoteRequests() int {
 func (b *Backend) serve(w http.ResponseWriter, r *http.Request) {
 	b.mu.Lock()
 	b.prs.requests++
-	if strings.HasSuffix(r.URL.Path, "/merge") {
-		b.prs.merges++
-	}
 	b.mu.Unlock()
+	if ServeScript(w, r, b.script) {
+		return
+	}
+	if strings.HasSuffix(r.URL.Path, "/merge") {
+		b.mu.Lock()
+		b.prs.merges++
+		b.mu.Unlock()
+	}
 	switch {
 	case r.URL.Path == apiPath+"/repos/"+Repo && r.Method == http.MethodGet:
 		b.mu.Lock()
@@ -173,27 +250,16 @@ var (
 	prMethods       = []string{http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodDelete}
 )
 
-// load starts a backend and loads the fixture wasm file against it, declaring
-// one Route per method over the repository's subtree.
-func load(t *testing.T, eng Engine, bare, wasmFile string, methods []string) *stack {
+// load starts a backend and loads the Connector against it, its declared routes
+// rebound to the backend's host.
+func load(t *testing.T, eng Engine, bare string, c Connector) *stack {
 	t.Helper()
 	b := newBackend(t, bare)
-	dir, err := fixturebuild.ConnectorDir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	wasm, err := os.ReadFile(filepath.Join(dir, wasmFile))
-	if err != nil {
-		t.Fatal(err)
-	}
+	b.script = c.Script
 	audit := &bytes.Buffer{}
-	var routes []connectorhost.Route
-	for _, m := range methods {
-		routes = append(routes, connectorhost.Route{Method: m, Host: b.Host, Path: apiPath + "/repos/" + Repo})
-	}
-	c, err := eng(context.Background(), wasm, connectorhost.Network{
+	conn, err := eng(context.Background(), c.Wasm, connectorhost.Network{
 		Name:   "fixture-forge",
-		Routes: routes,
+		Routes: c.BoundRoutes(b.Host),
 		Authorize: func(r *http.Request) error {
 			r.Header.Set("Authorization", "Bearer "+Token)
 			return nil
@@ -204,8 +270,8 @@ func load(t *testing.T, eng Engine, bare, wasmFile string, methods []string) *st
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = c.Close(context.Background()) })
-	return &stack{b, c, audit, connectorforge.Target{API: b.URL + apiPath, Repo: Repo}}
+	t.Cleanup(func() { _ = conn.Close(context.Background()) })
+	return &stack{b, conn, audit, connectorforge.Target{API: b.URL + apiPath, Repo: Repo}}
 }
 
 // base is what the push-only and PR harnesses share: one backend, one loaded
@@ -226,15 +292,14 @@ type base struct {
 	// against the Connector's declared hosts.
 	WebHost string
 
-	wasm     string
-	eng      Engine
-	methods  []string
-	target   connectorforge.Target
-	mu       sync.Mutex
-	sleeps   []time.Duration
-	plumbing []PlumbingCall
-	cf       forge.CodeForge
-	caps     forge.Capabilities
+	connector Connector
+	eng       Engine
+	target    connectorforge.Target
+	mu        sync.Mutex
+	sleeps    []time.Duration
+	plumbing  []PlumbingCall
+	cf        forge.CodeForge
+	caps      forge.Capabilities
 }
 
 // PlumbingCall is one call Compose made to build core's git plumbing.
@@ -243,9 +308,9 @@ type PlumbingCall struct {
 	Credential gitexec.Credential
 }
 
-// newBase starts the backend, loads the fixture Connector wasm file and
-// composes the forge with the default, valid remote.
-func newBase(t *testing.T, eng Engine, wasm string, methods []string) *base {
+// newBase starts the backend, loads the Connector and composes the forge with
+// the default, valid remote.
+func newBase(t *testing.T, eng Engine, c Connector) *base {
 	t.Helper()
 	t.Setenv("GIT_AUTHOR_NAME", "Test Bot")
 	t.Setenv("GIT_AUTHOR_EMAIL", "bot@example.com")
@@ -253,9 +318,9 @@ func newBase(t *testing.T, eng Engine, wasm string, methods []string) *base {
 	t.Setenv("GIT_COMMITTER_EMAIL", "bot@example.com")
 
 	repo := forgetest.NewGitRepoFixture(t, "main")
-	s := load(t, eng, repo.Bare, wasm, methods)
+	s := load(t, eng, repo.Bare, c)
 	h := &base{
-		t: t, eng: eng, wasm: wasm, methods: methods, Repo: repo, Backend: s.backend, Conn: s.conn, Audit: s.audit, target: s.target,
+		t: t, eng: eng, connector: c, Repo: repo, Backend: s.backend, Conn: s.conn, Audit: s.audit, target: s.target,
 		Credential: gitexec.Credential{Username: "bot", Password: "git-secret"},
 	}
 	// Production code is https-only, so git is pointed at the bare repo through
@@ -320,7 +385,13 @@ type Harness struct{ *base }
 // forge with the default, valid remote.
 func New(t *testing.T) *Harness {
 	t.Helper()
-	return &Harness{newBase(t, inProcess, "forge.wasm", pushOnlyMethods)}
+	return NewFor(t, fixtureConnector(t, "forge.wasm", pushOnlyMethods))
+}
+
+// NewFor is New over a Connector's own wasm and declared Route table.
+func NewFor(t *testing.T, c Connector) *Harness {
+	t.Helper()
+	return &Harness{newBase(t, inProcess, c)}
 }
 
 // Forge returns the composed forge.
@@ -329,7 +400,7 @@ func (h *Harness) Forge() forge.CodeForge { return h.cf }
 // Unreachable composes against a second backend, then closes it so Probe fails.
 func (h *Harness) Unreachable() forge.CodeForge {
 	h.t.Helper()
-	s := load(h.t, h.eng, h.Repo.Bare, h.wasm, h.methods)
+	s := load(h.t, h.eng, h.Repo.Bare, h.connector)
 	cf, _, err := connectorforge.Compose(s.conn, s.target, h.git())
 	if err != nil {
 		h.t.Fatal(err)
