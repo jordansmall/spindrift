@@ -132,7 +132,7 @@ func TestCapabilitiesMatchCore(t *testing.T) {
 		}
 	}
 	for name, want := range map[string]string{
-		"capBranches": CapBranches, "capPushOnly": CapPushOnly, "capPRs": CapPRs,
+		"CapBranches": CapBranches, "CapPushOnly": CapPushOnly, "CapPRs": CapPRs,
 		"capAutoMerge": CapAutoMerge, "capCIRun": CapCIRun,
 		"capBranchProtection": CapBranchProtection, "capProbe": CapProbe,
 		"capDraftPRs": CapDraftPRs, "capTokenGrant": CapTokenGrant,

@@ -1228,6 +1228,7 @@ checkedMerge {
         "UPDATE_GOLDENS" # test-only regen switch read by internal/golden (issue #4781)
         "SPINDRIFT_BACKEND_CONNECTOR_WASM" # nix/quickstart.nix wrapper's baked github Connector (issue #6884)
         "SPINDRIFT_BACKEND_CONNECTOR_ROUTES" # nix/quickstart.nix wrapper's baked github Route table (issue #6884)
+        "SPINDRIFT_BACKEND_CONNECTOR_SCRIPT" # test-only scripted answers read by internal/connectorconformance (issue #7419)
         "REGISTRY_PROXY_TCP_SECRET" # launcher-minted, read by driver-exec registry helpers
         "SIGNAL_SOCKET_ENDPOINT" # launcher-minted, read by driver-exec signal helper
         "SIGNAL_SOCKET_SECRET" # launcher-minted, read by driver-exec signal helper

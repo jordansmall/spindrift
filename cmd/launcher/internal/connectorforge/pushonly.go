@@ -18,12 +18,13 @@ import (
 )
 
 // The capability names a forge Connector advertises. sdk/forge declares the
-// same strings, and its parity test pins them.
+// same strings, and its parity test pins them. The three that select a
+// contract are exported for connectorconformance.
 const (
 	capForge            = "forge"
-	capBranches         = "forge.branches"
-	capPushOnly         = "forge.pushOnly"
-	capPRs              = "forge.prs"
+	CapBranches         = "forge.branches"
+	CapPushOnly         = "forge.pushOnly"
+	CapPRs              = "forge.prs"
 	capAutoMerge        = "forge.autoMerge"
 	capCIRun            = "forge.ciRun"
 	capBranchProtection = "forge.branchProtection"
@@ -144,12 +145,12 @@ type pushOnly struct {
 // reaches a host the Connector merely named.
 func Compose(c *connectorhost.Connector, target Target, g Git) (forge.CodeForge, forge.Capabilities, error) {
 	has := func(capName string) bool { return slices.Contains(c.Capabilities, capName) }
-	isPushOnly := has(capPushOnly)
+	isPushOnly := has(CapPushOnly)
 	switch {
-	case !has(capBranches):
-		return nil, forge.Capabilities{}, fmt.Errorf("%w: capabilities %v lack %q", ErrNotForge, c.Capabilities, capBranches)
-	case !isPushOnly && !(has(capForge) && has(capPRs)):
-		return nil, forge.Capabilities{}, fmt.Errorf("%w: capabilities %v lack %q and %q", ErrPRForgeUnsupported, c.Capabilities, capPushOnly, capPRs)
+	case !has(CapBranches):
+		return nil, forge.Capabilities{}, fmt.Errorf("%w: capabilities %v lack %q", ErrNotForge, c.Capabilities, CapBranches)
+	case !isPushOnly && !(has(capForge) && has(CapPRs)):
+		return nil, forge.Capabilities{}, fmt.Errorf("%w: capabilities %v lack %q and %q", ErrPRForgeUnsupported, c.Capabilities, CapPushOnly, CapPRs)
 	}
 	if g.Plumbing == nil {
 		return nil, forge.Capabilities{}, errors.New("connectorforge: Git.Plumbing is nil")
