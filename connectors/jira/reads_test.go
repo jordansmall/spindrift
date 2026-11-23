@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"reflect"
@@ -44,6 +45,25 @@ func serve(t *testing.T, path, body string) *[]connector.Request {
 		}
 		return 404, "{}"
 	})
+}
+
+func classOf(t *testing.T, err error) connector.Class {
+	t.Helper()
+	var ce *connector.Error
+	if !errors.As(err, &ce) {
+		t.Fatalf("err = %v, want *connector.Error", err)
+	}
+	return ce.Class
+}
+
+// statusClasses pins the literal class each status maps to, so a change to
+// ClassForStatus cannot pass unnoticed.
+var statusClasses = []struct {
+	status int
+	want   connector.Class
+}{
+	{500, connector.Transient}, {502, connector.Transient}, {429, connector.RateLimited},
+	{404, connector.NotFound}, {401, connector.Auth}, {403, connector.Auth}, {400, connector.Permanent},
 }
 
 func TestIssueMapsRawFields(t *testing.T) {
@@ -626,4 +646,33 @@ func TestMatchesRouteRefusesAnUnsupportedKindWithoutARequest(t *testing.T) {
 	if len(*got) != 0 {
 		t.Fatalf("requests = %v, want none", *got)
 	}
+}
+
+func TestIssueClassesNon2xx(t *testing.T) {
+	for _, c := range statusClasses {
+		script(t, func(connector.Request, *url.URL) (int, string) { return c.status, "{}" })
+		_, err := issue(cloud, "ENG-7")
+		if got := classOf(t, err); got != c.want {
+			t.Errorf("status %d: class %q, want %q", c.status, got, c.want)
+		}
+	}
+}
+
+func TestTransportFailureIsTransient(t *testing.T) {
+	// script cannot yield a transport error, so swap send directly.
+	old := send
+	send = func(connector.Request) (connector.Response, error) { return connector.Response{}, errors.New("dial") }
+	t.Cleanup(func() { send = old })
+	t.Run("do", func(t *testing.T) {
+		_, err := issue(cloud, "ENG-7")
+		if got := classOf(t, err); got != connector.Transient {
+			t.Errorf("class %q, want %q", got, connector.Transient)
+		}
+	})
+	t.Run("probe", func(t *testing.T) {
+		_, err := probe(cloud)
+		if got := classOf(t, err); got != connector.Transient {
+			t.Errorf("class %q, want %q", got, connector.Transient)
+		}
+	})
 }

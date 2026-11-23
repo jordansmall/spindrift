@@ -514,3 +514,13 @@ func TestFileIssueRouteDedupsRepeatedComponent(t *testing.T) {
 		t.Errorf("components = %v, want %v", body.Fields.Components, want)
 	}
 }
+
+func TestCommentClassesNon2xx(t *testing.T) {
+	for _, c := range statusClasses {
+		script(t, func(connector.Request, *url.URL) (int, string) { return c.status, "{}" })
+		err := comment(cloud, "ENG-7", tracker.CommentRequest{Body: "x"})
+		if got := classOf(t, err); got != c.want {
+			t.Errorf("status %d: class %q, want %q", c.status, got, c.want)
+		}
+	}
+}

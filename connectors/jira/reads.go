@@ -75,10 +75,10 @@ func do(t tracker.Target, method, path string, body, out any) error {
 	}
 	resp, err := send(req)
 	if err != nil {
-		return err
+		return connector.Errorf(connector.Transient, "%w", err)
 	}
 	if resp.Status < 200 || resp.Status > 299 {
-		return fmt.Errorf("%s %s: status %d%s", method, path, resp.Status, jiraReason(resp.Body))
+		return connector.Errorf(connector.ClassForStatus(resp.Status), "%s %s: status %d%s", method, path, resp.Status, jiraReason(resp.Body))
 	}
 	// A write answers 204 with no body and passes a nil out; a read that
 	// answers 200 empty must still fail to decode.
