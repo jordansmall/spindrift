@@ -68,12 +68,31 @@ let
     )
   );
   errors = lib.concatMap (c: c.errors) composed ++ orphans;
-in
-{
-  inherit errors;
   stanzas =
     if errors == [ ] then
       map (c: c.stanza) composed
     else
       throw "nix/consumer-stanzas.nix:\n${lib.concatStringsSep "\n" errors}";
+in
+{
+  inherit errors stanzas;
+  # A template's env example lists the core rows (no Connector, so a null
+  # credential) plus exactly the Connectors its flake takes as
+  # `?dir=connectors/<name>` inputs, so editing the inputs and running regen
+  # keeps the two together.
+  templateStanzas =
+    templateDir:
+    let
+      inputs = (import (templateDir + "/flake.nix")).inputs;
+      matches = lib.concatMap (
+        i: lib.optional (i ? url) (builtins.match ".*[?&]dir=connectors/([^&#/]+).*" i.url)
+      ) (lib.attrValues inputs);
+      connectorNames = lib.concatMap (m: lib.optional (m != null) (lib.head m)) matches;
+      # A dir named differently from its row would otherwise drop its secrets.
+      unmatched = lib.filter (n: !(lib.any (s: s.name == n) stanzas)) connectorNames;
+    in
+    if unmatched != [ ] then
+      throw "nix/consumer-stanzas.nix: ${templateDir} takes connectors/${lib.concatStringsSep ", connectors/" unmatched}, matching no lib/backends row name"
+    else
+      lib.filter (s: s.credential == null || lib.elem s.name connectorNames) stanzas;
 }

@@ -1151,6 +1151,33 @@ checkedMerge {
         touch $out
       '';
 
+  # Pins templates/core-connector's env example: the core secrets (Driver
+  # credentials included) plus the github Connector's, no forgejo (issue #7418);
+  # also pins the template's .gitignore listing harness.env, as the example promises.
+  core-connector-harness-env-example =
+    let
+      generated = pkgs.writeText "core-connector.harness.env.example.generated" (
+        renderers.renderHarnessEnvExample schema (
+          (import ../consumer-stanzas.nix { inherit (pkgs) lib; }).templateStanzas
+            ../../templates/core-connector
+        )
+      );
+    in
+    pkgs.runCommand "core-connector-harness-env-example"
+      {
+        inherit generated;
+        committed = ../../templates/core-connector/harness.env.example;
+        gitignore = ../../templates/core-connector/.gitignore;
+      }
+      ''
+        diff "$generated" "$committed" \
+          || { echo "templates/core-connector/harness.env.example is out of sync with lib/env-schema.nix or the core and github Consumer stanzas — run nix run .#regen" >&2; exit 1; }
+        # The example's header promises harness.env is gitignored.
+        grep -qx 'harness.env' "$gitignore" \
+          || { echo "templates/core-connector/.gitignore must list harness.env" >&2; exit 1; }
+        touch $out
+      '';
+
   # Forward: every lib/env-schema.nix knob appears as a literal in one of the
   # forwardGoSrc files (presence only; pinning values is refactor-brittle).
   # The scan is kept to those files so a stray literal elsewhere cannot
