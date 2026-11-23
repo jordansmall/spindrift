@@ -419,6 +419,52 @@ func TestNeedsUpdateAndListPRFiles(t *testing.T) {
 	}
 }
 
+func TestListPRFilesRefusesAnUnreadableList(t *testing.T) {
+	for name, reply := range map[string]string{
+		"missing field":   `{}`,
+		"null":            `{"files":null}`,
+		"no entries":      `{"files":[]}`,
+		"empty entry":     `{"files":["a",""]}`,
+		"absolute":        `{"files":["/etc/passwd"]}`,
+		"leading dotdot":  `{"files":["../x"]}`,
+		"inner dotdot":    `{"files":["a/../b"]}`,
+		"trailing dotdot": `{"files":["a/.."]}`,
+		"newline":         `{"files":["a\nb"]}`,
+		"NUL":             `{"files":["a\u0000b"]}`,
+		"DEL":             `{"files":["a\u007fb"]}`,
+		"dot segment":     `{"files":["./.github/workflows/ci.yml"]}`,
+		"empty segment":   `{"files":["a//b"]}`,
+		"trailing slash":  `{"files":["a/"]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newPRHarness(t, nil, map[string]any{"forge.prFiles": reply})
+			files, err := h.pr().ListPRFiles(prURL7)
+			if !errors.Is(err, ErrAnswer) || files != nil {
+				t.Fatalf("ListPRFiles = (%v, %v), want (nil, ErrAnswer)", files, err)
+			}
+			if !strings.Contains(err.Error(), "file list") {
+				t.Errorf("error %q does not name the file list", err)
+			}
+		})
+	}
+}
+
+func TestListPRFilesNamesAMissingField(t *testing.T) {
+	h := newPRHarness(t, nil, map[string]any{"forge.prFiles": `{}`})
+	_, err := h.pr().ListPRFiles(prURL7)
+	if !errors.Is(err, ErrAnswer) || !strings.Contains(err.Error(), "PR 7 file list is missing") {
+		t.Fatalf("ListPRFiles({}) = %v, want ErrAnswer naming the missing list", err)
+	}
+}
+
+func TestListPRFilesKeepsCleanPaths(t *testing.T) {
+	h := newPRHarness(t, nil, map[string]any{"forge.prFiles": `{"files":[".github/workflows/ci.yml","a..b/c","..hidden","dir/file with space.txt"]}`})
+	files, err := h.pr().ListPRFiles(prURL7)
+	if want := ".github/workflows/ci.yml,a..b/c,..hidden,dir/file with space.txt"; err != nil || strings.Join(files, ",") != want {
+		t.Errorf("ListPRFiles = (%v, %v), want %s", files, err, want)
+	}
+}
+
 func TestMarkDraftCommentAndURLPinning(t *testing.T) {
 	h := newPRHarness(t, nil, map[string]any{"forge.setDraft": `{}`, "forge.comment": `{}`})
 	for _, err := range []error{h.pr().MarkReady(prURL7), h.pr().MarkDraft(prURL7), h.pr().CommentPR(prURL7, "hi")} {

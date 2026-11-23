@@ -89,7 +89,7 @@ func TestRoutedRow_ReadsGoThroughTheConnector(t *testing.T) {
 	h.SeedIssue(forge.Issue{Number: "1", Title: "one", Labels: []string{testLabels.Dispatchable}})
 	h.SeedIssue(forge.Issue{Number: "2", Title: "two"})
 	prURL := h.SeedOpenPR("1")
-	h.mutatePR("1", func(p *restPR) { p.branch = "agent/issue-1" })
+	h.mutatePR("1", func(p *restPR) { p.branch = "agent/issue-1"; p.files = []string{"README.md"} })
 	h.SeedCheckStates(prURL, []forge.RollupState{forge.StateFailure})
 	h.SeedFailingCheck(prURL, "unit", "FAILURE", "boom")
 	h.SeedNativeDeps("1", []string{"2"})
@@ -147,8 +147,8 @@ func TestRoutedRow_ReadsGoThroughTheConnector(t *testing.T) {
 	if stale, err := c.NeedsUpdate(prURL); err != nil || stale {
 		t.Errorf("NeedsUpdate = %v, %v; want false", stale, err)
 	}
-	if _, err := c.ListPRFiles(prURL); err != nil {
-		t.Errorf("ListPRFiles: %v", err)
+	if got, err := c.ListPRFiles(prURL); err != nil || len(got) != 1 {
+		t.Errorf("ListPRFiles = %v, %v; want [README.md]", got, err)
 	}
 
 	if n := calls(); n != 0 {
