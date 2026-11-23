@@ -3782,12 +3782,21 @@ This is protocol version **0.3.0**. The host is
   past it is a send failure, never a budget overrun: the guest gets the
   status-0 send-failure reply, the Connector stays usable, and the audit
   entry's `reason` names the timeout. One call may make at most 128
-  `http_request`s; the 129th is refused and fails the call closed with
-  `ErrHTTPRequestLimit` ("connector call exceeded its http_request limit"),
-  so a looping guest is bounded in CPU time by the budget and in network wait
-  by 128 times 60 seconds, so one call's worst-case wall clock is 5 seconds
-  plus 32 minutes of credit plus 128 minutes of network wait, about 2 hours
-  40 minutes (8 minutes more for a request at the 8 MiB cap). Module memory
+  `http_request`s and spend at most 5 minutes in them in total; the 129th is
+  refused, and the request in flight when the 5 minutes run out is cut off,
+  each failing the call closed with `ErrHTTPRequestLimit` ("connector call
+  exceeded its http_request limit"), so a looping guest is bounded in CPU
+  time by the budget and in network wait by those 5 minutes, so one call's
+  worst-case wall clock is 5 seconds plus 32 minutes of credit plus 5
+  minutes of network wait, about 37 minutes (8 minutes more for a request at
+  the 8 MiB cap). A request URL is capped at 8 KiB, checked right after the
+  request decodes and before it is parsed or routed: a longer one is refused
+  without being echoed into the refusal or the audit entry. The method must
+  be one of `GET`, `HEAD`, `POST`, `PUT`, `PATCH` or `DELETE`, matched
+  exactly (case-sensitive); any other is refused unrouted and left out of
+  the audit entry's `method`; a Route's `method` is held to the same set.
+  A followed redirect hop that fails is reported by its host only, since the
+  hop URL's signed query is a secret. Module memory
   is capped: a declared minimum above 64 MiB is refused at load, and growth
   past the cap fails the call. A method call's limits grow with its request,
   since a correct Connector's time, memory and output grow with its input:
@@ -4435,7 +4444,7 @@ indirect-only requirement, or a `replace` or `exclude` that names it.
   `go mod tidy` in `cmd/launcher`, refresh the vendor hashes in
   `lib/build-constants.nix` (each `*VendorHash`: set it to `lib.fakeHash`,
   build, copy the hash Nix reports), and run the gate.
-- **Fuzzing the host.** Seven targets in `cmd/launcher/internal/connectorhost`
+- **Fuzzing the host.** Nine targets in `cmd/launcher/internal/connectorhost`
   cover what the host takes from a guest and what crosses the out-of-process
   pipe; run them after bumping the pin, since wazero decodes and compiles every
   module the host loads.
@@ -4463,6 +4472,14 @@ indirect-only requirement, or a `replace` or `exclude` that names it.
   layer arbitrary bytes as a hostile host's stream after a valid hello: the demux
   must end, fail the host and leave no open session able to block a read or a
   wait.
+  `FuzzHTTPRequest` (`http_request_fuzz_test.go`) feeds `http_request`
+  arbitrary bytes as the guest's request, against a stub transport: only an
+  `https` request to a Route's host with a method in the fixed set may reach
+  it, and an oversized URL or unknown method must be refused without being
+  echoed into the error or the audit entry.
+  `FuzzDecodeRaw` (`driver_raw_test.go`) checks the raw-line path against the
+  JSON path: the answers must match, and a line holding a newline must be
+  refused, never split.
 
 ### Targeting repos that define their own devShell toolchain
 
