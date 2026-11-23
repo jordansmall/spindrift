@@ -1055,6 +1055,17 @@ checkedMerge {
         touch $out
       '';
 
+  # Regenerate with `nix run .#regen` when a Connector's `backend.credential`
+  # knob changes (nix/connector-knobs.nix).
+  connector-credential-gen = mkGofmtDriftCheck {
+    name = "connector-credential-gen";
+    rendered =
+      renderers.renderConnectorCredentialEnvGo
+        (import ../connector-knobs.nix { inherit (pkgs) lib; }).credentialEnv;
+    committedPath = "cmd/launcher/quickstart/connector_credential_gen.go";
+    source = "nix/connector-knobs.nix";
+  };
+
   # Regenerate with `nix run .#regen` when lib/subcommands.nix changes
   # (issue #1575).
   subcommands-gen =

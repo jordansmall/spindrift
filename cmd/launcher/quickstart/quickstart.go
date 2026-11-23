@@ -911,17 +911,26 @@ func nixEscape(s string) string {
 }
 
 // renderHarnessEnv writes only the secrets the wizard collected: the
-// code-forge credential under the backend's TokenEnvVar, and the Driver
+// code-forge credential under the backend's TokenEnvVar, the same token again
+// under the backend's Connector credential (when it has one), and the Driver
 // credentials gatherCredentials collected. The generated comments mirror
 // lib/renderers.nix's renderHarnessEnvExample, the source of that wording.
 func renderHarnessEnv(issueTracker, token string, credentials []credential) string {
 	out := harnessEnvPreamble
 	out += harnessEnvSecretLine(harnessEnvTokenEnvVar(issueTracker), token)
+	if env, ok := connectorCredentialEnv[issueTracker]; ok {
+		out += connectorCredentialNote + harnessEnvSecretLine(env, token)
+	}
 	for _, c := range credentials {
 		out += harnessEnvSecretLine(c.env, c.value)
 	}
 	return out
 }
+
+// connectorCredentialNote precedes the Connector credential stanza: the
+// wizard reuses the token it verified, but a narrower one is safer.
+const connectorCredentialNote = "# The Connector authorizes its reads and writes with this token. A separate,\n" +
+	"# least-privilege token may replace it: see docs/reference.md#backend-primary-mode.\n"
 
 // harnessEnvTokenEnvVar returns the env var name the wizard writes the
 // backend credential under, falling back to GH_TOKEN. Keep it the only source,
