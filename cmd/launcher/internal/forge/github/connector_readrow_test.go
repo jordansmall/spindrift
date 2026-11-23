@@ -71,7 +71,7 @@ var callsNeedingARow = []struct {
 	{"IntrospectToken", func(*execClient) error { _, err := introspectToken("ghp_abc", connectorRepo); return err }},
 }
 
-// With no github row, under a GitHub Enterprise GH_HOST, or under a shadow row
+// With no github row, or under a GitHub Enterprise GH_HOST
 // there is no Connector to go through, and gh is no fallback: each call fails
 // with ErrNoRoute naming the cause and never runs gh.
 func TestCalls_WithoutARoutedRowFailNamedAndNeverRunGh(t *testing.T) {
@@ -93,10 +93,6 @@ func TestCalls_WithoutARoutedRowFailNamedAndNeverRunGh(t *testing.T) {
 			t.Setenv("GH_HOST", "ghe.example.com")
 			return NewExecClient(connectorRepo, testLabels), countGH(t)
 		}, "GH_HOST"},
-		{"ShadowRow", func(t *testing.T) (*execClient, func() int) {
-			_, c, calls := harnessWithRow(t, useGithubRowShadow)
-			return c, calls
-		}, "shadow"},
 	} {
 		for _, rd := range callsNeedingARow {
 			t.Run(tc.name+"/"+rd.name, func(t *testing.T) {

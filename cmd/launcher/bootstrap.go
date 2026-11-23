@@ -65,18 +65,6 @@ type launchContext struct {
 // research's no-repo sub-mode (issue #2202). A defer releases the
 // accumulation lock, the one thing an early error return can leak.
 func bootstrap(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descriptor, selfContained bool) (lc *launchContext, err error) {
-	return bootstrapWith(stdout, ensureReady, kind, selfContained, false)
-}
-
-// bootstrapShadowed is bootstrap for a dispatch run (`dispatch`, `research`):
-// a backend row asking for a read shadow gets its tracker and code forge
-// layered before the settlers and factory capture them. lc.cleanup closes the
-// shadows, so every path that defers it ends them.
-func bootstrapShadowed(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descriptor, selfContained bool) (*launchContext, error) {
-	return bootstrapWith(stdout, ensureReady, kind, selfContained, true)
-}
-
-func bootstrapWith(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descriptor, selfContained, shadowReads bool) (lc *launchContext, err error) {
 	pwd, err := os.Getwd()
 	if err != nil {
 		return nil, err
@@ -132,24 +120,8 @@ func bootstrapWith(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descri
 		}
 	}()
 	// c diverges from gc.config below (registryProxyRoutes is set on c only),
-	// which is safe only because gc itself is never read again.
+	// which is safe only because gc.config is never read again.
 	c := gc.config
-	it := gc.issueTracker
-	cf := gc.codeForge
-	caps := gc.capabilities
-	var shadows *readShadows
-	if shadowReads {
-		shadows = newReadShadows(pwd, os.Stderr)
-		it = shadows.wrapTracker(c, it)
-		cf = shadows.wrapCodeForge(c, cf)
-		caps = forge.ResolveCapabilities(cf, it, caps.ForgeDescriptor, caps.TrackerDescriptor)
-		// Covers every early error return below, like accumLock's.
-		defer func() {
-			if err != nil {
-				shadows.close()
-			}
-		}()
-	}
 
 	// Resolution mutates env (os.Unsetenv on the env-var form, see
 	// credresolver.New) and must run exactly once per route, so it cannot run
@@ -186,12 +158,12 @@ func bootstrapWith(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descri
 		return nil, err
 	}
 
-	lw := localloop.Wire(localloopConfig(c), it)
-	mergeSettle, verdict, terminated, err := newSettlers(c.kind().Settle, c, it, lw, cf, caps)
+	lw := localloop.Wire(localloopConfig(c), gc.issueTracker)
+	mergeSettle, verdict, terminated, err := newSettlers(c.kind().Settle, c, gc.issueTracker, lw, gc.codeForge, gc.capabilities)
 	if err != nil {
 		return nil, err
 	}
-	f, err := newDispatchFactory(c, pwd, r, it, lw, cf, caps)
+	f, err := newDispatchFactory(c, pwd, r, gc.issueTracker, lw, gc.codeForge, gc.capabilities)
 	if err != nil {
 		return nil, err
 	}
@@ -204,16 +176,15 @@ func bootstrapWith(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descri
 		config:       c,
 		pwd:          pwd,
 		runner:       r,
-		issueTracker: it,
-		codeForge:    cf,
-		capabilities: caps,
+		issueTracker: gc.issueTracker,
+		codeForge:    gc.codeForge,
+		capabilities: gc.capabilities,
 		factory:      f,
 		merge:        merge,
 		verdict:      verdict,
 		terminated:   terminated,
 		cleanup: func() {
 			f.Cleanup()
-			shadows.close()
 			closeSandbox()
 			removeScratchMirrors()
 			// Held for the whole run rather than only the seed, so a

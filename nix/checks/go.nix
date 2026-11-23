@@ -315,7 +315,6 @@ let
       "outcome"
       "panicguard"
       "primaryrecord"
-      "readshadow"
       "registrymanifest"
       "registryprobe"
       "registryvocab"

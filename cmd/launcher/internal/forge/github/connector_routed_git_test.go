@@ -63,7 +63,7 @@ func requireNoCoreGit(t *testing.T, seen string) {
 // Under a routed row the read-only Box's bundle relay and commit subjects run
 // in core's git with the row's credential.
 func TestRoutedRow_BundleRelayRunsInCoreGit(t *testing.T) {
-	h, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
+	h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
 	seen := gitCredentialLog(t)
 	f := routedGitClient()
 	const ref = "agent/issue-9002"
@@ -86,7 +86,7 @@ func TestRoutedRow_BundleRelayRunsInCoreGit(t *testing.T) {
 
 // A Box that wrote no bundle is the benign case under primary too.
 func TestRoutedRow_RelayOfNoBundleIsBenign(t *testing.T) {
-	routedLogHarness(t, useGithubRowRouted)
+	routedLogHarness(t, useGithubRowAt)
 	f := routedGitClient()
 
 	if err := f.RelayBundle(t.TempDir(), "agent/issue-1"); !errors.Is(err, forge.ErrBundleNotFound) {
@@ -99,7 +99,7 @@ func TestRoutedRow_RelayOfNoBundleIsBenign(t *testing.T) {
 
 // PushBranch creates the branch through core's git, create-only.
 func TestRoutedRow_PushBranchRunsInCoreGit(t *testing.T) {
-	h, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
+	h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
 	seen := gitCredentialLog(t)
 	src := t.TempDir()
 	forgetest.Run(t, "", "clone", h.backend.repo.Bare, src)
@@ -130,7 +130,7 @@ func TestRoutedRow_PushBranchRunsInCoreGit(t *testing.T) {
 // The mirror is seeded by core's git with the row's credential, which persists
 // nowhere in the repo the Box mounts.
 func TestRoutedRow_SeedMirrorRunsInCoreGit(t *testing.T) {
-	h, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
+	h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
 	seen := gitCredentialLog(t)
 	dir := filepath.Join(t.TempDir(), "mirror")
 
@@ -166,7 +166,7 @@ func splitWebHost(t *testing.T, h *connectorHarness) {
 
 // The mirror seeds when git's host is GH_HOST and no declared route names it.
 func TestRoutedRow_SeedMirrorWhenTheWebHostIsNotAnAPIRoute(t *testing.T) {
-	h, _, _, _ := routedLogHarness(t, useGithubRowRouted)
+	h, _, _, _ := routedLogHarness(t, useGithubRowAt)
 	splitWebHost(t, h)
 	dir := filepath.Join(t.TempDir(), "mirror")
 
@@ -182,7 +182,7 @@ func TestRoutedRow_SeedMirrorWhenTheWebHostIsNotAnAPIRoute(t *testing.T) {
 func TestRoutedRow_GitOpsAcceptARemoteOnGHHost(t *testing.T) {
 	for _, op := range routedGitOps {
 		t.Run(op.name, func(t *testing.T) {
-			h, _, _, _ := routedLogHarness(t, useGithubRowRouted)
+			h, _, _, _ := routedLogHarness(t, useGithubRowAt)
 			splitWebHost(t, h)
 			if err := op.run(h, t); errors.Is(err, connectorforge.ErrRemoteHost) {
 				t.Errorf("err = %v, want the GH_HOST remote accepted", err)
@@ -209,7 +209,7 @@ func TestRoutedRow_RebasePRHeadRunsInCoreGit(t *testing.T) {
 		wantMerges string
 	}{{"rebase", "0"}, {"", "0"}, {"merge", "1"}} {
 		t.Run("sync="+tc.method, func(t *testing.T) {
-			h, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
+			h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
 			seen := gitCredentialLog(t)
 			url := h.SeedLandablePR("11")
 			h.backend.repo.AdvanceBase()
@@ -235,7 +235,7 @@ func TestRoutedRow_RebasePRHeadRunsInCoreGit(t *testing.T) {
 func TestRoutedRow_RebasePRHeadConflictIsErrMergeConflict(t *testing.T) {
 	for _, method := range []string{"rebase", "merge"} {
 		t.Run(method, func(t *testing.T) {
-			h, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
+			h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
 			url := h.SeedLandablePR("12")
 			h.backend.repo.ConflictBase("12")
 
@@ -283,7 +283,7 @@ func TestRoutedRow_GitOpsFailByName(t *testing.T) {
 	boom := errors.New("github connector failed to load")
 	for _, op := range routedGitOps {
 		t.Run(op.name+"/load", func(t *testing.T) {
-			h, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
+			h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
 			old := loadRowConnector
 			t.Cleanup(func() { loadRowConnector = old })
 			loadRowConnector = func(context.Context, backendrows.Row, backendrows.Options) (*connectorhost.Connector, error) {
@@ -300,7 +300,6 @@ func TestRoutedRow_GitOpsFailByName(t *testing.T) {
 		t.Run(op.name+"/refused", func(t *testing.T) {
 			h, _, calls, _ := routedLogHarness(t, func(t *testing.T, host string) {
 				applyGithubRow(t, host, func(r *backendrows.Row) {
-					r.Primary = true
 					r.Routes = r.Routes[:0:0]
 					for _, rt := range allRoutes(t, host) {
 						if !strings.Contains(rt.Path, "/pulls") && !strings.Contains(rt.Path, "/git/") && !strings.Contains(rt.Path, "/graphql") {
@@ -323,7 +322,7 @@ func TestRoutedRow_GitOpsFailByName(t *testing.T) {
 // A routed row whose credential env is unset names it rather than sending git
 // an empty password.
 func TestRoutedRow_GitOpsNameAnUnsetCredential(t *testing.T) {
-	_, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
+	_, _, calls, _ := routedLogHarness(t, useGithubRowAt)
 	t.Setenv(tokenCredentialEnv, "")
 
 	err := routedGitClient().SeedMirror(filepath.Join(t.TempDir(), "mirror"))
@@ -387,7 +386,7 @@ func TestPlainRow_HostMediationContract(t *testing.T) {
 // and the row's credential, with no gh credential helper: the Ledger's own git
 // pushes a Ledger entry to the repository with them.
 func TestRoutedRow_LedgerSiteIsConnectorCloneURLAndCoreCredential(t *testing.T) {
-	h, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
+	h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
 	seen := gitCredentialLog(t)
 
 	site, err := Strategy.NewLedger(backendkit.Shared{RepoSlug: connectorRepo, Labels: testLabels}, nil)
@@ -417,7 +416,7 @@ func TestRoutedRow_LedgerSiteIsConnectorCloneURLAndCoreCredential(t *testing.T) 
 }
 
 func TestRoutedRow_LedgerSiteNamesAnUnsetCredential(t *testing.T) {
-	routedLogHarness(t, useGithubRowRouted)
+	routedLogHarness(t, useGithubRowAt)
 	t.Setenv(tokenCredentialEnv, "")
 
 	_, err := Strategy.NewLedger(backendkit.Shared{RepoSlug: connectorRepo, Labels: testLabels}, nil)
@@ -430,7 +429,7 @@ func TestRoutedRow_LedgerSiteNamesAnUnsetCredential(t *testing.T) {
 // RebasePRHead under a routed row rebases when the head the Connector names
 // is the one the caller expects, in core's git.
 func TestRoutedRow_RebasePRHeadMatchRebases(t *testing.T) {
-	h, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
+	h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
 	seen := gitCredentialLog(t)
 	url := h.SeedLandablePR("14")
 	h.backend.repo.AdvanceBase()
@@ -448,7 +447,7 @@ func TestRoutedRow_RebasePRHeadMatchRebases(t *testing.T) {
 // A head the Connector names that differs from the expected one is refused
 // before any git runs.
 func TestRoutedRow_RebasePRHeadMismatchIsRefusedBeforeGit(t *testing.T) {
-	h, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
+	h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
 	url := h.SeedLandablePR("15")
 	h.backend.repo.AdvanceBase()
 	seen := gitCredentialLog(t)
@@ -478,7 +477,7 @@ func TestExecClient_ResolvesPRHeadRebaser(t *testing.T) {
 // A plain Rebase under a routed row has no expected head to pin against the
 // guest's, so it is refused with nothing pushed (issue #6961).
 func TestRoutedRow_PlainRebaseIsRefused(t *testing.T) {
-	h, _, calls, _ := routedLogHarness(t, useGithubRowRouted)
+	h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
 	url := h.SeedLandablePR("16")
 	h.backend.repo.AdvanceBase()
 	seen := gitCredentialLog(t)

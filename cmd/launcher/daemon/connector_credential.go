@@ -39,8 +39,8 @@ var secretCmdRunner = func(cmd string) (string, error) {
 // Daemon's ISSUE_TRACKER and CODE_FORGE.
 // The CODE_FORGE row is included, though the probe reads only the tracker:
 // children inherit its pinned `_CMD`, and refusing here fails fast. A row
-// counts when backendkit.{Forge,Tracker}ReadsThroughConnector holds and it is
-// not a shadow row. A Basic-scheme row's IdentityEnv has no `_CMD` form and is
+// counts when backendkit.{Forge,Tracker}ReadsThroughConnector holds. A
+// Basic-scheme row's IdentityEnv has no `_CMD` form and is
 // not resolved.
 func resolveConnectorCredentials(doc *inputdoc.Document, kinds []daemon.Kind, stderr io.Writer) (refresh func(), err error) {
 	probes := false
@@ -68,9 +68,9 @@ func resolveConnectorCredentials(doc *inputdoc.Document, kinds []daemon.Kind, st
 	seen := map[string]bool{}
 	for _, row := range backendrows.All() {
 		env := row.CredentialEnv
-		readsTracker := row.Name == tracker && backendkit.TrackerReadsThroughConnector(row.Name, row.Primary)
-		readsForge := row.Name == forge && backendkit.ForgeReadsThroughConnector(row.Name, row.Primary)
-		if !(readsTracker || readsForge) || row.Shadow || seen[env] {
+		readsTracker := row.Name == tracker && backendkit.TrackerReadsThroughConnector(row.Name)
+		readsForge := row.Name == forge && backendkit.ForgeReadsThroughConnector(row.Name)
+		if !(readsTracker || readsForge) || seen[env] {
 			continue
 		}
 		seen[env] = true

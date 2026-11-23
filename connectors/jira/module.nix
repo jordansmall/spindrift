@@ -1,9 +1,7 @@
 # The jira Connector's flake-parts module: the Connector's whole tracker path.
 # The Connector is jira's only tracker: it answers every read, claim, transition,
-# label, comment and filed finding of an ISSUE_TRACKER=jira run, and `primary` is
-# refused on the row because no native adapter remains to replace.
-# Leave the row's `shadow` option off: the read shadow names a GitHub-shaped
-# target (repo slug, no dialect), not jira's project key and API dialect.
+# label, comment and filed finding of an ISSUE_TRACKER=jira run, and `shadow` and
+# `primary` are refused on the row because no native adapter remains.
 #
 # The row authorizes with Basic credentials, the Jira Cloud form (account email
 # plus API token). Server/Data Center PATs are Bearer, which one row cannot

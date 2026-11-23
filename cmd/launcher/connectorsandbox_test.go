@@ -145,8 +145,8 @@ func TestInstallConnectorSandbox_StartFailureFailsTheRun(t *testing.T) {
 	}
 	defer closeSandbox()
 
-	// The load site may swallow this error (a read shadow only dirties its
-	// summary), so the verdict must not depend on it reaching the run.
+	// The load site may swallow this error, so the verdict must not depend on
+	// it reaching the run.
 	err = loadViaRow(t)
 	if !errors.Is(err, connectorsandbox.ErrConnectorSandboxStart) || !strings.Contains(err.Error(), runner.ErrFakeNoSandbox.Error()) {
 		t.Fatalf("load = %v, want ErrConnectorSandboxStart carrying the runner's refusal, not an in-process compile error", err)

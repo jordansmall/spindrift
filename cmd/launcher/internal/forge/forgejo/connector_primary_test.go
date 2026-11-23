@@ -153,7 +153,7 @@ func TestConnectorForge_RefusesAMergeMethodTheConnectorCannotHonour(t *testing.T
 	}
 }
 
-// primary governs nothing: a plain row builds both halves from the Connector.
+// A plain row builds both halves from the Connector.
 func TestPlainRow_BuildsTheConnectorForgeAndTracker(t *testing.T) {
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
@@ -161,26 +161,21 @@ func TestPlainRow_BuildsTheConnectorForgeAndTracker(t *testing.T) {
 	t.Cleanup(forgejo.SetConnectorClient(srv.Client()))
 	t.Chdir(t.TempDir())
 
-	for name, primary := range map[string]bool{"plain": false, "primary": true} {
-		t.Run(name, func(t *testing.T) {
-			useForgejoRow(t, srv.URL, func(r *backendrows.Row) { r.Primary = primary })
-			if _, err := buildForge(srv, ""); err != nil {
-				t.Fatal(err)
-			}
-			tr, err := buildTracker(srv)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got := reflect.TypeOf(tr).String(); !strings.Contains(got, "connectortracker") {
-				t.Errorf("built %s, want the Connector tracker", got)
-			}
-		})
+	useForgejoRow(t, srv.URL, func(*backendrows.Row) {})
+	if _, err := buildForge(srv, ""); err != nil {
+		t.Fatal(err)
+	}
+	tr, err := buildTracker(srv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reflect.TypeOf(tr).String(); !strings.Contains(got, "connectortracker") {
+		t.Errorf("built %s, want the Connector tracker", got)
 	}
 }
 
-// Forgejo runs only through its Connector: without a row, or with a shadow row
-// (which only observes), neither the Code Forge nor the tracker is built, and
-// neither degrades to a native adapter.
+// Forgejo runs only through its Connector: without a row neither the Code
+// Forge nor the tracker is built, and neither degrades to a native adapter.
 func TestNoConnectorRow_RefusesTheCodeForgeAndTheTracker(t *testing.T) {
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
@@ -188,23 +183,13 @@ func TestNoConnectorRow_RefusesTheCodeForgeAndTheTracker(t *testing.T) {
 		t.Error("a Connector loaded without a usable row")
 		return nil, errors.New("unexpected load")
 	}))
-	for name, plain := range map[string]func(*backendrows.Row){
-		"no row":     nil,
-		"shadow row": func(r *backendrows.Row) { r.Shadow, r.ShadowEvery = true, 1 },
-	} {
-		t.Run(name, func(t *testing.T) {
-			if plain != nil {
-				useForgejoRow(t, srv.URL, plain)
-			}
-			cf, err := buildForge(srv, "squash")
-			if !errors.Is(err, forgejo.ErrNoConnectorRow) || cf != nil {
-				t.Errorf("buildForge = (%v, %v), want (nil, ErrNoConnectorRow)", cf, err)
-			}
-			tr, err := buildTracker(srv)
-			if !errors.Is(err, forgejo.ErrNoConnectorRow) || tr != nil {
-				t.Errorf("buildTracker = (%v, %v), want (nil, ErrNoConnectorRow)", tr, err)
-			}
-		})
+	cf, err := buildForge(srv, "squash")
+	if !errors.Is(err, forgejo.ErrNoConnectorRow) || cf != nil {
+		t.Errorf("buildForge = (%v, %v), want (nil, ErrNoConnectorRow)", cf, err)
+	}
+	tr, err := buildTracker(srv)
+	if !errors.Is(err, forgejo.ErrNoConnectorRow) || tr != nil {
+		t.Errorf("buildTracker = (%v, %v), want (nil, ErrNoConnectorRow)", tr, err)
 	}
 }
 

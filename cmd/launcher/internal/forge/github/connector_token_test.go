@@ -23,11 +23,6 @@ func useGithubRow(t *testing.T, b *tokenBackend) {
 // useGithubRowAt is useGithubRow for a backend at host.
 func useGithubRowAt(t *testing.T, host string) { applyGithubRow(t, host, func(*backendrows.Row) {}) }
 
-// useGithubRowShadow is useGithubRowAt with the row in shadow mode.
-func useGithubRowShadow(t *testing.T, host string) {
-	applyGithubRow(t, host, func(r *backendrows.Row) { r.Shadow, r.ShadowEvery = true, 1 })
-}
-
 func applyGithubRow(t *testing.T, host string, adjust func(*backendrows.Row)) {
 	t.Helper()
 	path, routes := githubConnectorRoutes(t, host, connectorRepo)

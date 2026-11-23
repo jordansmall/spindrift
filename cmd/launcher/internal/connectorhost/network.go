@@ -138,9 +138,6 @@ type AuditEntry struct {
 	Size      int64    `json:"size"`
 	Decision  Decision `json:"decision"`
 	Reason    string   `json:"reason,omitempty"`
-	// Shadow marks an entry a sampled shadow Connector recorded beside the
-	// native backend; it is omitted otherwise, so other entries are unchanged.
-	Shadow bool `json:"shadow,omitempty"`
 	// RateLimit is RateLimitPrimary or RateLimitSecondary when a 403 or 429 carries a
 	// rate-limit signal, else empty; see rateLimitKind.
 	RateLimit string `json:"rate_limit,omitempty"`
@@ -207,15 +204,9 @@ func (n *Network) recordFailure(d Decision, err error) {
 	_ = n.record(AuditEntry{Connector: n.Name, Decision: d, Reason: err.Error()})
 }
 
-// record stamps e with the Network's Shadow mark, writes it, then hands it to
-// Observe, outside the audit log's mutex.
+// record writes e to the audit log.
 func (n *Network) record(e AuditEntry) error {
-	e.Shadow = n.Shadow
-	err := n.Audit.Record(e)
-	if n.Observe != nil {
-		n.Observe(e)
-	}
-	return err
+	return n.Audit.Record(e)
 }
 
 // DeclaredHosts returns the distinct hosts of the Connector's Route table as
@@ -267,10 +258,6 @@ type Network struct {
 	Client *http.Client
 	// Audit receives one entry per request; required.
 	Audit *AuditLog
-	// Shadow stamps every audit entry as a shadow Connector's.
-	Shadow bool
-	// Observe, when non-nil, is called with each entry after it is recorded.
-	Observe func(AuditEntry)
 	// requestTimeout bounds one http_request; zero means httpRequestTimeout.
 	requestTimeout time.Duration
 }

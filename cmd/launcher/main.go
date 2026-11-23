@@ -2049,7 +2049,7 @@ var verbHandlers = map[string]verbHandler{
 			fmt.Fprintln(stderr, "flag --self-contained is only valid for the research subcommand")
 			return 1
 		}
-		lc, err := bootstrapShadowed(stdout, !parsed.noBuild, dispatchkind.Work, false)
+		lc, err := bootstrap(stdout, !parsed.noBuild, dispatchkind.Work, false)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
 			return bootstrapExitCode(err)
@@ -2061,7 +2061,7 @@ var verbHandlers = map[string]verbHandler{
 	},
 	"research": func(args []string, stdout, stderr io.Writer) int {
 		parsed := parseIssuePositionals(args)
-		lc, err := bootstrapShadowed(stdout, !parsed.noBuild, dispatchkind.Research, parsed.selfContained)
+		lc, err := bootstrap(stdout, !parsed.noBuild, dispatchkind.Research, parsed.selfContained)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
 			return bootstrapExitCode(err)
@@ -2237,8 +2237,8 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 
 // sandboxVerdict fails a run that ended well (it dispatched, or found nothing
 // to dispatch) but whose Connector sandbox did not start. A load site is free
-// to swallow that error (a read shadow only dirties its summary, a probe falls
-// to its next answer), so the run's result is not left to them.
+// to swallow that error (a probe falls to its next answer), so the run's
+// result is not left to them.
 func sandboxVerdict(code int, stderr io.Writer) int {
 	switch exitcode.Dispatch(code) {
 	case exitcode.Dispatched, exitcode.QueueEmpty, exitcode.NoneDispatchable:

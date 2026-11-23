@@ -201,9 +201,7 @@ func EncodeSpindriftOp(op SpindriftOp) string {
 // reports each mismatch. Like PromptHashes it is Box-reported, so untrusted.
 // Check is "events" (one line's decoded events), "resolveExit" (no LineNo, no
 // Line) or "resultEvent" (no LineNo; Line is the native result text). Native
-// and Shadow are each side's JSON-encoded result. A backend read shadow uses
-// the same op, with Check the read operation's name and Line its JSON-encoded
-// inputs.
+// and Shadow are each side's JSON-encoded result.
 type ShadowDivergence struct {
 	Driver string          `json:"driver"`
 	Check  string          `json:"check"`
@@ -219,12 +217,10 @@ type ShadowDivergence struct {
 // closed mid-run and the counts are those so far. Diverged counts every
 // mismatch, Recorded only those emitted as shadow_divergence ops.
 //
-// A backend read shadow counts compared calls rather than lines (so
-// *_ns_per_line is per call) and alone fills Forbidden (non-rate-limit 403s),
-// RateLimited, SecondaryRateLimited, Skipped (sampled calls dropped rather
-// than delay the native path), and the Sandbox* fields: run-wide totals for
-// the Connector sandbox all the run's Connectors share, set only when one
-// started. Replayed is set only by a replay of an archived Pass log.
+// Forbidden, RateLimited, SecondaryRateLimited, Skipped and the Sandbox*
+// fields were filled only by the retired backend read shadow; nothing writes
+// them now, but the keys stay for archived summaries. Replayed is set only by
+// a replay of an archived Pass log.
 //
 // The Filter* fields cover the stream-filter check, set only for a Driver that
 // filters its stdout: FilterRan is true once the whole raw copy was fed to both

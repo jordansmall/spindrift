@@ -59,7 +59,7 @@ func TestInstallConnectorSandbox_DemandTrackerLoadGoesToTheSandbox(t *testing.T)
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal([]backendrows.Row{{
-		Name: "github", Module: module, CredentialEnv: connectorTokenEnv, Primary: true,
+		Name: "github", Module: module, CredentialEnv: connectorTokenEnv,
 		Routes: []connectorhost.Route{{Method: "GET", Host: "api.github.com", Path: "/repos/{repo}/issues"}},
 	}})
 	if err != nil {

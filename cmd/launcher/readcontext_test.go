@@ -223,15 +223,15 @@ credential = { env = "`+envName+`" }
 	}
 }
 
-// A primary forgejo row whose Connector cannot load fails newReadContext with
+// A forgejo row whose Connector cannot load fails newReadContext with
 // the load error rather than panicking: every read-only command (doctor,
 // reconcile, research) and daemon child builds its Code Forge through here.
-func TestNewReadContext_PrimaryForgejoLoadFailure_ReturnsError(t *testing.T) {
+func TestNewReadContext_ForgejoLoadFailure_ReturnsError(t *testing.T) {
 	setFullyLocalEnv(t)
 	setKnob(t, "CODE_FORGE", "forgejo")
 	t.Setenv("FORGEJO_TOKEN", "tok")
 	t.Cleanup(backendrows.Snapshot())
-	doc := credentialRowDoc("forgejo", `,"primary":true`)
+	doc := credentialRowDoc("forgejo", "")
 	if err := backendrows.Use([]byte(doc), func(string) string { return "" }); err != nil {
 		t.Fatal(err)
 	}

@@ -71,9 +71,8 @@ type Strategy struct {
 	NewCodeForge    func(Shared, Lookup, forge.SanitizedParent, forge.IssueTracker) (forge.CodeForge, error)
 	NewLedger       func(Shared, Lookup) (LedgerSite, error)
 
-	// ConnectorRouted marks an adapter that reads through its non-shadow
-	// backend row's Connector. Without it a non-shadow row stays registered
-	// but unused.
+	// ConnectorRouted marks an adapter that reads through its backend row's
+	// Connector. Without it a row stays registered but unused.
 	ConnectorRouted bool
 	// LandedBanner is the clause the all-delivered banner puts after "==> all
 	// agents finished — ", for a backend that is a Code Forge. Nil on a
@@ -262,20 +261,19 @@ func ReplaceRegistryForTest(ss []Strategy) (restore func()) {
 }
 
 // ForgeReadsThroughConnector reports whether the Code Forge of the backend row
-// named name is built from its Connector: the row is primary, or the adapter
-// routes a non-shadow row itself (ConnectorRouted). The launcher gates
-// credential resolution on it. It takes the row's fields, not a backendrows.Row,
-// so backendkit stays out of the Connector sandbox's import closure.
-func ForgeReadsThroughConnector(name string, primary bool) bool {
+// named name is built from its Connector (the adapter's ConnectorRouted). The
+// launcher gates credential resolution on it. It takes the row's name, not a
+// backendrows.Row, so backendkit stays out of the Connector sandbox's import
+// closure.
+func ForgeReadsThroughConnector(name string) bool {
 	// An unknown name yields the zero Strategy: not routed.
 	strat, _ := ByName(name)
-	return primary || strat.ConnectorRouted
+	return strat.ConnectorRouted
 }
 
 // TrackerReadsThroughConnector reports whether the issue tracker of the
-// backend row named name reads through its Connector: the row is primary, or
-// the adapter routes a non-shadow row itself.
-func TrackerReadsThroughConnector(name string, primary bool) bool {
+// backend row named name reads through its Connector.
+func TrackerReadsThroughConnector(name string) bool {
 	strat, _ := ByName(name)
-	return primary || strat.ConnectorRouted
+	return strat.ConnectorRouted
 }

@@ -244,7 +244,7 @@ func TestNoCapabilityProbeOutsideResolver(t *testing.T) {
 			return nil
 		}
 		sawSettle = sawSettle || rel == "internal/settle/ready.go"
-		sawMain = sawMain || rel == "readshadow.go"
+		sawMain = sawMain || rel == "bootstrap.go"
 		for _, s := range capabilityProbeSites(t, path, nil, caps, fileExemptions{probeExemptions[rel], declExemptions[rel]}) {
 			t.Errorf("%s: CodeForge capability probed outside the resolver; read it off forge.ResolveCodeForge / Capabilities instead", s)
 		}
@@ -257,7 +257,7 @@ func TestNoCapabilityProbeOutsideResolver(t *testing.T) {
 		t.Fatalf("walk under %s never reached internal/settle/ready.go; the walk is inert", root)
 	}
 	if os.Getenv("SPINDRIFT_PROBE_GUARD_FULL_TREE") != "" && !sawMain {
-		t.Fatalf("walk under %s never reached readshadow.go in package main; the full tree is not copied", root)
+		t.Fatalf("walk under %s never reached bootstrap.go in package main; the full tree is not copied", root)
 	}
 }
 

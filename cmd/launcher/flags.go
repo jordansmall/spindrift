@@ -413,9 +413,8 @@ var globalSecretCmdTemplate string
 func connectorCredentialNeededThisRun(row backendrows.Row) bool {
 	isForge := resolvedKnob("CODE_FORGE") == row.Name
 	isTracker := resolvedKnob("ISSUE_TRACKER") == row.Name
-	return (row.Shadow && (isForge || isTracker)) ||
-		(isForge && backendkit.ForgeReadsThroughConnector(row.Name, row.Primary)) ||
-		(isTracker && backendkit.TrackerReadsThroughConnector(row.Name, row.Primary))
+	return (isForge && backendkit.ForgeReadsThroughConnector(row.Name)) ||
+		(isTracker && backendkit.TrackerReadsThroughConnector(row.Name))
 }
 
 // applyConnectorCredentials resolves each backend row's credential env the way

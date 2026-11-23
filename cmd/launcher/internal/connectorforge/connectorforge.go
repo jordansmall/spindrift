@@ -107,8 +107,8 @@ type guestCall func(ctx context.Context, method string, params, result any) erro
 
 // reads serves the PR reads from a Connector and leaves everything else to the
 // embedded native adapter. It hides the native adapter's optional
-// capabilities (forge.CIRunReporter and the like); only the read shadow builds
-// one in production, so no authoritative path loses them.
+// capabilities (forge.CIRunReporter and the like); only tests wrap a native
+// adapter in it, so no production path loses them.
 type reads struct {
 	forge.PRForge
 	call    guestCall
