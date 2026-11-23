@@ -853,6 +853,21 @@ let
     };
   };
   templatePkgs = templateOutputs.packages.${system};
+
+  # `templates.core-connector`: the same direct-`outputs` call, with core and
+  # the github Connector wired to this checkout in place of their github inputs.
+  coreConnectorTemplateOutputs =
+    let
+      core = import ../core;
+    in
+    (import ../templates/core-connector/flake.nix).outputs {
+      inherit nixpkgs flake-parts;
+      self = {
+        outPath = ../templates/core-connector;
+      };
+      spindrift = core;
+      spindrift-github = (import ../connectors/github/flake.nix).outputs { inherit core; };
+    };
 in
 {
   inherit
@@ -928,6 +943,7 @@ in
     consumerPkgs
     consumerFormatter
     templatePkgs
+    coreConnectorTemplateOutputs
     harnessNoRevision
     ;
 }

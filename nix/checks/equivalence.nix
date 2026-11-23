@@ -24,6 +24,7 @@ let
     minimalDirect
     consumerPkgs
     templatePkgs
+    coreConnectorTemplateOutputs
     harnessNoRevision
     ;
   # Shared by the mkharness-image-attr-name / mkharness-daemon-app-refs checks
@@ -37,6 +38,7 @@ let
   # comment): exact jq matches on the `artifacts` section against what the
   # runtime's row renders, and absence of what only the other rows render.
   runners = import ../../lib/runners/index.nix { };
+  linuxSystem = (import ../../lib/nixpkgs-shared.nix).linuxTwin.${system};
   preambles = import ../../lib/preambles.nix;
   runArtifactsAssertion =
     runtime:
@@ -264,6 +266,38 @@ in
         # Same config as the template ⇒ identical launcher commands.
         [ "$templateSpindrift" = "$directSpindrift" ] \
           || { echo "spindrift mismatch: $templateSpindrift != $directSpindrift" >&2; exit 1; }
+        touch $out
+      '';
+
+  # The `templates.core-connector` starter: built from core plus the github
+  # Connector alone, its launcher is complete and its run input document
+  # carries the github backend row and no forgejo one.
+  core-connector-template-fixture =
+    pkgs.runCommand "core-connector-template-fixture"
+      {
+        nativeBuildInputs = [ pkgs.jq ];
+        # Context discarded, as in mkHarness, so the check does not build the
+        # image. The image package exists only on Linux; read the Linux twin's,
+        # the same image a darwin launcher embeds.
+        imagePath = builtins.unsafeDiscardStringContext (
+          toString coreConnectorTemplateOutputs.packages.${linuxSystem}.agent-image
+        );
+      }
+      ''
+        spindriftCmd=${coreConnectorTemplateOutputs.packages.${system}.spindrift}/bin/spindrift
+
+        ! grep -q '@imagePath@' "$spindriftCmd" \
+          || { echo "unsubstituted @imagePath@ in $spindriftCmd" >&2; exit 1; }
+        grep -q -- '--input' "$spindriftCmd"
+
+        ${fixtures.runInputDocOf coreConnectorTemplateOutputs.apps.${system}.default.program}
+        grep -q "$imagePath" "$doc"
+        case "$imagePath" in
+          /nix/store/*spindrift*) : ;;
+          *) echo "unexpected image path: $imagePath" >&2; exit 1 ;;
+        esac
+        jq -e '[.backends[] | select(.credentialKnob == "githubConnectorToken")] | length == 1' "$doc"
+        jq -e '[.backends[] | select(.credentialKnob == "forgejoConnectorToken")] | length == 0' "$doc"
         touch $out
       '';
 

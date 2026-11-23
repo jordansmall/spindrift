@@ -109,6 +109,13 @@
           description = "spindrift consumer starter: flake + prompts + toolchain + harness.env.example";
         };
 
+        # Runs on core plus the github Connector alone; the forgejo row the
+        # batteries flake adds for every Consumer is dropped.
+        flake.templates.core-connector = {
+          path = ./templates/core-connector;
+          description = "spindrift consumer on core plus the github Connector, without the batteries flake (no forgejo row)";
+        };
+
         perSystem =
           {
             system,
