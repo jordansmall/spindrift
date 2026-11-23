@@ -315,3 +315,22 @@ func TestConnectorTracker_CountReadySurfacesJirasRejection(t *testing.T) {
 		})
 	}
 }
+
+// Core reads the Connector's error class to decide whether to retry, so a
+// failed issue read must reach it as a Connector-reported Transient.
+func TestConnectorTracker_FailedIssueReadReportsTransient(t *testing.T) {
+	for _, fl := range connectorFlavours {
+		t.Run(fl.name, func(t *testing.T) {
+			h := newConnectorHarness(t, fl.cloud)
+			h.SeedIssue(forge.Issue{Number: "PROJ-1", Title: "t"})
+			h.FailNativeDeps("PROJ-1") // makes the issue GET itself answer 500
+			_, err := h.tr.Issue("PROJ-1")
+			if err == nil {
+				t.Fatal("Issue: want an error from the failed read")
+			}
+			if got := connectorhost.ErrorClass(err); got != connectorhost.Transient {
+				t.Errorf("ErrorClass(%v) = %q, want %q", err, got, connectorhost.Transient)
+			}
+		})
+	}
+}

@@ -87,6 +87,8 @@ type jiraHarness struct {
 	// transitionsFail makes GET .../transitions answer 500.
 	transitionsFail bool
 
+	// commentStatus is the status POST .../comment answers with; 0 means 201.
+	commentStatus int
 	// myselfStatus is the status GET /myself answers with; 0 means 200.
 	myselfStatus int
 	// searchReject, when set, is the message every search and count answers 400
@@ -367,6 +369,10 @@ func (h *jiraHarness) handle(w http.ResponseWriter, r *http.Request) {
 		rec, ok := h.issues[num]
 		if !ok {
 			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if h.commentStatus != 0 {
+			w.WriteHeader(h.commentStatus)
 			return
 		}
 		var c jiraWireComment
