@@ -22,8 +22,12 @@ let
   structuralOptionsDoc = import ../lib/structural-options-doc.nix;
   structuralPaths = import ../lib/structural-paths.nix;
   extraOptionPaths = import ../lib/extra-option-paths.nix;
-  consumerStanzas = (import ./consumer-stanzas.nix { inherit (pkgs) lib; }).stanzas;
+  composedStanzas = import ./consumer-stanzas.nix { inherit (pkgs) lib; };
+  consumerStanzas = composedStanzas.stanzas;
   envExample = renderers.renderHarnessEnvExample schema consumerStanzas;
+  coreConnectorEnvExample = renderers.renderHarnessEnvExample schema (
+    composedStanzas.templateStanzas ../templates/core-connector
+  );
   flagTable = renderers.renderFlagTableGo schema;
   knobsFile = renderers.renderKnobsGo schema;
   loadKnobsFile = renderers.renderLoadKnobsGo schema;
@@ -174,6 +178,7 @@ pkgs.writeShellApplication {
     ${writeBetweenShellFn}
 
     ${writeGenerated "templates/default/harness.env.example" envExample}
+    ${writeGenerated "templates/core-connector/harness.env.example" coreConnectorEnvExample}
     ${writeGenerated "cmd/launcher/internal/inputdoc/flagtable_gen.go" flagTable}
     ${writeGenerated "cmd/launcher/internal/inputdoc/knobs_gen.go" knobsFile}
     gofmt -w "$root/cmd/launcher/internal/inputdoc/knobs_gen.go"
