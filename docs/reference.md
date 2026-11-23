@@ -3618,15 +3618,19 @@ This is protocol version **0.3.0**. The host is
   because the PR is not mergeable as it stands: a conflict, a missing required
   check or review, a draft, closed or merged PR), `permanent` (anything
   else). A missing `class` (a 0.2 Connector) or an unknown one reads as
-  `permanent`: core never retries a class it does not know. Core retries
-  `transient` with linear backoff (in `connectorforge`) and returns every
-  other class at once, except that a `not-mergeable` merge refusal makes
-  `Merge` re-read the PR to tell a conflict from a check block (see the
-  forge axis); `rate-limited` stays with core's own rate-limit holds. The
-  host surfaces the class on a `*CallError` under `ErrCall`, and
-  `ErrorClass(err)` reads it (empty for a host-side failure such as
-  `ErrBudget`). The Go SDK's `connector.Errorf(class, ...)` attaches a
-  class, `ClassForStatus` maps an HTTP status to one, and an error with no
+  `permanent`: core never retries a class it does not know. Tracker and
+  forge calls share one path (`connectorcall`): core retries `transient`
+  with linear backoff, except on each axis's non-idempotent methods
+  (`forge.merge`, `forge.openPR`, `forge.comment`; `tracker.comment`,
+  `tracker.fileIssue`, `tracker.createLabel`, `tracker.transition`), which
+  it calls once. It returns every other class at once, mapping
+  `rate-limited` to `forge.ErrRateLimit` for core's own rate-limit holds
+  and `auth` to `forge.ErrAuthFailure`; a `not-mergeable` merge refusal
+  makes `Merge` re-read the PR to tell a conflict from a check block (see
+  the forge axis). The host surfaces the class on a `*CallError` under
+  `ErrCall`, and `ErrorClass(err)` reads it (empty for a host-side failure
+  such as `ErrBudget`). The Go SDK's `connector.Errorf(class, ...)` attaches
+  a class, `ClassForStatus` maps an HTTP status to one, and an error with no
   class reports `permanent`.
 - **Limits.** Every call into the module runs under a wall-clock budget:
   30 seconds for `_initialize`, 5 seconds for the handshake, and one budget
