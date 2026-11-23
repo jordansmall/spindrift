@@ -381,14 +381,10 @@ func renderAgentTable(w io.Writer, records []dispatchrecord.Record) error {
 	return tw.Flush()
 }
 
-// statsWarnSpaces keeps a warning's word breaks, which SanitizeLine would
-// delete outright.
-var statsWarnSpaces = strings.NewReplacer("\t", " ", "\r", " ", "\n", " ")
-
 // statsWarnText sanitizes a warning's error text. It replaces \n rather than
 // keeping it, so error text cannot forge extra warning lines.
 func statsWarnText(s string) string {
-	return driverkit.SanitizeLine(statsWarnSpaces.Replace(s))
+	return driverkit.SpaceLine(s)
 }
 
 // statsKeyText makes an untrusted record-derived key (role, agent, model, a
