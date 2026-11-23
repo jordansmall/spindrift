@@ -6,7 +6,8 @@
 // primitive; "minimal" sets none of the optional PR primitives (draft PR
 // creation, auto-merge, CI run, branch protection, probe);
 // "undeclared-merge" merges through a path outside the repo subtree the Route
-// table declares, which the host refuses unsent.
+// table declares, which the host refuses unsent; "broken-branches" always errors
+// from branchExists.
 package main
 
 import (
@@ -174,6 +175,9 @@ func autoMergeAllowed(t forge.Target) (bool, error) {
 
 // The branch rides in the path raw: the host refuses an escaped path.
 func branchExists(t forge.Target, branch string) (bool, error) {
+	if mode == "broken-branches" {
+		return false, connector.Errorf(connector.Permanent, "branchExists is broken")
+	}
 	resp, err := connector.HTTPRequest(connector.Request{Method: http.MethodGet, URL: repoURL(t) + "/branches/" + branch})
 	if err != nil {
 		return false, connector.Errorf(connector.Transient, "forge backend unreachable: %w", err)

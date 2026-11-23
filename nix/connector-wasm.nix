@@ -51,7 +51,7 @@ pkgs.runCommand "connector-wasm-fixtures" { nativeBuildInputs = [ pkgs.go ]; } '
   for mode in host method path malformed write-path write-oversize flood; do
     build network-$mode.wasm -ldflags=-X=main.mode=$mode ./network
   done
-  for mode in minimal undeclared-merge; do
+  for mode in minimal undeclared-merge broken-branches; do
     build forge-pr-$mode.wasm -ldflags=-X=main.mode=$mode ./forgepr
   done
   build tracker-violate.wasm -ldflags=-X=main.mode=violate ./tracker
