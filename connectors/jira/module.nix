@@ -15,6 +15,10 @@ let
   routes = import ./routes.nix;
 in
 {
+  # The batteries root does not carry jira; the key lets a Consumer that imports
+  # it twice, or through two paths, dedup instead of failing "registered twice".
+  key = "spindrift-connector-jira";
+
   # Depends on the core it was handed; the module system dedups by path, so a
   # Consumer that imports the same core module is unaffected.
   imports = [ core.flakeModules.default ];

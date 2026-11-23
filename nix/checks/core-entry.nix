@@ -67,6 +67,16 @@ let
         ''
       )
     );
+
+  # A Consumer's jira input follows its `spindrift` input, so the Connector's
+  # `core` is the batteries root; two `lib.connector` calls give two distinct
+  # module values, which only the module's `key` can dedup.
+  rootAsCore = {
+    inherit (import ../../core) lib;
+    flakeModules.default = rootFlakeModule;
+  };
+  jiraViaRoot = (import ../../connectors/jira).lib.connector { core = rootAsCore; };
+  jiraViaRootAgain = (import ../../connectors/jira).lib.connector { core = rootAsCore; };
 in
 {
   # Issue #7139: a Consumer importing the root's `flakeModules.default` and
@@ -102,6 +112,23 @@ in
     credentialKnob = "forgejoConnectorToken";
     modes = [ "shadow" ];
   };
+
+  # Issue #7417: the batteries root does not carry jira, so a Consumer imports
+  # it from its own flake input; importing it twice must not fail.
+  core-entry-jira-connector-module-imported-twice =
+    pkgs.runCommand "core-entry-jira-connector-module-imported-twice"
+      { nativeBuildInputs = [ pkgs.jq ]; }
+      ''
+        ${fixtures.runInputDocOf
+          (fixtures.moduleConsumerWith [
+            rootFlakeModule
+            jiraViaRoot.flakeModule
+            jiraViaRootAgain.flakeModule
+          ]).apps.${system}.default.program
+        }
+        jq -e '[.backends[] | select(.credentialKnob == "jiraConnectorToken")] | length == 1' "$doc"
+        touch $out
+      '';
 
   core-entry-root-and-connector-module-dedup = rootAndConnectorModuleDedup {
     name = "core-entry-root-and-connector-module-dedup";
