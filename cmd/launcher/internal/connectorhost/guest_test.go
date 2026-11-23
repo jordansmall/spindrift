@@ -3,9 +3,11 @@ package connectorhost_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/driver/driverkit"
 )
 
 // uleb encodes v as unsigned LEB128, which wasm uses for every size and index.
@@ -148,4 +150,35 @@ func loadWasmUsing(t *testing.T, ld loader, wasm []byte) *connectorhost.Connecto
 	}
 	t.Cleanup(func() { _ = c.Close(context.Background()) })
 	return c
+}
+
+// A wasm guest's hostile error text is capped and stripped by every engine, not
+// only on the in-process stub path.
+func TestGuestErrorTextIsCappedAndSanitisedPerEngine(t *testing.T) {
+	// The call request lands at allocOff, so the response must fit below it.
+	hostile := "\x1b[31mred\x1b[0m line\r\nnul\x00rlo‮tail" + strings.Repeat("A", 3000)
+	resp, err := json.Marshal(map[string]string{"error": hostile, "class": "auth"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wasm := answeringGuest(nil, string(resp))
+	for engine, ld := range loadersFor(t) {
+		t.Run(engine, func(t *testing.T) {
+			c := loadWasmUsing(t, ld, wasm)
+			err := c.Call(context.Background(), "m", nil, nil)
+			if got := connectorhost.ErrorClass(err); got != connectorhost.Auth {
+				t.Errorf("ErrorClass = %q, want %q", got, connectorhost.Auth)
+			}
+			text := err.Error()
+			if strings.ContainsAny(text, "\x1b\r\x00‮") {
+				t.Errorf("error text keeps a control character: %q", text)
+			}
+			if !strings.HasSuffix(text, driverkit.CapMarker) {
+				t.Errorf("error text %q lacks the truncation marker", text)
+			}
+			if len(text) > 1024 {
+				t.Errorf("error text is %d bytes", len(text))
+			}
+		})
+	}
 }

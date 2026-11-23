@@ -1,6 +1,14 @@
 package connectorhost
 
-import "errors"
+import (
+	"errors"
+
+	"spindrift.dev/launcher/internal/driver/driverkit"
+)
+
+// maxErrorText bounds the Connector-supplied error text core prints, records in
+// the Connector's log and may post to a PR; the response cap alone is megabytes.
+const maxErrorText = 256
 
 // Class is the canonical error class a Connector reports with a failed call,
 // on every primitive of both axes. Core decides on retries from it.
@@ -52,5 +60,8 @@ func (r *response) callError() *CallError {
 	default:
 		c = Permanent
 	}
-	return &CallError{Class: c, Message: *r.Error}
+	return &CallError{Class: c, Message: capText(*r.Error)}
 }
+
+// capText caps and sanitises guest text that a core-built error carries.
+func capText(s string) string { return driverkit.CapLine(s, maxErrorText) }
