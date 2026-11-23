@@ -188,6 +188,7 @@ empty `skills` default.
 
 After editing `lib/env-schema.nix` (or a registry row's `knobs`), regenerate
 the artifacts it drives — `templates/default/harness.env.example`,
+`templates/core-connector/harness.env.example`,
 `cmd/launcher/internal/inputdoc/flagtable_gen.go`,
 `cmd/launcher/internal/inputdoc/knobs_gen.go`,
 `cmd/launcher/internal/inputdoc/loadknobs_gen.go`, `docs/flake-options.md`,
@@ -388,6 +389,10 @@ and in the in-box `box` program; the only bash left is the generated shim that
   check when you add a guarantee.
 - **`templates/default/`** — the consumer starter (`nix flake init -t`).
   spindrift dogfoods this very template, so changes here are load-bearing.
+- **`templates/core-connector/`** — the core-only starter
+  (`nix flake init -t github:jordansmall/spindrift#core-connector`): core
+  plus the github Connector, with its own regen-generated
+  `harness.env.example`.
 
 A few invariants worth calling out:
 

@@ -188,9 +188,20 @@ example. Pin the input in `flake.lock` so every run uses the same version.
 
 To build against core alone, without the root flake's dogfood inputs, use
 `spindrift.url = "github:jordansmall/spindrift?dir=core";`. It exports the
-same `lib.mkHarness`, `lib.rosterLib` and `flakeModules.default`, so the
-`imports` line stays the same. The root URL above keeps working unchanged,
-and it is still what most Consumers want.
+same `lib.mkHarness`, `lib.rosterLib` and `flakeModules.default`, but the
+`imports` line differs: the root module adds the github and forgejo backend
+rows, and core's module carries neither. A core-only Consumer on github
+also takes the github Connector subflake as an input, with its `core`
+following your `spindrift`, and imports its module too. The core-only path
+drops the forgejo row; a forgejo Consumer adds that Connector the same way.
+The `core-connector` template is the complete example:
+
+```sh
+nix flake init -t github:jordansmall/spindrift#core-connector
+```
+
+The root URL above keeps working unchanged, and it is still what most
+Consumers want.
 
 ## Before you deploy
 
