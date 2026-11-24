@@ -6,6 +6,7 @@ package primaryrecord
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/hostpaths"
 )
 
@@ -49,6 +51,7 @@ func OpenFile(name string) (io.Writer, func(), error) {
 	return f, func() { _ = f.Close() }, nil
 }
 
+// logPath resolves name under the host log directory of the working directory.
 func logPath(name string) (string, error) {
 	pwd, err := os.Getwd()
 	if err != nil {
@@ -87,10 +90,12 @@ func AuditFile(backend string) (io.Writer, error) {
 
 // Note appends the error a primary-routed operation returned to backend's
 // .log and returns err unchanged. A nil err records nothing. A record that
-// cannot be written goes to stderr instead, so the failure is not lost.
+// cannot be written goes to stderr instead, so the failure is not lost. A lost
+// claim race records nothing: forge.ErrAlreadyClaimed is core policy, not a
+// Connector fault, and an empty .log is what marks a clean run.
 func Note(backend, op string, err error) error {
-	if err == nil {
-		return nil
+	if err == nil || errors.Is(err, forge.ErrAlreadyClaimed) {
+		return err
 	}
 	line, _ := json.Marshal(struct {
 		Op    string `json:"op"`

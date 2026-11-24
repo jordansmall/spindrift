@@ -16,6 +16,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/git"
 	"spindrift.dev/launcher/internal/gitexec"
+	"spindrift.dev/launcher/internal/primaryrecord"
 )
 
 // ErrMergeMethod is why a forgejo row refuses a MERGE_METHOD
@@ -53,7 +54,8 @@ func connectorRow() (backendrows.Row, error) {
 // operation. Every failure is returned as is: the forge never falls back to a
 // native adapter. The Connector authorizes with the row's credential; git
 // keeps the native token. The Connector and its audit file live for the
-// process.
+// process. A failed load or compose, and each failed Connector call of the
+// built forge, is recorded in the primaryrecord .log.
 func newConnectorCodeForge(row backendrows.Row, s backendkit.Shared, k Knobs) (forge.CodeForge, error) {
 	if MergeStyle(s.MergeMethod) != "rebase" {
 		return nil, fmt.Errorf("%w (got %q)", ErrMergeMethod, s.MergeMethod)
@@ -61,15 +63,18 @@ func newConnectorCodeForge(row backendrows.Row, s backendkit.Shared, k Knobs) (f
 	row.Routes = connectortracker.Routes(row.Routes, s.RepoSlug)
 	conn, err := loadRowConnector(context.Background(), row, backendrows.Options{Client: connectorClient, Getenv: credentialGetenv(row, k)})
 	if err != nil {
+		recordFailure("load the Connector", err)
 		return nil, err
 	}
 	cf, _, err := connectorforge.Compose(conn, connectorforge.Target{API: strings.TrimSuffix(k.ForgejoBaseURL, "/"), Repo: s.RepoSlug}, connectorforge.Git{
 		Credential: GitCredential(k.ForgejoToken),
+		Note:       recordFailure,
 		Plumbing: func(cloneURL string, cred gitexec.Credential) forge.CodeForge {
 			return git.NewGitClient(cloneURL, s.BaseBranch, s.GitUserName, s.GitUserEmail, git.WithCredential(cred))
 		},
 	})
 	if err != nil {
+		recordFailure("compose the Code Forge", err)
 		_ = conn.Close(context.Background())
 		return nil, err
 	}
@@ -86,4 +91,9 @@ func credentialGetenv(row backendrows.Row, k Knobs) func(string) string {
 		}
 		return os.Getenv(name)
 	}
+}
+
+// recordFailure records a Connector failure in the primaryrecord .log.
+func recordFailure(op string, err error) {
+	_ = primaryrecord.Note(backend.Forgejo.Name, op, err)
 }

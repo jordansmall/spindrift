@@ -2,12 +2,14 @@ package primaryrecord_test
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/primaryrecord"
 )
@@ -40,6 +42,22 @@ func TestNote_AppendsOpAndError(t *testing.T) {
 	}
 	if want := `{"op":"search","error":"boom"}` + "\n"; string(raw) != want {
 		t.Errorf("log = %q, want %q", raw, want)
+	}
+}
+
+// A lost claim race is core policy, not a Connector fault, so it leaves no
+// .log: an empty one is what marks a clean run.
+func TestNote_LostClaimRaceRecordsNothing(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	lost := fmt.Errorf("claim #7: %w", forge.ErrAlreadyClaimed)
+
+	if got := primaryrecord.Note("jira", "claim", lost); got != lost {
+		t.Errorf("Note = %v, want the error unchanged", got)
+	}
+	logFile := filepath.Join(hostpaths.LogDir(dir), primaryrecord.Name("jira", ".log"))
+	if _, err := os.Stat(logFile); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a lost claim race wrote %s (stat err %v)", logFile, err)
 	}
 }
 
