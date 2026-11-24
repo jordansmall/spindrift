@@ -70,7 +70,7 @@ func writeHandlers(w Writer) ([]string, map[string]method) {
 
 	if w.Transition != nil {
 		caps = append(caps, CapTransition)
-		m[CapTransition] = func(params json.RawMessage) (any, error) {
+		m[methodTransition] = func(params json.RawMessage) (any, error) {
 			var p transitionParams
 			if err := unmarshal(params, &p); err != nil {
 				return nil, err
@@ -87,7 +87,7 @@ func writeHandlers(w Writer) ([]string, map[string]method) {
 	}
 	if w.EditLabels != nil {
 		caps = append(caps, CapEditLabels)
-		m[CapEditLabels] = func(params json.RawMessage) (any, error) {
+		m[methodEditLabels] = func(params json.RawMessage) (any, error) {
 			var p editLabelsParams
 			if err := unmarshal(params, &p); err != nil {
 				return nil, err
@@ -97,7 +97,7 @@ func writeHandlers(w Writer) ([]string, map[string]method) {
 	}
 	if w.Comment != nil {
 		caps = append(caps, CapComment)
-		m[CapComment] = func(params json.RawMessage) (any, error) {
+		m[methodComment] = func(params json.RawMessage) (any, error) {
 			var p commentParams
 			if err := unmarshal(params, &p); err != nil {
 				return nil, err
@@ -107,7 +107,7 @@ func writeHandlers(w Writer) ([]string, map[string]method) {
 	}
 	if w.FileIssue != nil {
 		caps = append(caps, CapFileIssue)
-		m[CapFileIssue] = func(params json.RawMessage) (any, error) {
+		m[methodFileIssue] = func(params json.RawMessage) (any, error) {
 			var p fileIssueParams
 			if err := unmarshal(params, &p); err != nil {
 				return nil, err
@@ -123,7 +123,7 @@ func writeHandlers(w Writer) ([]string, map[string]method) {
 	}
 	if w.CloseIssue != nil {
 		caps = append(caps, CapCloseIssue)
-		m[CapCloseIssue] = func(params json.RawMessage) (any, error) {
+		m[methodCloseIssue] = func(params json.RawMessage) (any, error) {
 			var p closeIssueParams
 			if err := unmarshal(params, &p); err != nil {
 				return nil, err

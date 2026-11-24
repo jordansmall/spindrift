@@ -311,14 +311,14 @@ func handlers(r Reader) ([]string, map[string]method) {
 	}
 
 	for _, c := range []struct {
-		name string
-		fn   func(Target, string) ([]string, error)
-	}{{capNativeDeps, r.NativeDeps}, {capBlocks, r.Blocks}} {
+		name, method string
+		fn           func(Target, string) ([]string, error)
+	}{{capNativeDeps, methodNativeDeps, r.NativeDeps}, {capBlocks, methodBlocks, r.Blocks}} {
 		if c.fn == nil {
 			continue
 		}
 		caps = append(caps, c.name)
-		m[c.name] = idList(c.fn)
+		m[c.method] = idList(c.fn)
 	}
 	if r.Probe != nil {
 		caps = append(caps, capProbe)
