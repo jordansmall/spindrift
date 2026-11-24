@@ -15,6 +15,49 @@ rec {
     "primary"
   ];
 
+  # Why a backend row's `field` naming env-schema `key` cannot stand, or null
+  # (issues #6805, #7498), over one attrset of its named arguments. `ownKnob` is the row's `knobs.${key}` and
+  # `coreEntry` the merged env schema's `${key}`, each null when absent. A core
+  # knob is no backend knob, except that a credential may name the token knob
+  # of the core backend of the row's own name, matched by the `tokenEnvVar` its
+  # descriptor declares in `backends` (the core registry); that entry is then
+  # checked as an own knob is.
+  backendKnobError =
+    {
+      backends,
+      name,
+      field,
+      secret,
+      key,
+      ownKnob,
+      coreEntry,
+    }:
+    let
+      fail = why: "Connector '${name}': backend ${field} '${key}' ${why}";
+      ownCoreToken =
+        field == "credential"
+        && coreEntry != null
+        && (coreEntry.env or null) != null
+        && builtins.any (b: b.name == name && (b.tokenEnvVar or null) == coreEntry.env) backends;
+      knob =
+        if ownKnob != null then
+          ownKnob
+        else if ownCoreToken then
+          coreEntry
+        else
+          null;
+    in
+    if knob == null then
+      fail "is not in this Connector's `knobs` (a core knob cannot be a backend ${field})"
+    else if secret && !(knob.secret or false) then
+      fail "is not a secret knob (`secret = true` required)"
+    else if (knob.boxEnv or false) != false then
+      fail "must be host-only (`boxEnv = false` required)"
+    else if !(knob ? env) then
+      fail "has no `env`"
+    else
+      null;
+
   # Why a row's `primary` (issues #6998, #6999) cannot stand, or null.
   # `nativeDriverNames` is the core Driver registry's. A backend row never
   # reaches here: checkedConnectors refuses its switches first, so only the
