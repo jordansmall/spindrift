@@ -70,8 +70,8 @@ let
   jiraViaRootAgain = (import ../../connectors/jira).lib.connector { core = rootAsCore; };
 in
 {
-  # Issue #7139: a Consumer importing the root's `flakeModules.default` and
-  # setting neither `primary` nor `shadow` still gets the github backend row.
+  # Issue #7139: a Consumer importing the root's `flakeModules.default` still
+  # gets the github backend row, carrying neither `primary` nor `shadow`.
   core-entry-root-module-carries-github-row =
     pkgs.runCommand "core-entry-root-module-carries-github-row" { nativeBuildInputs = [ pkgs.jq ]; }
       ''

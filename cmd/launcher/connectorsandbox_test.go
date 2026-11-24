@@ -120,7 +120,7 @@ func countSandboxTotals(t *testing.T) *int {
 
 // The closer is also what bootstrap's error-path defer runs, so the totals
 // must be recorded from it, not only from the success-path cleanup.
-func TestInstallConnectorSandbox_CloserRecordsPrimaryTotals(t *testing.T) {
+func TestInstallConnectorSandbox_CloserRecordsTotals(t *testing.T) {
 	useRealConnectorSandbox(t)
 	t.Cleanup(connectorsandbox.Use(nil))
 	calls := countSandboxTotals(t)

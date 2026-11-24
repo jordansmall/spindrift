@@ -766,16 +766,15 @@ recorded; a Connector moves to Primary mode after 20 consecutive dogfood runs
 with none (ADR 0073). _Avoid_: canary, dry run.
 
 **Primary mode**:
-The migration stage after Shadow mode, in which the Connector answers in place
-of the native backend, with no fallback: a Connector failure or audit refusal is
-recorded and fails the operation. Only a backend that still has a native
-adapter takes `primary`, which today is no backend. github, jira and forgejo
-have no native path left and take no `primary`: their Connectors are always
-the implementation, and a row that sets it fails evaluation (#6858, #6888,
-#7122). Dropping the row's `primary` option restored the native path; the
-native path was deleted (cut-over) after 20 consecutive dogfood runs with no
-Connector read error and no refusal (ADR 0073). _Avoid_: cut-over (the later
-deletion of the native path), promotion.
+The migration stage after Shadow mode, in which a Driver's Connector is the
+Driver in place of the native Strategy, with no fallback: a Connector that
+fails to load fails the run. Only a Driver row takes `primary`. github, jira
+and forgejo are backend rows with no native path left: their Connectors are
+always the implementation, and a row that sets `primary` fails evaluation
+(#6858, #6888, #7122, #7456). Dropping a Driver row's `primary` restores the
+native Strategy; the native Strategy is deleted (cut-over) after 20
+consecutive dogfood runs with no divergence (ADR 0073). _Avoid_: cut-over (the
+later deletion of the native path), promotion.
 
 **Connector protocol**:
 The versioned contract between the Connector host and Connectors: the

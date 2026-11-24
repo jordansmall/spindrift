@@ -98,7 +98,7 @@
 # RouteKinds.
 
 # connectorOnly (optional bool) marks a backend whose only implementation is
-# its Connector: there is no native adapter for its Connector's `primary` to
+# its Connector: there is no native adapter for its Connector to
 # replace (jira, issue #6858; github, issue #6888; forgejo, issue #7122). The
 # generated Descriptor carries it too: the Bundle's no-native-network-adapter
 # check reads it (issue #6888).
