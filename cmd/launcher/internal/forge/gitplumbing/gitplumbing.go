@@ -109,7 +109,7 @@ func GitForcePush(ctx context.Context, dir string, cred gitexec.Credential, remo
 			return fmt.Errorf("git push --force-with-lease: timed out: %w: %w", ctx.Err(), forge.ErrTransientPushFailure)
 		}
 		stderr, _ := os.ReadFile(stderrFile.Name())
-		return wrapForcePushError(err, string(stderr))
+		return wrapForcePushError(cred.Explain(err, stderr, remoteURL), string(stderr))
 	}
 	return nil
 }

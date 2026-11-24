@@ -243,7 +243,7 @@ func (p *pushOnly) cloneInto(op, shapeFlag string) func(dir string) error {
 	return func(dir string) error {
 		out, err := p.cred.Apply(exec.Command("git", "clone", shapeFlag, p.cloneURL, dir), p.cloneURL).CombinedOutput()
 		if err != nil {
-			return fmt.Errorf("connector forge: %s: git clone %s: %w%s", op, forge.RedactURLCredentials(p.cloneURL), err, forge.RedactedOutputTail(out))
+			return fmt.Errorf("connector forge: %s: git clone %s: %w%s", op, forge.RedactURLCredentials(p.cloneURL), p.cred.Explain(err, out, p.cloneURL), forge.RedactedOutputTail(out))
 		}
 		return nil
 	}

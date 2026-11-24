@@ -107,7 +107,7 @@ func fetchBranchTip(cred gitexec.Credential, gitArgs []string, repo, url, branch
 	ref := "refs/heads/" + branch
 	cmd := cred.Apply(gitexec.Cmd(gitArgs, "-C", repo, "fetch", "--depth=1", "-q", url, "+"+ref+":"+ref), url)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("butler: fetch branch %s from %s: %w: %s", branch, forge.RedactURLCredentials(url), err, forge.RedactURLCredentials(string(out)))
+		return fmt.Errorf("butler: fetch branch %s from %s: %w: %s", branch, forge.RedactURLCredentials(url), cred.Explain(err, out, url), forge.RedactURLCredentials(string(out)))
 	}
 	return nil
 }

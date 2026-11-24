@@ -45,7 +45,7 @@ func (g *coreGit) clone(dir string) error {
 	args := append([]string{"clone"}, gitexec.NoAutoMaintenance("--config")...)
 	args = append(args, "--no-single-branch", g.cloneURL, dir)
 	if out, err := runRedacted(g.cred.Apply(exec.Command("git", args...), g.cloneURL)); err != nil {
-		return fmt.Errorf("github: rebase: git clone %s: %w: %s", forge.RedactURLCredentials(g.cloneURL), err, out)
+		return fmt.Errorf("github: rebase: git clone %s: %w: %s", forge.RedactURLCredentials(g.cloneURL), g.cred.Explain(err, []byte(out), g.cloneURL), out)
 	}
 	return nil
 }
@@ -67,7 +67,7 @@ func (g *coreGit) Rebase(head string) error {
 func (g *coreGit) seedMirror(dir string) error {
 	args := append(gitexec.NoAutoMaintenance("-c"), "clone", "--bare", g.cloneURL, dir)
 	if out, err := runRedacted(g.cred.Apply(exec.Command("git", args...), g.cloneURL)); err != nil {
-		return fmt.Errorf("github: seed mirror: git clone %s: %w: %s", forge.RedactURLCredentials(g.cloneURL), err, out)
+		return fmt.Errorf("github: seed mirror: git clone %s: %w: %s", forge.RedactURLCredentials(g.cloneURL), g.cred.Explain(err, []byte(out), g.cloneURL), out)
 	}
 	return nil
 }

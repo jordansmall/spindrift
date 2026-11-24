@@ -72,7 +72,7 @@ func NewRemote(scratch, url string, cred gitexec.Credential, gitArgs ...string) 
 func (r Remote) sync() error {
 	out, err := r.cred.Apply(gitexec.Cmd(r.gitArgs, "-C", r.repo, "fetch", "--prune", "-q", r.url, butlerRefspec), r.url).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("ledger: fetch %s: %w: %s", forge.RedactURLCredentials(r.url), err, forge.RedactURLCredentials(string(out)))
+		return fmt.Errorf("ledger: fetch %s: %w: %s", forge.RedactURLCredentials(r.url), r.cred.Explain(err, out, r.url), forge.RedactURLCredentials(string(out)))
 	}
 	return nil
 }
@@ -90,7 +90,7 @@ func (r Remote) History(chore string, since time.Time) ([]Entry, error) {
 func (r Remote) lsRemote(ref string) (string, error) {
 	out, err := r.cred.Apply(gitexec.Cmd(r.gitArgs, "ls-remote", r.url, ref), r.url).Output()
 	if err != nil {
-		return "", fmt.Errorf("ledger: ls-remote %s %s: %w", forge.RedactURLCredentials(r.url), ref, err)
+		return "", fmt.Errorf("ledger: ls-remote %s %s: %w", forge.RedactURLCredentials(r.url), ref, r.cred.Explain(err, nil, r.url))
 	}
 	fields := strings.Fields(string(out))
 	if len(fields) == 0 {
@@ -139,7 +139,7 @@ func (r Remote) Append(chore, old string, s State, at time.Time) (string, error)
 		if cur != old {
 			return "", fmt.Errorf("%w: %s", ErrLostRace, ref)
 		}
-		return "", fmt.Errorf("ledger: push %s: %w: %s", ref, err, forge.RedactURLCredentials(string(pushOut)))
+		return "", fmt.Errorf("ledger: push %s: %w: %s", ref, r.cred.Explain(err, pushOut, r.url), forge.RedactURLCredentials(string(pushOut)))
 	}
 	return newCommit, nil
 }

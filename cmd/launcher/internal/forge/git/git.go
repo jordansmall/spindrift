@@ -27,11 +27,11 @@ const defaultCloneTimeout = 5 * time.Minute
 const defaultOpTimeout = defaultCloneTimeout
 
 // gitOutputWaitDelay bounds Cmd.WaitDelay for every git call that captures
-// output (Merge, Rebase, BranchExists). A hook's grandchild or a transport
-// child such as an ssh ControlMaster can hold the output pipe open after git
-// exits, and a killed git's child can hold it past the context deadline;
-// without WaitDelay, Run blocks until that child exits. ErrWaitDelay means git
-// itself exited 0.
+// output (clone, Merge, Rebase, BranchExists, Probe). A hook's grandchild or a
+// transport child such as an ssh ControlMaster can hold the output pipe open
+// after git exits, and a killed git's child can hold it past the context
+// deadline; without WaitDelay, Run blocks until that child exits. ErrWaitDelay
+// means git itself exited 0.
 const gitOutputWaitDelay = time.Second
 
 // gitClient is the push-only Code Forge adapter for a plain git remote
@@ -111,11 +111,12 @@ func cloneInto(remoteURL string, cred gitexec.Credential, dir string, timeout ti
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cloneCmd := exec.CommandContext(ctx, "git", append(append([]string{"clone"}, gitexec.NoAutoMaintenance("--config")...), remoteURL, dir)...)
-	if err := cred.Apply(cloneCmd, remoteURL).Run(); err != nil {
+	cloneCmd.WaitDelay = gitOutputWaitDelay
+	if out, err := cred.Apply(cloneCmd, remoteURL).CombinedOutput(); err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return fmt.Errorf("git clone %s: timed out after %s: %w", forge.RedactURLCredentials(remoteURL), timeout, ctx.Err())
 		}
-		return fmt.Errorf("git clone %s: %w", forge.RedactURLCredentials(remoteURL), err)
+		return fmt.Errorf("git clone %s: %w", forge.RedactURLCredentials(remoteURL), cred.Explain(err, out, remoteURL))
 	}
 	return nil
 }
@@ -273,9 +274,10 @@ func (g *gitClient) BranchExists(branch string) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), g.opTimeout)
 	defer cancel()
 	want := "refs/heads/" + branch
-	var out bytes.Buffer
+	var out, stderr bytes.Buffer
 	cmd := g.cred.Apply(exec.CommandContext(ctx, "git", "ls-remote", "--exit-code", "--heads", g.remoteURL, want), g.remoteURL)
 	cmd.Stdout = &out
+	cmd.Stderr = &stderr
 	cmd.WaitDelay = gitOutputWaitDelay
 	err := cmd.Run()
 	// Reading out after ErrWaitDelay can lose pipe-buffered bytes; that fails
@@ -295,18 +297,24 @@ func (g *gitClient) BranchExists(branch string) (bool, error) {
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return false, fmt.Errorf("git ls-remote %s: timed out after %s: %w", branch, g.opTimeout, ctx.Err())
 	}
-	return false, fmt.Errorf("git ls-remote %s: %w", branch, err)
+	return false, fmt.Errorf("git ls-remote %s: %w", branch, g.cred.Explain(err, stderr.Bytes(), g.remoteURL))
 }
 
 // Probe checks that the configured remote is reachable.
 func (g *gitClient) Probe() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), g.opTimeout)
 	defer cancel()
-	if err := g.cred.Apply(exec.CommandContext(ctx, "git", "ls-remote", g.remoteURL), g.remoteURL).Run(); err != nil {
+	cmd := exec.CommandContext(ctx, "git", "ls-remote", g.remoteURL)
+	cmd.WaitDelay = gitOutputWaitDelay
+	if out, err := g.cred.Apply(cmd, g.remoteURL).CombinedOutput(); err != nil {
+		clean := forge.RedactURLCredentials(g.remoteURL)
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return "", fmt.Errorf("%w: timed out after %s: %s", forge.ErrRepoNotFound, g.opTimeout, forge.RedactURLCredentials(g.remoteURL))
+			return "", fmt.Errorf("%w: timed out after %s: %s", forge.ErrRepoNotFound, g.opTimeout, clean)
 		}
-		return "", fmt.Errorf("%w: %s", forge.ErrRepoNotFound, forge.RedactURLCredentials(g.remoteURL))
+		if explained := g.cred.Explain(err, out, clean); explained != err {
+			return "", fmt.Errorf("%w: %w", forge.ErrRepoNotFound, explained)
+		}
+		return "", fmt.Errorf("%w: %s", forge.ErrRepoNotFound, clean)
 	}
 	return forge.RedactURLCredentials(g.remoteURL), nil
 }

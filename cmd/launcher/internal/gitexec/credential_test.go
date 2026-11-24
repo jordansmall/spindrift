@@ -1,10 +1,12 @@
 package gitexec
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -319,5 +321,103 @@ func TestCredentialApplyIsNoOpForNonHTTPRemotes(t *testing.T) {
 		if len(cmd.Env) != 1 {
 			t.Fatalf("%s: Apply changed the environment: %v", repoURL, cmd.Env)
 		}
+	}
+}
+
+// A credential scoped to a URL that redirects elsewhere is never offered at
+// the destination, so git dies asking for a username: Explain turns that into
+// an error naming the configured Target repo.
+func TestExplainNamesTheConfiguredRepoOnARedirect(t *testing.T) {
+	r := gitexectest.NewAuthRemote(t, testUser, testToken)
+	cred := Credential{Username: testUser, Password: testToken}
+	ls := func(url string) ([]byte, error) {
+		return cred.Apply(exec.Command("git", "ls-remote", url), url).CombinedOutput()
+	}
+
+	out, err := ls(r.MovedURL)
+	if err == nil {
+		t.Fatalf("ls-remote %s succeeded:\n%s", r.MovedURL, out)
+	}
+	got := cred.Explain(err, out, r.MovedURL)
+	for _, want := range []string{r.MovedURL, "configured Target repo", "redirect", "update"} {
+		if !strings.Contains(got.Error(), want) {
+			t.Errorf("Explain = %q, missing %q", got, want)
+		}
+	}
+	if !errors.Is(got, err) {
+		t.Errorf("Explain = %v does not wrap the git error", got)
+	}
+
+	// A failure that is not a redirect, and a remote carrying no credential,
+	// pass through untouched.
+	plain := errors.New("exit status 128")
+	for name, c := range map[string]struct {
+		cred Credential
+		err  error
+		out  string
+	}{
+		"other failure":   {cred, plain, "fatal: repository not found"},
+		"no error":        {cred, nil, "could not read Username"},
+		"zero credential": {Credential{}, plain, "could not read Username"},
+	} {
+		if got := c.cred.Explain(c.err, []byte(c.out), r.URL); got != c.err {
+			t.Errorf("%s: Explain = %v, want unchanged %v", name, got, c.err)
+		}
+	}
+}
+
+// A userinfo URL must reach neither the scope key nor Explain's error with its
+// secret, and Apply pins git's locale so Explain can match its stderr.
+func TestApplyAndExplainStripUserinfo(t *testing.T) {
+	const withInfo = "https://" + testUser + ":" + testToken + "@forge.example/o/r.git"
+	cred := Credential{testUser, testToken}
+
+	cmd := cred.Apply(exec.Command("git", "status"), withInfo)
+	env := strings.Join(cmd.Env, "\n")
+	for _, want := range []string{
+		"GIT_CONFIG_KEY_1=credential." + testRepoURL + ".helper",
+		"GIT_CONFIG_KEY_2=credential." + testRepoURL + ".useHttpPath",
+		"LC_ALL=C",
+	} {
+		if !slices.Contains(cmd.Env, want) {
+			t.Errorf("Apply env lacks %q:\n%s", want, env)
+		}
+	}
+	for _, e := range cmd.Env {
+		if strings.HasPrefix(e, "GIT_CONFIG_KEY_") && (strings.Contains(e, testToken) || strings.Contains(e, testUser)) {
+			t.Errorf("userinfo leaked into scope key %q", e)
+		}
+	}
+
+	got := cred.Explain(errors.New("exit status 128"), []byte("fatal: could not read Username"), withInfo)
+	if strings.Contains(got.Error(), testToken) || strings.Contains(got.Error(), testUser) {
+		t.Errorf("Explain leaked userinfo: %v", got)
+	}
+	if !strings.Contains(got.Error(), testRepoURL) {
+		t.Errorf("Explain = %v, want the credential-free URL %s", got, testRepoURL)
+	}
+}
+
+// An unescaped password may hold "?" or "#"; the authority still ends at the
+// first "/", so the last "@" before the path wins and no secret survives.
+func TestApplyAndExplainStripUserinfoWithQueryCharsInPassword(t *testing.T) {
+	const secret = "pa?ss#w0rd-do-not-leak"
+	const withInfo = "https://" + testUser + ":" + secret + "@forge.example/o/r.git"
+	cred := Credential{testUser, secret}
+
+	cmd := cred.Apply(exec.Command("git", "status"), withInfo)
+	for _, e := range cmd.Env {
+		if strings.HasPrefix(e, "GIT_CONFIG_KEY_") || strings.HasPrefix(e, "GIT_CONFIG_VALUE_") {
+			if strings.Contains(e, "pa?ss") || strings.Contains(e, "w0rd") || strings.Contains(e, testUser) {
+				t.Errorf("userinfo leaked into git config %q", e)
+			}
+		}
+	}
+	got := cred.Explain(errors.New("exit status 128"), []byte("fatal: could not read Username"), withInfo)
+	if strings.Contains(got.Error(), "pa?ss") || strings.Contains(got.Error(), "w0rd") || strings.Contains(got.Error(), testUser) {
+		t.Errorf("Explain leaked userinfo: %v", got)
+	}
+	if !strings.Contains(got.Error(), testRepoURL) {
+		t.Errorf("Explain = %v, want the credential-free URL %s", got, testRepoURL)
 	}
 }
