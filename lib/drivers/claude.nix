@@ -94,6 +94,7 @@
     modelOmitEmpty = false;
     agentsFlag = "--agents";
     effortFlag = "--effort";
+    sessionFlags = [ "--session-id" ];
     order = [
       "prompt"
       "model"

@@ -1416,8 +1416,9 @@ data (`opencode.nix` expands `lib/credential-paths.nix` and calls
 Driver entry declares:
 
 - `name`, `package`, `bin`, `flagsCommon`, `agentsJsonTemplate` — the
-  fields ADR 0009 already documents. Session flags are not a registry
-  field: declare `SessionFlags` in the Driver's `driverkit.Strategy`
+  fields ADR 0009 already documents. The row declares the session flag
+  names core accepts under `argvShape.sessionFlags`; the Driver's
+  `driverkit.Strategy` produces the answer in `SessionFlags`
   (`cmd/launcher/internal/driver/<name>/strategy.go`), along with the
   decoder its Pass-log readers share (see [Host-side event layer](#host-side-event-layer)).
   That package (`cmd/launcher/internal/driver/<name>`) also ships a
@@ -1527,7 +1528,9 @@ Driver entry declares:
   when `promptStyle` is `"flag"`); `modelFlag`; `modelOmitEmpty` (bool —
   omit the model slot entirely when the model value is empty);
   `agentsFlag` (optional — omit the attribute entirely for a Driver with
-  no `--agents` equivalent); `effortFlag`; and `order`, a permutation of
+  no `--agents` equivalent); `effortFlag`; `sessionFlags`, the list of
+  flag names the Driver's session answer may carry (core accepts no
+  other; may be empty); and `order`, a permutation of
   the 6 argv slots `prompt`/`model`/`agents`/`session`/`driverFlags`/
   `effort`, restricted to whichever slots actually apply — `agents` is
   excluded from the required permutation when `agentsFlag` itself is
@@ -1563,7 +1566,8 @@ structure — `assertShape` above only confirms the attribute is present, not
 that its contents are well-formed. `assertArgvShape` requires: `promptStyle`
 is `"flag"` or `"positional"`; `promptFlag` is a non-empty string when
 required; `modelFlag`/`effortFlag` are non-empty strings; `modelOmitEmpty`
-is a bool; `agentsFlag`, when present, is a non-empty string; and `order` is
+is a bool; `agentsFlag`, when present, is a non-empty string; `sessionFlags`
+is a list of distinct non-empty strings; and `order` is
 a list containing each applicable slot exactly once, with no missing, extra,
 or duplicate slots. Like `assertShape`, it collects every violation it finds
 into one `throw` message naming the Driver, rather than failing on just the

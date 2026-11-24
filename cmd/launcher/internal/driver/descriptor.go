@@ -23,6 +23,9 @@ type Descriptor struct {
 	// AuthContent constrains the Provider-keyed auth store a Driver reads from
 	// an env var; nil when the Driver has none.
 	AuthContent *AuthContent `json:"authContent,omitempty"`
+	// SessionFlags are the flag names the Driver's session answer may carry
+	// (argvShape.sessionFlags); core accepts no other.
+	SessionFlags []string `json:"sessionFlags,omitempty"`
 }
 
 // CredentialRule is one way a Driver is authenticated. It is plain data

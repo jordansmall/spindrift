@@ -37,6 +37,7 @@ let
       modelFlag = "--model";
       modelOmitEmpty = false;
       effortFlag = "--effort";
+      sessionFlags = [ "--session-id" ];
       order = [
         "prompt"
         "model"
@@ -380,6 +381,54 @@ mergeDisjoint (driverChecksFor { inherit (driverRegistry) entries; }) {
     assert assertMsg (hasInfix "DRIVER_ENV_FILES='A_VAR=.a/auth.json B_VAR=b.json'\n" out)
       "renderPreamble must render envFiles as one escaped ENV=path word list, got: ${out}";
     pkgs.runCommand "drivers-render-preamble-env-files" { } "touch $out";
+
+  # Issue #7507: assertArgvShape validates argvShape.sessionFlags, the closed
+  # set of flag names a Driver's session answer may carry.
+  drivers-assert-argv-shape-session-flags =
+    let
+      withFlags =
+        v:
+        stubDriverBase
+        // {
+          argvShape = stubDriverBase.argvShape // {
+            sessionFlags = v;
+          };
+        };
+      throws = v: !(builtins.tryEval (driverRegistry.assertArgvShape "stub" (withFlags v))).success;
+      badValues = [
+        "--session-id"
+        null
+        [ 1 ]
+        [ "" ]
+        [
+          "--session-id"
+          "--session-id"
+        ]
+      ];
+      notThrown = filter (v: !(throws v)) badValues;
+      missing =
+        !(builtins.tryEval (
+          driverRegistry.assertArgvShape "stub" (
+            stubDriverBase
+            // {
+              argvShape = removeAttrs stubDriverBase.argvShape [ "sessionFlags" ];
+            }
+          )
+        )).success;
+    in
+    assert assertMsg (notThrown == [ ])
+      "assertArgvShape must throw for every malformed sessionFlags, but did not for: ${
+        concatStringsSep ", " (map (v: generators.toPretty { } v) notThrown)
+      }";
+    assert assertMsg missing "assertArgvShape must throw when argvShape.sessionFlags is absent";
+    assert assertMsg (
+      !(throws [
+        "--title"
+        "--session"
+      ])
+      && !(throws [ ])
+    ) "assertArgvShape must accept distinct non-empty flag names, and an empty list";
+    pkgs.runCommand "drivers-assert-argv-shape-session-flags" { } "touch $out";
 
   # assertShape validates envFiles when present: a list of exactly
   # { env, pathRelative } with a shell-style env name and a non-empty,

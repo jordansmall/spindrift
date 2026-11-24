@@ -300,6 +300,8 @@ in
     assert assertMsg (
       shape.effortFlag == "--thinking"
     ) "pi Driver's argvShape.effortFlag must stay \"--thinking\", got: ${shape.effortFlag}";
+    assert assertMsg (shape.sessionFlags == [ "--session-id" ])
+      "pi Driver's argvShape.sessionFlags must stay [ \"--session-id\" ], got: ${builtins.toJSON shape.sessionFlags}";
     assert assertMsg
       (
         shape.order == [
@@ -620,7 +622,7 @@ in
   # row's own list must reach descriptor_gen.go's pi Descriptor.
   drivers-pi-effort-on-model-levels-reach-descriptor =
     let
-      rendered = renderers.renderDriverDescriptorsGo driverRegistry.entries;
+      rendered = renderers.renderDriverDescriptorsGo driverRegistry.descriptorRows;
       levels = "[]string{${concatStringsSep ", " (map builtins.toJSON entry.effortOnModelLevels)}}";
     in
     assert assertMsg (hasInfix "EffortOnModelLevels: ${levels}," rendered)

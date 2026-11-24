@@ -273,6 +273,7 @@ in
     modelFlag = "--model";
     modelOmitEmpty = true;
     effortFlag = "--thinking";
+    sessionFlags = [ "--session-id" ];
     order = [
       "driverFlags"
       "model"

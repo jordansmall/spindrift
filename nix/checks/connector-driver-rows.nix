@@ -251,7 +251,7 @@ in
 
         line=$(grep '^DRIVER_ROWS_FILE=' ${h.driverPreambleFile})
         eval "$line"
-        jq -e --arg w "$wasm" '.[0] == {name: "fixture", credentials: [{env: ["ANTHROPIC_API_KEY"], remedy: "set ANTHROPIC_API_KEY"}], module: $w}
+        jq -e --arg w "$wasm" '.[0] == {name: "fixture", credentials: [{env: ["ANTHROPIC_API_KEY"], remedy: "set ANTHROPIC_API_KEY"}], sessionFlags: ["--session-id"], module: $w}
           and [.[].name] == ["fixture", "claude"]' "$DRIVER_ROWS_FILE"
         touch $out
       '';

@@ -379,6 +379,8 @@ in
     assert assertMsg (
       shape.effortFlag == "--effort"
     ) "claude Driver's argvShape.effortFlag must stay \"--effort\", got: ${shape.effortFlag}";
+    assert assertMsg (shape.sessionFlags == [ "--session-id" ])
+      "claude Driver's argvShape.sessionFlags must stay [ \"--session-id\" ], got: ${builtins.toJSON shape.sessionFlags}";
     assert assertMsg (
       shape.order == [
         "prompt"

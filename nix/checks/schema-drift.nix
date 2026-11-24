@@ -580,7 +580,7 @@ checkedMerge {
   # #436, #5338, #5503).
   driver-descriptors-gen = mkGofmtDriftCheck {
     name = "driver-descriptors-gen";
-    rendered = renderers.renderDriverDescriptorsGo driverRegistry.entries;
+    rendered = renderers.renderDriverDescriptorsGo driverRegistry.descriptorRows;
     committedPath = "cmd/launcher/internal/driver/descriptor_gen.go";
     source = "lib/drivers/*.nix";
   };

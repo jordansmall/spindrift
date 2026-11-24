@@ -777,10 +777,11 @@ rec {
 
   # cmd/launcher/internal/driver/descriptor_gen.go content (issues #5338,
   # #5503): one Go `Descriptor` per lib/drivers/*.nix row, sorted by name.
-  # driverEntries is the registry's `entries`, not the whole registry, whose
-  # functions are not Drivers (issue #624). Driver rows carry many Nix-only
-  # attributes, so one outside rowFields is no error here; assertShape owns the
-  # closed set. Emits unaligned Go; gofmt owns column alignment.
+  # driverEntries is the registry's `descriptorRows` (its `entries` with
+  # sessionFlags lifted flat), not the whole registry, whose functions are not
+  # Drivers (issue #624). Driver rows carry many Nix-only attributes, so one
+  # outside rowFields is no error here; assertShape owns the closed set. Emits
+  # unaligned Go; gofmt owns column alignment.
   renderDriverDescriptorsGo =
     driverEntries:
     let
@@ -792,6 +793,7 @@ rec {
         (optional "effortOnModelLevels" "EffortOnModelLevels" null)
         (required "credentials" "Credentials")
         (optional "authContent" "AuthContent" null)
+        (required "sessionFlags" "SessionFlags")
       ];
       goStrings = items: "[]string{${builtins.concatStringsSep ", " (map builtins.toJSON items)}}";
       goStringMap =
@@ -833,6 +835,7 @@ rec {
               authAPIKeyProviders (value.apiKeyProviders or { })
             }},\n";
           effortOnModelLevels = goName: value: "\t${goName}: ${goStrings value},\n";
+          sessionFlags = goName: value: if value == [ ] then "" else "\t${goName}: ${goStrings value},\n";
           credentials =
             goName: value:
             if value == [ ] then

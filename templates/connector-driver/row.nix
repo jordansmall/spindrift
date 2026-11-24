@@ -23,6 +23,7 @@
     modelFlag = "--model";
     modelOmitEmpty = false;
     effortFlag = "--effort";
+    sessionFlags = [ ];
     order = [
       "prompt"
       "model"

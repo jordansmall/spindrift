@@ -262,3 +262,23 @@ func TestNewDescriptorWithoutDriverNamesTheMissingRow(t *testing.T) {
 		t.Errorf("New(bogus) = %v, want the unknown-DRIVER error", err)
 	}
 }
+
+func TestSessionFlagDeclared(t *testing.T) {
+	for _, c := range []struct {
+		name, flag string
+		want       bool
+	}{
+		{"claude", "--session-id", true},
+		{"claude", "--title", false},
+		{"opencode", "--title", true},
+		{"opencode", "--session", true},
+		{"opencode", "--session-id", false},
+		{"pi", "--session-id", true},
+		{"bogus", "--session-id", false},
+		{"claude", "", false},
+	} {
+		if got := SessionFlagDeclared(c.name, c.flag); got != c.want {
+			t.Errorf("SessionFlagDeclared(%q, %q) = %v, want %v", c.name, c.flag, got, c.want)
+		}
+	}
+}

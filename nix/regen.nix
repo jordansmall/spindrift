@@ -35,7 +35,7 @@ let
     renderers.renderFlakeOptionsDocFull schema structuralOptionsDoc structuralPaths
       extraOptionPaths;
   driverRegistry = import ../lib/drivers/default.nix { inherit (pkgs) lib; };
-  driverDescriptorsFile = renderers.renderDriverDescriptorsGo driverRegistry.entries;
+  driverDescriptorsFile = renderers.renderDriverDescriptorsGo driverRegistry.descriptorRows;
   dispatchKindsFile = renderers.renderDispatchKindsGo (import ../lib/dispatch-kinds);
   connectorProtocol = import ../lib/connector-protocol;
   connectorProtocolRender = import ../lib/connector-protocol/render.nix;
