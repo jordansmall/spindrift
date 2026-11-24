@@ -6795,15 +6795,20 @@ downgrades, it never blocks: the cost of a hit is one human read.
 The default is:
 
 ```
-.github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**,.pi/**
+.github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**,.pi/**,spindrift-connector-routes.json
 ```
 
 — CI config for both forges plus the instruction surface (`CLAUDE.md`, `AGENTS.md`,
-`.claude/`, `.opencode/`, `.pi/`). Those files are a cross-run persistence vector: a
-poisoned instruction file merged once feeds every future Agent as trusted
-input on its next fresh clone, so the default set is deliberately broad.
-Setting `MERGE_GUARD_PATHS=""` disables the guard entirely — an explicit
-opt-out; the operator owns the consequences.
+`.claude/`, `.opencode/`, `.pi/`), and the Consumer's accepted Route baseline
+`spindrift-connector-routes.json` (ADR 0073). The CI config and instruction
+files are a cross-run persistence vector: a poisoned instruction file merged
+once feeds every future Agent as trusted input on its next fresh clone, so the
+default set is deliberately broad. Editing the baseline accepts a Connector's
+wider grant on the Operator's behalf, so that is a human's call too.
+Setting `MERGE_GUARD_PATHS` replaces the whole default: a Consumer who
+overrides it must restate `spindrift-connector-routes.json` in the list, or
+the baseline goes unguarded. Setting `MERGE_GUARD_PATHS=""` disables the guard
+entirely — an explicit opt-out; the operator owns the consequences.
 
 **Tuning-provenance hold.** A second, independent check runs after the path
 guard: the launcher reads the issue the PR closes, and if it is a finding
