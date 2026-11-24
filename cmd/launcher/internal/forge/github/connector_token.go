@@ -5,13 +5,11 @@ import (
 	"fmt"
 	"net/http"
 
-	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectortracker"
-	"spindrift.dev/launcher/internal/primaryrecord"
 )
 
 // connectorClient is the transport the host-side Connector loads send with; nil
@@ -28,9 +26,7 @@ func introspectToken(token, repoSlug string) (backendkit.TokenIntrospection, err
 	if err != nil {
 		return backendkit.TokenIntrospection{}, err
 	}
-	audit, closeAudit, _ := primaryrecord.OpenFile(primaryrecord.Name(backend.GitHub.Name, ".audit.jsonl"))
-	defer closeAudit()
-	got, err := introspectViaConnector(row, backendrows.Options{Audit: audit, Client: connectorClient}, token, repoSlug)
+	got, err := introspectViaConnector(row, backendrows.Options{Client: connectorClient}, token, repoSlug)
 	return got, noteRouted("introspect the token", err)
 }
 

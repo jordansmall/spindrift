@@ -24,6 +24,8 @@ import (
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/connectorsandbox/sandbox"
 	"spindrift.dev/launcher/internal/fixturebuild"
+	"spindrift.dev/launcher/internal/hostpaths"
+	"spindrift.dev/launcher/internal/primaryrecord"
 	"spindrift.dev/launcher/internal/runner"
 )
 
@@ -328,7 +330,8 @@ func Sandbox(t *testing.T, r runner.Runner, host string) {
 
 // RouteRefusal loads a fixture network Connector through r's Connector
 // sandbox the way a backend row does, has it request a host outside its Route
-// table, and asserts the Launcher refuses it and audits the refusal itself.
+// table, and asserts the Launcher refuses it and audits the refusal itself. It
+// changes the working directory (t.Chdir), so callers must not run in parallel.
 func RouteRefusal(t *testing.T, r runner.Runner) {
 	t.Setenv(escapeCredentialEnv, "sentinel")
 	var hits atomic.Int32
@@ -344,7 +347,6 @@ func RouteRefusal(t *testing.T, r runner.Runner) {
 		t.Fatal(err)
 	}
 	const name = "escape-route"
-	var audit bytes.Buffer
 	row := backendrows.Row{
 		Name:          name,
 		Module:        filepath.Join(dir, "network-host.wasm"),
@@ -353,7 +355,10 @@ func RouteRefusal(t *testing.T, r runner.Runner) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), escapeTimeout)
 	defer cancel()
-	c, err := backendrows.Load(ctx, row, backendrows.Options{Audit: &audit})
+	// Load opens its audit file under the working directory's log directory.
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	c, err := backendrows.Load(ctx, row, backendrows.Options{})
 	if err != nil {
 		t.Fatalf("Load through the sandbox: %v", err)
 	}
@@ -364,11 +369,15 @@ func RouteRefusal(t *testing.T, r runner.Runner) {
 	if err := c.Call(ctx, "fetch", params, new(struct{})); !errors.Is(err, connectorhost.ErrRouteRefused) {
 		t.Fatalf("fetch err = %v, want ErrRouteRefused", err)
 	}
+	audit, err := os.ReadFile(filepath.Join(hostpaths.LogDir(cwd), primaryrecord.Name(name, ".audit.jsonl")))
+	if err != nil {
+		t.Fatal(err)
+	}
 	var entries []connectorhost.AuditEntry
-	for dec := json.NewDecoder(&audit); dec.More(); {
+	for dec := json.NewDecoder(bytes.NewReader(audit)); dec.More(); {
 		var e connectorhost.AuditEntry
 		if err := dec.Decode(&e); err != nil {
-			t.Fatalf("audit log %q: %v", audit.String(), err)
+			t.Fatalf("audit log %q: %v", audit, err)
 		}
 		entries = append(entries, e)
 	}

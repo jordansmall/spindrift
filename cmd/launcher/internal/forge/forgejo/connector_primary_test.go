@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -20,6 +21,8 @@ import (
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgejo"
+	"spindrift.dev/launcher/internal/hostpaths"
+	"spindrift.dev/launcher/internal/primaryrecord"
 )
 
 const connectorCredentialEnv = "SPINDRIFT_FORGEJO_CONNECTOR_TOKEN"
@@ -69,7 +72,7 @@ func productionForge(t *testing.T, srv *httptest.Server) (forge.CodeForge, []con
 	t.Chdir(dir)
 	cf, err := buildForge(srv, "")
 	row, _ := backendrows.Lookup("forgejo")
-	return cf, connectortracker.Routes(row.Routes, connectorRepo), filepath.Join(dir, ".spindrift", "logs", "connector-forgejo.audit.jsonl"), err
+	return cf, connectortracker.Routes(row.Routes, connectorRepo), filepath.Join(hostpaths.LogDir(dir), primaryrecord.Name("forgejo", ".audit.jsonl")), err
 }
 
 // A Connector that fails to load fails the construction with its error and
@@ -87,6 +90,36 @@ func TestConnectorForge_LoadFailureFailsConstruction(t *testing.T) {
 	}
 	if cf != nil {
 		t.Errorf("built a %T despite the load failure", cf)
+	}
+}
+
+// A Connector never runs unrecorded: an audit file that will not open fails the
+// construction with its path, and nothing reaches the instance.
+func TestConnectorForge_UnopenableAuditFileFailsConstruction(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits.Add(1) }))
+	t.Cleanup(srv.Close)
+	useForgejoRow(t, srv.URL, func(*backendrows.Row) {})
+	t.Setenv(connectorCredentialEnv, connectorToken)
+	t.Cleanup(forgejo.SetConnectorClient(srv.Client()))
+	dir := t.TempDir()
+	t.Chdir(dir)
+	logDir := hostpaths.LogDir(dir)
+	if err := os.MkdirAll(filepath.Dir(logDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(logDir, nil, 0o644); err != nil { // a file where the log directory belongs
+		t.Fatal(err)
+	}
+
+	cf, err := buildForge(srv, "")
+
+	want := filepath.Join(logDir, primaryrecord.Name("forgejo", ".audit.jsonl"))
+	if err == nil || !strings.Contains(err.Error(), want) || cf != nil {
+		t.Errorf("buildForge = (%v, %v), want (nil, an error naming %s)", cf, err, want)
+	}
+	if n := hits.Load(); n != 0 {
+		t.Errorf("instance saw %d requests, want none", n)
 	}
 }
 

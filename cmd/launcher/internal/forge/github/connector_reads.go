@@ -51,9 +51,8 @@ const (
 var loadClock = time.Now
 
 type sharedConnector struct {
-	conn       *connectorhost.Connector
-	api        string
-	closeAudit func()
+	conn *connectorhost.Connector
+	api  string
 }
 
 // loadFailures counts a key's consecutive failed loads and keeps the last error
@@ -88,10 +87,8 @@ func sharedConnectorFor(row backendrows.Row, repoSlug string) (*sharedConnector,
 	if f := sharedConnectors.failures[key]; f.n >= maxLoadFailures && loadClock().Sub(f.last) < loadRetryAfter {
 		return nil, fmt.Errorf("connector load failed %d times in a row; retried %s after the last failure: %w", f.n, loadRetryAfter, f.err)
 	}
-	audit, closeAudit, _ := primaryrecord.OpenFile(primaryrecord.Name(backend.GitHub.Name, ".audit.jsonl"))
-	conn, api, err := loadConnector(row, backendrows.Options{Audit: audit, Client: connectorClient}, repoSlug)
+	conn, api, err := loadConnector(row, backendrows.Options{Client: connectorClient}, repoSlug)
 	if err != nil {
-		closeAudit()
 		if sharedConnectors.failures == nil {
 			sharedConnectors.failures = map[string]loadFailures{}
 		}
@@ -99,7 +96,7 @@ func sharedConnectorFor(row backendrows.Row, repoSlug string) (*sharedConnector,
 		return nil, err
 	}
 	delete(sharedConnectors.failures, key)
-	sc := &sharedConnector{conn: conn, api: api, closeAudit: closeAudit}
+	sc := &sharedConnector{conn: conn, api: api}
 	if sharedConnectors.loaded == nil {
 		sharedConnectors.loaded = map[string]*sharedConnector{}
 	}
@@ -110,7 +107,6 @@ func sharedConnectorFor(row backendrows.Row, repoSlug string) (*sharedConnector,
 // dropShared closes sc and forgets it. The caller holds sharedConnectors.mu.
 func dropShared(key string, sc *sharedConnector) {
 	_ = sc.conn.Close(context.Background())
-	sc.closeAudit()
 	delete(sharedConnectors.loaded, key)
 }
 

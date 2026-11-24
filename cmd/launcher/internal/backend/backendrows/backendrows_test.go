@@ -18,6 +18,8 @@ import (
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
+	"spindrift.dev/launcher/internal/hostpaths"
+	"spindrift.dev/launcher/internal/primaryrecord"
 )
 
 const fixturesEnv = "SPINDRIFT_CONNECTOR_FIXTURES_DIR"
@@ -221,7 +223,7 @@ func TestLoadResolvesTheCredentialHostSideAndEnforcesTheRoutes(t *testing.T) {
 	t.Cleanup(srv.Close)
 	host := srv.Listener.Addr().String()
 
-	var audit bytes.Buffer
+	audit := auditInTempDir(t, "fixture-network")
 	r := backendrows.Row{
 		Name: "fixture-network", Module: fixtureWasm(t), CredentialEnv: "FIXTURE_TOKEN",
 		Routes: []connectorhost.Route{{Method: "GET", Host: host, Path: "/repos"}},
@@ -233,7 +235,6 @@ func TestLoadResolvesTheCredentialHostSideAndEnforcesTheRoutes(t *testing.T) {
 			}
 			return ""
 		},
-		Audit:  &audit,
 		Client: srv.Client(),
 	})
 	if err != nil {
@@ -259,11 +260,11 @@ func TestLoadResolvesTheCredentialHostSideAndEnforcesTheRoutes(t *testing.T) {
 	if len(seen) != 1 {
 		t.Errorf("undeclared request reached the backend")
 	}
-	lines := strings.Split(strings.TrimSpace(audit.String()), "\n")
+	lines := strings.Split(strings.TrimSpace(audit()), "\n")
 	if len(lines) != 2 || !strings.Contains(lines[0], `"sent"`) || !strings.Contains(lines[1], `"refused"`) {
-		t.Errorf("audit = %q, want a sent then a refused entry", audit.String())
+		t.Errorf("audit = %q, want a sent then a refused entry", audit())
 	}
-	if strings.Contains(audit.String(), "tok-123") {
+	if strings.Contains(audit(), "tok-123") {
 		t.Error("credential in audit log")
 	}
 }
@@ -278,7 +279,7 @@ func TestLoadFailsClosedWithoutTheCredential(t *testing.T) {
 		Routes: []connectorhost.Route{{Method: "GET", Host: srv.Listener.Addr().String(), Path: "/repos"}},
 	}
 	c, err := backendrows.Load(context.Background(), r, backendrows.Options{
-		Getenv: func(string) string { return "" }, Audit: &bytes.Buffer{}, Client: srv.Client(),
+		Getenv: func(string) string { return "" }, Client: srv.Client(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -295,7 +296,7 @@ func withScheme(r backendrows.Row, scheme, identityEnv string) backendrows.Row {
 	return r
 }
 
-func loadBasic(t *testing.T, srv *httptest.Server, env map[string]string, audit *bytes.Buffer) *connectorhost.Connector {
+func loadBasic(t *testing.T, srv *httptest.Server, env map[string]string) *connectorhost.Connector {
 	t.Helper()
 	r := backendrows.Row{
 		Name: "fixture-network", Module: fixtureWasm(t), CredentialEnv: "FIXTURE_TOKEN",
@@ -303,7 +304,7 @@ func loadBasic(t *testing.T, srv *httptest.Server, env map[string]string, audit 
 		Routes: []connectorhost.Route{{Method: "GET", Host: srv.Listener.Addr().String(), Path: "/repos"}},
 	}
 	c, err := backendrows.Load(context.Background(), r, backendrows.Options{
-		Getenv: func(k string) string { return env[k] }, Audit: audit, Client: srv.Client(),
+		Getenv: func(k string) string { return env[k] }, Client: srv.Client(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -319,7 +320,8 @@ func TestLoadSendsBasicAuthFromTheIdentityAndCredential(t *testing.T) {
 		fmt.Fprint(w, "ok")
 	}))
 	t.Cleanup(srv.Close)
-	c := loadBasic(t, srv, map[string]string{"FIXTURE_EMAIL": "me@example.com", "FIXTURE_TOKEN": "tok-123"}, &bytes.Buffer{})
+	auditInTempDir(t, "fixture-network")
+	c := loadBasic(t, srv, map[string]string{"FIXTURE_EMAIL": "me@example.com", "FIXTURE_TOKEN": "tok-123"})
 	if err := c.Call(context.Background(), "fetch", map[string]string{"url": srv.URL + "/repos/x", "method": "GET"}, new(fetched)); err != nil {
 		t.Fatal(err)
 	}
@@ -340,8 +342,8 @@ func TestLoadBasicFailsClosedWithoutIdentityOrCredential(t *testing.T) {
 				t.Error("request reached the backend without full Basic credentials")
 			}))
 			t.Cleanup(srv.Close)
-			var audit bytes.Buffer
-			c := loadBasic(t, srv, env, &audit)
+			audit := auditInTempDir(t, "fixture-network")
+			c := loadBasic(t, srv, env)
 			err := c.Call(context.Background(), "fetch", map[string]string{"url": srv.URL + "/repos/x", "method": "GET"}, new(fetched))
 			if err == nil || !errors.Is(err, connectorhost.ErrCall) {
 				t.Fatalf("err = %v, want a failed call", err)
@@ -350,18 +352,19 @@ func TestLoadBasicFailsClosedWithoutIdentityOrCredential(t *testing.T) {
 			if !strings.Contains(err.Error(), connectorhost.ErrHTTPSend.Error()) {
 				t.Errorf("err = %v, want the %q failure", err, connectorhost.ErrHTTPSend)
 			}
-			lines := strings.Split(strings.TrimSpace(audit.String()), "\n")
+			lines := strings.Split(strings.TrimSpace(audit()), "\n")
 			if len(lines) != 1 || !strings.Contains(lines[0], `"failed"`) {
-				t.Errorf("audit = %q, want exactly one failed entry", audit.String())
+				t.Errorf("audit = %q, want exactly one failed entry", audit())
 			}
 		})
 	}
 }
 
 func TestLoadReportsAnUnreadableModule(t *testing.T) {
+	t.Chdir(t.TempDir())
 	r := row("gone", getRepos)
 	r.Module = filepath.Join(t.TempDir(), "absent.wasm")
-	if _, err := backendrows.Load(context.Background(), r, backendrows.Options{Audit: &bytes.Buffer{}}); err == nil || !strings.Contains(err.Error(), "gone") {
+	if _, err := backendrows.Load(context.Background(), r, backendrows.Options{}); err == nil || !strings.Contains(err.Error(), "gone") {
 		t.Fatalf("err = %v, want a read error naming the backend", err)
 	}
 }
@@ -595,6 +598,7 @@ func (l *recordingLoader) LoadNetwork(_ context.Context, _ []byte, n connectorho
 // A reload is a Load like any other, so under the Connector sandbox the
 // replacement is loaded into it too.
 func TestLoadRoutesEveryLoadThroughTheInstalledSandbox(t *testing.T) {
+	t.Chdir(t.TempDir())
 	module := filepath.Join(t.TempDir(), "x.wasm")
 	if err := os.WriteFile(module, []byte("\x00asm"), 0o600); err != nil {
 		t.Fatal(err)
@@ -603,7 +607,7 @@ func TestLoadRoutesEveryLoadThroughTheInstalledSandbox(t *testing.T) {
 	t.Cleanup(connectorsandbox.Use(l))
 	r := backendrows.Row{Name: "fixture", Module: module, CredentialEnv: "TOKEN"}
 	for range 2 {
-		if _, err := backendrows.Load(context.Background(), r, backendrows.Options{Audit: &bytes.Buffer{}}); err == nil || err.Error() != "recorded" {
+		if _, err := backendrows.Load(context.Background(), r, backendrows.Options{}); err == nil || err.Error() != "recorded" {
 			t.Fatalf("Load = %v, want the sandbox's error", err)
 		}
 	}
@@ -656,5 +660,47 @@ func TestSnapshotRestoreDropsAGateRegisteredAfterIt(t *testing.T) {
 	}
 	if _, ok := backendrows.Lookup("gated"); !ok {
 		t.Error("a gate registered after Snapshot survives its restore")
+	}
+}
+
+// auditInTempDir runs the test in a fresh directory, where Load opens its audit
+// file, and returns a reader of what the file holds.
+func auditInTempDir(t *testing.T, name string) func() string {
+	t.Helper()
+	dir := t.TempDir()
+	t.Chdir(dir)
+	return func() string {
+		raw, err := os.ReadFile(filepath.Join(hostpaths.LogDir(dir), primaryrecord.Name(name, ".audit.jsonl")))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
+	}
+}
+
+// A Connector never runs unrecorded: an audit file that will not open fails the
+// load, naming the file, before the module is read or compiled.
+func TestLoadFailsWhenTheAuditFileWillNotOpen(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	logDir := hostpaths.LogDir(dir)
+	if err := os.MkdirAll(filepath.Dir(logDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(logDir, nil, 0o644); err != nil { // a file where the log directory belongs
+		t.Fatal(err)
+	}
+	l := &recordingLoader{}
+	t.Cleanup(connectorsandbox.Use(l))
+	r := row("gone", getRepos)
+	r.Module = filepath.Join(dir, "absent.wasm")
+
+	_, err := backendrows.Load(context.Background(), r, backendrows.Options{})
+	want := filepath.Join(logDir, primaryrecord.Name("gone", ".audit.jsonl"))
+	if err == nil || !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), "read module") {
+		t.Fatalf("err = %v, want the audit open failure naming %s, not the module read", err, want)
+	}
+	if len(l.networks) != 0 {
+		t.Errorf("sandbox saw loads %v, want none", l.networks)
 	}
 }

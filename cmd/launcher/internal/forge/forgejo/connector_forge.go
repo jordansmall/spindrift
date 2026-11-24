@@ -4,10 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"spindrift.dev/launcher/internal/backend"
@@ -18,17 +16,12 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/git"
 	"spindrift.dev/launcher/internal/gitexec"
-	"spindrift.dev/launcher/internal/hostpaths"
 )
 
 // ErrMergeMethod is why a forgejo row refuses a MERGE_METHOD
 // other than rebase: the Connector always merges by rebase, so honouring the
 // knob is impossible and ignoring it would be silent.
 var ErrMergeMethod = errors.New("MERGE_METHOD must be rebase or unset: the forgejo Connector merges by rebase only")
-
-// connectorAuditLog is the Connector's request record, in the host's
-// log directory beside the other Connector logs.
-const connectorAuditLog = "connector-forgejo.audit.jsonl"
 
 // loadRowConnector loads a backend row's Connector; a test seam.
 var loadRowConnector = backendrows.Load
@@ -66,10 +59,8 @@ func newConnectorCodeForge(row backendrows.Row, s backendkit.Shared, k Knobs) (f
 		return nil, fmt.Errorf("%w (got %q)", ErrMergeMethod, s.MergeMethod)
 	}
 	row.Routes = connectortracker.Routes(row.Routes, s.RepoSlug)
-	audit, closeAudit := openAudit()
-	conn, err := loadRowConnector(context.Background(), row, backendrows.Options{Audit: audit, Client: connectorClient, Getenv: credentialGetenv(row, k)})
+	conn, err := loadRowConnector(context.Background(), row, backendrows.Options{Client: connectorClient, Getenv: credentialGetenv(row, k)})
 	if err != nil {
-		closeAudit()
 		return nil, err
 	}
 	cf, _, err := connectorforge.Compose(conn, connectorforge.Target{API: strings.TrimSuffix(k.ForgejoBaseURL, "/"), Repo: s.RepoSlug}, connectorforge.Git{
@@ -80,7 +71,6 @@ func newConnectorCodeForge(row backendrows.Row, s backendkit.Shared, k Knobs) (f
 	})
 	if err != nil {
 		_ = conn.Close(context.Background())
-		closeAudit()
 		return nil, err
 	}
 	return cf, nil
@@ -96,27 +86,4 @@ func credentialGetenv(row backendrows.Row, k Knobs) func(string) string {
 		}
 		return os.Getenv(name)
 	}
-}
-
-// openAudit opens the Connector's audit file for appending. A record that
-// cannot be written must not fail the run, so an unopenable file discards, with
-// one stderr line because that record is the Connector's evidence.
-func openAudit() (io.Writer, func()) {
-	lost := func(err error) (io.Writer, func()) {
-		fmt.Fprintf(os.Stderr, "forgejo: Connector audit record disabled: %v\n", err)
-		return io.Discard, func() {}
-	}
-	pwd, err := os.Getwd()
-	if err != nil {
-		return lost(err)
-	}
-	dir := hostpaths.LogDir(pwd)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return lost(err)
-	}
-	f, err := os.OpenFile(filepath.Join(dir, connectorAuditLog), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
-	if err != nil {
-		return lost(err)
-	}
-	return f, func() { _ = f.Close() }
 }
