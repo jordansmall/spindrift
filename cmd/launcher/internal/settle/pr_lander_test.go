@@ -182,6 +182,14 @@ func TestSettle_PRLander(t *testing.T) {
 			wantPRExact: guardWording(".github/workflows/ci.yml"),
 		},
 		{
+			name:         "merge guard hit on the Route baseline under the shipped default",
+			guard:        ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**,.pi/**,spindrift-connector-routes.json",
+			wantStatuses: []Status{detailOnly, StatusMergeGuardHit, StatusMergeableUnknown},
+			files:        []string{"src/main.go", "spindrift-connector-routes.json"},
+			want:         guardHit, wantLabels: complete, wantNoLabels: noFailed, wantCalls: flipOnly,
+			wantPRExact: guardWording("spindrift-connector-routes.json"),
+		},
+		{
 			name: "merge guard hit on a forgejo workflow path", shape: shapeForgejo, tracker: backend.Forgejo,
 			wantStatuses: []Status{detailOnly, StatusMergeGuardHit, StatusMergeableUnknown},
 			guard:        ".github/**,.forgejo/**", files: []string{"src/main.go", ".forgejo/workflows/ci.yml"},
