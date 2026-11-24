@@ -139,9 +139,7 @@ func bootstrap(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descriptor
 	// the minter rewrites in place (issue #1027). No-op when unset.
 	if c.GhTokenRefreshFile != "" {
 		panicguard.Go(func() {
-			tokenrefresh.Watch(c.GhTokenRefreshFile, tokenrefresh.Interval, nil, func(v string) error {
-				return os.Setenv("GH_TOKEN", v)
-			})
+			tokenrefresh.WatchGHToken(c.GhTokenRefreshFile, tokenrefresh.Interval, nil)
 		})
 	}
 
