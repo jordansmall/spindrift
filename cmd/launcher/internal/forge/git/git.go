@@ -111,7 +111,7 @@ func cloneInto(remoteURL string, cred gitexec.Credential, dir string, timeout ti
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cloneCmd := exec.CommandContext(ctx, "git", append(append([]string{"clone"}, gitexec.NoAutoMaintenance("--config")...), remoteURL, dir)...)
-	if err := cred.Apply(cloneCmd).Run(); err != nil {
+	if err := cred.Apply(cloneCmd, remoteURL).Run(); err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return fmt.Errorf("git clone %s: timed out after %s: %w", forge.RedactURLCredentials(remoteURL), timeout, ctx.Err())
 		}
@@ -134,7 +134,7 @@ func cloneToTemp(remoteURL string, cred gitexec.Credential, prefix string, timeo
 		return "", nil, nil, err
 	}
 	gitIn = func(ctx context.Context, args ...string) *exec.Cmd {
-		return cred.Apply(exec.CommandContext(ctx, "git", gitexec.GuardedArgs(dir, args...)...))
+		return cred.Apply(exec.CommandContext(ctx, "git", gitexec.GuardedArgs(dir, args...)...), remoteURL)
 	}
 	return dir, gitIn, cleanup, nil
 }
@@ -258,7 +258,7 @@ func (g *gitClient) Rebase(branch string) error {
 	}
 	pushCtx, pushCancel := context.WithTimeout(context.Background(), g.opTimeout)
 	defer pushCancel()
-	return gitplumbing.GitForcePush(pushCtx, dir, g.cred)
+	return gitplumbing.GitForcePush(pushCtx, dir, g.cred, g.remoteURL)
 }
 
 // BranchExists reports whether branch exists on the remote. Under
@@ -274,7 +274,7 @@ func (g *gitClient) BranchExists(branch string) (bool, error) {
 	defer cancel()
 	want := "refs/heads/" + branch
 	var out bytes.Buffer
-	cmd := g.cred.Apply(exec.CommandContext(ctx, "git", "ls-remote", "--exit-code", "--heads", g.remoteURL, want))
+	cmd := g.cred.Apply(exec.CommandContext(ctx, "git", "ls-remote", "--exit-code", "--heads", g.remoteURL, want), g.remoteURL)
 	cmd.Stdout = &out
 	cmd.WaitDelay = gitOutputWaitDelay
 	err := cmd.Run()
@@ -302,7 +302,7 @@ func (g *gitClient) BranchExists(branch string) (bool, error) {
 func (g *gitClient) Probe() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), g.opTimeout)
 	defer cancel()
-	if err := g.cred.Apply(exec.CommandContext(ctx, "git", "ls-remote", g.remoteURL)).Run(); err != nil {
+	if err := g.cred.Apply(exec.CommandContext(ctx, "git", "ls-remote", g.remoteURL), g.remoteURL).Run(); err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return "", fmt.Errorf("%w: timed out after %s: %s", forge.ErrRepoNotFound, g.opTimeout, forge.RedactURLCredentials(g.remoteURL))
 		}

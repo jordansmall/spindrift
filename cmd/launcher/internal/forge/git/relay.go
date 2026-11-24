@@ -12,7 +12,7 @@ import (
 // forge.DraftPRCreator and forge.BundleCommitSubjects: the PR pair moves
 // together, and OutboxRelayCapable follows DraftPRCreator.
 func (g *gitClient) RelayBundle(outboxDir, ref string) error {
-	return bundlerelay.Relay("git", outboxDir, ref, g.cred, func(dir string) error {
+	return bundlerelay.Relay("git", outboxDir, ref, g.cred, g.remoteURL, func(dir string) error {
 		return cloneInto(g.remoteURL, g.cred, dir, g.cloneTimeout)
 	})
 }

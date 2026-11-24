@@ -105,7 +105,7 @@ func FetchTree(scratch, url, branch string, cred gitexec.Credential, gitArgs ...
 // always means "just fetched" (issue #4074).
 func fetchBranchTip(cred gitexec.Credential, gitArgs []string, repo, url, branch string) error {
 	ref := "refs/heads/" + branch
-	cmd := cred.Apply(gitexec.Cmd(gitArgs, "-C", repo, "fetch", "--depth=1", "-q", url, "+"+ref+":"+ref))
+	cmd := cred.Apply(gitexec.Cmd(gitArgs, "-C", repo, "fetch", "--depth=1", "-q", url, "+"+ref+":"+ref), url)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("butler: fetch branch %s from %s: %w: %s", branch, forge.RedactURLCredentials(url), err, forge.RedactURLCredentials(string(out)))
 	}

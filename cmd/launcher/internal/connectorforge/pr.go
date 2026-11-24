@@ -87,7 +87,7 @@ func (l draftPRLayer) UnwrapCodeForge() forge.CodeForge    { return l.CodeForge 
 func (l relayLayer) UnwrapCodeForge() forge.CodeForge      { return l.CodeForge }
 
 func (l relayLayer) RelayBundle(outboxDir, ref string) error {
-	return bundlerelay.Relay("connector forge", outboxDir, ref, l.p.cred, l.p.relayClone("relay bundle"))
+	return bundlerelay.Relay("connector forge", outboxDir, ref, l.p.cred, l.p.cloneURL, l.p.relayClone("relay bundle"))
 }
 
 func (l relayLayer) CommitSubjects(outboxDir, base, ref string) ([]string, error) {

@@ -241,7 +241,7 @@ func (p *pushOnly) DeleteBranch(branch, base string) error {
 // only redacted output.
 func (p *pushOnly) cloneInto(op, shapeFlag string) func(dir string) error {
 	return func(dir string) error {
-		out, err := p.cred.Apply(exec.Command("git", "clone", shapeFlag, p.cloneURL, dir)).CombinedOutput()
+		out, err := p.cred.Apply(exec.Command("git", "clone", shapeFlag, p.cloneURL, dir), p.cloneURL).CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("connector forge: %s: git clone %s: %w%s", op, forge.RedactURLCredentials(p.cloneURL), err, forge.RedactedOutputTail(out))
 		}
@@ -264,7 +264,7 @@ var _ forge.MirrorSeeder = (*pushOnly)(nil)
 
 // pushBranch creates branch from localRef in the repo at srcDir, create-only.
 func (p *pushOnly) pushBranch(srcDir, localRef, branch, base string) error {
-	return bundlerelay.PushBranch("connector forge", srcDir, localRef, branch, base, p.cred, p.relayClone("push branch"))
+	return bundlerelay.PushBranch("connector forge", srcDir, localRef, branch, base, p.cred, p.cloneURL, p.relayClone("push branch"))
 }
 
 // newPushOnly builds a pushOnly whose clock, a zero one included, sleeps.
