@@ -91,7 +91,7 @@ in
         ${fixtures.runInputDocOf
           (fixtures.moduleConsumerVia rootFlakeModule).apps.${system}.default.program
         }
-        jq -e '[.backends[] | select(.credentialKnob == "forgejoConnectorToken")]
+        jq -e '[.backends[] | select(.credentialKnob == "forgejoToken")]
           | length == 1 and (.[0] | (has("primary") | not) and (has("shadow") | not))' "$doc"
         touch $out
       '';
@@ -99,7 +99,7 @@ in
   core-entry-root-and-forgejo-connector-module-dedup = rootAndConnectorModuleDedup {
     name = "core-entry-root-and-forgejo-connector-module-dedup";
     module = forgejoConnectorModule;
-    credentialKnob = "forgejoConnectorToken";
+    credentialKnob = "forgejoToken";
   };
 
   # Issue #7417: the batteries root does not carry jira, so a Consumer imports

@@ -2986,3 +2986,26 @@ func TestSecretCmdTemplate_GithubRunSuppliesGHTokenOnce(t *testing.T) {
 		t.Errorf("ran %q, want exactly %q", ran(), want)
 	}
 }
+
+// A row may name a core secret knob as its credential (forgejo's FORGEJO_TOKEN,
+// issue #7500). parseFlags already ran that knob's `_CMD`, so this pass must
+// not run the vault a second time.
+func TestApplyConnectorCredentials_SkipsRowCredentialACoreSecretResolved(t *testing.T) {
+	t.Cleanup(backendrows.Snapshot())
+	doc := `[{"name":"forgejo","module":"/nonexistent.wasm","credentialEnv":"FORGEJO_TOKEN",
+"routes":[{"method":"GET","host":"forgejo.example","path":"/x"}]}]`
+	if err := backendrows.Use([]byte(doc), func(string) string { return "" }); err != nil {
+		t.Fatal(err)
+	}
+	setKnob(t, "CODE_FORGE", "forgejo")
+	setKnob(t, "ISSUE_TRACKER", "forgejo")
+	t.Setenv("FORGEJO_TOKEN", "already-resolved")
+	t.Setenv("FORGEJO_TOKEN_CMD", "vault get forgejo")
+	ran := stubSecretCmd(t, "", failingVault)
+	if err := applyConnectorCredentials(); err != nil {
+		t.Fatal(err)
+	}
+	if got := ran(); len(got) != 0 {
+		t.Errorf("runner called: %q, want none (the core secret pass owns FORGEJO_TOKEN_CMD)", got)
+	}
+}

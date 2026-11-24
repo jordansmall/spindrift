@@ -544,7 +544,7 @@ in
               and .routes == .acceptedRoutes
               and all(.routes[]; .host == "{base}")
               and .baseEnv == "FORGEJO_BASE_URL"
-              and .credentialKnob == "forgejoConnectorToken"
+              and .credentialKnob == "forgejoToken"
               and (has("primary") | not) and (has("shadow") | not))' "$doc"
         touch $out
       '';

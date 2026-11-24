@@ -297,7 +297,7 @@ in
           *) echo "unexpected image path: $imagePath" >&2; exit 1 ;;
         esac
         jq -e '[.backends[] | select(.credentialKnob == "ghToken")] | length == 1' "$doc"
-        jq -e '[.backends[] | select(.credentialKnob == "forgejoConnectorToken")] | length == 0' "$doc"
+        jq -e '[.backends[] | select(.credentialKnob == "forgejoToken")] | length == 0' "$doc"
         touch $out
       '';
 
@@ -840,8 +840,9 @@ in
     );
     # The flake module reads the table through this function, so a fixture
     # env-only row exercises its `flakePath` guards beside the real table's own
-    # env-only rows (githubConnectorToken and the jira Connector credential
-    # knobs); an unguarded read would break every Consumer eval.
+    # env-only rows (githubConnectorToken and the forgejo and jira Connector
+    # credential knobs); an unguarded read would break every Consumer
+    # eval.
     assert
       let
         fixture = removedKnobs // {

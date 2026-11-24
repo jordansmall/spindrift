@@ -281,16 +281,17 @@ in
     ) "the forgejo Connector's row must carry the Route table in connectors/forgejo/routes.nix";
     pkgs.runCommand "connectors-forgejo-contributes-routes" { } "touch $out";
 
-  # Issue #6868: the forgejo Connector registers its row and token knob
-  # unconditionally; it is the Code Forge for every forgejo run.
+  # Issue #6868: the forgejo Connector registers its row unconditionally; it is
+  # the Code Forge for every forgejo run. Its credential is core's forgejoToken
+  # (issue #7500), so the Connector declares no token knob of its own.
   connectors-forgejo-row-unconditional =
     assert assertMsg (
-      (configOf withForgejo).envSchema ? forgejoConnectorToken
-    ) "the env schema must still carry forgejoConnectorToken";
+      !((configOf withForgejo).envSchema ? forgejoConnectorToken)
+    ) "the env schema must not carry forgejoConnectorToken";
     assert assertMsg (
-      (configOf withForgejo).connectors.forgejo.knobs ? forgejoConnectorToken
-      && (configOf withForgejo).connectors.forgejo.backend != null
-    ) "the forgejo row must carry the forgejoConnectorToken knob and its backend";
+      (configOf withForgejo).connectors.forgejo.knobs == { }
+      && (configOf withForgejo).connectors.forgejo.backend.credential == "forgejoToken"
+    ) "the forgejo row must declare no knob and authorize with core's forgejoToken";
     pkgs.runCommand "connectors-forgejo-row-unconditional" { } "touch $out";
 
   connectors-jira-contributes-routes =

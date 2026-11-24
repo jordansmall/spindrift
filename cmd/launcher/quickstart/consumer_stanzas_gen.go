@@ -93,8 +93,7 @@ var consumerStanzas = map[string]consumerStanza{
 		},
 		Secrets: []stanzaSecret{
 			{Env: "FORGEJO_TOKEN", Secret: true},
-			{Env: "SPINDRIFT_FORGEJO_CONNECTOR_TOKEN", Secret: true},
 		},
-		Credential: "SPINDRIFT_FORGEJO_CONNECTOR_TOKEN",
+		Credential: "FORGEJO_TOKEN",
 	},
 }

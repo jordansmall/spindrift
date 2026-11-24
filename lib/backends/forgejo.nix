@@ -14,7 +14,7 @@
   connectorOnly = true;
   tokenEnvVar = "FORGEJO_TOKEN";
   consumerStanza = {
-    connectorKnobs = [ "forgejoConnectorToken" ];
+    connectorKnobs = [ ];
     flakeInput = null;
     moduleImport = null;
   };
@@ -53,7 +53,7 @@
       env = "FORGEJO_TOKEN";
       secret = true;
       hostConfig = true;
-      doc = "Forgejo/Gitea API token (Bearer/token scheme); required when ISSUE_TRACKER=forgejo, and git's credential when CODE_FORGE=forgejo";
+      doc = "Forgejo/Gitea API token (Bearer/token scheme), the one credential of a forgejo run: the host attaches it to the forgejo Connector's requests and git uses it; required when ISSUE_TRACKER=forgejo or CODE_FORGE=forgejo (needs read access to the repository, its pull requests, commit statuses and branches, and write access to open, edit, merge and comment on pull requests and to delete branches)";
       boxEnv = false;
     };
   };

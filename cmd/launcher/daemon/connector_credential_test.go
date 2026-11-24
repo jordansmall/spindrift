@@ -497,6 +497,7 @@ func TestMainRun_StartsTheConnectorCredentialWatcherForACmdSourcedRow(t *testing
 // A forgejo row is read as the CODE_FORGE and as the ISSUE_TRACKER, so the
 // credential gate resolves its credential on either axis.
 func TestResolveConnectorCredentials_ForgejoRowResolvesAsForgeOrTracker(t *testing.T) {
+	const forgejoTokenEnv = "FORGEJO_TOKEN"
 	for _, tc := range []struct {
 		name, template, forge string
 		wantRan, wantErr      bool
@@ -508,13 +509,13 @@ func TestResolveConnectorCredentials_ForgejoRowResolvesAsForgeOrTracker(t *testi
 		t.Run(tc.name, func(t *testing.T) {
 			clearKnobEnvT(t)
 			t.Cleanup(backendrows.Snapshot())
-			raw := `[{"name":"forgejo","module":"/nonexistent.wasm","credentialEnv":"` + ghTokenEnv + `",
+			raw := `[{"name":"forgejo","module":"/nonexistent.wasm","credentialEnv":"` + forgejoTokenEnv + `",
 "routes":[{"method":"GET","host":"codeberg.org","path":"/api/v1/x"}]}]`
 			if err := backendrows.Use([]byte(raw), func(string) string { return "" }); err != nil {
 				t.Fatal(err)
 			}
-			t.Setenv(ghTokenEnv, "")
-			t.Setenv(ghTokenEnv+"_CMD", "")
+			t.Setenv(forgejoTokenEnv, "")
+			t.Setenv(forgejoTokenEnv+"_CMD", "")
 			t.Setenv("SECRET_CMD", tc.template)
 			var ran bool
 			stubSecretCmd(t, func(string) (string, error) { ran = true; return "tok\n", nil })
@@ -531,7 +532,38 @@ func TestResolveConnectorCredentials_ForgejoRowResolvesAsForgeOrTracker(t *testi
 			if ran != tc.wantRan {
 				t.Errorf("secret command ran = %v, want %v", ran, tc.wantRan)
 			}
+			if got := os.Getenv(forgejoTokenEnv); tc.wantRan && got != "tok" {
+				t.Errorf("%s = %q, want tok", forgejoTokenEnv, got)
+			}
 		})
+	}
+}
+
+// FORGEJO_TOKEN is a core secret yet the daemon resolves it through the
+// forgejo row, so its `_CMD` form fills it as a Connector credential does.
+func TestResolveConnectorCredentials_ForgejoTokenCmdFillsFORGEJO_TOKEN(t *testing.T) {
+	clearKnobEnvT(t)
+	t.Cleanup(backendrows.Snapshot())
+	raw := `[{"name":"forgejo","module":"/nonexistent.wasm","credentialEnv":"FORGEJO_TOKEN",
+"routes":[{"method":"GET","host":"codeberg.org","path":"/api/v1/x"}]}]`
+	if err := backendrows.Use([]byte(raw), func(string) string { return "" }); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FORGEJO_TOKEN", "")
+	t.Setenv("FORGEJO_TOKEN_CMD", "fetch-forgejo-token")
+	t.Setenv("SECRET_CMD", "")
+	var ranCmd string
+	stubSecretCmd(t, func(cmd string) (string, error) { ranCmd = cmd; return "tok-f\n", nil })
+	doc := demandDocT(map[string]string{"CODE_FORGE": "forgejo", "ISSUE_TRACKER": "local"})
+
+	if _, err := resolveConnectorCredentials(doc, workKinds, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if ranCmd != "fetch-forgejo-token" {
+		t.Errorf("ran %q, want fetch-forgejo-token", ranCmd)
+	}
+	if got := os.Getenv("FORGEJO_TOKEN"); got != "tok-f" {
+		t.Errorf("FORGEJO_TOKEN = %q, want tok-f", got)
 	}
 }
 
