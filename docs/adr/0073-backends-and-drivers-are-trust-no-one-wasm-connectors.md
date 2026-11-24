@@ -1391,8 +1391,8 @@ moves only the issue tracker, which stays native until #7122. The root
 `flakeModules.default` carries the forgejo Connector module, so every Consumer
 has the forgejo row, as it has github's, and an existing forgejo Consumer
 config evaluates unchanged, `primary` included. A `CODE_FORGE=forgejo` run needs
-`SPINDRIFT_FORGEJO_CONNECTOR_TOKEN` (`FORGEJO_TOKEN` stays git's credential)
-and `MERGE_METHOD` `rebase` or unset. The in-box half (the Box token, the
+`SPINDRIFT_FORGEJO_CONNECTOR_TOKEN` (`FORGEJO_TOKEN` stays git's credential;
+see the #7500 amendment) and `MERGE_METHOD` `rebase` or unset. The in-box half (the Box token, the
 in-box forge CLI and forgejo-cli) stays until #6757. The pinned exception in
 rule 7 shrinks to the native forgejo tracker.
 
@@ -1553,3 +1553,14 @@ removed: setting it fails evaluation and launch. This supersedes the github
 parts of the earlier wording above that names that variable and calls the
 credential static. See [the
 reference](../reference.md#the-github-connector).
+
+## Amendment (issue #7500): forgejo's credential is core's `FORGEJO_TOKEN`
+
+The forgejo Connector and core's git share one credential, `FORGEJO_TOKEN`, as
+github's do `GH_TOKEN`. The host reads it from the process environment at each
+Connector request and each git op, so a token rotated there reaches the next
+request and push; `FORGEJO_TOKEN_CMD` and `SECRET_CMD` run once at launch.
+`SPINDRIFT_FORGEJO_CONNECTOR_TOKEN` and its `_CMD` are removed: setting either
+fails evaluation and launch. This supersedes the earlier wording that has
+`FORGEJO_TOKEN` stay git's credential beside a separate Connector token. See
+[MIGRATING.md](../../MIGRATING.md).

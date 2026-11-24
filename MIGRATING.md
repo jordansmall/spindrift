@@ -1,5 +1,22 @@
 # Migration Guide
 
+## `SPINDRIFT_FORGEJO_CONNECTOR_TOKEN` is removed: `FORGEJO_TOKEN` authorizes everything (issue #7500)
+
+A forgejo run now takes one token. `FORGEJO_TOKEN` authorizes the forgejo
+Connector's requests (tracker and forge) and core git alike, and is read at each
+use from the process environment, so a change to `FORGEJO_TOKEN` there reaches
+the next request and push; `FORGEJO_TOKEN_CMD` or `SECRET_CMD` runs once at
+launch, with no mid-run re-run. The `forgejoConnectorToken` knob and
+`SPINDRIFT_FORGEJO_CONNECTOR_TOKEN` are gone, and setting either now fails with
+a message naming `FORGEJO_TOKEN`.
+
+The fix: set `FORGEJO_TOKEN=<token with both scope sets>` (or
+`FORGEJO_TOKEN_CMD`) and delete `SPINDRIFT_FORGEJO_CONNECTOR_TOKEN` (and its
+`_CMD`) from `harness.env`, the flake, and CI secrets. If the two tokens
+differed, the one token needs both sets of scopes, as the `FORGEJO_TOKEN` entry
+in [`docs/flake-options.md`](docs/flake-options.md) lists them. The sections
+below that name the old variable describe earlier releases.
+
 ## Server/Data Center jira sites must set `JIRA_DEPLOYMENT=server` (issue #7501)
 
 **A Jira Server/Data Center site must now set `JIRA_DEPLOYMENT=server`
