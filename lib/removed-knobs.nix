@@ -63,4 +63,16 @@
     env = "SPINDRIFT_GITHUB_CONNECTOR_TOKEN";
     message = "SPINDRIFT_GITHUB_CONNECTOR_TOKEN was removed: the github Connector takes GH_TOKEN as its credential instead (issue #7499; see MIGRATING.md); delete the setting";
   };
+  jiraConnectorToken = {
+    env = "SPINDRIFT_JIRA_CONNECTOR_TOKEN";
+    message = "SPINDRIFT_JIRA_CONNECTOR_TOKEN was removed: the jira Connector authorizes with JIRA_TOKEN instead (issue #7501); see MIGRATING.md; delete the setting";
+  };
+  jiraConnectorTokenCmd = {
+    env = "SPINDRIFT_JIRA_CONNECTOR_TOKEN_CMD";
+    message = "SPINDRIFT_JIRA_CONNECTOR_TOKEN_CMD was removed: the jira Connector authorizes with JIRA_TOKEN_CMD instead (issue #7501); see MIGRATING.md; delete the setting";
+  };
+  jiraConnectorEmail = {
+    env = "SPINDRIFT_JIRA_CONNECTOR_EMAIL";
+    message = "SPINDRIFT_JIRA_CONNECTOR_EMAIL was removed: the jira Connector takes its Basic identity from JIRA_EMAIL instead (issue #7501); see MIGRATING.md; delete the setting";
+  };
 }

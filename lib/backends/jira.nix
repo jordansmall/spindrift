@@ -11,10 +11,7 @@
   # The core knob a jira Connector row names as its Basic identity (issue #7501).
   identityEnvVar = "JIRA_EMAIL";
   consumerStanza = {
-    connectorKnobs = [
-      "jiraConnectorToken"
-      "jiraConnectorEmail"
-    ];
+    connectorKnobs = [ ];
     flakeInput = ''
       jira = {
         url = "github:jordansmall/spindrift?dir=connectors/jira";
@@ -26,7 +23,7 @@
   # The knob holding the Tracker scope (ADR 0075 decision 3); a row without one
   # scopes by REPO_SLUG.
   trackerScopeKnob = "jiraProjectKey";
-  doctorTokenHint = "SPINDRIFT_JIRA_CONNECTOR_TOKEN";
+  doctorTokenHint = "JIRA_TOKEN";
   doctorSlugHint = "JIRA_BASE_URL / JIRA_PROJECT_KEY";
   # The Box has no Jira client and JIRA_TOKEN is host-only, so the research
   # verdict (issue #5245) and a work run's IF BLOCKED comment (issue #5263)
@@ -103,7 +100,7 @@
     jiraEmail = {
       env = "JIRA_EMAIL";
       group = "issues";
-      doc = "selects the jira Connector's API dialect: set it (a Jira Cloud account email) for Jira Cloud's search APIs, leave empty for Server/Data Center, which keeps the v2 /search; the Connector authenticates with SPINDRIFT_JIRA_CONNECTOR_EMAIL and SPINDRIFT_JIRA_CONNECTOR_TOKEN, not this";
+      doc = "Basic-auth identity the jira Connector's backend row pairs with JIRA_TOKEN: the Jira Cloud account email (Server/Data Center: the username); host-only, never reaches the Box";
       flakeOption = true;
       nixSubPath = "jira.email";
       boxEnv = false;
@@ -131,7 +128,7 @@
       env = "JIRA_TOKEN";
       secret = true;
       hostConfig = true;
-      doc = "still required when ISSUE_TRACKER=jira but unused since the native adapter's removal (#6858); the jira Connector authenticates with SPINDRIFT_JIRA_CONNECTOR_TOKEN";
+      doc = "credential the jira Connector's backend row authorizes its calls with, paired with JIRA_EMAIL for Basic auth: a Jira Cloud API token (Server/Data Center: the password or token); needs permission to edit and transition issues in the project, since the Connector writes labels, comments and workflow transitions through it; host-only, never reaches the Box; read on every ISSUE_TRACKER=jira run";
       boxEnv = false;
     };
   };

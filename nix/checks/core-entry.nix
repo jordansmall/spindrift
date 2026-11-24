@@ -115,7 +115,7 @@ in
             jiraViaRootAgain.flakeModule
           ]).apps.${system}.default.program
         }
-        jq -e '[.backends[] | select(.credentialKnob == "jiraConnectorToken")] | length == 1' "$doc"
+        jq -e '[.backends[] | select(.credentialKnob == "jiraToken")] | length == 1' "$doc"
         touch $out
       '';
 

@@ -372,8 +372,9 @@ rec {
     + "# <NAME>_CMD, but note the plaintext value below still wins over it\n"
     + "# too, so remove that value (or add <NAME>_CMD) for SECRET_CMD to apply.\n\n";
 
-  # Precedes the Connector credential stanza: the wizard reuses the token it
-  # verified, but a narrower one is safer.
+  # Precedes a separate Connector credential stanza: the wizard reuses the token
+  # it verified, but a narrower one is safer. A backend whose credential is its
+  # own core token (jira's JIRA_TOKEN) has nothing to substitute, so no note.
   connectorCredentialNote =
     "# The Connector authorizes its reads and writes with this token. A separate,\n"
     + "# least-privilege token may replace it: see docs/reference.md#backend-connectors.\n";
@@ -384,7 +385,9 @@ rec {
   # used. Core secrets come first; each backend's follow in its own group, from
   # the Consumer stanzas passed in (nix/consumer-stanzas.nix, issue #7415).
   # Connector knobs are env-only (`flakeOption = false`), so env is their one
-  # channel; non-secret ones (the jira email) are listed too, with no `_CMD` hint.
+  # channel; a non-secret stanza entry (a Basic identity such as the jira email,
+  # Connector-owned or a core knob that also has a flake option) is listed too,
+  # with no `_CMD` hint.
   renderHarnessEnvExample =
     schema: stanzas:
     let

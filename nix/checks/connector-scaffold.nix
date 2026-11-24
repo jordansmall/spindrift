@@ -242,10 +242,15 @@ let
         tmpl = rowOf tmplDir token;
         ref = rowOf refDir ref;
       };
-      allKnobFields = r: unique (concatMap attrNames (attrValues r.knobs));
+      allKnobFields = r: unique (concatMap attrNames (attrValues (r.knobs or { })));
       routeAttrs = d: unique (concatMap attrNames (load d "routes.nix"));
     in
-    sameNames "module.nix row attrs" (attrNames rows.ref) (attrNames rows.tmpl)
+    # A first-party reference may name its own backend's core credential and
+    # declare no knobs (issue #7501); a third-party row cannot name a core
+    # knob, so the template always declares its own credential knob.
+    sameNames "module.nix row attrs" (subtractLists [ "knobs" ] (attrNames rows.ref)) (
+      subtractLists [ "knobs" ] (attrNames rows.tmpl)
+    )
     # The template's backend and knobs may use fewer of the reference's options
     # (token auth, not Basic), never one it does not.
     ++ namesProblems "module.nix backend" [
@@ -254,9 +259,19 @@ let
       "credential"
       "base"
     ] (attrNames rows.ref.backend) (attrNames rows.tmpl.backend)
-    ++ namesProblems "module.nix knob fields" [ "env" "group" "doc" ] (allKnobFields rows.ref) (
-      allKnobFields rows.tmpl
-    )
+    ++ namesProblems "module.nix knob fields" [ "env" "group" "doc" ] (
+      if rows.ref ? knobs then
+        allKnobFields rows.ref
+      else
+        [
+          "env"
+          "group"
+          "doc"
+          "secret"
+          "flakeOption"
+          "boxEnv"
+        ]
+    ) (allKnobFields rows.tmpl)
     ++ sameNames "fragments.nix attrs" (attrNames (frag refDir)) (attrNames (frag tmplDir))
     ++ expect (
       toRef (frag tmplDir).name == (frag refDir).name

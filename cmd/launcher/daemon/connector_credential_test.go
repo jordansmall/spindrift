@@ -195,7 +195,7 @@ func TestResolveConnectorCredentials_UnreadRowsNeverRunCmd(t *testing.T) {
 	}
 }
 
-const jiraTokenEnv = "SPINDRIFT_JIRA_CONNECTOR_TOKEN"
+const jiraTokenEnv = "JIRA_TOKEN"
 
 func useJiraConnectorRow(t *testing.T) {
 	t.Helper()

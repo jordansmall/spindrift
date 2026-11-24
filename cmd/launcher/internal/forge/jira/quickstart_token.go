@@ -26,7 +26,7 @@ func acquireToken(_ backendkit.Shared, _ backendkit.Lookup, p backendkit.TokenPr
 			return token, nil
 		}
 		if errors.Is(err, forge.ErrAuthFailure) {
-			return "", fmt.Errorf("Jira token rejected by the API — check the token, SPINDRIFT_JIRA_CONNECTOR_EMAIL and JIRA_BASE_URL (issues.jira.baseURL), then rerun `%s` and paste a valid token: %w", p.RerunCmd, err)
+			return "", fmt.Errorf("Jira token rejected by the API — check the token, JIRA_EMAIL and JIRA_BASE_URL (issues.jira.baseURL), then rerun `%s` and paste a valid token: %w", p.RerunCmd, err)
 		}
 		return "", fmt.Errorf("Jira connectivity check failed — either the instance is unreachable or the project key is wrong; check JIRA_BASE_URL (issues.jira.baseURL) and JIRA_PROJECT_KEY (issues.jira.projectKey), then rerun `%s`: %w", p.RerunCmd, err)
 	}

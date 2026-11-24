@@ -5,8 +5,10 @@
 # Returns `{ stanzas; errors; }`. `stanzas` is one entry per backend row, in
 # registry order: `{ name; displayName; settings; secrets; flakeInput;
 # moduleImport; credential; }`, where `settings` is the row's own `flakeOption`
-# knobs, `secrets` is the row's `tokenEnvVar` schema entry (when it has one)
-# followed by the Connector knobs its `consumerStanza.connectorKnobs` lists, and
+# knobs, `secrets` is the row's `tokenEnvVar` schema entry (when it has one),
+# then its Connector's Basic `identity` when that names a core schema knob (a
+# Connector-owned identity is a listed connector knob instead), then the
+# Connector knobs its `consumerStanza.connectorKnobs` lists, and
 # `credential` is the env of the knob its row's `backend.credential` names: a
 # Connector knob, or the row's own backend's core token (flakeModule, not this
 # file, validates the name; null when the backend has no Connector). Forcing
@@ -31,6 +33,11 @@ let
           lib.findFirst (e: (e.env or null) == row.tokenEnvVar) null (lib.attrValues schema)
         else
           null;
+      identityEntry =
+        let
+          id = ((connectorRows.${row.name} or { }).backend or { }).identity or null;
+        in
+        if id != null && !(declared ? ${id}) then schema.${id} else null;
       missing = lib.optional (stanza == null) "${file}: row declares no consumerStanza";
       unknown = map (
         k: "${file}: consumerStanza.connectorKnobs names ${k}, which its Connector does not declare"
@@ -51,7 +58,10 @@ let
       stanza = {
         inherit (row) name displayName;
         settings = lib.filterAttrs (_: k: k.flakeOption or false) (row.knobs or { });
-        secrets = lib.optional (tokenEntry != null) tokenEntry ++ map (k: declared.${k}) listed;
+        secrets =
+          lib.optional (tokenEntry != null) tokenEntry
+          ++ lib.optional (identityEntry != null) identityEntry
+          ++ map (k: declared.${k}) listed;
         flakeInput = stanza.flakeInput or null;
         moduleImport = stanza.moduleImport or null;
         credential =

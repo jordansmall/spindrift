@@ -185,12 +185,12 @@ func newProductionHarness(t *testing.T, cloud bool, tr dispatchkind.Tracker, map
 	}
 	h.auditPath = filepath.Join(hostpaths.LogDir(pwd), connectorrecord.Name("jira", ".audit.jsonl"))
 
-	t.Setenv("SPINDRIFT_JIRA_CONNECTOR_TOKEN", connectorToken)
-	t.Setenv("SPINDRIFT_JIRA_CONNECTOR_EMAIL", connectorEmail)
+	t.Setenv("JIRA_TOKEN", connectorToken)
+	t.Setenv("JIRA_EMAIL", connectorEmail)
 	r := backendrows.Row{
 		Name: "jira", Module: path, Routes: table,
-		CredentialEnv: "SPINDRIFT_JIRA_CONNECTOR_TOKEN", CredentialScheme: backendrows.SchemeBasic,
-		IdentityEnv: "SPINDRIFT_JIRA_CONNECTOR_EMAIL", BaseEnv: jira.JiraBaseURLEnv,
+		CredentialEnv: "JIRA_TOKEN", CredentialScheme: backendrows.SchemeBasic,
+		IdentityEnv: "JIRA_EMAIL", BaseEnv: jira.JiraBaseURLEnv,
 	}
 	for _, f := range adjust {
 		f(&r)

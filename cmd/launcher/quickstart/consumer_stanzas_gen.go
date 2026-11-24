@@ -79,10 +79,9 @@ var consumerStanzas = map[string]consumerStanza{
 		},
 		Secrets: []stanzaSecret{
 			{Env: "JIRA_TOKEN", Secret: true},
-			{Env: "SPINDRIFT_JIRA_CONNECTOR_TOKEN", Secret: true},
-			{Env: "SPINDRIFT_JIRA_CONNECTOR_EMAIL"},
+			{Env: "JIRA_EMAIL"},
 		},
-		Credential:   "SPINDRIFT_JIRA_CONNECTOR_TOKEN",
+		Credential:   "JIRA_TOKEN",
 		FlakeInput:   "jira = {\n  url = \"github:jordansmall/spindrift?dir=connectors/jira\";\n  inputs.core.follows = \"spindrift\";\n};\n",
 		ModuleImport: "inputs.jira.flakeModules.default",
 	},
