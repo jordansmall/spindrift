@@ -3465,6 +3465,14 @@ or forge and then for a Driver
 [Connector subflake shape](#connector-subflake-shape) is the reference for what
 the pieces mean.
 
+The wire contract a Connector speaks is written down once, in
+[`lib/connector-protocol`](../lib/connector-protocol), and rendered into a JSON
+Schema
+([`protocol.schema.json`](../cmd/launcher/internal/connectorprotocol/protocol.schema.json))
+and the SDK's Go types. A Go author gets those types from `spindrift.dev/sdk`;
+an author in another language reads the schema
+([Connector protocol](#connector-protocol)).
+
 **Generate.** In an empty directory:
 
 ```sh
@@ -3589,16 +3597,22 @@ The protocol, not the SDK, is the contract between core and a Connector
 This is protocol version **0.3.0**. The host is
 [`connectorhost`](../cmd/launcher/internal/connectorhost/connectorhost.go).
 
-The protocol is also described once as data, in `lib/connector-protocol`.
-`nix run .#regen` renders it into the
+The protocol is described once as data, in
+[`lib/connector-protocol`](../lib/connector-protocol): that description is the
+source, and neither Go module is. `nix run .#regen` renders it into the
 [`connectorprotocol`](../cmd/launcher/internal/connectorprotocol/protocol_gen.go)
 package (the version, capability, method, error-class, limit and event
-constants, and a method table) and into
+constants, and a method table), into the SDK's `protocol_gen.go` files
+(`sdk/{connector,event,forge,tracker,driver}`: the same constants and the wire
+structs), and into
 [`protocol.schema.json`](../cmd/launcher/internal/connectorprotocol/protocol.schema.json),
-a JSON Schema for a Connector author not writing Go: each method's `params`
-and `result` under `methods`, the shared shapes under `$defs`. The
-`connector-protocol-gen` and `connector-protocol-schema-gen` checks fail when
-either file is stale.
+the machine-readable contract for a Connector author not writing Go: each
+method's `params` and `result` under `methods`, the shared shapes under
+`$defs`. The `connector-protocol-gen`, `connector-protocol-sdk-gen` and
+`connector-protocol-schema-gen` checks fail when a rendered file is stale.
+Core's own hand-written types are pinned to the same description by agreement
+tests against `connectorprotocol`, so a protocol change is one edit to the
+description and a regen.
 
 - **Module.** A Connector is a WebAssembly reactor module built with the
   stock Go toolchain (no TinyGo):
@@ -4203,9 +4217,10 @@ either file is stale.
   the payload bytes in place and must not keep them past the call. A Driver
   instead calls `driver.Register(driver.Strategy{...})`, which
   registers its capabilities and every method above. Package `event` is a
-  published copy of the canonical event vocabulary ([ADR 0065](adr/0065-drivers-decode-pass-logs-into-canonical-events.md)),
-  kept in parity with driverkit by `sdk/event/parity_test.go` (the
-  `sdk-go-test` check).
+  published copy of the canonical event vocabulary ([ADR 0065](adr/0065-drivers-decode-pass-logs-into-canonical-events.md)).
+  The SDK's protocol constants and wire structs live in each package's
+  generated `protocol_gen.go`, rendered from the description (see above), not
+  hand-kept in step with core.
 - **Conformance.** `conformance.RunConnector(t, wasmPath, corpusDir)`
   (`cmd/launcher/internal/driver/driverkit/conformance`) loads a compiled
   Driver Connector and runs the same suite over the same corpus as
