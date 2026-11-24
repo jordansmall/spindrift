@@ -2535,8 +2535,9 @@ flake module resolves the key to its env var and hands every such row to
 Three optional fields serve a tracker on the Consumer's own site, such as Jira.
 `scheme` is `"bearer"` (default) or `"basic"`; `basic` pairs `credential` (the
 API token) with `identity`, the key of another of the Connector's own host-only
-knobs holding the username (Jira Cloud's `JIRA_EMAIL`), which need not be
-secret, and bearer refuses an `identity`. `base` names any env-schema knob,
+knobs holding the username, or, for a Connector whose own core backend
+declares one, that backend's identity knob (jira's core `JIRA_EMAIL`), which
+need not be secret, and bearer refuses an `identity`. `base` names any env-schema knob,
 core or the Connector's own, holding the site's https base URL; a Route whose
 `host` is exactly `{base}` resolves at launcher load to that URL's host, with
 the URL's path prefix prepended to the route path (a route path of `/` maps to
@@ -2776,9 +2777,8 @@ create), and
 the table beyond a Consumer's accepted baseline, so doctor's
 `connector-routes-widened[jira]` row lists them as `+` lines until the
 Consumer adds them to `spindrift-connector-routes.json`. Its row authorizes
-with Basic credentials from the host-only
-`SPINDRIFT_JIRA_CONNECTOR_TOKEN` and `SPINDRIFT_JIRA_CONNECTOR_EMAIL`, with
-`JIRA_BASE_URL` as the base. The row takes no `shadow` or `primary`:
+with Basic credentials from core's host-only `JIRA_TOKEN` and `JIRA_EMAIL`,
+with `JIRA_BASE_URL` as the base. The row takes no `shadow` or `primary`:
 the Connector answers every jira call ([Running jira through its
 Connector](#running-jira-through-its-connector)).
 
@@ -3425,23 +3425,32 @@ Connector module carries a dedup `key`, so importing it twice is harmless. The
 jira as the tracker.
 
 Set `JIRA_BASE_URL` to the site's https URL and `JIRA_PROJECT_KEY`, and set the
-row's two host-only credentials:
+row's two host-only credentials, core's own `JIRA_TOKEN` and `JIRA_EMAIL`:
 
 ```sh
-export SPINDRIFT_JIRA_CONNECTOR_TOKEN=...   # API token (Cloud) or password
-export SPINDRIFT_JIRA_CONNECTOR_EMAIL=...   # account email (Cloud) or username
+export JIRA_TOKEN=...   # API token (Cloud) or password or token (Server/DC)
+export JIRA_EMAIL=...   # account email (Cloud) or username (Server/DC)
 ```
+
+**A Server/Data Center site must also set `JIRA_DEPLOYMENT=server`**
+(`issues.jira.deployment = "server"`). `JIRA_DEPLOYMENT` selects the API
+dialect, `cloud` (the default) or `server`, and an unset value means Cloud, so
+a Server/Data Center site that leaves it unset talks to Jira Cloud's search
+APIs and fails.
 
 Without the module a run fails with `ISSUE_TRACKER=jira needs the jira
 Connector`, and a `JIRA_BASE_URL` that is not an https URL is refused the same
 way: the Connector never speaks plain http. The launcher and the daemon read
-the token on every jira run and resolve it like any secret (`SECRET_CMD`
-included). `JIRA_TOKEN` is still required at startup but unused since the
-native adapter's removal (#6858), and the other jira knobs stay required as
-before. The row always authorizes with Basic, so a Server/Data Center site needs
-a username and password or token in those two variables, not a Bearer PAT. The
-API dialect follows `JIRA_EMAIL`: Jira Cloud when it is set, Server/Data Center
-otherwise. Each process appends the Connector's audit lines to
+the token on every jira run and resolve it like any secret (`JIRA_TOKEN_CMD`
+and `SECRET_CMD` included); the host attaches both credentials per request, and
+the Connector never holds them. The row always authorizes with Basic, so a
+Server/Data Center site needs a username and password or token in those two
+variables, not a Bearer PAT, which the Basic row cannot express. The API
+dialect follows `JIRA_DEPLOYMENT`, not `JIRA_EMAIL`: `cloud` (the default) uses
+Jira Cloud's search APIs, `server` keeps Server/Data Center's v2 `/search`.
+`SPINDRIFT_JIRA_CONNECTOR_TOKEN` (and its `_CMD` form) and `SPINDRIFT_JIRA_CONNECTOR_EMAIL` are
+removed knobs that fail at launch, naming `JIRA_TOKEN` (`JIRA_TOKEN_CMD`) and `JIRA_EMAIL` (see
+[MIGRATING.md](../MIGRATING.md)). Each process appends the Connector's audit lines to
 `.spindrift/logs/connector-jira-<stamp>-<pid>.audit.jsonl` and every failed
 load or call to the matching `.log`. The jira row is not on dogfood's
 `nix/dogfood-primary.nix`, so no streak recipe counts its runs.
@@ -4493,15 +4502,17 @@ secret) may appear in host-side logs. The plaintext direct-value and
 with this in place, `harness.env` is expected to hold fetch recipes
 rather than live credentials. The github row's credential is core's `GH_TOKEN`
 and resolves through `GH_TOKEN_CMD` (`--gh-token-cmd`) as any core secret does.
-A forgejo or jira Connector row's host-only credential
-(`SPINDRIFT_FORGEJO_CONNECTOR_TOKEN`, `SPINDRIFT_JIRA_CONNECTOR_TOKEN`) resolves
+The forgejo Connector row's host-only credential
+(`SPINDRIFT_FORGEJO_CONNECTOR_TOKEN`) resolves
 the same way: `<ENV>_CMD`, then
 the plain env var, then the `SECRET_CMD` template. The template applies
 only to a row this run reads through: its backend is the active
 `CODE_FORGE` or `ISSUE_TRACKER`. An explicit `<ENV>_CMD` runs regardless. The
-jira row's paired identity env, `SPINDRIFT_JIRA_CONNECTOR_EMAIL`, gets no `_CMD` or
-template resolution. Those two tokens have no `--<secret>-cmd` or `--<secret>-file`
-flag, and a failing command or template fails startup naming the env var,
+jira row's credential is core's own `JIRA_TOKEN`, resolved by the ordinary
+secret chain above; its paired identity, `JIRA_EMAIL`, is not a secret and gets
+no `_CMD` or template resolution. A Connector-owned token (the forgejo row's
+`SPINDRIFT_FORGEJO_CONNECTOR_TOKEN`) has no `--<secret>-cmd` or
+`--<secret>-file` flag, and a failing command or template fails startup naming the env var,
 not the command. See `spindrift --help --all` for the full
 `--<secret>-cmd`/`--<secret>-file` flag list. When the launcher's own stdin
 and stderr are both TTYs, an interactive vault unlock prompt passes through
@@ -6535,12 +6546,14 @@ jira Connector's flake input and module import to the generated `flake.nix`
   reference](flake-options.md). The jira Connector does every call
   ([Running jira through its
   Connector](#running-jira-through-its-connector)), authenticating with
-  `SPINDRIFT_JIRA_CONNECTOR_TOKEN` and `SPINDRIFT_JIRA_CONNECTOR_EMAIL`.
-  `JIRA_TOKEN` is a secret env var that is still required at startup but
-  unused since the native adapter's removal (#6858).
-  `JIRA_EMAIL` selects the Connector's API dialect: set, it is Jira Cloud's
-  search APIs, listing pages `GET /rest/api/2/search/jql` by `nextPageToken`;
-  unset, Server/Data Center keeps `/rest/api/2/search` paged by `startAt`.
+  `JIRA_TOKEN` (a secret env var) and `JIRA_EMAIL`, Basic: a Cloud API token
+  and account email, or a Server/Data Center password or token and username,
+  not a Bearer PAT. `JIRA_DEPLOYMENT` (`cloud` by default, or `server`;
+  `issues.jira.deployment`) selects the Connector's API dialect: `cloud` is
+  Jira Cloud's search APIs, listing pages `GET /rest/api/2/search/jql` by
+  `nextPageToken`; `server` keeps Server/Data Center's `/rest/api/2/search`
+  paged by `startAt`. A Server/Data Center site must set `server`; unset means
+  Cloud. `JIRA_EMAIL` does not affect the dialect.
   `spindrift doctor`'s `Probe()` check validates Jira auth and reachability
   independently of the GitHub Code Forge probe. Two more rows read the
   project's create metadata: `issue-type` (required) fails when
@@ -11892,9 +11905,9 @@ whichever wrote last wins. A plain variable is read per request and never
 refreshed (bar the github `GH_TOKEN` refresh file), so the operator owns its lifetime.
 
 The Jira probe reads a count without fetching any issue, and its mode
-follows `JIRA_EMAIL`. With an email set (Basic auth, Jira Cloud) it is one
+follows `JIRA_DEPLOYMENT`. With `cloud` (the default) it is one
 `POST /rest/api/3/search/approximate-count`, because Cloud retired
-`/rest/api/2/search` (CHANGE-2046). Without one (Bearer PAT, Jira
+`/rest/api/2/search` (CHANGE-2046). With `server` (Jira
 Server/Data Center) it is one JQL search with `maxResults=0`, reading the
 response's `total`. The Cloud count is approximate and can lag recent
 updates, which is acceptable because a started child lists the issues
@@ -11908,8 +11921,7 @@ a child would find. Jira offers no conditional request, hence the longer
 through its `-file` or `-cmd` form is invisible to it, and a missing base
 URL, project key or token, or a malformed mapping, leaves the kind
 exit-driven. The count itself is the jira Connector's `tracker.count`,
-authorized with `SPINDRIFT_JIRA_CONNECTOR_TOKEN` and
-`SPINDRIFT_JIRA_CONNECTOR_EMAIL`; `JIRA_TOKEN` only has to be present.
+authorized with `JIRA_TOKEN` and `JIRA_EMAIL`.
 
 Whenever a tracker-probed kind is left exit-driven this way — an unknown
 `ISSUE_TRACKER`, a missing knob, or a tracker with no Demand adapter — the

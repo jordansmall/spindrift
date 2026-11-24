@@ -161,3 +161,10 @@ import, which the wizard splices into the generated `flake.nix`. The input
 points at the Connector's subflake with `core` following `spindrift`, so the
 lock graph holds one core. The Connector module carries a dedup `key`, so a
 second import of it dedups instead of failing.
+
+## Amendment (2026-11-24, issue #7501): jira's credentials are core knobs
+
+The jira `AcquireToken` hook's token now lands in `JIRA_TOKEN` alone, and the
+wizard writes `JIRA_EMAIL` beside it (blank until answered). The
+`SPINDRIFT_JIRA_CONNECTOR_TOKEN` and `SPINDRIFT_JIRA_CONNECTOR_EMAIL` knobs are
+removed, so the wizard no longer writes them.

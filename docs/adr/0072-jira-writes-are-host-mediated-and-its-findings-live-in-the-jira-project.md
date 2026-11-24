@@ -205,3 +205,12 @@ Connector's `tracker.transition` and `tracker.editLabels` primitives on every
 means that Connector. `JIRA_TOKEN` is still a required knob but nothing reads
 it; the Connector authorizes with `SPINDRIFT_JIRA_CONNECTOR_TOKEN` and
 `SPINDRIFT_JIRA_CONNECTOR_EMAIL`.
+
+## Amendment (2026-11-24, issue #7501): the Connector authorizes with core's `JIRA_TOKEN` and `JIRA_EMAIL`
+
+`JIRA_TOKEN` is read again: the jira Connector authorizes with core's
+`JIRA_TOKEN` (the credential) and `JIRA_EMAIL` (the Basic identity: the Cloud
+account email, or the Server/Data Center username). `SPINDRIFT_JIRA_CONNECTOR_TOKEN`
+and `SPINDRIFT_JIRA_CONNECTOR_EMAIL` are removed knobs that fail at launch.
+The API dialect is chosen by the new `JIRA_DEPLOYMENT` (`cloud` or `server`),
+not by whether an email is set.
