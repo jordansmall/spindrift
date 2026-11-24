@@ -106,36 +106,20 @@ type (
 // runs against a stub guest.
 type guestCall = connectorcall.Call
 
-// reads serves the PR reads from a Connector and leaves everything else to the
-// embedded native adapter. It hides the native adapter's optional
-// capabilities (forge.CIRunReporter and the like); only tests wrap a native
-// adapter in it, so no production path loses them.
+// reads serves the five PR reads from a Connector. prForge embeds it and
+// supplies the rest of forge.PRForge.
 type reads struct {
-	forge.PRForge
 	call    guestCall
 	target  Target
 	webHost string
 }
 
-// New builds core's forge PR reads from a forge Connector. writes keeps every
-// write and every read the Connector has no primitive for. Calls run under
-// context.Background() because PRForge methods carry no context. Every PR URL
-// must name webHost (host[:port]) exactly, case-insensitively, with the port
-// as written ("github.com:443" does not match "github.com").
-func New(c *connectorhost.Connector, writes forge.PRForge, target Target, webHost string) (forge.PRForge, error) {
-	if !slices.Contains(c.Capabilities, capForge) {
-		return nil, fmt.Errorf("%w: capabilities %v lack \"forge\"", ErrNotForge, c.Capabilities)
-	}
-	if webHost == "" {
-		return nil, ErrNoWebHost
-	}
-	return newForge(classedCall(c, retry.Clock{}), writes, target, webHost), nil
-}
-
 // NewReader composes c's forge for a host that reads through the Connector
-// alone: Compose's PR and branch reads with no git or native writes under it.
+// alone: Compose's PR and branch reads with no git under it.
 // Call only those reads: Rebase fails with ErrNoGit, and the writes would
-// reach the Connector.
+// reach the Connector. Every PR URL must name webHost (host[:port]) exactly,
+// case-insensitively, with the port as written ("github.com:443" does not
+// match "github.com").
 func NewReader(c *connectorhost.Connector, target Target, webHost string) (forge.CodeForge, error) {
 	if !slices.Contains(c.Capabilities, capForge) {
 		return nil, fmt.Errorf("%w: capabilities %v lack \"forge\"", ErrNotForge, c.Capabilities)
@@ -145,10 +129,6 @@ func NewReader(c *connectorhost.Connector, target Target, webHost string) (forge
 	}
 	p := newPushOnly(c, target, retry.Clock{})
 	return composePR(p, c.Capabilities, webHost), nil
-}
-
-func newForge(call guestCall, writes forge.PRForge, target Target, webHost string) forge.PRForge {
-	return &reads{PRForge: writes, call: call, target: target, webHost: webHost}
 }
 
 // isPRNumber reports whether s is a positive decimal integer in canonical form
