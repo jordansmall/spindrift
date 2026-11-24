@@ -1,6 +1,7 @@
 // Package connectorcall is core's one retry-and-error-class path for tracker
 // and forge Connector calls: each axis wraps its raw call in Classify, which
-// reads retry safety and required capability from the protocol's method table.
+// reads retry safety and required capability from the protocol's method table,
+// and in Checked, which runs the result check that table names for the method.
 package connectorcall
 
 import (
