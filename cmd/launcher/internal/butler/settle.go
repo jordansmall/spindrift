@@ -228,10 +228,18 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 						// PostIssue succeeds: a failed post must not push a
 						// branch or open a PR for an issue that never landed.
 						OnFiled: func(url string) {
+							// Either way the issue was filed wearing the patch
+							// label, so spend the slot; with no usable issue
+							// number there is no PR to open or issue to close.
+							if url == "" {
+								fmt.Fprintf(s.out, "    #%s  status=patch-failed  !! filed, but the tracker returned an unusable URL: no issue number to open the patch PR against\n", num)
+								patchesLeft--
+								return
+							}
 							issueNum, err := issueNumberFromURL(url)
 							if err != nil {
-								// No issue number to label or close.
 								fmt.Fprintf(s.out, "    #%s  status=patch-failed  !! %v\n", num, err)
+								patchesLeft--
 								return
 							}
 							head := forge.AgentBranchName(s.patch.branchPrefix, issueNum)
@@ -260,6 +268,9 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 			// failed post frees it back to the rest of the sweep.
 			return settle.Decoration{Backlink: backlink + "\n\n" + note, ExtraLabels: s.extraLabels(dec.labels...), OnFiled: func(url string) {
 				remaining--
+				if url == "" {
+					url = unusableFiledRef
+				}
 				promoted = append(promoted, url)
 			}}
 		}
@@ -281,14 +292,21 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	// One line per sweep, not per finding: with promotion off every finding
 	// would otherwise repeat the same reason. Gated on a finding actually
 	// filing, so a sweep whose findings were all deduped or failed stays quiet.
-	if !s.policy.enabled && len(filing.Filed) > 0 {
+	filedCount := len(filing.Filed) + filing.Unusable
+	if !s.policy.enabled && filedCount > 0 {
 		fmt.Fprintf(s.out, "    #%s  status=promotion-off  note=%s\n", num, promotionOffNote)
+	}
+
+	if filing.Unusable > 0 {
+		fmt.Fprintf(s.out, "    #%s  status=filed-unusable-url  note=%d finding(s) were filed but the tracker returned an unusable URL; not refiled\n", num, filing.Unusable)
 	}
 
 	// Every finding failing to file leaves the claim standing like a crash:
 	// the findings are re-found next run, and the non-zero exit feeds the
-	// daemon breaker instead of spending a Box per sweep forever.
-	if len(filing.Filed) == 0 && filing.Failed > 0 {
+	// daemon breaker instead of spending a Box per sweep forever. Not when a
+	// finding was filed with an unusable URL: it exists on the tracker, so
+	// re-finding and refiling it next run is what must not happen.
+	if filedCount == 0 && filing.Failed > 0 {
 		s.fail(d, num, fmt.Sprintf("all %d finding(s) failed to file -- see the logged issue-intent filing errors; a missing provenance label is one cause (spindrift doctor --butler)", filing.Failed))
 		return settled{}
 	}
@@ -304,7 +322,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	state := ledger.State{
 		LastSwept: s.scope.Head,
 		Cursor:    s.scope.NextCursor,
-		Filed:     filing.Filed,
+		Filed:     append(slices.Clone(filing.Filed), slices.Repeat([]string{unusableFiledRef}, filing.Unusable)...),
 		Promoted:  promoted,
 		Patched:   patched,
 		Usage:     d.CumulativeUsage(),
@@ -325,9 +343,9 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 		return settled{}
 	}
 
-	note := fmt.Sprintf("%d filed", len(filing.Filed))
+	note := fmt.Sprintf("%d filed", filedCount)
 	if len(promoted) > 0 {
-		note = fmt.Sprintf("%d filed, %d promoted", len(filing.Filed), len(promoted))
+		note = fmt.Sprintf("%d filed, %d promoted", filedCount, len(promoted))
 	}
 	if len(patched) > 0 {
 		note = fmt.Sprintf("%s, %d patched", note, len(patched))
@@ -342,7 +360,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	// polling CI must never leave the Chore's claim standing (issue #4076).
 	s.adoptLandings(landings)
 
-	return settled{done: true, filed: len(filing.Filed), promoted: len(promoted), dropped: dropped, patched: len(patched)}
+	return settled{done: true, filed: filedCount, promoted: len(promoted), dropped: dropped, patched: len(patched)}
 }
 
 // adoptLandings hands each landed patch's draft PR to the work merge gate.
@@ -445,6 +463,11 @@ func issueNumberFromURL(url string) (string, error) {
 // here too since patchCommitSubject's result also becomes the draft PR/
 // squash title (issue #4074).
 const patchSubjectMaxLen = 72
+
+// unusableFiledRef stands in for the URL of a finding the tracker filed but
+// returned an unusable URL for. Fixed text, never the Connector's own URL,
+// which is untrusted; the ledger counts list entries.
+const unusableFiledRef = "(filed; the tracker returned an unusable URL)"
 
 // patchCommitSubject derives a Conventional Commits subject for a patch's
 // commit and draft PR title from the finding's own title, prefixing it when

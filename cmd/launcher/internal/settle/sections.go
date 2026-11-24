@@ -8,7 +8,8 @@ import (
 // buildFiledIssuesSection renders filed's entries as a "## Filed issues"
 // Markdown list, and returns "" for an empty filed. A failed filing degrades to
 // a bullet so a human notices and retries it; so does a non-http(s) URL (the
-// local tracker returns local:<slug>), which would otherwise be a dead link.
+// local tracker returns local:<slug>), which would otherwise be a dead link. An
+// Unusable filing's bullet instead says the issue exists, so nobody refiles it.
 func buildFiledIssuesSection(filed []filedIntent) string {
 	lines := make([]string, 0, len(filed))
 	for _, f := range filed {
@@ -17,6 +18,10 @@ func buildFiledIssuesSection(filed []filedIntent) string {
 			continue
 		}
 		title := markdownInlineText(f.Title)
+		if f.Unusable {
+			lines = append(lines, fmt.Sprintf("- **%s** (filed, but the tracker returned an unusable URL — do not refile; find it on the tracker) — %s", title, markdownInlineText(f.Body)))
+			continue
+		}
 		if f.Failed {
 			lines = append(lines, fmt.Sprintf("- **%s** (filing failed) — %s", title, markdownInlineText(f.Body)))
 			continue

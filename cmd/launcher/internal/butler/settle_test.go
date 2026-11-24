@@ -2004,3 +2004,143 @@ func TestSettleRun_PreBoxFailure_NamesErrInNote(t *testing.T) {
 		t.Errorf("status line = %q, want the seed error as the note", got)
 	}
 }
+
+// Every finding filed but came back with an unusable URL: the issues exist on
+// the tracker, so the sweep is not the all-failed path -- that would leave the
+// claim standing and refile them next run.
+func TestSettleRun_AllFindingsFiledWithUnusableURL_FinishesAndNeverRefiles(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	claim := claimButlerChore(t, backend, "bugs", start)
+
+	unusable := fmt.Errorf("%w: url %q", forge.ErrFiledUnusableURL, "elsewhere")
+	fc := forge.NewFake()
+	fc.PostIssueErrForTitle = map[string]error{"first finding": unusable, "second finding": unusable}
+
+	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
+	now := start.Add(time.Minute)
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, chore.Room{}, promotion{}, patchRung{}, testKindLabels, io.Discard)
+
+	result := readyResult(
+		`{"title":"first finding","body":"repro","dedupTerms":["a.go:Foo"]}`,
+		`{"title":"second finding","body":"repro2","dedupTerms":["b.go:Bar"]}`,
+	)
+
+	var buf bytes.Buffer
+	s.out = &buf
+	got := s.settle(dispatch.NewFake(), result)
+	stdout := buf.String()
+
+	if !got.done {
+		t.Errorf("settled = %+v, want done=true", got)
+	}
+	if strings.Contains(stdout, "failed to file") {
+		t.Errorf("stdout = %q, want no all-failed line", stdout)
+	}
+	if !strings.Contains(stdout, "status=filed-unusable-url  note=2 finding(s) were filed but the tracker returned an unusable URL; not refiled") {
+		t.Errorf("stdout = %q, want the filed-unusable-url line", stdout)
+	}
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if tip.State.Phase != ledger.Done {
+		t.Errorf("Phase = %q, want %q", tip.State.Phase, ledger.Done)
+	}
+}
+
+// An unusable-URL filing still wears every label it was posted with, so it
+// spends the promotion slot: with room 1, only the first of three eligible
+// findings may carry the promote label, and the ledger counts all three as
+// filed.
+func TestSettleRun_Promotion_UnusableURLSpendsRoom(t *testing.T) {
+	t.Parallel()
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	claim := claimButlerChore(t, backend, "bugs", start)
+
+	unusable := fmt.Errorf("%w: url %q", forge.ErrFiledUnusableURL, "elsewhere")
+	fc := forge.NewFake()
+	fc.PostIssueErrForTitle = map[string]error{"one": unusable, "two": unusable, "three": unusable}
+
+	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
+	now := start.Add(time.Minute)
+	policy := promotion{enabled: true, classes: []string{"error-handling"}, maxFiles: 1, label: "ready-for-agent"}
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, chore.Room{Promotions: 1}, policy, patchRung{}, testKindLabels, io.Discard)
+
+	got := s.settle(dispatch.NewFake(), readyResult(
+		`{"title":"one","body":"b1","dedupTerms":["a.go:X"],"class":"error-handling","concurrence":"agreed one"}`,
+		`{"title":"two","body":"b2","dedupTerms":["b.go:Y"],"class":"error-handling","concurrence":"agreed two"}`,
+		`{"title":"three","body":"b3","dedupTerms":["c.go:Z"],"class":"error-handling","concurrence":"agreed three"}`,
+	))
+
+	if !slices.Contains(labelsForFinding(fc, "one"), "ready-for-agent") {
+		t.Errorf("first labels = %v, want ready-for-agent", labelsForFinding(fc, "one"))
+	}
+	for _, title := range []string{"two", "three"} {
+		if l := labelsForFinding(fc, title); slices.Contains(l, "ready-for-agent") {
+			t.Errorf("%s labels = %v, want no ready-for-agent (room spent by the unusable filing)", title, l)
+		}
+	}
+	if !got.done || got.filed != 3 || got.promoted != 1 {
+		t.Errorf("settled = %+v, want done filed=3 promoted=1", got)
+	}
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(tip.State.Promoted) != 1 || len(tip.State.Filed) != 3 {
+		t.Errorf("Promoted = %v, Filed = %v, want 1 promoted and 3 filed", tip.State.Promoted, tip.State.Filed)
+	}
+	for _, e := range append(slices.Clone(tip.State.Promoted), tip.State.Filed...) {
+		if strings.Contains(e, "elsewhere") {
+			t.Errorf("ledger entry %q carries the Connector's untrusted URL", e)
+		}
+	}
+	totals, err := ledger.DayTotals(backend, "bugs", now)
+	if err != nil {
+		t.Fatalf("DayTotals: %v", err)
+	}
+	if totals.Filed != 3 || totals.Promoted != 1 {
+		t.Errorf("DayTotals = %+v, want Filed=3 Promoted=1", totals)
+	}
+}
+
+// A patch finding filed with an unusable URL has no issue number to open its
+// PR against: nothing is pushed, the failure is logged, and the patch slot is
+// spent because the issue already wears the patch label.
+func TestSettleRun_Patch_UnusableURLOpensNoPR(t *testing.T) {
+	t.Parallel()
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	claim := claimButlerChore(t, backend, "bugs", start)
+
+	fc := forge.NewFake()
+	fc.PostIssueErr = fmt.Errorf("%w: url %q", forge.ErrFiledUnusableURL, "elsewhere")
+	tree, pf, gate := patchReserveRig(fc)
+
+	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
+	now := start.Add(time.Minute)
+	room := chore.Room{Promotions: 1, Patches: 1}
+	var out bytes.Buffer
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, room, patchReservePromotion(true), patchRung{tree: tree, forge: pf, branchPrefix: testBranchPrefix, base: "main", gate: gate}, testKindLabels, &out)
+
+	got := s.settle(dispatch.NewFake(), patchReserveResult())
+
+	if !got.done || got.patched != 0 || got.promoted != 0 {
+		t.Errorf("settled = %+v, want done patched=0 promoted=0", got)
+	}
+	if len(pf.pushCalls) != 0 || len(pf.draftCalls) != 0 {
+		t.Errorf("push %v / draft %v calls, want none", pf.pushCalls, pf.draftCalls)
+	}
+	if !strings.Contains(out.String(), "status=patch-failed  !! filed, but the tracker returned an unusable URL") {
+		t.Errorf("log = %q, want the patch-failed unusable-URL line", out.String())
+	}
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(tip.State.Patched) != 0 || len(tip.State.Promoted) != 0 || len(tip.State.Filed) != 1 {
+		t.Errorf("Patched = %v, Promoted = %v, Filed = %v, want none, none, 1", tip.State.Patched, tip.State.Promoted, tip.State.Filed)
+	}
+}

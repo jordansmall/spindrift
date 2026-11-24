@@ -53,10 +53,13 @@ type State struct {
 	Cursor    string     `json:"cursor,omitempty"`
 	Phase     Phase      `json:"phase"`
 	ClaimedBy *ClaimedBy `json:"claimedBy,omitempty"`
-	Filed     []string   `json:"filed,omitempty"`
-	Promoted  []string   `json:"promoted,omitempty"`
-	Dropped   int        `json:"dropped,omitempty"`
-	Patched   []string   `json:"patched,omitempty"` // PR URLs the run opened (ADR 0057).
+	// Filed and Promoted entries are issue URLs, except that one may be a
+	// non-URL placeholder for a filing whose tracker URL was unusable:
+	// consumers must not parse entries as URLs (DayTotals only counts them).
+	Filed    []string `json:"filed,omitempty"`
+	Promoted []string `json:"promoted,omitempty"`
+	Dropped  int      `json:"dropped,omitempty"`
+	Patched  []string `json:"patched,omitempty"` // PR URLs the run opened (ADR 0057).
 	// Snapshot references the tuning Chore's digest snapshot (ADR 0062); the
 	// digest itself stays in the host's Dispatch Records store, since a hosted
 	// forge's Ledger ref is readable by anyone who can read the repo.

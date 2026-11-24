@@ -2,6 +2,7 @@ package settle
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -124,14 +125,20 @@ func ParseIssueIntent(raw string) (signalwire.IssueIntent, bool) {
 }
 
 // filedIntent is the outcome of filing one issue-intent: a URL on success,
-// Failed with the body kept so a caller can render it inline, or Skipped on a
-// dedup match (issue #3609), with neither URL nor Body.
+// Failed with the body kept so a caller can render it inline, Unusable when
+// the tracker filed it but its URL failed core's check, or Skipped on a dedup
+// match (issue #3609), with neither URL nor Body.
 type filedIntent struct {
 	Title   string
 	URL     string
 	Failed  bool
 	Body    string
 	Skipped bool
+	// Unusable means PostIssue returned an error wrapping
+	// forge.ErrFiledUnusableURL: the issue exists on the tracker with no URL
+	// to show, so unlike Failed it must never be refiled. Body is kept for
+	// inline rendering. Exclusive with Failed and Skipped.
+	Unusable bool
 	// DupRef is a comma-joined, display-only list of every reference
 	// covering the intent, backlog "#<number>" issues and this run's
 	// "<title>" peers mixed, so a Skipped entry names its match (issue
@@ -173,8 +180,9 @@ func fileIssueIntentsDetailed(progress Progress, it forge.IssueTracker, num stri
 // (issue #3875): decorate runs per intent, returning its backlink, extraLabels
 // appended after the provenance and type labels (e.g. the Butler's
 // auto-promotion "ready-for-agent", issue #3880), and onFiled, called with the
-// URL only once PostIssue succeeds, so a failed filing never burns the
-// Butler's per-run promotion room.
+// URL once the issue exists on the tracker, so a failed filing never burns the
+// Butler's per-run promotion room. An unusable-URL filing calls it with "": the
+// issue still wears extraLabels, so the callback must still commit its spend.
 func fileIssueIntentsDetailedFunc(progress Progress, it forge.IssueTracker, num string, result dispatch.Result, provenanceLabel string, dedup DedupPolicy, decorate func(issueIntent) (bodyBacklink string, extraLabels []string, onFiled func(url string))) []filedIntent {
 	if !result.IssueIntentsFound {
 		return nil
@@ -273,43 +281,58 @@ func fileIssueIntentsDetailedFunc(progress Progress, it forge.IssueTracker, num 
 		}
 		labels = append(labels, extraLabels...)
 		url, err := filer.PostIssue(in.Title, body, labels)
-		if err != nil {
+		// Only a filed issue indexes its keys: a transient PostIssue error must
+		// not suppress a retry within this run, but an unusable URL means the
+		// tracker did file it, so a same-keyed intent must not file twice. %q
+		// keeps the ref newline-free, backing up markdownInlineText.
+		unusable := errors.Is(err, forge.ErrFiledUnusableURL)
+		if err == nil || unusable {
+			ref := fmt.Sprintf("this run's %q", in.Title)
+			for k := range keys {
+				dedupIndex[k] = ref
+				runKeys[k] = ref
+			}
+		}
+		switch {
+		case unusable:
+			fmt.Fprintf(os.Stderr, "    ?? #%s: issue-intent %q was filed, but the tracker's reply is unusable: %v\n", num, in.Title, err)
+			if onFiled != nil {
+				onFiled("")
+			}
+			out = append(out, filedIntent{Title: in.Title, Unusable: true, Body: in.Body})
+		case err != nil:
 			fmt.Fprintf(os.Stderr, "    ?? #%s: issue-intent file failed: %v\n", num, err)
 			out = append(out, filedIntent{Title: in.Title, Failed: true, Body: in.Body})
-			continue
+		default:
+			if onFiled != nil {
+				onFiled(url)
+			}
+			out = append(out, filedIntent{Title: in.Title, URL: url})
 		}
-		// Only a successful filing indexes its keys: a transient PostIssue
-		// error must not suppress a retry within this run. %q keeps the ref
-		// newline-free, backing up markdownInlineText.
-		ref := fmt.Sprintf("this run's %q", in.Title)
-		for k := range keys {
-			dedupIndex[k] = ref
-			runKeys[k] = ref
-		}
-		if onFiled != nil {
-			onFiled(url)
-		}
-		out = append(out, filedIntent{Title: in.Title, URL: url})
 	}
 	return out
 }
 
 // filedTally is one run's issue-filing volume. Failures count apart so a run
-// that tried and failed does not read as quiet (issue #3608), and a dedup
-// skip (issue #3609) is neither success nor failure.
+// that tried and failed does not read as quiet (issue #3608), a dedup
+// skip (issue #3609) is neither success nor failure, and an unusable-URL
+// filing exists on the tracker so it is not a failure either.
 type filedTally struct {
-	ok      int
-	failed  int
-	skipped int
+	ok       int
+	failed   int
+	skipped  int
+	unusable int
 }
 
-// tallyFiled counts filed by filedIntent.Failed/Skipped.
+// tallyFiled counts filed by filedIntent.Failed/Skipped/Unusable.
 func tallyFiled(filed []filedIntent) filedTally {
 	var t filedTally
 	for _, f := range filed {
 		switch {
 		case f.Skipped:
 			t.skipped++
+		case f.Unusable:
+			t.unusable++
 		case f.Failed:
 			t.failed++
 		default:
@@ -322,11 +345,11 @@ func tallyFiled(filed []filedIntent) filedTally {
 // String renders comma-joined name:count pairs (issues #3608, #3609), so a new
 // count is one more pair rather than a format change.
 func (t filedTally) String() string {
-	return fmt.Sprintf("ok:%d,failed:%d,skipped:%d", t.ok, t.failed, t.skipped)
+	return fmt.Sprintf("ok:%d,failed:%d,skipped:%d,unusable:%d", t.ok, t.failed, t.skipped, t.unusable)
 }
 
 // reportFiled prints the filing tally for issue num, always — even a zero
-// tally (filed=ok:0,failed:0,skipped:0) — so "reached filing and filed
+// tally (filed=ok:0,failed:0,skipped:0,unusable:0) — so "reached filing and filed
 // nothing" reads differently in the transcript than "never reached filing"
 // (no line at all).
 func reportFiled(progress Progress, num string, filed []filedIntent) {
