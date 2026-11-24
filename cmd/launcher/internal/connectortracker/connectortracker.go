@@ -22,6 +22,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/dedupmarker"
@@ -389,9 +390,15 @@ func (l commentsLayer) Comments(num string) ([]forge.Comment, error) {
 	}
 	comments := make([]forge.Comment, len(res.Comments))
 	for i, c := range res.Comments {
+		if !cleanText(c.Author) {
+			return nil, fmt.Errorf("%w: comment %d has an empty or control-character author", ErrAnswer, i)
+		}
+		if _, err := time.Parse(time.RFC3339, c.CreatedAt); err != nil {
+			return nil, fmt.Errorf("%w: comment %d has an unparseable createdAt %q", ErrAnswer, i, c.CreatedAt)
+		}
 		comments[i] = forge.Comment{
 			Author: c.Author, CreatedAt: c.CreatedAt, Body: c.Body,
-			Minimized: c.Minimized, MinimizedReason: c.MinimizedReason, Association: c.Association,
+			Minimized: c.Minimized, MinimizedReason: c.MinimizedReason, Association: knownAssociation(c.Association),
 		}
 		if c.ResearchMarker {
 			comments[i].Body = forge.ResearchMarker + "\n" + c.Body
@@ -1183,6 +1190,9 @@ func (w wireIssue) issue(g idGrammar, read readKind) (forge.Issue, error) {
 			return forge.Issue{}, fmt.Errorf("%w: issue %s has unknown state %q", ErrAnswer, w.Number, w.State)
 		}
 	}
+	if err := checkLabels(w.Labels); err != nil {
+		return forge.Issue{}, fmt.Errorf("issue %s: %w", w.Number, err)
+	}
 	iss := forge.Issue{
 		Number:   w.Number,
 		Title:    w.Title,
@@ -1197,4 +1207,32 @@ func (w wireIssue) issue(g idGrammar, read readKind) (forge.Issue, error) {
 		iss.ClosedNotPlanned = w.ClosedNotPlanned
 	}
 	return iss, nil
+}
+
+// cleanText reports whether s is non-empty and free of control characters, so
+// text a Connector supplies cannot forge lines in a transcript or log.
+func cleanText(s string) bool {
+	return s != "" && strings.IndexFunc(s, unicode.IsControl) < 0
+}
+
+// checkLabels refuses a label name core could not safely act on or echo.
+func checkLabels(labels []string) error {
+	for _, l := range labels {
+		if !cleanText(l) {
+			return fmt.Errorf("%w: empty or control-character label name %q", ErrAnswer, l)
+		}
+	}
+	return nil
+}
+
+// knownAssociation keeps an author_association from the vocabulary core
+// understands; anything else becomes "", the no-standing value, rather than
+// failing the read, so a Connector cannot mint trust with an invented value.
+func knownAssociation(a string) string {
+	switch a {
+	case "OWNER", "MEMBER", "COLLABORATOR", "CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR",
+		"FIRST_TIMER", "MANNEQUIN", "NONE":
+		return a
+	}
+	return ""
 }
