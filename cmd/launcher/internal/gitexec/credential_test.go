@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	testUser  = "ci-bot"
-	testToken = "s3cr3t-tok3n-d0-not-leak"
+	testUser    = "ci-bot"
+	testToken   = "s3cr3t-tok3n-d0-not-leak"
+	testRepoURL = "https://forge.example/o/r.git"
 )
 
 func TestSplitCredential(t *testing.T) {
@@ -82,7 +83,7 @@ func TestAmbientHelpersNeverSeeToken(t *testing.T) {
 			url, _ := gitexectest.AuthRemote(t, c.user, c.pass)
 			cleaned, cred := SplitCredential(strings.Replace(url, "://", "://"+c.userinfo, 1))
 			cmd, files := ambient(cleaned)
-			out, err := cred.Apply(cmd).CombinedOutput()
+			out, err := cred.Apply(cmd, cleaned).CombinedOutput()
 			if err != nil || !strings.Contains(string(out), "refs/heads/main") {
 				t.Fatalf("ls-remote: %v\n%s", err, out)
 			}
@@ -108,7 +109,7 @@ func TestTokenAsUsernameAuthenticatesWithoutUserinfo(t *testing.T) {
 	tmp := t.TempDir()
 	trace := filepath.Join(tmp, "trace")
 	clone := filepath.Join(tmp, "clone")
-	cmd := cred.Apply(Cmd(nil, "clone", cleaned, clone))
+	cmd := cred.Apply(Cmd(nil, "clone", cleaned, clone), cleaned)
 	cmd.Env = append(cmd.Env, "GIT_TRACE="+trace)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("clone: %v\n%s", err, out)
@@ -125,7 +126,7 @@ func TestTokenAsUsernameAuthenticatesWithoutUserinfo(t *testing.T) {
 			t.Fatalf("token in %s:\n%s", f, b)
 		}
 	}
-	ls := cred.Apply(Cmd(nil, "ls-remote", cleaned))
+	ls := cred.Apply(Cmd(nil, "ls-remote", cleaned), cleaned)
 	if out, err := ls.CombinedOutput(); err != nil || !strings.Contains(string(out), "refs/heads/main") {
 		t.Fatalf("ls-remote: %v\n%s", err, out)
 	}
@@ -134,11 +135,11 @@ func TestTokenAsUsernameAuthenticatesWithoutUserinfo(t *testing.T) {
 func TestCredentialZeroApplyIsNoOp(t *testing.T) {
 	cmd := exec.Command("git", "status")
 	cmd.Env = []string{"A=1"}
-	if got := (Credential{}).Apply(cmd); got != cmd || len(cmd.Env) != 1 {
+	if got := (Credential{}).Apply(cmd, testRepoURL); got != cmd || len(cmd.Env) != 1 {
 		t.Fatalf("zero Credential changed the command: env=%v", cmd.Env)
 	}
 	nilEnv := exec.Command("git", "status")
-	(Credential{}).Apply(nilEnv)
+	(Credential{}).Apply(nilEnv, testRepoURL)
 	if nilEnv.Env != nil {
 		t.Fatalf("zero Credential set Env: %v", nilEnv.Env)
 	}
@@ -156,11 +157,11 @@ func TestCredentialDoesNotFormatPassword(t *testing.T) {
 func TestCredentialApplyExtendsGitConfigCount(t *testing.T) {
 	cmd := exec.Command("git", "status")
 	cmd.Env = []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=ambient.key", "GIT_CONFIG_VALUE_0=ambient"}
-	Credential{testUser, testToken}.Apply(cmd)
+	Credential{testUser, testToken}.Apply(cmd, testRepoURL)
 
 	env := lastEnv(cmd.Env)
-	if env["GIT_CONFIG_COUNT"] != "3" {
-		t.Fatalf("GIT_CONFIG_COUNT = %q, want 3", env["GIT_CONFIG_COUNT"])
+	if env["GIT_CONFIG_COUNT"] != "4" {
+		t.Fatalf("GIT_CONFIG_COUNT = %q, want 4", env["GIT_CONFIG_COUNT"])
 	}
 	if env["GIT_CONFIG_KEY_0"] != "ambient.key" || env["GIT_CONFIG_VALUE_0"] != "ambient" {
 		t.Fatalf("ambient entry 0 not preserved: %v", env)
@@ -168,8 +169,11 @@ func TestCredentialApplyExtendsGitConfigCount(t *testing.T) {
 	if env["GIT_CONFIG_KEY_1"] != "credential.helper" || env["GIT_CONFIG_VALUE_1"] != "" {
 		t.Fatalf("entry 1 must reset helpers: %q=%q", env["GIT_CONFIG_KEY_1"], env["GIT_CONFIG_VALUE_1"])
 	}
-	if env["GIT_CONFIG_KEY_2"] != "credential.helper" || !strings.HasPrefix(env["GIT_CONFIG_VALUE_2"], "!") {
-		t.Fatalf("entry 2 must be the env-reading helper: %v", env)
+	if env["GIT_CONFIG_KEY_2"] != "credential."+testRepoURL+".helper" || !strings.HasPrefix(env["GIT_CONFIG_VALUE_2"], "!") {
+		t.Fatalf("entry 2 must be the env-reading helper scoped to the URL: %v", env)
+	}
+	if env["GIT_CONFIG_KEY_3"] != "credential."+testRepoURL+".useHttpPath" || env["GIT_CONFIG_VALUE_3"] != "true" {
+		t.Fatalf("entry 3 must scope the helper to the path: %v", env)
 	}
 	if env["GIT_TERMINAL_PROMPT"] != "0" {
 		t.Fatalf("GIT_TERMINAL_PROMPT = %q", env["GIT_TERMINAL_PROMPT"])
@@ -179,7 +183,7 @@ func TestCredentialApplyExtendsGitConfigCount(t *testing.T) {
 func TestCredentialApplyAmbientCountSurvivesRealGit(t *testing.T) {
 	cmd := exec.Command("git", "config", "--get", "ambient.key")
 	cmd.Env = append(os.Environ(), "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=ambient.key", "GIT_CONFIG_VALUE_0=kept")
-	Credential{testUser, testToken}.Apply(cmd)
+	Credential{testUser, testToken}.Apply(cmd, testRepoURL)
 	out, err := cmd.Output()
 	if err != nil || strings.TrimSpace(string(out)) != "kept" {
 		t.Fatalf("ambient config lost: %q %v", out, err)
@@ -192,7 +196,7 @@ func TestCredentialAuthenticatesGit(t *testing.T) {
 	gitArgs := []string{"-c", "user.name=t", "-c", "user.email=t@example.invalid"}
 
 	run := func(c Credential, dir string, args ...string) (string, error) {
-		cmd := c.Apply(Cmd(gitArgs, args...))
+		cmd := c.Apply(Cmd(gitArgs, args...), url)
 		cmd.Dir = dir
 		out, err := cmd.CombinedOutput()
 		return string(out), err
@@ -220,13 +224,13 @@ func TestCredentialAuthenticatesGit(t *testing.T) {
 		clone := filepath.Join(tmp, "clone")
 
 		cmds := []*exec.Cmd{
-			cred.Apply(Cmd(gitArgs, "clone", url, clone)),
+			cred.Apply(Cmd(gitArgs, "clone", url, clone), url),
 		}
 		cmds[0].Env = append(cmds[0].Env, "GIT_TRACE="+trace)
 		runAll(t, cmds)
 
 		commit := Cmd(gitArgs, "-C", clone, "commit", "--allow-empty", "-m", "change")
-		push := cred.Apply(Cmd(gitArgs, "-C", clone, "push", "origin", "main"))
+		push := cred.Apply(Cmd(gitArgs, "-C", clone, "push", "origin", "main"), url)
 		push.Env = append(push.Env, "GIT_TRACE="+trace)
 		runAll(t, []*exec.Cmd{commit, push})
 
@@ -272,4 +276,48 @@ func lastEnv(env []string) map[string]string {
 		m[k] = v
 	}
 	return m
+}
+
+// Apply scopes the credential to the exact URL: a sibling repository on the
+// same host and a repository on another host are never offered it.
+func TestCredentialApplyIsScopedToTheExactURL(t *testing.T) {
+	r := gitexectest.NewAuthRemote(t, testUser, testToken)
+	elsewhere := gitexectest.NewAuthRemote(t, testUser, testToken)
+	cred := Credential{testUser, testToken}
+	lsRemote := func(scope, target string) (string, error) {
+		out, err := cred.Apply(Cmd(nil, "ls-remote", target), scope).CombinedOutput()
+		return string(out), err
+	}
+
+	if out, err := lsRemote(r.URL, r.URL); err != nil || !strings.Contains(out, "refs/heads/main") {
+		t.Fatalf("exact URL: %v\n%s", err, out)
+	}
+	for _, c := range []struct {
+		name, target string
+		srv          *gitexectest.Remote
+	}{
+		{"sibling repository", r.OtherURL, r},
+		{"other host", elsewhere.URL, elsewhere},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			before := len(authedPaths(c.srv))
+			if out, err := lsRemote(r.URL, c.target); err == nil {
+				t.Fatalf("ls-remote %s authenticated under a credential scoped to %s:\n%s", c.target, r.URL, out)
+			}
+			if got := authedPaths(c.srv)[before:]; len(got) != 0 {
+				t.Fatalf("Authorization sent for %v", got)
+			}
+		})
+	}
+}
+
+func TestCredentialApplyIsNoOpForNonHTTPRemotes(t *testing.T) {
+	for _, repoURL := range []string{"/srv/git/r.git", "file:///srv/git/r.git", "ssh://git@forge.example/o/r.git", "git@forge.example:o/r.git"} {
+		cmd := exec.Command("git", "status")
+		cmd.Env = []string{"A=1"}
+		Credential{testUser, testToken}.Apply(cmd, repoURL)
+		if len(cmd.Env) != 1 {
+			t.Fatalf("%s: Apply changed the environment: %v", repoURL, cmd.Env)
+		}
+	}
 }

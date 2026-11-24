@@ -26,7 +26,7 @@ func SeedMirror(remoteURL, baseBranch, dir string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultCloneTimeout)
 	defer cancel()
 	run := func(step string, args ...string) error {
-		cmd := cred.Apply(exec.CommandContext(ctx, "git", args...))
+		cmd := cred.Apply(exec.CommandContext(ctx, "git", args...), cleanURL)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				return fmt.Errorf("%s: timed out after %s: %w", step, defaultCloneTimeout, ctx.Err())

@@ -80,13 +80,14 @@ func IsMergeTransient(stderr string) bool {
 	return MatchesAnyMarker(stderr+"\n", mergeTransientMarkers)
 }
 
-// GitForcePush force-with-lease-pushes the current branch checked out at dir,
+// GitForcePush force-with-lease-pushes the current branch checked out at dir to
+// the remote at remoteURL (origin's clone URL; the credential is scoped to it),
 // appending extraArgs after --force-with-lease (e.g. "-u", "origin", ref for a
 // branch with no upstream, issue #1918). A failure whose stderr carries a
 // transport or server marker, or a ctx deadline kill, wraps
 // forge.ErrTransientPushFailure so callers know a retry is safe. ctx bounds
 // the subprocess because git applies no timeout of its own.
-func GitForcePush(ctx context.Context, dir string, cred gitexec.Credential, extraArgs ...string) error {
+func GitForcePush(ctx context.Context, dir string, cred gitexec.Credential, remoteURL string, extraArgs ...string) error {
 	// stderr goes to a file, not an io.Writer: Cmd.Run's copy goroutine waits
 	// for EOF on the pipe, which a hung grandchild (git-receive-pack's
 	// pre-receive hook) holds open after the context kills git itself.
@@ -98,7 +99,7 @@ func GitForcePush(ctx context.Context, dir string, cred gitexec.Credential, extr
 	defer stderrFile.Close()
 
 	args := append([]string{"-C", dir, "push", "--force-with-lease"}, extraArgs...)
-	cmd := cred.Apply(exec.CommandContext(ctx, "git", args...))
+	cmd := cred.Apply(exec.CommandContext(ctx, "git", args...), remoteURL)
 	cmd.Stderr = stderrFile
 	if err := cmd.Run(); err != nil {
 		// A deadline kill is transient: every caller builds a fresh deadline per

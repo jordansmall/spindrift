@@ -70,7 +70,7 @@ func NewRemote(scratch, url string, cred gitexec.Credential, gitArgs ...string) 
 // already treats as a zero Tip. Called only from NewRemote and from Append
 // after a lost race or failed push, never routinely.
 func (r Remote) sync() error {
-	out, err := r.cred.Apply(gitexec.Cmd(r.gitArgs, "-C", r.repo, "fetch", "--prune", "-q", r.url, butlerRefspec)).CombinedOutput()
+	out, err := r.cred.Apply(gitexec.Cmd(r.gitArgs, "-C", r.repo, "fetch", "--prune", "-q", r.url, butlerRefspec), r.url).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("ledger: fetch %s: %w: %s", forge.RedactURLCredentials(r.url), err, forge.RedactURLCredentials(string(out)))
 	}
@@ -88,7 +88,7 @@ func (r Remote) History(chore string, since time.Time) ([]Entry, error) {
 // lsRemote queries url directly (no scratch repo involved) for ref's current
 // value, "" if absent, so Append can tell a lost race from a real push error.
 func (r Remote) lsRemote(ref string) (string, error) {
-	out, err := r.cred.Apply(gitexec.Cmd(r.gitArgs, "ls-remote", r.url, ref)).Output()
+	out, err := r.cred.Apply(gitexec.Cmd(r.gitArgs, "ls-remote", r.url, ref), r.url).Output()
 	if err != nil {
 		return "", fmt.Errorf("ledger: ls-remote %s %s: %w", forge.RedactURLCredentials(r.url), ref, err)
 	}
@@ -119,7 +119,7 @@ func (r Remote) Append(chore, old string, s State, at time.Time) (string, error)
 	ref := RefPrefix + chore
 	lease := fmt.Sprintf("--force-with-lease=%s:%s", ref, old)
 	refspec := fmt.Sprintf("%s:%s", newCommit, ref)
-	pushOut, err := r.cred.Apply(gitexec.Cmd(r.gitArgs, "-C", r.repo, "push", "-q", r.url, lease, refspec)).CombinedOutput()
+	pushOut, err := r.cred.Apply(gitexec.Cmd(r.gitArgs, "-C", r.repo, "push", "-q", r.url, lease, refspec), r.url).CombinedOutput()
 	if err != nil {
 		// The remote can hold newCommit despite a push error (the connection
 		// dropped after the server applied it): that is our win. The lease lost

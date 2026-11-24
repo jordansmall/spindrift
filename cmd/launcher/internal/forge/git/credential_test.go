@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/gitexec"
 	"spindrift.dev/launcher/internal/gitexec/gitexectest"
 	"spindrift.dev/launcher/internal/testutil"
@@ -161,4 +163,31 @@ func TestGitClient_TokenAsUsernameRemote_AttachesCredentialOutOfBand(t *testing.
 		t.Fatalf("Probe = %q, %v; want %q, nil", got, err, url)
 	}
 	assertNoUserinfoInTrace(t, trace())
+}
+
+func TestSeedMirror_UserinfoRemote_AuthenticatesAgainstTheExactURL(t *testing.T) {
+	_, remote := authFixture(t)
+	dir := filepath.Join(t.TempDir(), "mirror.git")
+	if err := SeedMirror(remote, "main", dir); err != nil {
+		t.Fatalf("SeedMirror: %v", err)
+	}
+	testutil.GitRun(t, dir, "rev-parse", "--verify", "refs/heads/agent/issue-1")
+}
+
+func TestRelayBundle_UserinfoRemote_AuthenticatesCloneAndPush(t *testing.T) {
+	t.Setenv("GIT_AUTHOR_NAME", "Test Bot")
+	t.Setenv("GIT_AUTHOR_EMAIL", "bot@example.com")
+	t.Setenv("GIT_COMMITTER_NAME", "Test Bot")
+	t.Setenv("GIT_COMMITTER_EMAIL", "bot@example.com")
+	clean, bare := gitexectest.AuthRemote(t, authUser, authToken)
+	remote := strings.Replace(clean, "http://", "http://"+authUser+":"+authToken+"@", 1)
+	outbox := t.TempDir()
+	want := forgetest.SeedRelayBundle(t, bare, "main", outbox, "agent/issue-2")
+
+	if err := NewGitClient(remote, "main", "Test Bot", "bot@example.com").(forge.BundleRelay).RelayBundle(outbox, "agent/issue-2"); err != nil {
+		t.Fatalf("RelayBundle: %v", err)
+	}
+	if got := forgetest.RevParse(t, bare, "refs/heads/agent/issue-2"); got != want {
+		t.Fatalf("relayed branch = %s, want %s", got, want)
+	}
 }

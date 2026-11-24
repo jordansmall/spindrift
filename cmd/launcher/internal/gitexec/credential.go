@@ -46,16 +46,23 @@ const (
 		usernameEnv + `" "$` + passwordEnv + `"; }; f`
 )
 
-// Apply makes cmd's git authenticate with c and returns cmd. The secret
-// travels only as an environment value read by an inline credential helper,
-// never in argv, a URL, or on-disk config. Ambient helpers are reset first:
-// git offers every helper the credential on success, so one could store it
-// in ~/.git-credentials. A `-c credential.helper` on cmd's argv is not reset
-// (git reads GIT_CONFIG_PARAMETERS after GIT_CONFIG_COUNT), so callers must
-// not pair one with a non-zero Credential. Both fields are always emitted, or
-// git would prompt and fail under GIT_TERMINAL_PROMPT=0.
-func (c Credential) Apply(cmd *exec.Cmd) *exec.Cmd {
-	if c == (Credential{}) {
+// Apply makes cmd's git authenticate with c against repoURL and returns cmd.
+// repoURL is the exact URL git talks to (for a push to origin, origin's URL):
+// the helper is registered as credential.<repoURL>.helper with useHttpPath, so
+// a redirect, an LFS endpoint, or a second repository on the same host is never
+// offered the token. A zero Credential, or a repoURL that is not http(s), makes
+// Apply a no-op: other remotes carry no credential.
+//
+// The secret travels only as an environment value read by an inline credential
+// helper, never in argv, a URL, or on-disk config. Ambient helpers are reset
+// first, unscoped, since a scoped entry cannot clear them: git offers every
+// helper the credential on success, so one could store it in
+// ~/.git-credentials. A `-c credential.helper` on cmd's argv is not reset (git
+// reads GIT_CONFIG_PARAMETERS after GIT_CONFIG_COUNT), so callers must not pair
+// one with a non-zero Credential. Both fields are always emitted, or git would
+// prompt and fail under GIT_TERMINAL_PROMPT=0.
+func (c Credential) Apply(cmd *exec.Cmd, repoURL string) *exec.Cmd {
+	if u, err := url.Parse(repoURL); c == (Credential{}) || err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return cmd
 	}
 	env := cmd.Env
@@ -72,14 +79,18 @@ func (c Credential) Apply(cmd *exec.Cmd) *exec.Cmd {
 			}
 		}
 	}
-	// Reset first so ambient helpers never see the credential, then add ours.
-	helpers := []string{"", envHelper}
-	for i, h := range helpers {
+	scope := "credential." + repoURL
+	entries := [][2]string{
+		{"credential.helper", ""}, // reset first so ambient helpers never see the credential
+		{scope + ".helper", envHelper},
+		{scope + ".useHttpPath", "true"},
+	}
+	for i, e := range entries {
 		idx := strconv.Itoa(n + i)
-		env = append(env, "GIT_CONFIG_KEY_"+idx+"=credential.helper", "GIT_CONFIG_VALUE_"+idx+"="+h)
+		env = append(env, "GIT_CONFIG_KEY_"+idx+"="+e[0], "GIT_CONFIG_VALUE_"+idx+"="+e[1])
 	}
 	cmd.Env = append(env,
-		"GIT_CONFIG_COUNT="+strconv.Itoa(n+len(helpers)),
+		"GIT_CONFIG_COUNT="+strconv.Itoa(n+len(entries)),
 		usernameEnv+"="+c.Username,
 		passwordEnv+"="+c.Password,
 		"GIT_TERMINAL_PROMPT=0",

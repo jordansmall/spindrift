@@ -271,7 +271,7 @@ func (e *execClient) RebasePRHead(prURL, head string) error {
 // syncBranch is Rebase's git half: clone with clone, sync head onto
 // origin/<base> the way e.syncMethod says, and force-push with cred (the zero
 // Credential leaves the push to the clone's own persisted helper).
-func (e *execClient) syncBranch(head, base string, clone func(dir string) error, cred gitexec.Credential) error {
+func (e *execClient) syncBranch(head, base string, clone func(dir string) error, cred gitexec.Credential, remoteURL string) error {
 	dir, err := os.MkdirTemp("", "spindrift-rebase-*")
 	if err != nil {
 		return fmt.Errorf("mkdtemp: %w", err)
@@ -308,7 +308,7 @@ func (e *execClient) syncBranch(head, base string, clone func(dir string) error,
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), rebaseForcePushTimeout)
 	defer cancel()
-	return gitplumbing.GitForcePush(ctx, dir, cred)
+	return gitplumbing.GitForcePush(ctx, dir, cred, remoteURL)
 }
 
 // runRedacted runs cmd and returns its trimmed, credential-redacted stdout+stderr.
