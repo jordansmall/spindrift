@@ -49,14 +49,14 @@ var gateRegistry = append([]launchGate{
 	{Name: "signal-carrier-network-mode", Check: func(c config, _ io.Writer) error {
 		return checkSignalCarrierNetworkModeGate(c)
 	}},
-}, primaryConnectorWriteGate)
+}, connectorWriteGate)
 
-// primaryConnectorWriteGate closes gateRegistry (checkRoutedConnectorWriteGate).
-var primaryConnectorWriteGate = launchGate{
-	Name:       primaryConnectorWriteGateName,
-	Applicable: routedGithubApplies,
+// connectorWriteGate closes gateRegistry (checkConnectorWriteGate).
+var connectorWriteGate = launchGate{
+	Name:       connectorWriteGateName,
+	Applicable: githubApplies,
 	Network:    true,
-	Check:      checkRoutedConnectorWriteGate,
+	Check:      checkConnectorWriteGate,
 }
 
 // splitGateRegistryByNetwork partitions registry into its non-network and

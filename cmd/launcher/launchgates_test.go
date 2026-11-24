@@ -54,7 +54,7 @@ func TestWalkGateRegistry_StopsAtFirstFailure(t *testing.T) {
 	}
 }
 
-// A gate that backend selection noops out, such as the primary github Connector
+// A gate that backend selection noops out, such as the github Connector
 // write gate on a non-github config, must not print a false "ok" for a check
 // that never ran against anything real (issue #2942 bug 2).
 func TestWalkGateRegistry_SkipsInapplicableGateEntirely(t *testing.T) {
@@ -323,10 +323,11 @@ func gateNames(gates []launchGate) []string {
 }
 
 // A read-only Box holds no forge token, so no gate scope-checks one: the
-// primary Connector write gate is the registry's only network gate.
-func TestGateRegistry_OnlyNetworkGateIsPrimaryConnectorWrite(t *testing.T) {
+// Connector write gate is the registry's only network gate.
+func TestGateRegistry_OnlyNetworkGateIsConnectorWrite(t *testing.T) {
 	_, network := splitGateRegistryByNetwork(gateRegistry)
-	want := []string{primaryConnectorWriteGateName}
+	// The literal pins the user-visible gate id, not the constant.
+	want := []string{"connector-write-github"}
 	if got := gateNames(network); !reflect.DeepEqual(got, want) {
 		t.Errorf("network gates = %v, want %v", got, want)
 	}

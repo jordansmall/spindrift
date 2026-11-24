@@ -3276,7 +3276,7 @@ the only barrier. [ADR 0073's #7209
 amendment](adr/0073-backends-and-drivers-are-trust-no-one-wasm-connectors.md#amendment-issue-7209-a-primary-github-connector-holds-a-push-capable-credential)
 records the trade-off.
 
-The `primary-connector-write-github` gate checks the credential at startup when
+The `connector-write-github` gate checks the credential at startup when
 `ISSUE_TRACKER` or `CODE_FORGE` is `github`, but
 it is advisory for most credentials. It refuses (config invalid, for launch,
 `doctor` and the daemon's
