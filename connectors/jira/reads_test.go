@@ -191,6 +191,18 @@ func TestCommentsReportResearchMarkerAsField(t *testing.T) {
 	}
 }
 
+func TestCommentsReportAnonymousAuthor(t *testing.T) {
+	serve(t, "/jira/rest/api/2/issue/ENG-3/comment", `{"comments":[
+		{"created":"2025-01-02T03:04:05.000+0000","body":"anon"}]}`)
+	cs, err := comments(cloud, "ENG-3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cs) != 1 || cs[0].Author != "Anonymous" {
+		t.Fatalf("comments = %#v", cs)
+	}
+}
+
 const links = `{"key":"ENG-4","fields":{"issuelinks":[
 	{"type":{"inward":"is blocked by","outward":"blocks"},"inwardIssue":{"key":"ENG-1"}},
 	{"type":{"inward":"is blocked by","outward":"blocks"},"inwardIssue":{"key":"ENG-2"}},
