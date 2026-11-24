@@ -43,7 +43,7 @@ pkgs.runCommand "connector-wasm-fixtures" { nativeBuildInputs = [ pkgs.go ]; } '
   cp ${connectorWasm}/driver.wasm ${connectorWasm}/network.wasm \
     ${connectorWasm}/forge.wasm ${connectorWasm}/forge-pr.wasm \
     ${connectorWasm}/tracker.wasm ${connectorWasm}/tracker-writes.wasm \
-    ${connectorWasm}/tracker-dialect.wasm $out/
+    ${connectorWasm}/tracker-dialect.wasm ${connectorWasm}/tracker-hostile.wasm $out/
   for mode in trap loop memory oversize malformed invalid; do
     build hostile-$mode.wasm -ldflags=-X=main.mode=$mode ./hostile
   done
