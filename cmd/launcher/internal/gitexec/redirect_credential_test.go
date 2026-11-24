@@ -54,20 +54,19 @@ func TestPathScopedHelperMatching(t *testing.T) {
 	})
 
 	for _, c := range []struct {
-		name, scope, target string
-		srv                 *gitexectest.Remote
+		name, target string
+		srv          *gitexectest.Remote
 	}{
-		{"sibling repository on the same host", r.URL, r.OtherURL, r},
-		{"repository on another host", r.URL, elsewhere.URL, elsewhere},
+		{"sibling repository on the same host", r.OtherURL, r},
+		{"repository on another host", elsewhere.URL, elsewhere},
 	} {
 		t.Run(c.name+" gets no credential", func(t *testing.T) {
-			srv := c.srv
-			before := len(authedPaths(srv))
-			out, err := lsRemoteScoped(t, c.scope, c.target)
+			before := len(authedPaths(c.srv))
+			out, err := lsRemoteScoped(t, r.URL, c.target)
 			if err == nil {
-				t.Fatalf("ls-remote %s succeeded under helper scoped to %s:\n%s", c.target, c.scope, out)
+				t.Fatalf("ls-remote %s succeeded under helper scoped to %s:\n%s", c.target, r.URL, out)
 			}
-			if got := authedPaths(srv)[before:]; len(got) != 0 {
+			if got := authedPaths(c.srv)[before:]; len(got) != 0 {
 				t.Fatalf("Authorization sent for %v:\n%s", got, out)
 			}
 		})
@@ -93,6 +92,32 @@ func TestPathScopedHelperMatching(t *testing.T) {
 		}
 		if !strings.Contains(out, "redirecting to "+r.URL) {
 			t.Fatalf("git did not report the redirect:\n%s", out)
+		}
+	})
+
+	// The other redirect shape: the old path authenticates first, then 301s.
+	// Observed with git here: a helper scoped to the old URL answers the old
+	// path's 401, and git then carries that Authorization to the same-host
+	// destination path (the helper is not asked again, so the scope does not
+	// guard it). The clone still fails, since git POSTs git-upload-pack to the
+	// old path and does not follow a 301 on a POST. A rename therefore fails
+	// by design here too, but the token does reach the destination's path.
+	t.Run("redirect after authentication fails and reaches the destination", func(t *testing.T) {
+		before := len(r.Requests())
+		out, err := lsRemoteScoped(t, r.MovedAfterAuthURL, r.MovedAfterAuthURL)
+		if err == nil || !strings.Contains(out, "HTTP 301") {
+			t.Fatalf("ls-remote %s: err=%v, want a failure on the 301:\n%s", r.MovedAfterAuthURL, err, out)
+		}
+		cred := Credential{Username: testUser, Password: testToken}
+		if got := cred.Explain(err, []byte(out), r.MovedAfterAuthURL).Error(); !strings.Contains(got, "configured Target repo "+r.MovedAfterAuthURL) {
+			t.Errorf("Explain = %q, want it to name the configured Target repo", got)
+		}
+		var sentToDestination bool
+		for _, q := range r.Requests()[before:] {
+			sentToDestination = sentToDestination || (q.HasAuth && strings.HasPrefix(q.Path, "/repo.git/"))
+		}
+		if !sentToDestination {
+			t.Fatalf("git no longer carries the credential across the redirect; revisit the Explain comment: %v", r.Requests()[before:])
 		}
 	})
 }
