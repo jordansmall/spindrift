@@ -1,11 +1,6 @@
 package driverkit
 
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"io"
-)
+import "io"
 
 // ResultReader names how a Driver's final-message text is read from its log.
 type ResultReader int
@@ -125,17 +120,4 @@ func (s Strategy) resultOf(l *Log) string {
 		return l.lastMessageText()
 	}
 	return l.resultText()
-}
-
-// DecodeSessionArgs reads the session file the Box writes: a JSON array of
-// argv words, or an empty file for a session with no flag.
-func DecodeSessionArgs(b []byte) ([]string, error) {
-	if len(bytes.TrimSpace(b)) == 0 {
-		return nil, nil
-	}
-	var args []string
-	if err := json.Unmarshal(b, &args); err != nil {
-		return nil, fmt.Errorf("session file is not a JSON array of strings: %w", err)
-	}
-	return args, nil
 }

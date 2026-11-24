@@ -514,3 +514,24 @@ func TestDecodeSessionArgs(t *testing.T) {
 		}
 	}
 }
+
+func TestEncodeSessionArgsRoundTrips(t *testing.T) {
+	for _, argv := range [][]string{
+		{"--title", "spindrift o/r 7 two words"},
+		{"--session-id", "u-1"},
+		nil,
+		{},
+	} {
+		body, err := EncodeSessionArgs(argv)
+		if err != nil {
+			t.Fatalf("EncodeSessionArgs(%q): %v", argv, err)
+		}
+		if len(argv) == 0 && body != "" {
+			t.Errorf("EncodeSessionArgs(%q) = %q, want an empty file", argv, body)
+		}
+		got, err := DecodeSessionArgs([]byte(body))
+		if err != nil || !slices.Equal(got, argv) {
+			t.Errorf("round trip of %q = %q, %v", argv, got, err)
+		}
+	}
+}
