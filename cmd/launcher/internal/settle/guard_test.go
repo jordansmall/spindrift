@@ -7,7 +7,7 @@ import "testing"
 // It covers match, no-match, a deleted file's (still-reported) path, a nested
 // CLAUDE.md, and the empty-string opt-out that disables the guard entirely.
 func TestInternalSeam_MatchedGuardPaths(t *testing.T) {
-	const defaultPaths = ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**,.pi/**"
+	const defaultPaths = ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**,.pi/**,spindrift-connector-routes.json"
 
 	cases := []struct {
 		name  string
@@ -40,6 +40,12 @@ func TestInternalSeam_MatchedGuardPaths(t *testing.T) {
 			paths: defaultPaths,
 			files: []string{"CLAUDE.md"},
 			want:  []string{"CLAUDE.md"},
+		},
+		{
+			name:  "Route baseline file is held under the shipped default",
+			paths: defaultPaths,
+			files: []string{"spindrift-connector-routes.json"},
+			want:  []string{"spindrift-connector-routes.json"},
 		},
 		{
 			name:  "empty MERGE_GUARD_PATHS disables the guard entirely",

@@ -1,7 +1,7 @@
 # Pins for MERGE_GUARD_PATHS (ADR 0016, ADR 0062, issues #4949 and #4974): the
-# shipped schema default stays unchanged, and the dogfood restates it plus the
-# globs for behaviour-changing files that must merge by hand whatever their
-# origin.
+# shipped schema default is pinned (changing it means updating this pin), and
+# the dogfood restates it plus the globs for behaviour-changing files that must
+# merge by hand whatever their origin.
 {
   pkgs,
   config,
@@ -47,7 +47,10 @@ in
   # Extending the dogfood must not widen what every consumer gets by default.
   merge-guard-paths-schema-default-unchanged =
     assert assertMsg
-      (schemaDefault == ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**,.pi/**")
+      (
+        schemaDefault
+        == ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**,.pi/**,spindrift-connector-routes.json"
+      )
       "lib/env-schema.nix mergeGuardPaths.default must stay the shipped default; extend the dogfood in nix/dogfood-defaults.nix instead, or update this pin if the shipped default is meant to change";
     pkgs.runCommand "merge-guard-paths-schema-default-unchanged" { } "touch $out";
 

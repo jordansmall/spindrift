@@ -231,7 +231,7 @@
             #   branchPrefix = "agent/issue-";
             #   merge = {
             #     # comma-separated globs matched against every changed path (added, modified, deleted); a hit downgrades the merge to manual regardless of MERGE_MODE and posts a PR comment naming the match; empty disables the guard (github and forgejo Code Forge merge paths only)
-            #     guardPaths = ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**,.pi/**";
+            #     guardPaths = ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**,.pi/**,spindrift-connector-routes.json";
             #     # how the final integration commits land on green: merge (merge commit), squash, or rebase; the github and forgejo Connectors merge by rebase only and refuse merge or squash at launch (github and forgejo Code Forge merge paths only)
             #     method = "rebase";
             #     # post-green merge policy: immediate (merge on green), auto (enqueue the forge's native auto-merge on github or forgejo; github needs Allow auto-merge enabled, forgejo needs rebase merges allowed), manual (leave PR open for human approval)
