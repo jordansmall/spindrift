@@ -173,6 +173,12 @@ in
         "STUB_CONNECTOR_EMAIL"
       ]
     ) "consumer-stanzas: secrets hold the row token then the listed connector knobs, in listed order";
+    assert assertMsg (
+      secretEnvs (pkgs.lib.findFirst (s: s.name == trackerOnly.name) null real) == [
+        "JIRA_TOKEN"
+        "JIRA_EMAIL"
+      ]
+    ) "consumer-stanzas: a core-knob Basic identity follows its row token in the stanza's secrets";
     assert assertMsg (fails omitsSecret)
       "consumer-stanzas: a Connector secret knob the stanza omits must fail eval";
     assert assertMsg (
@@ -196,9 +202,8 @@ in
       (
         pairingOwned == [
           "GH_TOKEN"
+          "JIRA_EMAIL"
           "JIRA_TOKEN"
-          "SPINDRIFT_JIRA_CONNECTOR_EMAIL"
-          "SPINDRIFT_JIRA_CONNECTOR_TOKEN"
         ]
       )
       "consumer-stanzas: a jira+github pairing's env example must list exactly their secrets, got ${toString pairingOwned}";

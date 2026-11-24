@@ -150,10 +150,10 @@ let
     backendRows.jira = {
       module = p: "${jiraConnector.package p}/jira.wasm";
       inherit (jiraConnector) routes;
-      credentialEnv = "SPINDRIFT_JIRA_CONNECTOR_TOKEN";
-      credentialKnob = "jiraConnectorToken";
+      credentialEnv = "JIRA_TOKEN";
+      credentialKnob = "jiraToken";
       credentialScheme = "basic";
-      identityEnv = "SPINDRIFT_JIRA_CONNECTOR_EMAIL";
+      identityEnv = "JIRA_EMAIL";
       baseEnv = "JIRA_BASE_URL";
       acceptedRoutes = (builtins.fromJSON (builtins.readFile ../spindrift-connector-routes.json)).jira;
     };

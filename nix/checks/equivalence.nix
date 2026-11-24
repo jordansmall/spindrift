@@ -839,9 +839,9 @@ in
       )
     );
     # The flake module reads the table through this function, so a fixture
-    # env-only row exercises its `flakePath` guards; an unguarded read would
-    # break every Consumer eval. The real githubConnectorToken row is env-only
-    # too; the fixture keeps the guard covered if that row is ever dropped.
+    # env-only row exercises its `flakePath` guards beside the real table's own
+    # env-only rows (githubConnectorToken and the jira Connector credential
+    # knobs); an unguarded read would break every Consumer eval.
     assert
       let
         fixture = removedKnobs // {

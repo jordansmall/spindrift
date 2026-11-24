@@ -280,3 +280,35 @@ func TestRemovedKnobsCheck_RejectsGithubConnectorToken(t *testing.T) {
 		}
 	}
 }
+
+// The jira Connector's own credential knobs are gone (issue #7501), the
+// token's secret _CMD form included: each is rejected from the environment and
+// the input document, naming its replacement.
+func TestRemovedKnobsCheck_RejectsJiraConnectorCredentials(t *testing.T) {
+	for env, replacement := range map[string]string{
+		"SPINDRIFT_JIRA_CONNECTOR_TOKEN":     "JIRA_TOKEN",
+		"SPINDRIFT_JIRA_CONNECTOR_TOKEN_CMD": "JIRA_TOKEN_CMD",
+		"SPINDRIFT_JIRA_CONNECTOR_EMAIL":     "JIRA_EMAIL",
+	} {
+		assertRejected := func(t *testing.T) {
+			t.Helper()
+			_, err := removedKnobsCheck().Probe()
+			if err == nil {
+				t.Fatalf("%s: Probe() err = nil, want a removed-knob rejection", env)
+			}
+			for _, want := range []string{env + " was removed", replacement} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("%s: err = %q, want it to contain %q", env, err, want)
+				}
+			}
+		}
+		t.Run(env+"/env", func(t *testing.T) {
+			t.Setenv(env, "x")
+			assertRejected(t)
+		})
+		t.Run(env+"/document", func(t *testing.T) {
+			useDoc(t, &inputdoc.Document{Settings: map[string]string{env: "x"}})
+			assertRejected(t)
+		})
+	}
+}

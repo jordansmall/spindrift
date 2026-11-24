@@ -4437,7 +4437,7 @@ func TestDoctor_AuthFailure_NotDoublyReported(t *testing.T) {
 	}
 }
 
-// The auth-failure remediation text names SPINDRIFT_JIRA_CONNECTOR_TOKEN, not GH_TOKEN, when the
+// The auth-failure remediation text names JIRA_TOKEN, not GH_TOKEN, when the
 // issue tracker is jira; the generic message would misdirect an operator
 // debugging a Jira probe.
 func TestDoctor_AuthFailure_Jira(t *testing.T) {
@@ -4451,8 +4451,8 @@ func TestDoctor_AuthFailure_Jira(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "SPINDRIFT_JIRA_CONNECTOR_TOKEN") {
-		t.Errorf("want error to mention SPINDRIFT_JIRA_CONNECTOR_TOKEN, got: %v", err)
+	if !strings.Contains(err.Error(), "JIRA_TOKEN") {
+		t.Errorf("want error to mention JIRA_TOKEN, got: %v", err)
 	}
 }
 

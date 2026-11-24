@@ -68,7 +68,7 @@ func TestRegisteredStrategiesShape(t *testing.T) {
 			validAsTracker:   true,
 			validAsCodeForge: false,
 			tokenEnvVar:      "JIRA_TOKEN",
-			doctorTokenHint:  "SPINDRIFT_JIRA_CONNECTOR_TOKEN",
+			doctorTokenHint:  "JIRA_TOKEN",
 			doctorSlugHint:   "JIRA_BASE_URL / JIRA_PROJECT_KEY",
 
 			hasValidateTracker: true,
