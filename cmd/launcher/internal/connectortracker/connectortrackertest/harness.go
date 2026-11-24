@@ -255,7 +255,7 @@ func New(t *testing.T, c connectorforgetest.Connector) forgetest.Harness {
 	}
 	t.Cleanup(func() { _ = conn.Close(context.Background()) })
 	h.Conn = conn
-	h.tr, err = connectortracker.New(conn, nil, connectortracker.Lifecycle{Labels: Labels, VerdictLabels: forge.ResearchVerdictLabels()},
+	h.tr, err = connectortracker.New(conn, nil, connectortracker.Lifecycle{Labels: Labels, VerdictLabels: forge.ResearchVerdictLabels(), WebHost: b.Host},
 		connectortracker.Target{API: b.URL + apiPath, Repo: Repo})
 	if err != nil {
 		t.Fatal(err)

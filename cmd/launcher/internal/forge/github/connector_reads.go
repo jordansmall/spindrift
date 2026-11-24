@@ -188,7 +188,7 @@ func (e *execClient) trackerOp(row backendrows.Row, capName, verb string, fn fun
 				return fmt.Errorf("%w: %s", errNoCapability, c)
 			}
 		}
-		lc := connectortracker.Lifecycle{Labels: e.labels, VerdictLabels: e.verdictLabels, Route: e.route}
+		lc := connectortracker.Lifecycle{Labels: e.labels, VerdictLabels: e.verdictLabels, Route: e.route, WebHost: Host()}
 		tr, err := connectortracker.New(conn, nil, lc, connectortracker.Target{API: api, Repo: e.repo})
 		if err != nil {
 			return err

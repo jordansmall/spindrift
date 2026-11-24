@@ -53,6 +53,11 @@ func WorkflowPermissionRemedy(num string) string {
 // backoff.
 var ErrMergeTransient = errors.New("transient merge failure")
 
+// ErrFiledUnusableURL is returned by PostIssue when the tracker reported the
+// issue filed but the URL it returned is not usable. The issue exists, so a
+// caller must not file it again.
+var ErrFiledUnusableURL = errors.New("tracker reported the issue filed but returned an unusable url")
+
 // ErrMarkReadyTransient is returned by MarkReady when the draft-to-ready flip
 // fails for a transient transport or server reason rather than a genuine
 // refusal (permission, closed PR). Callers may retry with backoff.

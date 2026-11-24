@@ -22,7 +22,7 @@ var routeReplies = map[string]string{
 	"tracker.countInterval": `{"seconds":5}`,
 	CapCount:                `{"count":1}`,
 	CapLabeled:              `{"issues":[]}`,
-	CapFileIssue:            `{"url":"https://j/browse/P-1"}`,
+	CapFileIssue:            `{"url":"https://tracker.example/o/r/issues/7"}`,
 	"tracker.matchesRoute":  `{"matches":false}`,
 }
 

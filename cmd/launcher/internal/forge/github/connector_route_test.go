@@ -23,6 +23,7 @@ func setTrackerRoute(c *execClient) {
 // sends none and sees the whole scope.
 func TestExecClient_IssueRouteNarrowsReadsAndFilesWithItsLabel(t *testing.T) {
 	h, c, _ := routedHarness(t)
+	t.Setenv("GH_HOST", h.backend.host) // a filed issue's URL must be on the web host
 	h.SeedIssue(forge.Issue{Number: "1", Title: "in route", Labels: []string{testLabels.Dispatchable, routeLabel, "finding"}})
 	h.SeedIssue(forge.Issue{Number: "2", Title: "other route", Labels: []string{testLabels.Dispatchable, "finding"}})
 
