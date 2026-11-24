@@ -430,6 +430,25 @@ in
           backend ? probeBackend,
         }:
         consumerWith [ { spindrift.connectors.probe = { inherit knobs backend; }; } ];
+      names = import ../../lib/connector-names.nix;
+      coreBackends = import ../../lib/backends/default.nix;
+      # A row of core backend `rowName` naming core knob `knob` as its own credential.
+      probeRow =
+        rowName: knob:
+        consumerWith [
+          {
+            spindrift.connectors.${rowName} = {
+              # The checked-in accepted baseline (spindrift-connector-routes.json)
+              # holds `{base}` routes for the forgejo and jira rows, which
+              # mkHarness refuses without a `baseEnv`.
+              knobs.probeBase = baseKnob;
+              backend = probeBackend // {
+                credential = knob;
+                base = "probeBase";
+              };
+            };
+          }
+        ];
       programOf = c: c.apps.${system}.default.program;
       builds = c: (builtins.tryEval (builtins.seq (programOf c) true)).success;
     in
@@ -449,6 +468,51 @@ in
         };
       }))
     ) "a credential naming a core knob must fail evaluation";
+    # A row may name its own backend's core token (issue #7498). `probe` is
+    # no core backend, so a core knob stays refused there above.
+    assert assertMsg (builds (
+      probeRow "github" "ghToken"
+    )) "a github row naming its own token must evaluate";
+    assert assertMsg (builds (
+      probeRow "forgejo" "forgejoToken"
+    )) "a forgejo row naming its own token must evaluate";
+    assert assertMsg (builds (
+      probeRow "jira" "jiraToken"
+    )) "a jira row naming its own token must evaluate";
+    assert assertMsg (
+      !(builds (probeRow "github" "forgejoToken"))
+    ) "a github row naming the forgejo token must fail evaluation";
+    assert assertMsg (
+      !(builds (probeRow "github" "issueTracker"))
+    ) "a github row naming a non-token core knob must fail evaluation";
+    # `builds` cannot see why a row was refused, so the refusal text is pinned
+    # on the pure decision, against the real core entries.
+    assert assertMsg
+      (
+        let
+          core = (import ../../lib/row-knobs.nix).fold (import ../../lib/connector-knobs.nix [ ]);
+          err =
+            name: key:
+            names.backendKnobError {
+              backends = coreBackends;
+              inherit name key;
+              field = "credential";
+              secret = true;
+              ownKnob = null;
+              coreEntry = core.${key} or null;
+            };
+          notOwn =
+            name: key:
+            "Connector '${name}': backend credential '${key}' is not in this Connector's `knobs` (a core knob cannot be a backend credential)";
+        in
+        err "github" "ghToken" == null
+        && err "forgejo" "forgejoToken" == null
+        && err "jira" "jiraToken" == null
+        && err "github" "forgejoToken" == notOwn "github" "forgejoToken"
+        && err "github" "issueTracker" == notOwn "github" "issueTracker"
+        && err "probe" "ghToken" == notOwn "probe" "ghToken"
+      )
+      "only a core backend's own token knob may be named by its row, and every other core knob is refused as such";
     assert assertMsg (
       !(builds (probe {
         knobs.probeToken = secretKnob // {

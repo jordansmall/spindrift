@@ -2564,6 +2564,9 @@ a row missing its `module`, `routes` or `credential`, on a `basic` scheme
 without an `identity` (or an `identity` on bearer), and on an `identity` that
 is not one of the Connector's own host-only knobs or a `base` that is no
 env-schema knob.
+One exception to the own-knobs rule: a row named for a core backend may name
+that backend's own token knob as its `credential`, such as github's `GH_TOKEN`
+(issue #7498); that knob is checked as an own one is.
 
 `mkHarness` renders each row into the Launcher input document's `backends`
 section as `{name, module, routes, acceptedRoutes, credentialEnv,
@@ -2586,10 +2589,14 @@ row: `ISSUE_TRACKER=jira` builds the tracker from the Connector, and no other
 backend is selected by its Connector alone yet (issue #6807).
 
 `nix/checks/connector-backend-rows.nix` pins the rows: the fixture's reaches the
-input document, a bad credential (a core knob, one of the Connector's own that is
-not secret or not host-only, or no knob at all), a blanket route or a row missing
-a field fails evaluation, and the launcher test applies that Nix-rendered
-document and sends a declared request through the host.
+input document, a bad credential (a core knob, one of the Connector's own that
+is not secret or not host-only, or no knob at all), a blanket route or a row
+missing a field fails evaluation, and the launcher test applies that
+Nix-rendered document and sends a declared request through the host. A github,
+forgejo or jira row naming its own token evaluates, while a core knob on any
+other row, another backend's token or a non-token core knob on a github row
+fails. The refusal text of a core knob is pinned on the pure
+`backendKnobError`.
 
 ##### Reviewing a widened Route table
 

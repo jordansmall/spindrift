@@ -15,6 +15,8 @@ let
   skillsLib = import ./skills.nix;
   schema = import ./env-schema.nix;
   removedKnobs = import ./removed-knobs.nix;
+  names = import ./connector-names.nix;
+  backends = import ./backends/default.nix;
   resolveNixPath = import ./nixpath.nix;
   inherit (import ./renderers.nix) flagKind;
   runtimeValues = (import ./runners/index.nix { }).runtimes;
@@ -92,7 +94,6 @@ let
   checkedConnectors = lib.mapAttrs (
     name: r:
     let
-      names = import ./connector-names.nix;
       nativeDriverNames = (import ./drivers/default.nix { inherit lib; }).nativeDriverNames;
       err =
         if r.backend != null && r.definedSwitches != [ ] then
@@ -113,19 +114,19 @@ let
       ownKnobEnv =
         field: key: secret:
         let
-          fail = why: throw "Connector '${name}': backend ${field} '${key}' ${why}";
-          knob =
-            r.knobs.${key}
-              or (fail "is not in this Connector's `knobs` (a core knob cannot be a backend ${field})");
+          err = names.backendKnobError {
+            inherit
+              backends
+              name
+              field
+              secret
+              key
+              ;
+            ownKnob = r.knobs.${key} or null;
+            coreEntry = config.spindrift.envSchema.${key} or null;
+          };
         in
-        if secret && !(knob.secret or false) then
-          fail "is not a secret knob (`secret = true` required)"
-        else if (knob.boxEnv or false) != false then
-          fail "must be host-only (`boxEnv = false` required)"
-        else if !(knob ? env) then
-          fail "has no `env`"
-        else
-          config.spindrift.envSchema.${key}.env;
+        if err != null then throw err else config.spindrift.envSchema.${key}.env;
       baseEnv =
         config.spindrift.envSchema.${b.base}.env
           or (throw "Connector '${name}': backend base '${b.base}' is not an env-schema knob");
@@ -527,7 +528,7 @@ in
                   readOnly = true;
                   default = builtins.filter (
                     n: options.${n}.highestPrio < (lib.mkOptionDefault null).priority
-                  ) (import ./connector-names.nix).switchNames;
+                  ) names.switchNames;
                   description = "The backend-row switches the Consumer set; checkedConnectors refuses them.";
                 };
                 knobs = mkOption {
@@ -732,7 +733,7 @@ in
         in
         # A second module registering the same row name fails instead of the
         # submodule merge silently combining their knobs.
-        (import ./connector-names.nix).uniqueRow row
+        names.uniqueRow row
       );
       default = { };
       description = "Connector rows registered by Connectors' flake-parts modules.";
