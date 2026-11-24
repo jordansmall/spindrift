@@ -243,6 +243,9 @@ var EventKinds = []string{EventStart, EventText, EventReasoning, EventToolCall, 
 // GuestEventKinds lists the kinds a Driver's decoder may emit.
 var GuestEventKinds = []string{EventStart, EventText, EventReasoning, EventToolCall, EventToolResult, EventUsage, EventModel, EventError, EventUnparsed, EventResult}
 
+// ProgressEventKinds lists the kinds that show the agent working past an earlier error.
+var ProgressEventKinds = []string{EventStart, EventText, EventReasoning, EventToolCall, EventToolResult}
+
 // The Reason a driver Pattern carries.
 const (
 	// ReasonRateLimit: API rate limit.
