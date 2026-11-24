@@ -32,7 +32,8 @@
   prompts,
   # The knob subset the image consumes: nix-in-box / writable-store wiring
   # (ADR 0018), the prefetch snippet, the Driver-scoped image name (issue
-  # #262), and the schema-derived entrypoint defaults preamble.
+  # #262), and the schema-derived entrypoint defaults preamble; plus
+  # mkHarness's internal, non-schema tarball compressor.
   knobs,
 }:
 let
@@ -340,6 +341,7 @@ let
 
   image = pkgs.dockerTools.buildLayeredImage {
     name = knobs.imageName;
+    compressor = knobs.imageCompressor;
     tag = "latest";
     contents = [
       agentEnv

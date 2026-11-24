@@ -171,6 +171,10 @@
   # of the (Linux) pkgs, like `packages`, so Consumer-supplied derivations
   # stay correct on a darwin host (issue #469).
   extraClosures ? (_pkgs: [ ]),
+  # dockerTools.buildLayeredImage compressor for the image tarball. Not
+  # Consumer-tunable; overridable only so check-only fixtures (nix/fixtures.nix)
+  # can skip the gzip nothing reads: the launcher loads shipped images.
+  imageCompressor ? "gz",
   # Short git revision injected into the binary via ldflags for `spindrift --version`.
   # Callers pass self.shortRev or self.rev; defaults to "unknown" for impure builds.
   revision ? "unknown",
@@ -1310,6 +1314,7 @@ let
       nixStoreWritable
       prefetch
       imageName
+      imageCompressor
       ;
     entrypointDefaultsPreamble = renderDefaultsPreamble { };
   };

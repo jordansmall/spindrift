@@ -1156,7 +1156,7 @@ in
   # extraClosures derivations must be physically present in the image:
   # contents = [...] ++ extraClosures pulls the closure into the store layers
   # the same way agentEnv and agentFiles do. Listing each already-extracted
-  # layer is cheap; only the initial compressed-image read is expensive.
+  # layer is cheap; only the initial image read is expensive.
   extra-closure-in-image-contents =
     pkgs.runCommand "extra-closure-in-image-contents" { nativeBuildInputs = [ pkgs.jq ]; }
       ''
