@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorprotocol/schematest"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -19,10 +20,7 @@ const testWebHost = "github.com"
 
 const prURL7 = "https://github.com/o/r/pull/7"
 
-type recordedCall struct {
-	method string
-	params map[string]any
-}
+type recordedCall = schematest.Call
 
 // stubGuest answers each method with the JSON in replies and records the calls.
 func stubGuest(t *testing.T, replies map[string]string) (guestCall, *[]recordedCall) {
@@ -37,7 +35,7 @@ func stubGuest(t *testing.T, replies map[string]string) (guestCall, *[]recordedC
 		if err := json.Unmarshal(raw, &p); err != nil {
 			t.Fatal(err)
 		}
-		calls = append(calls, recordedCall{method, p})
+		calls = append(calls, recordedCall{Method: method, Params: p})
 		reply, ok := replies[method]
 		if !ok {
 			return errors.New("guest: no such method " + method)
@@ -68,21 +66,23 @@ func TestNewReaderRefusesEmptyWebHost(t *testing.T) {
 }
 
 func TestOpenPRForBranchPicksFirstOpen(t *testing.T) {
-	f, calls := newTestForge(t, map[string]string{"forge.prsForBranch": `{"prs":[
+	replies := map[string]string{"forge.prsForBranch": `{"prs":[
 		{"number":"9","url":"https://github.com/o/r/pull/9","state":"closed","merged":true},
 		{"number":"8","url":"https://github.com/o/r/pull/8","state":"open","merged":false},
-		{"number":"7","url":"https://github.com/o/r/pull/7","state":"open","merged":false}]}`})
+		{"number":"7","url":"https://github.com/o/r/pull/7","state":"open","merged":false}]}`}
+	f, calls := newTestForge(t, replies)
 	pr, ok, err := f.OpenPRForBranch("agent/issue-1")
 	if err != nil || !ok || pr.URL != "https://github.com/o/r/pull/8" {
 		t.Fatalf("got %+v, %v, %v; want PR 8", pr, ok, err)
 	}
-	want := recordedCall{"forge.prsForBranch", map[string]any{
+	want := recordedCall{Method: "forge.prsForBranch", Params: map[string]any{
 		"target": map[string]any{"api": "https://api.example", "repo": "o/r"},
 		"branch": "agent/issue-1",
 	}}
 	if !reflect.DeepEqual((*calls)[0], want) {
 		t.Errorf("call = %+v, want %+v", (*calls)[0], want)
 	}
+	schematest.RequireConforms(t, *calls, replies)
 }
 
 func TestOpenPRForBranchOnlyClosedOrEmpty(t *testing.T) {
@@ -166,13 +166,14 @@ func TestPRStateMapsStates(t *testing.T) {
 			if err != nil || got != tc.want {
 				t.Fatalf("PRState = %q, %v; want %q", got, err, tc.want)
 			}
-			want := recordedCall{"forge.pr", map[string]any{
+			want := recordedCall{Method: "forge.pr", Params: map[string]any{
 				"target": map[string]any{"api": "https://api.example", "repo": "o/r"},
 				"number": "7",
 			}}
 			if !reflect.DeepEqual((*calls)[0], want) {
 				t.Errorf("call = %+v, want %+v", (*calls)[0], want)
 			}
+			schematest.RequireConforms(t, *calls, map[string]string{"forge.pr": tc.reply})
 		})
 	}
 }
@@ -245,7 +246,7 @@ func TestCheckStateMapsRollup(t *testing.T) {
 		if err != nil || got != want {
 			t.Errorf("CheckState(%q) = %q, %v; want %q", state, got, err, want)
 		}
-		if (*calls)[0].method != "forge.checks" || (*calls)[0].params["number"] != "7" {
+		if (*calls)[0].Method != "forge.checks" || (*calls)[0].Params["number"] != "7" {
 			t.Errorf("call = %+v", (*calls)[0])
 		}
 	}
@@ -350,14 +351,15 @@ func TestGuestErrorsPropagate(t *testing.T) {
 }
 
 func TestFailureDetailCarriesTheFailingJobLog(t *testing.T) {
-	f, calls := newTestForge(t, map[string]string{
+	replies := map[string]string{
 		"forge.checks": rollupJSON(t, []wireCheck{
 			{Kind: "CheckRun", Name: "build", Conclusion: "SUCCESS", JobID: "1"},
 			{Kind: "CheckRun", Name: "unit", Conclusion: "FAILURE", Summary: "exit 1", JobID: "42"},
 			{Kind: "CheckRun", Name: "app", Conclusion: "FAILURE"}, // not a workflow job
 		}),
 		"forge.jobLog": `{"log":"--- FAIL: TestX\nboom\n"}`,
-	})
+	}
+	f, calls := newTestForge(t, replies)
 	got, err := f.FailureDetail(prURL7)
 	if err != nil {
 		t.Fatal(err)
@@ -371,11 +373,11 @@ func TestFailureDetailCarriesTheFailingJobLog(t *testing.T) {
 	}
 	var logCalls []recordedCall
 	for _, c := range *calls {
-		if c.method == "forge.jobLog" {
+		if c.Method == "forge.jobLog" {
 			logCalls = append(logCalls, c)
 		}
 	}
-	wantCall := recordedCall{"forge.jobLog", map[string]any{
+	wantCall := recordedCall{Method: "forge.jobLog", Params: map[string]any{
 		"target":     map[string]any{"api": "https://api.example", "repo": "o/r"},
 		"jobId":      "42",
 		"tail":       float64(forge.JobLogKeepBytes),
@@ -384,6 +386,7 @@ func TestFailureDetailCarriesTheFailingJobLog(t *testing.T) {
 	if len(logCalls) != 1 || !reflect.DeepEqual(logCalls[0], wantCall) {
 		t.Errorf("jobLog calls = %v, want [%v]", logCalls, wantCall)
 	}
+	schematest.RequireConforms(t, *calls, replies)
 }
 
 func TestFailureDetailSurvivesAnUnreadableLog(t *testing.T) {
@@ -434,7 +437,7 @@ func TestFailureDetailSkipsLogsOnceTheBudgetIsSpent(t *testing.T) {
 		t.Errorf("FailureDetail = %q, want %q", got, want)
 	}
 	for _, c := range *calls {
-		if c.method == "forge.jobLog" {
+		if c.Method == "forge.jobLog" {
 			t.Errorf("forge.jobLog called after the budget was spent: %+v", c)
 		}
 	}

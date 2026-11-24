@@ -107,7 +107,7 @@ func TestStatusesLayer(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(missing, []string{"Doing"}) {
 		t.Fatalf("missing = %v, %v; want [Doing]", missing, err)
 	}
-	if p := (*calls)[0].params["target"]; !reflect.DeepEqual(p, map[string]any{"api": "https://api.example", "repo": "o/r", "dialect": ""}) {
+	if p := (*calls)[0].Params["target"]; !reflect.DeepEqual(p, map[string]any{"api": "https://api.example", "repo": "o/r", "dialect": ""}) {
 		t.Errorf("target = %v", p)
 	}
 }
@@ -213,7 +213,7 @@ func TestCreateMetaLayer(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(unfilled, []string{`"Team" (customfield_1)`}) {
 		t.Fatalf("unfilled = %v, %v", unfilled, err)
 	}
-	if got := (*calls)[0].params["issueType"]; got != "Task" {
+	if got := (*calls)[0].Params["issueType"]; got != "Task" {
 		t.Errorf("issueType = %v, want Task", got)
 	}
 
@@ -246,17 +246,17 @@ func TestCountLayer(t *testing.T) {
 	if _, err := dc.CountReady(false); err != nil {
 		t.Fatal(err)
 	}
-	if len(*calls) != 3 || (*calls)[0].method != "tracker.countInterval" {
+	if len(*calls) != 3 || (*calls)[0].Method != "tracker.countInterval" {
 		t.Fatalf("calls = %v; want one interval read then two counts", *calls)
 	}
-	p := (*calls)[1].params
+	p := (*calls)[1].Params
 	if p["label"] != "ready-for-agent" || p["status"] != "Ready" {
 		t.Errorf("count params = %v, want both selectors", p)
 	}
 	if p["fresh"] != true || p["limit"] != float64(forge.ResultPageLimit) {
 		t.Errorf("count params = %v, want fresh true and limit %d", p, forge.ResultPageLimit)
 	}
-	if p := (*calls)[2].params; p["fresh"] != false {
+	if p := (*calls)[2].Params; p["fresh"] != false {
 		t.Errorf("second count params = %v, want fresh false", p)
 	}
 }
@@ -323,7 +323,7 @@ func TestPriorClaimLayer(t *testing.T) {
 			if err != nil || found != tc.found || (found && got != tc.want) {
 				t.Fatalf("PriorClaimState = %v, %v, %v; want %v, %v", got, found, err, tc.want, tc.found)
 			}
-			if len(*calls) != 1 || (*calls)[0].params["number"] != "42" {
+			if len(*calls) != 1 || (*calls)[0].Params["number"] != "42" {
 				t.Errorf("calls = %v; want one read of issue 42", *calls)
 			}
 		})

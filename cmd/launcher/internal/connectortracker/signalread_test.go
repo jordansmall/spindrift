@@ -93,7 +93,7 @@ func TestSignalIssueSearchThroughAConnectorTracker(t *testing.T) {
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "from the connector") {
 		t.Fatalf("got %d %s, want the connector's hit", w.Code, w.Body)
 	}
-	if len(*calls) != 1 || (*calls)[0].method != CapSearchIssues || (*calls)[0].params["text"] != "flaky" || (*calls)[0].params["state"] != "closed" {
+	if len(*calls) != 1 || (*calls)[0].Method != CapSearchIssues || (*calls)[0].Params["text"] != "flaky" || (*calls)[0].Params["state"] != "closed" {
 		t.Fatalf("guest calls = %+v, want one tracker.searchIssues with the query", *calls)
 	}
 }

@@ -34,7 +34,7 @@ func (g *writeGuest) call(_ context.Context, method string, params, result any) 
 	raw, _ := json.Marshal(params)
 	var p map[string]any
 	_ = json.Unmarshal(raw, &p)
-	g.calls = append(g.calls, recordedCall{method, p})
+	g.calls = append(g.calls, recordedCall{Method: method, Params: p})
 	switch method {
 	case CapTransition:
 		if g.transitionErr != nil {
@@ -68,7 +68,7 @@ func (g *writeGuest) call(_ context.Context, method string, params, result any) 
 func (g *writeGuest) methods() []string {
 	var out []string
 	for _, c := range g.calls {
-		out = append(out, c.method)
+		out = append(out, c.Method)
 	}
 	return out
 }
@@ -76,7 +76,7 @@ func (g *writeGuest) methods() []string {
 func (g *writeGuest) edits() []recordedCall {
 	var out []recordedCall
 	for _, c := range g.calls {
-		if c.method == CapEditLabels {
+		if c.Method == CapEditLabels {
 			out = append(out, c)
 		}
 	}
@@ -127,7 +127,7 @@ func TestTransitionMovedStripsStaleLabels(t *testing.T) {
 	if err := tr.TransitionState("7", forge.InProgress, forge.Complete); err != nil {
 		t.Fatal(err)
 	}
-	want := recordedCall{CapTransition, map[string]any{
+	want := recordedCall{Method: CapTransition, Params: map[string]any{
 		"target": map[string]any{"api": "https://api.example", "repo": "o/r", "dialect": ""},
 		"number": "7", "state": "complete",
 		"mapping": map[string]any{
@@ -140,7 +140,7 @@ func TestTransitionMovedStripsStaleLabels(t *testing.T) {
 		t.Errorf("transition call = %+v, want %+v", g.calls[0], want)
 	}
 	e := g.edits()
-	if len(e) != 1 || !reflect.DeepEqual(strs(e[0].params["remove"]), []string{"wip", "bad"}) || len(strs(e[0].params["add"])) != 0 {
+	if len(e) != 1 || !reflect.DeepEqual(strs(e[0].Params["remove"]), []string{"wip", "bad"}) || len(strs(e[0].Params["add"])) != 0 {
 		t.Errorf("edits = %+v, want one removal of wip and the stale failed label", e)
 	}
 }
@@ -159,7 +159,7 @@ func TestTransitionRequestCarriesStateAndMapping(t *testing.T) {
 	if err := tr.TransitionState("7", forge.InProgress, forge.Complete); err != nil {
 		t.Fatal(err)
 	}
-	p := g.calls[0].params
+	p := g.calls[0].Params
 	if p["state"] != "complete" {
 		t.Errorf("state = %v, want complete", p["state"])
 	}
@@ -184,8 +184,8 @@ func TestTransitionStateNameIsDispatchStateString(t *testing.T) {
 	}
 	var state any
 	for _, c := range g.calls {
-		if c.method == CapTransition {
-			state = c.params["state"]
+		if c.Method == CapTransition {
+			state = c.Params["state"]
 		}
 	}
 	if state != "in-progress" {
@@ -221,7 +221,7 @@ func TestTransitionUnavailableHybridSwapsLabel(t *testing.T) {
 		t.Fatal(err)
 	}
 	e := g.edits()
-	if len(e) != 1 || !reflect.DeepEqual(strs(e[0].params["add"]), []string{"done"}) || !reflect.DeepEqual(strs(e[0].params["remove"]), []string{"wip", "bad"}) {
+	if len(e) != 1 || !reflect.DeepEqual(strs(e[0].Params["add"]), []string{"done"}) || !reflect.DeepEqual(strs(e[0].Params["remove"]), []string{"wip", "bad"}) {
 		t.Errorf("edits = %+v, want add done, remove wip and bad", e)
 	}
 }
@@ -234,11 +234,11 @@ func TestTransitionUnmappedHybridSwapsLabel(t *testing.T) {
 	if err := tr.TransitionState("7", forge.InProgress, forge.Complete); err != nil {
 		t.Fatal(err)
 	}
-	if m, _ := g.calls[0].params["mapping"].(map[string]any); len(m) != 0 {
+	if m, _ := g.calls[0].Params["mapping"].(map[string]any); len(m) != 0 {
 		t.Errorf("mapping = %v, want empty when no state names a status", m)
 	}
 	e := g.edits()
-	if len(e) != 1 || !reflect.DeepEqual(strs(e[0].params["add"]), []string{"done"}) {
+	if len(e) != 1 || !reflect.DeepEqual(strs(e[0].Params["add"]), []string{"done"}) {
 		t.Errorf("edits = %+v, want add done", e)
 	}
 }
@@ -377,7 +377,7 @@ func TestClaimStripsSettledLabelsBeforeNativeClaim(t *testing.T) {
 	if got, want := g.methods(), []string{"tracker.issue", CapEditLabels, CapTransition, CapEditLabels}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("calls = %v, want %v", got, want)
 	}
-	strip := g.calls[1].params
+	strip := g.calls[1].Params
 	if got := strs(strip["remove"]); !reflect.DeepEqual(got, []string{"done", "rec"}) || len(strs(strip["add"])) != 0 {
 		t.Errorf("strip = %+v, want remove [done rec]", strip)
 	}
@@ -406,7 +406,7 @@ func TestClaimWithoutNativeStatusSkipsSettledStrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The label swap is the only edit; its removal set already names the settled labels.
-	if e := g.edits(); len(e) != 1 || !reflect.DeepEqual(strs(e[0].params["add"]), []string{"wip"}) {
+	if e := g.edits(); len(e) != 1 || !reflect.DeepEqual(strs(e[0].Params["add"]), []string{"wip"}) {
 		t.Errorf("edits = %+v, want the one label swap", e)
 	}
 }
@@ -418,9 +418,10 @@ func TestCompleteVerdictSwapsInProgressLabel(t *testing.T) {
 		t.Fatal(err)
 	}
 	e := g.edits()
-	if len(e) != 1 || !reflect.DeepEqual(strs(e[0].params["add"]), []string{"rec"}) || !reflect.DeepEqual(strs(e[0].params["remove"]), []string{"wip"}) {
+	if len(e) != 1 || !reflect.DeepEqual(strs(e[0].Params["add"]), []string{"rec"}) || !reflect.DeepEqual(strs(e[0].Params["remove"]), []string{"wip"}) {
 		t.Errorf("edits = %+v, want add rec, remove wip", e)
 	}
+	g.requireConforms(t)
 }
 
 func TestCompleteVerdictGuardsMissingInProgressLabel(t *testing.T) {
@@ -468,8 +469,8 @@ func TestLabelRegistryPassesThrough(t *testing.T) {
 	if err := tr.CreateLabel("x", "desc", "ff0000"); err != nil {
 		t.Fatal(err)
 	}
-	p := g.calls[1].params
-	if g.calls[1].method != "tracker.createLabel" || p["name"] != "x" || p["description"] != "desc" || p["color"] != "ff0000" {
+	p := g.calls[1].Params
+	if g.calls[1].Method != "tracker.createLabel" || p["name"] != "x" || p["description"] != "desc" || p["color"] != "ff0000" {
 		t.Errorf("createLabel call = %+v", g.calls[1])
 	}
 }
@@ -486,12 +487,13 @@ func TestCommentStripsFirstResearchMarkerAndFlagsIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := g.last()
-	if c.method != CapComment || c.params["number"] != "7" || c.params["research"] != true {
+	if c.Method != CapComment || c.Params["number"] != "7" || c.Params["research"] != true {
 		t.Errorf("call = %+v", c)
 	}
-	if want := "verdict\n  " + forge.ResearchMarker + "  \nquoted"; c.params["body"] != want {
-		t.Errorf("body = %q, want %q", c.params["body"], want)
+	if want := "verdict\n  " + forge.ResearchMarker + "  \nquoted"; c.Params["body"] != want {
+		t.Errorf("body = %q, want %q", c.Params["body"], want)
 	}
+	g.requireConforms(t)
 }
 
 func TestCommentWithoutMarkerPassesVerbatim(t *testing.T) {
@@ -501,7 +503,7 @@ func TestCommentWithoutMarkerPassesVerbatim(t *testing.T) {
 	if err := tr.Comment("7", body); err != nil {
 		t.Fatal(err)
 	}
-	if c := g.last(); c.params["body"] != body || c.params["research"] != false {
+	if c := g.last(); c.Params["body"] != body || c.Params["research"] != false {
 		t.Errorf("call = %+v", c)
 	}
 }
@@ -528,10 +530,11 @@ func TestPostIssueSplitsDedupMarkerAndSendsIssueType(t *testing.T) {
 	if err != nil || url != "https://tracker.example/o/r/issues/7" {
 		t.Fatalf("url, err = %q, %v", url, err)
 	}
-	p := g.last().params
-	if g.last().method != CapFileIssue || p["title"] != "title" || p["body"] != "desc" || p["dedupMarker"] != marker || p["issueType"] != "Bug" || !reflect.DeepEqual(strs(p["labels"]), []string{"l1"}) {
+	p := g.last().Params
+	if g.last().Method != CapFileIssue || p["title"] != "title" || p["body"] != "desc" || p["dedupMarker"] != marker || p["issueType"] != "Bug" || !reflect.DeepEqual(strs(p["labels"]), []string{"l1"}) {
 		t.Errorf("call = %+v", g.last())
 	}
+	g.requireConforms(t)
 }
 
 func TestPostIssueNilLabelsSendEmptyList(t *testing.T) {
@@ -541,8 +544,8 @@ func TestPostIssueNilLabelsSendEmptyList(t *testing.T) {
 	if _, err := filer.PostIssue("t", "b", nil); err != nil {
 		t.Fatal(err)
 	}
-	if l, ok := g.last().params["labels"].([]any); !ok || len(l) != 0 {
-		t.Errorf("labels = %#v, want []", g.last().params["labels"])
+	if l, ok := g.last().Params["labels"].([]any); !ok || len(l) != 0 {
+		t.Errorf("labels = %#v, want []", g.last().Params["labels"])
 	}
 }
 
@@ -571,7 +574,7 @@ func TestPostIssueRefusesAnUnusableURLAsFiledWithoutRetry(t *testing.T) {
 			if got != "" || !strings.Contains(err.Error(), "filed") || !strings.Contains(err.Error(), "unusable") {
 				t.Errorf("url = %q, err = %v", got, err)
 			}
-			if len(g.calls) != 1 || g.calls[0].method != CapFileIssue {
+			if len(g.calls) != 1 || g.calls[0].Method != CapFileIssue {
 				t.Errorf("calls = %+v, want exactly one fileIssue", g.calls)
 			}
 		})
@@ -609,7 +612,7 @@ func TestCloseMergedIssueClosesAnOpenIssueThroughTheConnector(t *testing.T) {
 	if got := g.methods(); !reflect.DeepEqual(got, []string{"tracker.issue", CapCloseIssue}) {
 		t.Fatalf("calls = %v, want a read then the close", got)
 	}
-	if p := g.last().params; p["number"] != "7" {
+	if p := g.last().Params; p["number"] != "7" {
 		t.Errorf("close params = %+v", p)
 	}
 }
@@ -668,10 +671,10 @@ func TestAddLabelsSendsOneEditAndSkipsEmpties(t *testing.T) {
 	if len(edits) != 1 || len(g.calls) != 1 {
 		t.Fatalf("calls = %v, want one label edit", g.methods())
 	}
-	if got := strs(edits[0].params["add"]); !reflect.DeepEqual(got, []string{"a", "b"}) {
+	if got := strs(edits[0].Params["add"]); !reflect.DeepEqual(got, []string{"a", "b"}) {
 		t.Errorf("add = %v", got)
 	}
-	if got := edits[0].params["number"]; got != "7" {
+	if got := edits[0].Params["number"]; got != "7" {
 		t.Errorf("number = %v", got)
 	}
 }
