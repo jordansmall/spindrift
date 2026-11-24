@@ -3949,9 +3949,9 @@ This is protocol version **0.3.0**. The host is
   before a native claim, and the verdict guard that the in-progress label is
   present; research stays label-only because its dispatch-kind row maps no
   status. The Connector holds no lifecycle mode. Core resolves its host-posted
-  commenter and issue filer from `tracker.comment` and `tracker.fileIssue`, and
-  from the native adapter without them, lifting the research and dedup markers
-  out of the body before the call.
+  commenter and issue filer from `tracker.comment` and `tracker.fileIssue`
+  alone, lifting the research and dedup markers out of the body before the
+  call.
   [`connectortracker.New`](../cmd/launcher/internal/connectortracker/connectortracker.go)
   builds core's tracker reads from such a Connector: it resolves the dispatch
   label and status of a Dispatch state, orders by issue id, applies the page
@@ -3970,13 +3970,13 @@ This is protocol version **0.3.0**. The host is
   doctor skips its rows and the daemon has no Demand source. Recover's
   prior-claim read follows the same rule: core maps the last removed label
   named like the Complete or Failed label to that state, and a Connector
-  without `tracker.removedLabels` offers none. Probe is part of
-  every tracker, so without `tracker.probe` it stays on the native adapter, as
-  does the label list without `tracker.labels`. The jira row has no native
-  adapter behind it: its handshake must advertise `tracker.transition`,
-  `tracker.editLabels`, `tracker.labels`, `tracker.comment`, `tracker.probe`,
-  `tracker.fileIssue` and `tracker.labeled`, and one missing fails the run. The
-  SDK's `tracker.Register(tracker.Reader{...})` serves the methods. A 0.1
+  without `tracker.removedLabels` offers none. Probe and the label list are
+  part of every tracker, so without `tracker.probe` or `tracker.labels` they
+  fail as unadvertised. The jira row's handshake must advertise
+  `tracker.transition`, `tracker.editLabels`, `tracker.labels`,
+  `tracker.comment`, `tracker.probe`, `tracker.fileIssue` and
+  `tracker.labeled`, and one missing fails the run. The SDK's
+  `tracker.Register(tracker.Reader{...})` serves the methods. A 0.1
   Connector predates the `status` selector, `tracker.blocks` and project-key
   ids: core never sends it a `status`, ignores those two capabilities, and
   fails a read whose Dispatch state has only a status selector. The
@@ -4008,7 +4008,7 @@ This is protocol version **0.3.0**. The host is
   plus `forge.MaxLogExcerptBytes` of `errorLines`, so a cause near the log's
   start survives the cut as it does natively, and cuts the rest. An error
   line is a whole line matching `FAIL`, `panic:` or `error:`.
-  [`connectorforge.New`](../cmd/launcher/internal/connectorforge/connectorforge.go)
+  [`connectorforge.NewReader`](../cmd/launcher/internal/connectorforge/connectorforge.go)
   builds core's PR reads from such a Connector: it pins PR URLs to the
   forge's web host and the target repository, refuses an unknown rollup
   `state`, filters failing conclusions with the native adapter's sets, and

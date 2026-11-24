@@ -1,7 +1,6 @@
 // Package connectorforge builds core's forge from a forge Connector over the
-// sdk/forge primitives. New wraps a native adapter with the Connector's PR
-// reads, leaving every write and every read the Connector has no primitive for
-// with the native side. Compose builds a whole Code Forge from a Connector advertising
+// sdk/forge primitives. NewReader builds the Connector's PR and branch reads
+// alone. Compose builds a whole Code Forge from a Connector advertising
 // "forge.branches" and "forge.pushOnly" or "forge.prs": the Connector answers
 // the forge questions and names the remote, and git runs in core's plumbing
 // with core's credential, attached only after the remote's host is checked

@@ -479,7 +479,6 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 	// Quickstart installs no Connector sandbox, so a Connector-read tracker or
 	// Code Forge defers its finish-line checks to `spindrift doctor`, as does
 	// the token probe of any chosen row whose tracker side is the Connector.
-	// The false arguments mean "not primary".
 	deferChecks := !connectorsandbox.Installed() &&
 		(backendkit.TrackerReadsThroughConnector(trackerChoice.name) ||
 			backendkit.ForgeReadsThroughConnector(forgeChoice.name))

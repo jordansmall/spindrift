@@ -28,10 +28,8 @@ type trackerIssueSearcher struct {
 }
 
 // NewTrackerIssueSearcher searches through s, already scoped to the Dispatch's
-// repository. A Connector serving the search gates it by its Route table; one
-// not advertising tracker.searchIssues falls through to the native adapter
-// it wraps, if any, scoped but ungated. Failure detail goes to warn, never to
-// the Box.
+// repository. The Connector serving the search gates it by its Route table.
+// Failure detail goes to warn, never to the Box.
 func NewTrackerIssueSearcher(s forge.IssueSearcher, warn io.Writer) IssueSearcher {
 	if warn == nil {
 		warn = io.Discard
