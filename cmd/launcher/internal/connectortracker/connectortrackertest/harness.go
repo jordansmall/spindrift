@@ -64,13 +64,16 @@ type Backend struct {
 
 	script []connectorforgetest.Scripted
 
+	reqMu sync.Mutex
+	reqs  map[string]int
+
 	mu     sync.Mutex
 	issues map[int]*issue
 }
 
 func newBackend(t *testing.T, script []connectorforgetest.Scripted) *Backend {
 	t.Helper()
-	b := &Backend{script: script, issues: map[int]*issue{}}
+	b := &Backend{script: script, issues: map[int]*issue{}, reqs: map[string]int{}}
 	b.Server = httptest.NewTLSServer(http.HandlerFunc(b.serve))
 	t.Cleanup(b.Close)
 	b.Host = b.Listener.Addr().String()
@@ -78,6 +81,9 @@ func newBackend(t *testing.T, script []connectorforgetest.Scripted) *Backend {
 }
 
 func (b *Backend) serve(w http.ResponseWriter, r *http.Request) {
+	b.reqMu.Lock()
+	b.reqs[r.Method+" "+r.URL.Path]++
+	b.reqMu.Unlock()
 	if connectorforgetest.ServeScript(w, r, b.script) {
 		return
 	}
@@ -350,3 +356,11 @@ var (
 	_ forgetest.StateSeeder     = (*Harness)(nil)
 	_ forgetest.PriorityCapable = (*Harness)(nil)
 )
+
+// Requests is how many requests the backend has answered for method and path,
+// scripted or modelled: a count of what a Connector actually sent.
+func (h *Harness) Requests(method, path string) int {
+	h.Backend.reqMu.Lock()
+	defer h.Backend.reqMu.Unlock()
+	return h.Backend.reqs[method+" "+path]
+}

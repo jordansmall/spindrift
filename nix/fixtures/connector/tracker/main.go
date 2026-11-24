@@ -9,7 +9,11 @@
 // the full contract must catch as a stale label; "dialect" is faithful and
 // read-only but probes GET {Target.API}/repos/{Target.Repo}/dialect before each
 // read and fails on a non-2xx, which only a backend scripted to answer it
-// satisfies.
+// satisfies; "hostile" is faithful and read-only plus tracker.fileIssue (POST
+// {API}/repos/{Repo}/issues, answering its html_url verbatim) and
+// tracker.listLabels (GET {API}/repos/{Repo}/labels), and passes a comment's
+// author_association through unvetted, so a scripted backend can make it relay
+// answers core must refuse.
 package main
 
 import (
@@ -29,6 +33,9 @@ var mode string
 func init() {
 	if mode == "writes" || mode == "writes-violate" {
 		tracker.RegisterWrites(tracker.Writer{Transition: transition, EditLabels: editLabels})
+	}
+	if mode == "hostile" {
+		tracker.RegisterWrites(tracker.Writer{FileIssue: fileIssue, ListLabels: listLabels})
 	}
 	tracker.Register(tracker.Reader{
 		ListIssues:    listIssues,
@@ -105,6 +112,38 @@ func editLabels(t tracker.Target, number string, add, remove []string) error {
 	return nil
 }
 
+func fileIssue(t tracker.Target, r tracker.IssueRequest) (string, error) {
+	body, err := json.Marshal(map[string]any{"title": r.Title, "body": r.Body, "labels": r.Labels})
+	if err != nil {
+		return "", err
+	}
+	resp, err := send(http.MethodPost, issuesURL(t), string(body))
+	if err != nil {
+		return "", err
+	}
+	var created struct {
+		HTMLURL string `json:"html_url"`
+	}
+	if err := json.Unmarshal(resp, &created); err != nil {
+		return "", err
+	}
+	return created.HTMLURL, nil
+}
+
+func listLabels(t tracker.Target) ([]string, error) {
+	var rest []struct {
+		Name string `json:"name"`
+	}
+	if err := get(t, t.API+"/repos/"+t.Repo+"/labels", &rest); err != nil {
+		return nil, err
+	}
+	out := make([]string, len(rest))
+	for i, l := range rest {
+		out[i] = l.Name
+	}
+	return out, nil
+}
+
 func issuesURL(t tracker.Target) string { return t.API + "/repos/" + t.Repo + "/issues" }
 
 type restIssue struct {
@@ -162,15 +201,16 @@ func comments(t tracker.Target, number string) ([]tracker.Comment, error) {
 		User struct {
 			Login string `json:"login"`
 		} `json:"user"`
-		CreatedAt string `json:"created_at"`
-		Body      string `json:"body"`
+		CreatedAt   string `json:"created_at"`
+		Body        string `json:"body"`
+		Association string `json:"author_association"`
 	}
 	if err := get(t, issuesURL(t)+"/"+number+"/comments", &rest); err != nil {
 		return nil, err
 	}
 	out := make([]tracker.Comment, len(rest))
 	for i, c := range rest {
-		out[i] = tracker.Comment{Author: c.User.Login, CreatedAt: c.CreatedAt, Body: c.Body}
+		out[i] = tracker.Comment{Author: c.User.Login, CreatedAt: c.CreatedAt, Body: c.Body, Association: c.Association}
 	}
 	return out, nil
 }

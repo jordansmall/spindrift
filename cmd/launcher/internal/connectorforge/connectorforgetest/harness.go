@@ -43,7 +43,8 @@ const (
 
 // Scripted is one canned answer the backend serves to a request whose method
 // and URL path match, ahead of its own model, for a dialect the model does not
-// speak.
+// speak. Body may carry "{host}", answered as the request's Host, for a URL
+// back to the backend.
 type Scripted struct {
 	Method string `json:"method"`
 	Path   string `json:"path"`
@@ -69,7 +70,7 @@ func ServeScript(w http.ResponseWriter, r *http.Request, script []Scripted) bool
 		if s.Method == r.Method && s.Path == r.URL.Path {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(s.Status)
-			_, _ = w.Write([]byte(s.Body))
+			_, _ = w.Write([]byte(strings.ReplaceAll(s.Body, "{host}", r.Host)))
 			return true
 		}
 	}

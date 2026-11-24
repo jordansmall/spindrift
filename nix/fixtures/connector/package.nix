@@ -4,7 +4,8 @@
 # Connector, ./forgepr), tracker.wasm (the fixture read-only tracker
 # Connector, ./tracker), tracker-writes.wasm (the same tracker built
 # in its write-capable mode) and tracker-dialect.wasm (the same tracker built to
-# probe a path only a scripted backend answers), wasip1 reactors. The SDK source
+# probe a path only a scripted backend answers) and tracker-hostile.wasm (the same
+# tracker built to relay what a scripted backend answers), wasip1 reactors. The SDK source
 # comes from `core`, not a path out of this directory (the escape guard); both
 # trees are copied to their repo-relative layout because go.mod replaces
 # spindrift.dev/sdk with a relative path three levels up.
@@ -33,4 +34,5 @@ pkgs.runCommand "connector-fixture-wasm" { nativeBuildInputs = [ pkgs.go ]; } ''
   go build -buildmode=c-shared -o $out/tracker.wasm ./tracker
   go build -buildmode=c-shared -ldflags=-X=main.mode=writes -o $out/tracker-writes.wasm ./tracker
   go build -buildmode=c-shared -ldflags=-X=main.mode=dialect -o $out/tracker-dialect.wasm ./tracker
+  go build -buildmode=c-shared -ldflags=-X=main.mode=hostile -o $out/tracker-hostile.wasm ./tracker
 ''
