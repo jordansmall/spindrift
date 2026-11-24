@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 
 	"spindrift.dev/launcher/internal/backend"
@@ -52,22 +51,23 @@ func connectorRow() (backendrows.Row, error) {
 // newConnectorCodeForge composes the Code Forge from row's Connector and the
 // capabilities its handshake advertises, with core's own git doing every git
 // operation. Every failure is returned as is: the forge never falls back to a
-// native adapter. The Connector authorizes with the row's credential; git
-// keeps the native token. The Connector and its audit file live for the
-// process. A failed load or compose, and each failed Connector call of the
-// built forge, is recorded in the connectorrecord .log.
+// native adapter. The Connector and core's git both read FORGEJO_TOKEN at each
+// use, so a token rotated mid-run reaches the next request and the next push.
+// The Connector and its audit file live for the process. A failed load or
+// compose, and each failed Connector call of the built forge, is recorded in
+// the connectorrecord .log.
 func newConnectorCodeForge(row backendrows.Row, s backendkit.Shared, k Knobs) (forge.CodeForge, error) {
 	if MergeStyle(s.MergeMethod) != "rebase" {
 		return nil, fmt.Errorf("%w (got %q)", ErrMergeMethod, s.MergeMethod)
 	}
 	row.Routes = connectortracker.Routes(row.Routes, s.RepoSlug)
-	conn, err := loadRowConnector(context.Background(), row, backendrows.Options{Client: connectorClient, Getenv: credentialGetenv(row, k)})
+	conn, err := loadRowConnector(context.Background(), row, backendrows.Options{Client: connectorClient})
 	if err != nil {
 		recordFailure("load the Connector", err)
 		return nil, err
 	}
 	cf, _, err := connectorforge.Compose(conn, connectorforge.Target{API: strings.TrimSuffix(k.ForgejoBaseURL, "/"), Repo: s.RepoSlug}, connectorforge.Git{
-		Credential: GitCredential(k.ForgejoToken),
+		Credential: gitCredential,
 		Note:       recordFailure,
 		Plumbing: func(cloneURL string, cred gitexec.Credential) forge.CodeForge {
 			return git.NewGitClient(cloneURL, s.BaseBranch, s.GitUserName, s.GitUserEmail, git.WithCredential(cred))
@@ -79,18 +79,6 @@ func newConnectorCodeForge(row backendrows.Row, s backendkit.Shared, k Knobs) (f
 		return nil, err
 	}
 	return cf, nil
-}
-
-// credentialGetenv resolves FORGEJO_TOKEN from k, the Lookup the forge was
-// built from, so a token the process env never held (the quickstart wizard's)
-// still authorizes. Every other name falls through to the process env.
-func credentialGetenv(row backendrows.Row, k Knobs) func(string) string {
-	return func(name string) string {
-		if name == row.CredentialEnv && name == ForgejoTokenEnv && k.ForgejoToken != "" {
-			return k.ForgejoToken
-		}
-		return os.Getenv(name)
-	}
 }
 
 // recordFailure records a Connector failure in the connectorrecord .log.

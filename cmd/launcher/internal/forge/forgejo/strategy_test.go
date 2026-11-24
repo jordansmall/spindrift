@@ -8,6 +8,7 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/forge/forgejo"
+	"spindrift.dev/launcher/internal/gitexec"
 )
 
 func mapLookup(m map[string]string) backendkit.Lookup {
@@ -132,7 +133,7 @@ func TestStrategyLedgerSiteCarriesCredentialNotUserinfo(t *testing.T) {
 	if strings.Contains(site.URL, "@") || strings.Contains(site.URL, token) {
 		t.Errorf("URL = %q, want no userinfo and no token", site.URL)
 	}
-	if cred, err := site.Credential.Get(); err != nil || cred != forgejo.GitCredential(token) {
-		t.Errorf("Credential does not match GitCredential(token)")
+	if cred, err := site.Credential.Get(); err != nil || cred != gitexec.EnvCredential("oauth2", forgejo.ForgejoTokenEnv) {
+		t.Errorf("Credential is not the oauth2 credential read from FORGEJO_TOKEN")
 	}
 }

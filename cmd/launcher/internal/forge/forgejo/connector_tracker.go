@@ -51,7 +51,7 @@ func checkConnectorCapabilities(have []string) error {
 func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (forge.IssueTracker, error) {
 	row.Routes = connectortracker.Routes(row.Routes, s.RepoSlug)
 	it, err := connectortracker.NewReloading(func() (*connectorhost.Connector, error) {
-		conn, err := loadRowConnector(context.Background(), row, backendrows.Options{Client: connectorClient, Getenv: credentialGetenv(row, k)})
+		conn, err := loadRowConnector(context.Background(), row, backendrows.Options{Client: connectorClient})
 		if err != nil {
 			return nil, err
 		}

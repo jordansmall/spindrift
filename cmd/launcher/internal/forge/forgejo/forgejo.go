@@ -12,7 +12,7 @@ import (
 )
 
 // GitRemoteURL builds the clone URL for repo (an owner/repo slug). It carries
-// no userinfo: git authenticates with GitCredential, out of band, so the token
+// no userinfo: git authenticates with gitCredential, out of band, so the token
 // never reaches an argv, a persisted remote or an error string. It must equal
 // the Connector's CloneURL for the same base and slug (connectors/forgejo
 // remote): the credential is scoped to this URL's path and git matches paths
@@ -30,17 +30,12 @@ func GitRemoteURL(baseURL, repo string) string {
 	return u.String()
 }
 
-// GitCredential is the credential git presents to a Forgejo instance for
-// token. Forgejo/Gitea basic auth takes a non-empty password as an access
-// token, so the username is a placeholder, the same oauth2:<token> shape the
-// git backend documents. An empty token yields the zero (anonymous)
-// Credential.
-func GitCredential(token string) gitexec.Credential {
-	if token == "" {
-		return gitexec.Credential{}
-	}
-	return gitexec.Credential{Username: "oauth2", Password: token}
-}
+// gitCredential is the credential git presents to a Forgejo instance. Forgejo
+// and Gitea basic auth takes a non-empty password as an access token, so the
+// username is a placeholder, the same oauth2:<token> shape the git backend
+// documents. It reads FORGEJO_TOKEN at each use; an unset token is the zero
+// (anonymous) Credential.
+var gitCredential = gitexec.EnvCredential("oauth2", ForgejoTokenEnv)
 
 // MergeStyle resolves MergeMethod to a merge style. An unset method resolves
 // to "rebase", matching the github adapter's default; the forge build gates on

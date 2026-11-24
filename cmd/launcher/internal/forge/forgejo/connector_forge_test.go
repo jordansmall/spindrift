@@ -25,7 +25,9 @@ import (
 	"spindrift.dev/launcher/internal/hostpaths"
 )
 
-const connectorCredentialEnv = "SPINDRIFT_FORGEJO_CONNECTOR_TOKEN"
+// connectorCredentialEnv is the one credential a forgejo run holds: the Connector
+// and core's git both read it.
+const connectorCredentialEnv = forgejo.ForgejoTokenEnv
 
 // useForgejoRow applies a forgejo backend row, shaped as the input document
 // carries it, with its {base} routes resolved against baseURL.
@@ -52,10 +54,10 @@ func useForgejoRow(t *testing.T, baseURL string, adjust func(*backendrows.Row)) 
 	}
 }
 
-// buildForge runs the production constructor with core's git token distinct
-// from the Connector's credential.
+// buildForge runs the production constructor; git and the Connector both read
+// FORGEJO_TOKEN from the environment.
 func buildForge(srv *httptest.Server, mergeMethod string) (forge.CodeForge, error) {
-	l := mapLookup(map[string]string{forgejo.ForgejoBaseURLEnv: srv.URL, forgejo.ForgejoTokenEnv: gitSecret})
+	l := mapLookup(map[string]string{forgejo.ForgejoBaseURLEnv: srv.URL, forgejo.ForgejoTokenEnv: connectorToken})
 	s := backendkit.Shared{RepoSlug: connectorRepo, BaseBranch: "main", GitUserName: "Test Bot", GitUserEmail: "bot@example.com", MergeMethod: mergeMethod}
 	return forgejo.Strategy.NewCodeForge(s, l, forge.SanitizedParent{}, nil)
 }
@@ -287,7 +289,7 @@ func TestConnectorForge_RebasePRHeadIsPinnedToTheAgentBranch(t *testing.T) {
 
 // buildTracker runs the production constructor for the issue tracker.
 func buildTracker(srv *httptest.Server) (forge.IssueTracker, error) {
-	l := mapLookup(map[string]string{forgejo.ForgejoBaseURLEnv: srv.URL, forgejo.ForgejoTokenEnv: gitSecret})
+	l := mapLookup(map[string]string{forgejo.ForgejoBaseURLEnv: srv.URL, forgejo.ForgejoTokenEnv: connectorToken})
 	return forgejo.Strategy.NewIssueTracker(backendkit.Shared{RepoSlug: connectorRepo, Labels: testLabels, VerdictLabels: forge.ResearchVerdictLabels()}, l)
 }
 
@@ -411,26 +413,4 @@ func TestConnectorTracker_ExposesTheNativeCapabilitySet(t *testing.T) {
 func asOK[T any](it forge.IssueTracker) bool {
 	_, ok := forge.As[T](it)
 	return ok
-}
-
-// The tracker's Connector authorizes with FORGEJO_TOKEN as the knob lookup
-// holds it, as the forge's does, so a token only the quickstart wizard set
-// still reaches it.
-func TestConnectorTracker_ResolvesTheCredentialFromTheLookup(t *testing.T) {
-	srv := httptest.NewTLSServer(nil)
-	t.Cleanup(srv.Close)
-	useForgejoRow(t, srv.URL, func(r *backendrows.Row) { r.CredentialEnv = forgejo.ForgejoTokenEnv })
-	t.Setenv(forgejo.ForgejoTokenEnv, "")
-	var got string
-	t.Cleanup(forgejo.SetLoadRowConnector(func(_ context.Context, _ backendrows.Row, o backendrows.Options) (*connectorhost.Connector, error) {
-		got = o.Getenv(forgejo.ForgejoTokenEnv)
-		return nil, errors.New("stop here")
-	}))
-	t.Chdir(t.TempDir())
-
-	_, _ = buildTracker(srv)
-
-	if got != gitSecret {
-		t.Errorf("Connector credential = %q, want the lookup's token %q", got, gitSecret)
-	}
 }
