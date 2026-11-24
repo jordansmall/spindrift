@@ -398,10 +398,10 @@ func TestConnectorRow_LedgerSiteIsConnectorCloneURLAndCoreCredential(t *testing.
 	if len(site.GitArgs) != 0 {
 		t.Errorf("GitArgs = %v, want none under a routed row", site.GitArgs)
 	}
-	if site.Credential.Username != "x-access-token" || site.Credential.Password != connectorToken {
-		t.Errorf("Credential = %+v, want the row's token", site.Credential)
+	if cred, err := site.Credential.Get(); err != nil || cred.Username != "x-access-token" || cred.Password != connectorToken {
+		t.Errorf("Credential = %+v, %v, want the row's token", cred, err)
 	}
-	r, err := ledger.NewRemote(t.TempDir(), site.URL, site.Credential, site.GitArgs...)
+	r, err := ledger.NewRemoteFrom(t.TempDir(), site.URL, site.Credential, site.GitArgs...)
 	if err != nil {
 		t.Fatalf("a Ledger over the site cannot reach the repository: %v", err)
 	}
@@ -414,6 +414,13 @@ func TestConnectorRow_LedgerSiteIsConnectorCloneURLAndCoreCredential(t *testing.
 		t.Errorf("Ledger ref = %s, want the pushed %s", got, commit)
 	}
 	requireCoreCredential(t, seen, calls)
+}
+
+// The site is built once per chore run but the token refreshes under it: each
+// Ledger push presents the row env's token as it stands then.
+func TestConnectorRow_LedgerPushReadsTheRowTokenAtEachPush(t *testing.T) {
+	routedLogHarness(t, useGithubRowAt)
+	requireLedgerPushReadsRotatedToken(t, func() { t.Setenv(tokenCredentialEnv, "rotated-token") })
 }
 
 func TestConnectorRow_LedgerSiteNamesAnUnsetCredential(t *testing.T) {
@@ -530,4 +537,46 @@ func TestConnectorRow_RebasePRHeadAuthenticatesAtTheCloneURL(t *testing.T) {
 		t.Error("the PR branch does not contain the advanced base")
 	}
 	gitexectest.RequireAuthOnlyUnder(t, git.Requests(), "/"+connectorRepo+".git/")
+}
+
+// requireLedgerPushReadsRotatedToken pushes a Ledger entry through a routed
+// row's Ledger site, calls rotate to move the row's credential to
+// "rotated-token", and pushes again: git must present the original token on
+// the first push and the rotated one on the second, though the site was built
+// once before either.
+func requireLedgerPushReadsRotatedToken(t *testing.T, rotate func()) {
+	t.Helper()
+	const chore, rotated = "chore-rotated", "rotated-token"
+	seen := gitCredentialLog(t)
+	site, err := Strategy.NewLedger(backendkit.Shared{RepoSlug: connectorRepo, Labels: testLabels}, nil)
+	if err != nil {
+		t.Fatalf("NewLedger: %v", err)
+	}
+	r, err := ledger.NewRemoteFrom(t.TempDir(), site.URL, site.Credential, site.GitArgs...)
+	if err != nil {
+		t.Fatalf("NewRemoteFrom: %v", err)
+	}
+	commit, err := r.Append(chore, "", ledger.State{Phase: ledger.Claimed}, time.Now())
+	if err != nil {
+		t.Fatalf("Append with the live token: %v", err)
+	}
+	first, err := os.ReadFile(seen)
+	if err != nil {
+		t.Fatalf("git never ran with a credential: %v", err)
+	}
+	if !strings.Contains(string(first), "x-access-token:"+connectorToken) || strings.Contains(string(first), rotated) {
+		t.Fatalf("first push credentials = %q, want the original token only", first)
+	}
+
+	rotate()
+	if _, err := r.Append(chore, commit, ledger.State{Phase: ledger.Done}, time.Now()); err != nil {
+		t.Fatalf("Append after the token rotated: %v", err)
+	}
+	all, err := os.ReadFile(seen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(all[len(first):]), "x-access-token:"+rotated) {
+		t.Errorf("second push credentials = %q, want the rotated token: the push reused the token captured at build", all[len(first):])
+	}
 }

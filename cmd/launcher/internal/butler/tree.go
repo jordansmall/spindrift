@@ -53,8 +53,9 @@ const patchRef = "refs/butler/patch"
 type GitTree struct {
 	Repo string
 	URL  string
-	// Credential authenticates the re-fetch from URL; URL itself carries none.
-	Credential gitexec.Credential
+	// Credential authenticates the re-fetch from URL, read at each one; URL
+	// itself carries none.
+	Credential gitexec.CredentialSource
 	GitArgs    []string
 	Name       string
 	Email      string
@@ -94,6 +95,12 @@ func (g GitTree) TrackedFiles(commit string) ([]string, error) {
 // credentials never reach an error string. The returned GitTree carries url,
 // cred and gitArgs, so a later CommitPatch re-fetches.
 func FetchTree(scratch, url, branch string, cred gitexec.Credential, gitArgs ...string) (GitTree, error) {
+	return FetchTreeFrom(scratch, url, branch, gitexec.StaticCredential(cred), gitArgs...)
+}
+
+// FetchTreeFrom is FetchTree with a credential read at each fetch instead of
+// fixed at construction.
+func FetchTreeFrom(scratch, url, branch string, cred gitexec.CredentialSource, gitArgs ...string) (GitTree, error) {
 	if err := fetchBranchTip(cred, gitArgs, scratch, url, branch); err != nil {
 		return GitTree{}, err
 	}
@@ -103,7 +110,11 @@ func FetchTree(scratch, url, branch string, cred gitexec.Credential, gitArgs ...
 // fetchBranchTip shallow-fetches branch's current tip from url into repo,
 // force-updating repo's local refs/heads/<branch>, so "the current base head"
 // always means "just fetched" (issue #4074).
-func fetchBranchTip(cred gitexec.Credential, gitArgs []string, repo, url, branch string) error {
+func fetchBranchTip(src gitexec.CredentialSource, gitArgs []string, repo, url, branch string) error {
+	cred, err := src.Get()
+	if err != nil {
+		return fmt.Errorf("butler: fetch branch %s from %s: %w", branch, forge.RedactURLCredentials(url), err)
+	}
 	ref := "refs/heads/" + branch
 	cmd := cred.Apply(gitexec.Cmd(gitArgs, "-C", repo, "fetch", "--depth=1", "-q", url, "+"+ref+":"+ref), url)
 	if out, err := cmd.CombinedOutput(); err != nil {

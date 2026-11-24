@@ -26,7 +26,8 @@ type Remote struct {
 	url string
 	// cred authenticates every command that talks to url, as an env-only
 	// credential helper: the secret is in no argv, URL, or persisted config.
-	cred gitexec.Credential
+	// It is read per command, so a token rotated mid-run is the one presented.
+	cred gitexec.CredentialSource
 	// gitArgs are extra leading git args applied to every command that talks
 	// to url (e.g. -c credential.helper=... -c credential.helper=!gh auth
 	// git-credential), before the subcommand.
@@ -45,6 +46,12 @@ const butlerRefspec = "+" + RefPrefix + "*:" + RefPrefix + "*"
 // bare if needed, then syncs its mirror from url: the run's one routine fetch.
 // cred (zero for none) authenticates every git call against url.
 func NewRemote(scratch, url string, cred gitexec.Credential, gitArgs ...string) (Remote, error) {
+	return NewRemoteFrom(scratch, url, gitexec.StaticCredential(cred), gitArgs...)
+}
+
+// NewRemoteFrom is NewRemote with a credential read at each git call against
+// url instead of fixed at construction.
+func NewRemoteFrom(scratch, url string, cred gitexec.CredentialSource, gitArgs ...string) (Remote, error) {
 	if err := exec.Command("git", "-C", scratch, "rev-parse", "--is-bare-repository").Run(); err != nil {
 		if out, err := exec.Command("git", "init", "--bare", "-q", scratch).CombinedOutput(); err != nil {
 			return Remote{}, fmt.Errorf("ledger: init scratch repo %s: %w: %s", scratch, err, out)
@@ -70,9 +77,13 @@ func NewRemote(scratch, url string, cred gitexec.Credential, gitArgs ...string) 
 // already treats as a zero Tip. Called only from NewRemote and from Append
 // after a lost race or failed push, never routinely.
 func (r Remote) sync() error {
-	out, err := r.cred.Apply(gitexec.Cmd(r.gitArgs, "-C", r.repo, "fetch", "--prune", "-q", r.url, butlerRefspec), r.url).CombinedOutput()
+	cred, err := r.cred.Get()
 	if err != nil {
-		return fmt.Errorf("ledger: fetch %s: %w: %s", forge.RedactURLCredentials(r.url), r.cred.Explain(err, out, r.url), forge.RedactURLCredentials(string(out)))
+		return fmt.Errorf("ledger: fetch %s: %w", forge.RedactURLCredentials(r.url), err)
+	}
+	out, err := cred.Apply(gitexec.Cmd(r.gitArgs, "-C", r.repo, "fetch", "--prune", "-q", r.url, butlerRefspec), r.url).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("ledger: fetch %s: %w: %s", forge.RedactURLCredentials(r.url), cred.Explain(err, out, r.url), forge.RedactURLCredentials(string(out)))
 	}
 	return nil
 }
@@ -88,9 +99,13 @@ func (r Remote) History(chore string, since time.Time) ([]Entry, error) {
 // lsRemote queries url directly (no scratch repo involved) for ref's current
 // value, "" if absent, so Append can tell a lost race from a real push error.
 func (r Remote) lsRemote(ref string) (string, error) {
-	out, err := r.cred.Apply(gitexec.Cmd(r.gitArgs, "ls-remote", r.url, ref), r.url).Output()
+	cred, err := r.cred.Get()
 	if err != nil {
-		return "", fmt.Errorf("ledger: ls-remote %s %s: %w", forge.RedactURLCredentials(r.url), ref, r.cred.Explain(err, nil, r.url))
+		return "", fmt.Errorf("ledger: ls-remote %s %s: %w", forge.RedactURLCredentials(r.url), ref, err)
+	}
+	out, err := cred.Apply(gitexec.Cmd(r.gitArgs, "ls-remote", r.url, ref), r.url).Output()
+	if err != nil {
+		return "", fmt.Errorf("ledger: ls-remote %s %s: %w", forge.RedactURLCredentials(r.url), ref, cred.Explain(err, nil, r.url))
 	}
 	fields := strings.Fields(string(out))
 	if len(fields) == 0 {
@@ -119,7 +134,11 @@ func (r Remote) Append(chore, old string, s State, at time.Time) (string, error)
 	ref := RefPrefix + chore
 	lease := fmt.Sprintf("--force-with-lease=%s:%s", ref, old)
 	refspec := fmt.Sprintf("%s:%s", newCommit, ref)
-	pushOut, err := r.cred.Apply(gitexec.Cmd(r.gitArgs, "-C", r.repo, "push", "-q", r.url, lease, refspec), r.url).CombinedOutput()
+	cred, err := r.cred.Get()
+	if err != nil {
+		return "", fmt.Errorf("ledger: push %s %s: %w", forge.RedactURLCredentials(r.url), ref, err)
+	}
+	pushOut, err := cred.Apply(gitexec.Cmd(r.gitArgs, "-C", r.repo, "push", "-q", r.url, lease, refspec), r.url).CombinedOutput()
 	if err != nil {
 		// The remote can hold newCommit despite a push error (the connection
 		// dropped after the server applied it): that is our win. The lease lost
@@ -139,7 +158,7 @@ func (r Remote) Append(chore, old string, s State, at time.Time) (string, error)
 		if cur != old {
 			return "", fmt.Errorf("%w: %s", ErrLostRace, ref)
 		}
-		return "", fmt.Errorf("ledger: push %s: %w: %s", ref, r.cred.Explain(err, pushOut, r.url), forge.RedactURLCredentials(string(pushOut)))
+		return "", fmt.Errorf("ledger: push %s: %w: %s", ref, cred.Explain(err, pushOut, r.url), forge.RedactURLCredentials(string(pushOut)))
 	}
 	return newCommit, nil
 }

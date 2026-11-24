@@ -8,6 +8,7 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/gitexec"
 	"spindrift.dev/launcher/internal/gitremote"
 )
 
@@ -51,7 +52,7 @@ var Strategy = backendkit.Strategy{
 		if err != nil {
 			return backendkit.LedgerSite{}, err
 		}
-		return backendkit.LedgerSite{URL: GitRemoteURL(k.ForgejoBaseURL, s.RepoSlug), Credential: GitCredential(k.ForgejoToken)}, nil
+		return backendkit.LedgerSite{URL: GitRemoteURL(k.ForgejoBaseURL, s.RepoSlug), Credential: gitexec.StaticCredential(GitCredential(k.ForgejoToken))}, nil
 	},
 	WebURL: func(s backendkit.Shared, l backendkit.Lookup) string {
 		base := identityBase(l)

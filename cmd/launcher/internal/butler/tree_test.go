@@ -516,3 +516,26 @@ func TestFetchTree_CredentialAuthenticatesCleanURL(t *testing.T) {
 		t.Fatalf("FetchTree with a wrong token = %v, want an error without any token", err)
 	}
 }
+
+// The branch-tip re-fetch CommitPatch makes reads the Tree's credential source
+// at each fetch, so a token rotated since FetchTreeFrom built the Tree is the
+// one presented.
+func TestGitTreeRefetchReadsCredentialSourceAtEachFetch(t *testing.T) {
+	remote := gitexectest.NewAuthRemote(t, "oauth2", "tree-token")
+	token := "tree-token"
+	src := func() (gitexec.Credential, error) {
+		return gitexec.Credential{Username: "oauth2", Password: token}, nil
+	}
+	scratch := ledgertest.NewRepo(t)
+	tree, err := FetchTreeFrom(scratch, remote.URL, "main", src)
+	if err != nil {
+		t.Fatalf("FetchTreeFrom: %v", err)
+	}
+	token = "rotated-away-token"
+	if err := fetchBranchTip(tree.Credential, tree.GitArgs, tree.Repo, tree.URL, "main"); err == nil {
+		t.Fatal("re-fetch after rotating to a rejected token succeeded, want the new token presented")
+	}
+	if !remote.Presented("rotated-away-token") {
+		t.Error("the re-fetch after rotation never presented the rotated token")
+	}
+}

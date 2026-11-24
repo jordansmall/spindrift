@@ -132,7 +132,7 @@ func TestStrategyLedgerSiteCarriesCredentialNotUserinfo(t *testing.T) {
 	if strings.Contains(site.URL, "@") || strings.Contains(site.URL, token) {
 		t.Errorf("URL = %q, want no userinfo and no token", site.URL)
 	}
-	if site.Credential != forgejo.GitCredential(token) {
+	if cred, err := site.Credential.Get(); err != nil || cred != forgejo.GitCredential(token) {
 		t.Errorf("Credential does not match GitCredential(token)")
 	}
 }

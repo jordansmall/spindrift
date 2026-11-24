@@ -18,19 +18,19 @@ import (
 // c.BaseBranch (butler.FetchTree) over that same scratch repo -- one
 // checkout serving both the Ledger backend and the Chore scan. Shared by the
 // github and forgejo rows, which differ only in url, credential and gitArgs.
-func remoteLedger(c config, url string, cred gitexec.Credential, gitArgs ...string) (ledger.Backend, butler.Tree, func(), error) {
+func remoteLedger(c config, url string, cred gitexec.CredentialSource, gitArgs ...string) (ledger.Backend, butler.Tree, func(), error) {
 	dir, err := os.MkdirTemp("", "spindrift-ledger-*")
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("butler: create ledger scratch dir: %w", err)
 	}
 	cleanup := func() { os.RemoveAll(dir) }
 
-	r, err := ledger.NewRemote(dir, url, cred, gitArgs...)
+	r, err := ledger.NewRemoteFrom(dir, url, cred, gitArgs...)
 	if err != nil {
 		cleanup()
 		return nil, nil, nil, err
 	}
-	tree, err := butler.FetchTree(dir, url, c.BaseBranch, cred, gitArgs...)
+	tree, err := butler.FetchTreeFrom(dir, url, c.BaseBranch, cred, gitArgs...)
 	if err != nil {
 		cleanup()
 		return nil, nil, nil, err
