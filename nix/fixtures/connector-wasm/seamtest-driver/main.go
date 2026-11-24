@@ -36,7 +36,7 @@ func init() {
 			}
 			return append(b, '\n'), nil
 		},
-		SessionFlags: func(mode, repoSlug, issue, home string) string { return "" },
+		SessionFlags: func(mode, repoSlug, issue, home string) driver.SessionFlag { return driver.SessionFlag{} },
 	})
 }
 

@@ -1,5 +1,25 @@
 # Migration Guide
 
+## A Driver Connector answers `driver.sessionFlags` as a flag and a value (issue #7507)
+
+**A third-party Driver Connector must declare its session flag names on its
+row and answer `SessionFlags` with a `SessionFlag`.** The answer used to be one
+string that driver-exec split on whitespace and appended to the agent's argv.
+It is now `{flag, value}`.
+
+- **Declare `argvShape.sessionFlags`** on the `spindrift.connectors.<name>.driver`
+  row: the list of flag names the answer may carry, `[ ]` for none. A row
+  without it fails evaluation.
+- **Return `driver.SessionFlag{Flag, Value}`** from the SDK's
+  `Strategy.SessionFlags` instead of a string. The zero value renders nothing.
+
+```go
+// before
+return "--session-id " + id
+// after
+return driver.SessionFlag{Flag: "--session-id", Value: id}
+```
+
 ## `SPINDRIFT_FORGEJO_CONNECTOR_TOKEN` is removed: `FORGEJO_TOKEN` authorizes everything (issue #7500)
 
 A forgejo run now takes one token. `FORGEJO_TOKEN` authorizes the forgejo

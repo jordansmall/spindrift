@@ -89,13 +89,13 @@ type Driver interface {
 	// to an empty PassLog.
 	Decode(logPath string) (driverkit.PassLog, error)
 
-	// SessionFlags renders the CLI's session flags for mode. "initial" pins the
-	// session, "resume" resumes it (rendering nothing when the Driver's session
+	// SessionFlags renders the CLI's session flag and its value for mode. "initial" pins the
+	// session, "resume" resumes it (rendering the zero flag when the Driver's session
 	// store lacks it and its CLI cannot create one), and any other mode renders
-	// nothing. home is the Box's HOME; a Driver whose store path comes from
+	// the zero flag. home is the Box's HOME; a Driver whose store path comes from
 	// elsewhere ignores it. An error means the flags could not be rendered; the
 	// caller must not start the session without them.
-	SessionFlags(mode, repoSlug, issue, home string) (string, error)
+	SessionFlags(mode, repoSlug, issue, home string) (driverkit.SessionFlag, error)
 }
 
 // registry is populated by the bundle package's init(); this package imports

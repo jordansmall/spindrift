@@ -48,9 +48,6 @@ type (
 	resultEventResult struct {
 		Event string `json:"event"`
 	}
-	sessionFlagsResult struct {
-		Flags string `json:"flags"`
-	}
 	resolveExitResult struct {
 		ExitCode int `json:"exitCode"`
 	}
@@ -157,14 +154,14 @@ func (c *Connector) DriverStrategyWithout(caps ...string) (driverkit.Strategy, e
 			err := c.Call(ctx, "driver.resultEvent", map[string]any{"text": text}, &r)
 			return []byte(r.Event), err
 		},
-		SessionFlags: func(mode, repoSlug, issue, home string) (string, error) {
-			var r sessionFlagsResult
+		SessionFlags: func(mode, repoSlug, issue, home string) (driverkit.SessionFlag, error) {
+			var r driverkit.SessionFlag
 			err := c.Call(ctx, "driver.sessionFlags",
 				map[string]any{"mode": mode, "repoSlug": repoSlug, "issue": issue, "home": home}, &r)
 			if err != nil {
-				return "", err // an error, not a bare "": an empty "initial" drops the session pin
+				return driverkit.SessionFlag{}, err // an error, not a zero flag: an empty "initial" drops the session pin
 			}
-			return r.Flags, nil
+			return r, nil
 		},
 	}
 	if has("driver.resolveExit") {

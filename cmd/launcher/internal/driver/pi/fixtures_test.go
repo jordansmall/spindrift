@@ -43,7 +43,7 @@ const (
 	settled    = `{"type":"agent_settled","aborted":false}`
 )
 
-func sessionFlags(t *testing.T, d driverkit.Driver, mode, slug, issue, home string) string {
+func sessionFlags(t *testing.T, d driverkit.Driver, mode, slug, issue, home string) driverkit.SessionFlag {
 	t.Helper()
 	got, err := d.SessionFlags(mode, slug, issue, home)
 	if err != nil {

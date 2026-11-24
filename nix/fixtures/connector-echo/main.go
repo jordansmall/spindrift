@@ -23,7 +23,7 @@ func init() {
 			}
 		},
 		ResultEvent:  func(text string) ([]byte, error) { return []byte(text + "\n"), nil },
-		SessionFlags: func(mode, repoSlug, issue, home string) string { return "" },
+		SessionFlags: func(mode, repoSlug, issue, home string) driver.SessionFlag { return driver.SessionFlag{} },
 		Result:       driver.LastMessage,
 	})
 }

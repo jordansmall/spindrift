@@ -13,7 +13,7 @@ func newDriver() driverkit.Driver {
 	return driverkit.New(opencode.Strategy)
 }
 
-func sessionFlags(t *testing.T, d driverkit.Driver, mode, slug, issue, home string) string {
+func sessionFlags(t *testing.T, d driverkit.Driver, mode, slug, issue, home string) driverkit.SessionFlag {
 	t.Helper()
 	got, err := d.SessionFlags(mode, slug, issue, home)
 	if err != nil {

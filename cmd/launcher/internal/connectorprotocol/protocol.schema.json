@@ -927,13 +927,13 @@
       },
       "result": {
         "properties": {
-          "flags": {
+          "flag": {
+            "type": "string"
+          },
+          "value": {
             "type": "string"
           }
         },
-        "required": [
-          "flags"
-        ],
         "type": "object"
       }
     },

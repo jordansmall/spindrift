@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+
+	"spindrift.dev/launcher/internal/driver/driverkit"
 )
 
 // fakeMemory stands in for guest memory: what the host reads back is whatever
@@ -86,7 +88,7 @@ func checkDriverShapes(t *testing.T, resp *response) {
 		t.Fatalf("unnamed failure decoding describeResult from %q: %v", resp.Result, describeErr)
 	}
 	for _, into := range []any{
-		&resultEventResult{}, &sessionFlagsResult{}, &resolveExitResult{},
+		&resultEventResult{}, &driverkit.SessionFlag{}, &resolveExitResult{},
 		&newDecoderResult{}, &newStreamFilterResult{}, &streamDataResult{}, &toolPhaseResult{}, &toolKindResult{}, &modelFamilyResult{}, nil,
 	} {
 		if err := decodeResult(resp, into); !allowedGuestErr(err) {

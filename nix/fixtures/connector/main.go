@@ -52,8 +52,8 @@ func init() {
 		},
 		NewStreamFilter: func(w io.Writer) driver.StreamFilter { return &deltaFilter{w: w} },
 		ResultEvent:     func(text string) ([]byte, error) { return []byte("result " + text + "\n"), nil },
-		SessionFlags: func(mode, repoSlug, issue, home string) string {
-			return strings.Join([]string{mode, repoSlug, issue, home}, "|")
+		SessionFlags: func(mode, repoSlug, issue, home string) driver.SessionFlag {
+			return driver.SessionFlag{Flag: "--session-id", Value: strings.Join([]string{mode, repoSlug, issue, home}, "|")}
 		},
 		ResolveExit: func(log []byte, exitCode int) (int, error) {
 			if len(log) == 0 {

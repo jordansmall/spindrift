@@ -279,7 +279,7 @@ func (f *fixture) sessionID() string {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	return strings.TrimPrefix(flags, "--session-id ")
+	return flags.Value
 }
 
 func (f *fixture) readOnlyRelay() {
@@ -455,7 +455,7 @@ func TestOutcomeNudge_ResumeTargetsPinnedSessionWithStrippedHandoff(t *testing.T
 	f.run()
 
 	call := f.calls[0]
-	if want := "--session-id " + f.sessionID(); call.session != want {
+	if want := `["--session-id","` + f.sessionID() + `"]`; call.session != want {
 		t.Errorf("session file = %q, want %q", call.session, want)
 	}
 	if got := call.argv["--handoff-file"]; got == f.handoffFile {
@@ -746,7 +746,7 @@ func TestPRIntent_Missing_ResumeSuppliesIt(t *testing.T) {
 	if strings.Contains(out, "spindrift_op") {
 		t.Errorf("give-up op emitted although the resume supplied the marker:\n%s", out)
 	}
-	if call := f.calls[0]; call.session != "--session-id "+f.sessionID() || string(call.handoff["ReviewPromptFile"]) != `""` {
+	if call := f.calls[0]; call.session != `["--session-id","`+f.sessionID()+`"]` || string(call.handoff["ReviewPromptFile"]) != `""` {
 		t.Errorf("resume not narrowed: %+v", call)
 	}
 	if !strings.Contains(f.calls[0].prompt, readyLine) {
@@ -1236,9 +1236,9 @@ func TestFirstRun_SessionFlagsFollowTheHandoffSessionMode(t *testing.T) {
 		mode   string
 		want   func(id string) string
 	}{
-		{"initial pins the session", "claude", "initial", func(id string) string { return "--session-id " + id }},
+		{"initial pins the session", "claude", "initial", func(id string) string { return `["--session-id","` + id + `"]` }},
 		{"claude resume renders nothing", "claude", "resume", func(string) string { return "" }},
-		{"pi resume reopens the pinned session", "pi", "resume", func(id string) string { return "--session-id " + id }},
+		{"pi resume reopens the pinned session", "pi", "resume", func(id string) string { return `["--session-id","` + id + `"]` }},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -2423,8 +2423,10 @@ func TestRun_SessionFlagsErrorIsDriverPhaseError(t *testing.T) {
 	defer driver.Snapshot()()
 	boom := errors.New("session store unreadable")
 	driver.Register(driverkit.Strategy{
-		Name:         "flagfail",
-		SessionFlags: func(string, string, string, string) (string, error) { return "", boom },
+		Name: "flagfail",
+		SessionFlags: func(string, string, string, string) (driverkit.SessionFlag, error) {
+			return driverkit.SessionFlag{}, boom
+		},
 	})
 	f := newFixture(t)
 	f.useDriver("flagfail")

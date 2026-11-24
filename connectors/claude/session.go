@@ -3,6 +3,8 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+
+	"spindrift.dev/sdk/driver"
 )
 
 // sessionUUID folds a hash of repoSlug and issue to the 8-4-4-4-12 shape the
@@ -14,14 +16,14 @@ func sessionUUID(repoSlug, issue string) string {
 	return h[:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
 }
 
-// SessionFlags renders the claude CLI's session flags. The session id is
+// SessionFlags answers the claude CLI's session flag. The session id is
 // derived from repoSlug and issue alone, so no state is stored between runs.
 // "resume" always renders nothing here: it needs a check for the
 // session transcript under home, but a Connector cannot see home, so the caller
 // falls back to the cold-context flow until the host supplies that fact.
-func SessionFlags(mode, repoSlug, issue, _ string) string {
+func SessionFlags(mode, repoSlug, issue, _ string) driver.SessionFlag {
 	if mode == "initial" {
-		return "--session-id " + sessionUUID(repoSlug, issue)
+		return driver.SessionFlag{Flag: "--session-id", Value: sessionUUID(repoSlug, issue)}
 	}
-	return ""
+	return driver.SessionFlag{}
 }

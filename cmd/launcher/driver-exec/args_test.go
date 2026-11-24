@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 
 	"spindrift.dev/launcher/internal/promptassembly"
@@ -267,7 +268,7 @@ func TestBuildDriverArgsClaudeEffortWithSessionAndFlags(t *testing.T) {
 		t.Fatal(err)
 	}
 	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id abc-123"), 0o600); err != nil {
+	if err := os.WriteFile(sessionFile, []byte(`["--session-id","abc-123"]`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	in := driverInput{
@@ -293,16 +294,16 @@ func TestBuildDriverArgsClaudeEffortWithSessionAndFlags(t *testing.T) {
 	}
 }
 
-// The session file and driverFlags both hold space-separated strings that
-// must become separate argv elements, matching the shell's prior `read -ra`.
-func TestBuildDriverArgsSessionAndFlagsAreWordSplit(t *testing.T) {
+// driverFlags holds a space-separated string that must become separate argv
+// elements, matching the shell's prior `read -ra`.
+func TestBuildDriverArgsFlagsAreWordSplit(t *testing.T) {
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")
 	if err := os.WriteFile(promptFile, []byte("do it"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id abc-123"), 0o600); err != nil {
+	if err := os.WriteFile(sessionFile, []byte(`["--session-id","abc-123"]`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	in := driverInput{
@@ -323,6 +324,51 @@ func TestBuildDriverArgsSessionAndFlagsAreWordSplit(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("buildDriverArgs = %q, want %q", got, want)
+	}
+}
+
+// The session file is a JSON array of argv words, so a value with spaces stays
+// one element; driverFlags is still split on whitespace.
+func TestBuildDriverArgsSessionWordsStayWhole(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("do it"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(dir, "session.txt")
+	if err := os.WriteFile(sessionFile, []byte(`["--title","spindrift a b"]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := buildDriverArgs(driverInput{shape: claudeShape, promptFile: promptFile, model: "m", sessionFile: sessionFile})
+	if err != nil {
+		t.Fatalf("buildDriverArgs: %v", err)
+	}
+	if !slices.Contains(got, "spindrift a b") || slices.Index(got, "--title")+1 != slices.Index(got, "spindrift a b") {
+		t.Errorf("buildDriverArgs = %q, want --title and \"spindrift a b\" as two adjacent elements", got)
+	}
+}
+
+func TestBuildDriverArgsSessionFileEmptyOrMalformed(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("do it"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		content string
+		bad     bool
+	}{{"", false}, {"--session-id abc", true}} {
+		sessionFile := filepath.Join(dir, "session.txt")
+		if err := os.WriteFile(sessionFile, []byte(c.content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got, err := buildDriverArgs(driverInput{shape: claudeShape, promptFile: promptFile, model: "m", sessionFile: sessionFile})
+		if (err != nil) != c.bad {
+			t.Errorf("session %q: err = %v, want error %v", c.content, err, c.bad)
+		}
+		if !c.bad && !slices.Equal(got, []string{"-p", "do it", "--model", "m"}) {
+			t.Errorf("empty session file: args = %q, want no session words", got)
+		}
 	}
 }
 
@@ -380,7 +426,7 @@ func TestBuildDriverArgsSyntheticShapeIsDataDriven(t *testing.T) {
 		t.Fatal(err)
 	}
 	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--resume xyz"), 0o600); err != nil {
+	if err := os.WriteFile(sessionFile, []byte(`["--resume","xyz"]`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	synthShape := promptassembly.ArgvShape{

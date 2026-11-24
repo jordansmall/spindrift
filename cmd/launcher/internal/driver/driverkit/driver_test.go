@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -60,8 +61,8 @@ func fakeStrategy() Strategy {
 		Name:        "fake",
 		NewDecoder:  tabDecoder,
 		ResultEvent: func(text string) ([]byte, error) { return []byte("result\t" + text + "\t0\n"), nil },
-		SessionFlags: func(mode, repoSlug, issue, home string) (string, error) {
-			return strings.Join([]string{mode, repoSlug, issue, home}, "|"), nil
+		SessionFlags: func(mode, repoSlug, issue, home string) (SessionFlag, error) {
+			return SessionFlag{Flag: "--" + mode, Value: strings.Join([]string{repoSlug, issue, home}, "|")}, nil
 		},
 	}
 }
@@ -464,17 +465,52 @@ func TestStrategyDriverSessionFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "initial|o/r|12|/home/agent"; got != want {
-		t.Errorf("SessionFlags = %q, want %q", got, want)
+	if want := (SessionFlag{Flag: "--initial", Value: "o/r|12|/home/agent"}); got != want {
+		t.Errorf("SessionFlags = %+v, want %+v", got, want)
 	}
 }
 
 func TestInfallibleSessionFlags(t *testing.T) {
-	f := InfallibleSessionFlags(func(mode, repoSlug, issue, home string) string {
-		return mode + repoSlug + issue + home
+	f := InfallibleSessionFlags(func(mode, repoSlug, issue, home string) SessionFlag {
+		return SessionFlag{Flag: mode, Value: repoSlug + issue + home}
 	})
 	got, err := f("m", "r", "i", "h")
-	if got != "mrih" || err != nil {
-		t.Fatalf("got (%q, %v), want (\"mrih\", nil)", got, err)
+	if got != (SessionFlag{Flag: "m", Value: "rih"}) || err != nil {
+		t.Fatalf("got (%+v, %v), want ({m rih}, nil)", got, err)
+	}
+}
+
+func TestSessionFlagArgs(t *testing.T) {
+	for _, c := range []struct {
+		in   SessionFlag
+		want []string
+	}{
+		{SessionFlag{}, nil},
+		{SessionFlag{Value: "orphan"}, nil},
+		{SessionFlag{Flag: "--bare"}, []string{"--bare"}},
+		{SessionFlag{Flag: "--title", Value: "a b"}, []string{"--title", "a b"}},
+	} {
+		if got := c.in.Args(); !slices.Equal(got, c.want) {
+			t.Errorf("%+v.Args() = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestDecodeSessionArgs(t *testing.T) {
+	for _, c := range []struct {
+		in   string
+		want []string
+		bad  bool
+	}{
+		{"", nil, false},
+		{" \n", nil, false},
+		{`["--title","spindrift a b"]`, []string{"--title", "spindrift a b"}, false},
+		{"--session-id abc", nil, true},
+		{`{"flag":"x"}`, nil, true},
+	} {
+		got, err := DecodeSessionArgs([]byte(c.in))
+		if (err != nil) != c.bad || !slices.Equal(got, c.want) {
+			t.Errorf("DecodeSessionArgs(%q) = %q, %v; want %q, bad=%v", c.in, got, err, c.want, c.bad)
+		}
 	}
 }

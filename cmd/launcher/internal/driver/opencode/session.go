@@ -14,11 +14,10 @@ import (
 )
 
 // sessionID is the only shape of id rendered into argv. The store is
-// agent-writable and driver-exec splits the flags on whitespace, so an
-// unchecked id could smuggle extra flags.
+// agent-writable, so an unchecked id could be read by the CLI as a flag.
 var sessionID = regexp.MustCompile(`^ses_[A-Za-z0-9]+$`)
 
-// SessionFlags renders the opencode CLI's session flags. opencode generates
+// SessionFlags answers the opencode CLI's session flag. opencode generates
 // its own session ids, so no id can be pinned at creation: "initial" pins a
 // title derived from repoSlug and issue instead, and "resume" looks up the
 // newest root session carrying that title in the store at OPENCODE_DB, the
@@ -27,17 +26,17 @@ var sessionID = regexp.MustCompile(`^ses_[A-Za-z0-9]+$`)
 // flow. An unset OPENCODE_DB has no fallback: opencode would then write its
 // default store, not the per-issue one. Never --continue: it names the last
 // session globally, not this issue's.
-func SessionFlags(mode, repoSlug, issue, _ string) string {
+func SessionFlags(mode, repoSlug, issue, _ string) driverkit.SessionFlag {
 	title := "spindrift-" + driverkit.SessionKey(repoSlug, issue)
 	switch mode {
 	case "initial":
-		return "--title " + title
+		return driverkit.SessionFlag{Flag: "--title", Value: title}
 	case "resume":
 		if id := lookupSession(os.Getenv("OPENCODE_DB"), title); id != "" {
-			return "--session " + id
+			return driverkit.SessionFlag{Flag: "--session", Value: id}
 		}
 	}
-	return ""
+	return driverkit.SessionFlag{}
 }
 
 // lookupSession returns the newest live root session titled title, or "" on

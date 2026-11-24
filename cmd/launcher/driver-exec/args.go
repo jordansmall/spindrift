@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/promptassembly"
 )
 
@@ -68,7 +69,11 @@ func buildDriverArgs(in driverInput) ([]string, error) {
 			if err != nil {
 				return nil, err
 			}
-			args = append(args, strings.Fields(string(session))...)
+			sessionArgs, err := driverkit.DecodeSessionArgs(session)
+			if err != nil {
+				return nil, fmt.Errorf("buildDriverArgs: %w", err)
+			}
+			args = append(args, sessionArgs...)
 		case "driverFlags":
 			args = append(args, strings.Fields(in.driverFlags)...)
 		case "effort":

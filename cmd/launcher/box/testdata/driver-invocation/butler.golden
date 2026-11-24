@@ -12,7 +12,7 @@ argv
 --manifest-path
 <outbox>/manifest.json
 session
---session-id 12e77a13-f17a-68e0-23e4-6ceb95081fce
+["--session-id","12e77a13-f17a-68e0-23e4-6ceb95081fce"]
 devshell
 false default
 prompt
