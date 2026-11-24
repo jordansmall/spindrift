@@ -291,6 +291,8 @@ type base struct {
 	// WebHost is the web host core hands Compose; empty checks the remote
 	// against the Connector's declared hosts.
 	WebHost string
+	// Note is Git.Note as Compose gets it; nil records nothing.
+	Note func(method string, err error)
 
 	connector Connector
 	eng       Engine
@@ -339,7 +341,7 @@ func newBase(t *testing.T, eng Engine, c Connector) *base {
 
 func (h *base) git() connectorforge.Git {
 	return connectorforge.Git{
-		Credential: h.Credential, WebHost: h.WebHost,
+		Credential: h.Credential, WebHost: h.WebHost, Note: h.Note,
 		Plumbing: func(u string, cred gitexec.Credential) forge.CodeForge {
 			h.mu.Lock()
 			h.plumbing = append(h.plumbing, PlumbingCall{u, cred})

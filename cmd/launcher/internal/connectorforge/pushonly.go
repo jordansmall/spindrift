@@ -70,6 +70,10 @@ type Git struct {
 	// instead of a declared route host: a forge whose API host differs
 	// (api.github.com) declares no route on it, and core already trusts it.
 	WebHost string
+	// Note, when set, sees each guest call of the composed forge that fails
+	// after retries and classification, by method. Compose's own remote read is
+	// not noted: its caller records the Compose error, so a failure lands once.
+	Note func(method string, err error)
 }
 
 // notRetried are the methods whose request is not idempotent: a retry after a
@@ -160,6 +164,16 @@ func Compose(c *connectorhost.Connector, target Target, g Git) (forge.CodeForge,
 	remote, err := p.remote()
 	if err != nil {
 		return nil, forge.Capabilities{}, err
+	}
+	if g.Note != nil {
+		raw := p.call
+		p.call = func(ctx context.Context, method string, params, result any) error {
+			err := raw(ctx, method, params, result)
+			if err != nil {
+				g.Note(method, err)
+			}
+			return err
+		}
 	}
 	p.git = g.Plumbing(remote.CloneURL, g.Credential)
 	p.cloneURL, p.cred = remote.CloneURL, g.Credential

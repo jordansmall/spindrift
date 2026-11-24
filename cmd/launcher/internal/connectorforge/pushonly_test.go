@@ -265,3 +265,60 @@ func TestConnectorErrorClassCoreObserves(t *testing.T) {
 func TestComposedForgeCodeForgeContract_RemoteEngine(t *testing.T) {
 	forgetest.RunCodeForgeContract(t, connectorforgetest.NewRemote(t))
 }
+
+type noted struct {
+	method string
+	err    error
+}
+
+// Git.Note sees each guest call that fails after retries and classification,
+// by method; a failure Compose's own remote read hits is the caller's to
+// record, so it is not noted twice.
+func TestComposeNotesFailedCallsByMethod(t *testing.T) {
+	var got []noted
+	h := connectorforgetest.New(t)
+	h.Note = func(method string, err error) { got = append(got, noted{method, err}) }
+	cf, _, err := h.Compose()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cf.BranchExists("agent/issue-9"); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("a successful call noted %v", got)
+	}
+
+	h.Backend.FailBranchRequests(422)
+	_, callErr := cf.BranchExists("agent/issue-9")
+
+	if callErr == nil || len(got) != 1 || got[0].method != "forge.branchExists" || got[0].err != callErr {
+		t.Errorf("noted %v for call error %v, want one forge.branchExists note of that error", got, callErr)
+	}
+}
+
+func TestComposeNotesNothingForARefusedRemote(t *testing.T) {
+	var got []noted
+	h := connectorforgetest.New(t)
+	h.Note = func(method string, err error) { got = append(got, noted{method, err}) }
+	h.Backend.SetRemote("https://evil.example/o/r.git", "https://"+h.Backend.Host+"/o/r")
+
+	if _, _, err := h.Compose(); !errors.Is(err, connectorforge.ErrRemoteHost) {
+		t.Fatalf("Compose = %v, want ErrRemoteHost", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("Compose noted %v, want the caller to record its error", got)
+	}
+}
+
+func TestComposeWithoutANoteStillFailsCalls(t *testing.T) {
+	h := connectorforgetest.New(t)
+	cf, _, err := h.Compose()
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.Backend.FailBranchRequests(422)
+	if _, err := cf.BranchExists("agent/issue-9"); err == nil {
+		t.Error("BranchExists succeeded, want the failure")
+	}
+}
