@@ -31,3 +31,14 @@ func TestProtocolRolesAgree(t *testing.T) {
 			connectorprotocol.RoleImplementor, connectorprotocol.RoleReviewer)
 	}
 }
+
+// TestProtocolProgressAgrees fails when IsProgress answers differently from the
+// description's progress kinds, which the SDK's event.IsProgress is rendered from.
+func TestProtocolProgressAgrees(t *testing.T) {
+	for _, k := range connectorprotocol.EventKinds {
+		want := slices.Contains(connectorprotocol.ProgressEventKinds, k)
+		if got := IsProgress(Kind(k)); got != want {
+			t.Errorf("IsProgress(%q) = %t, protocol says %t", k, got, want)
+		}
+	}
+}

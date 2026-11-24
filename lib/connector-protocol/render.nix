@@ -379,10 +379,12 @@ let
         (checkFields "event ${toJSON (e.name or "?")}" e [
           "name"
           "guest"
+          "progress"
           "doc"
         ])
         (checkName "event" "[a-z]+(_[a-z]+)*" e.name)
         (if isBool e.guest then true else fail "event ${e.name}: guest must be a bool")
+        (if isBool e.progress then true else fail "event ${e.name}: progress must be a bool")
         (checkDoc "event ${e.name}" e.doc)
       ]) desc.events
       ++ concatMap' (
@@ -433,6 +435,7 @@ let
       "Classes"
       "EventKinds"
       "GuestEventKinds"
+      "ProgressEventKinds"
       "Retry"
       "Method"
       "Methods"
@@ -871,6 +874,10 @@ let
     + "var GuestEventKinds = ${
       goList (map (e: "Event${goIdent e.name}") (filter (e: e.guest) desc.events))
     }\n\n"
+    + "// ProgressEventKinds lists the kinds that show the agent working past an earlier error.\n"
+    + "var ProgressEventKinds = ${
+      goList (map (e: "Event${goIdent e.name}") (filter (e: e.progress) desc.events))
+    }\n\n"
     + "// The Reason a driver Pattern carries.\n"
     + constBlock (
       map (
@@ -1155,14 +1162,28 @@ let
             );
         };
         event = {
-          idents = [ "Kind" ] ++ map (e: "Kind${goIdent e.name}") desc.events;
+          idents = [
+            "Kind"
+            "IsProgress"
+          ]
+          ++ map (e: "Kind${goIdent e.name}") desc.events;
           text =
             "// Kind names one canonical event a Driver's decoder derives from a Pass log\n"
             + "// line (ADR 0065). Drivers translate their CLI's own grammar into these kinds\n"
             + "// at their own boundary; the shared readers (classification, usage, result\n"
             + "// text, transcript, heartbeat) consume only Events and never see a grammar.\n"
             + "type Kind string\n\n"
-            + typedConsts "Kind" "Kind" desc.events;
+            + typedConsts "Kind" "Kind" desc.events
+            + "// IsProgress reports whether k shows the agent working past an earlier error:\n"
+            + "// an error followed by such an event was recovered from. KindUsage is\n"
+            + "// deliberately not progress: it can close the step whose error was just\n"
+            + "// emitted.\n"
+            + "func IsProgress(k Kind) bool {\n"
+            + "\tswitch k {\n"
+            + "\tcase ${
+              concatStringsSep ", " (map (e: "Kind${goIdent e.name}") (filter (e: e.progress) desc.events))
+            }:\n"
+            + "\t\treturn true\n\t}\n\treturn false\n}\n\n";
         };
         forge = axisConsts "forge";
         tracker =

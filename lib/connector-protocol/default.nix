@@ -4,9 +4,9 @@
 # through the binding in sdk.nix, into the SDK's sdk/<pkg>/protocol_gen.go.
 #
 # It describes protocol 0.3.0 as it is today; it adds nothing to the wire. Core's
-# own hand-written constants stay as they are, because the SDK's parity tests
-# evaluate them, and agreement tests (connectorhost/protocol_test.go) fail when
-# one drifts from this file: if a value differs, this description is wrong.
+# own hand-written constants stay as they are, and agreement tests (the
+# protocol_test.go and wirefields_test.go files under cmd/launcher/internal) fail
+# when one drifts from this file: if a value differs, this description is wrong.
 #
 # docs/reference.md's "Connector protocol" section is the prose contract. A method
 # row's fields are listed in render.nix, which throws on a missing, unknown or
@@ -184,61 +184,73 @@ let
     };
 
     # The canonical event kinds (ADR 0065), in driverkit's order. A guest may emit
-    # every kind but the host's own.
+    # every kind but the host's own. A progress kind shows the agent working past an
+    # earlier error: an error followed by one was recovered from.
     events = [
       {
         name = "start";
         guest = true;
+        progress = true;
         doc = "A model call (turn) begins. Fills Timestamp and MessageID. The classifier counts it as agent progress. A CLI with no per-call start record (claude) emits one per assistant or user turn as its progress marker, even for a line with no decodable content.";
       }
       {
         name = "text";
         guest = true;
+        progress = true;
         doc = "Assistant prose. Fills Text (as the CLI wrote it, not trimmed), MessageID, Timestamp, Role. The result reader, transcript renderer and heartbeat writer consume it; the classifier counts it as agent progress.";
       }
       {
         name = "reasoning";
         guest = true;
+        progress = true;
         doc = "Assistant reasoning or thinking; never narration, transcript or result text, so decode a CLI's thinking output to this kind, never to text, or it would surface in the verdict scan and heartbeat. It counts as agent progress for the classifier. Fills Text, MessageID, Timestamp, Role.";
       }
       {
         name = "tool_call";
         guest = true;
+        progress = true;
         doc = "The agent invoking a tool. Fills ToolID, ToolName, ToolInput, ToolTarget, MessageID, Timestamp, Role. The transcript renderer shows it; it counts as agent progress.";
       }
       {
         name = "tool_result";
         guest = true;
+        progress = true;
         doc = "A tool's output coming back. Fills ToolID, ToolName, ToolTarget, ToolOutput, IsError (the tool failed), Subagent (a spawn tool's report), MessageID, Timestamp, Role; Text stays empty. The transcript renderer shows it; it counts as agent progress. A CLI that reports call and result in one record emits both kinds from it, call first, the result repeating the call's ToolInput and ToolTarget.";
       }
       {
         name = "usage";
         guest = true;
+        progress = false;
         doc = "One model call's token tally. Fills Tokens, Model, Effort (when known), MessageID, Timestamp, Role. The usage reader sums every usage event for the run totals (so a decoder emits one per call, not a running total) and dedups the per-model breakdown by non-empty MessageID. It is not agent progress.";
       }
       {
         name = "model";
         guest = true;
+        progress = false;
         doc = "The model in force changed: a model id observed. Fills Model, MessageID, Timestamp, Role, and Effort when known. The heartbeat writer reports a change of Model and, when Effort is set, shows model:effort in the role header.";
       }
       {
         name = "error";
         guest = true;
+        progress = false;
         doc = "An error the CLI reported inside its grammar. Text keeps the error's raw text, because the classifier matches transient markers on it; ResetAt carries a rate-limit reset the payload names. The latest one not followed by agent progress decides the classification, or the first with ClassifyOptions.FirstMatch. A CLI that reports failures as plain text (claude) decodes every non-content line to this kind.";
       }
       {
         name = "unparsed";
         guest = true;
+        progress = false;
         doc = "A line outside the CLI's grammar: stderr shares the Pass log, so a Driver sees the CLI's own diagnostics here. Text is the trimmed line. The classifier reads it only for terminal markers; nothing else consumes it.";
       }
       {
         name = "result";
         guest = true;
+        progress = false;
         doc = "The CLI's final result text, for a CLI that reports one as its own event. Fills Text, and may carry totals in Tokens, DurationMs, DurationAPIMs and NumTurns, and name the session's Models. The result reader lets it replace the text gathered so far. A CLI whose result is its last message's prose emits no result event.";
       }
       {
         name = "host_op";
         guest = false;
+        progress = false;
         doc = "Spindrift's own host-written spindrift_op line, which rides the Pass log in every Driver's stream; a guest never emits it. Fills HostOp and Timestamp. The heartbeat writer renders it via FormatSpindriftOp.";
       }
     ];
