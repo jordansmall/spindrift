@@ -14,14 +14,43 @@ import (
 // Credential is the forge username and password git presents to an http(s)
 // remote; either may carry the token. The zero value means no credential: Apply
 // is a no-op on it.
-type Credential struct{ Username, Password string }
+type Credential struct {
+	Username, Password string
+
+	// tokenEnv, when set, names the environment variable holding the token and
+	// overrides Password; only EnvCredential sets it.
+	tokenEnv string
+}
+
+// EnvCredential returns a credential whose password is read from the tokenEnv
+// environment variable at each Apply and Explain, so a token rotated in the
+// process environment reaches the next git call. An unset or empty variable
+// makes it behave as the zero Credential.
+func EnvCredential(username, tokenEnv string) Credential {
+	return Credential{Username: username, tokenEnv: tokenEnv}
+}
+
+// resolved is c with an env-backed password read from the environment now. An
+// env-backed credential whose variable is empty resolves to the zero value,
+// so no half-credential reaches git.
+func (c Credential) resolved() Credential {
+	if c.tokenEnv == "" {
+		return c
+	}
+	pass := os.Getenv(c.tokenEnv)
+	if pass == "" {
+		return Credential{}
+	}
+	return Credential{Username: c.Username, Password: pass}
+}
 
 // CredentialSource yields the Credential for one git operation, read at the
 // moment of use so a token rotated since the source was built is honoured. A
 // nil source is the zero Credential.
 type CredentialSource func() (Credential, error)
 
-// StaticCredential is the source of a Credential that never changes.
+// StaticCredential is the source that always yields c; an env-backed c still
+// reads its token at each use.
 func StaticCredential(c Credential) CredentialSource {
 	return func() (Credential, error) { return c, nil }
 }
@@ -85,6 +114,7 @@ const (
 // one with a non-zero Credential. Both fields are always emitted, or git would
 // prompt and fail under GIT_TERMINAL_PROMPT=0.
 func (c Credential) Apply(cmd *exec.Cmd, repoURL string) *exec.Cmd {
+	c = c.resolved()
 	if u, err := url.Parse(repoURL); c == (Credential{}) || err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return cmd
 	}
@@ -159,7 +189,7 @@ var redirectFailure = regexp.MustCompile(`could not read Username|returned error
 // out is the run's output; a *exec.ExitError's captured Stderr is read too.
 // Any other failure, and a zero Credential, come back unchanged.
 func (c Credential) Explain(err error, out []byte, repoURL string) error {
-	if err == nil || c == (Credential{}) {
+	if err == nil || c.resolved() == (Credential{}) {
 		return err
 	}
 	var exit *exec.ExitError
