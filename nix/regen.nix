@@ -37,6 +37,10 @@ let
   driverRegistry = import ../lib/drivers/default.nix { inherit (pkgs) lib; };
   driverDescriptorsFile = renderers.renderDriverDescriptorsGo driverRegistry.entries;
   dispatchKindsFile = renderers.renderDispatchKindsGo (import ../lib/dispatch-kinds);
+  connectorProtocol = import ../lib/connector-protocol;
+  connectorProtocolRender = import ../lib/connector-protocol/render.nix;
+  connectorProtocolGoFile = connectorProtocolRender.renderGo connectorProtocol;
+  connectorProtocolSchemaFile = connectorProtocolRender.renderSchema connectorProtocol;
   choreCatalog = import ../lib/chore-catalog.nix;
   choreBuiltinsFile = renderers.renderChoreBuiltinsGo choreCatalog;
   agentPaths = import ../lib/agent-paths.nix;
@@ -189,6 +193,10 @@ pkgs.writeShellApplication {
     gofmt -w "$root/cmd/launcher/internal/driver/descriptor_gen.go"
     ${writeGenerated "cmd/launcher/internal/dispatchkind/kinds_gen.go" dispatchKindsFile}
     gofmt -w "$root/cmd/launcher/internal/dispatchkind/kinds_gen.go"
+    mkdir -p "$root/cmd/launcher/internal/connectorprotocol"
+    ${writeGenerated "cmd/launcher/internal/connectorprotocol/protocol_gen.go" connectorProtocolGoFile}
+    gofmt -w "$root/cmd/launcher/internal/connectorprotocol/protocol_gen.go"
+    ${writeGenerated "cmd/launcher/internal/connectorprotocol/protocol.schema.json" connectorProtocolSchemaFile}
     ${writeGenerated "cmd/launcher/internal/chore/builtins_gen.go" choreBuiltinsFile}
     ${writeGenerated "cmd/launcher/internal/agentpaths/agentpaths_gen.go" agentPathsFile}
     ${writeGenerated "cmd/launcher/internal/runner/families_gen.go" runnerFamiliesFile}
