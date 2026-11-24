@@ -1,5 +1,23 @@
 # Migration Guide
 
+## The Route baseline is merge-guarded by default (issue #7465)
+
+The shipped `MERGE_GUARD_PATHS` default now ends in
+`spindrift-connector-routes.json`, the accepted Route baseline at the Consumer
+flake's root (ADR 0073). A PR that edits it accepts a Connector's wider grant
+on the Operator's behalf, so the merge downgrades to manual. Nothing to do on
+the default.
+
+If you override the guard paths, the override replaces the whole default:
+append the baseline file to your list or edits to it merge unguarded.
+
+```nix
+spindrift.git.merge.guardPaths = ".github/**,**/CLAUDE.md,spindrift-connector-routes.json";
+```
+
+The same applies to a `MERGE_GUARD_PATHS` environment override. See [Merge
+guard](docs/reference.md#merge-guard).
+
 ## The backend read shadow is deleted (issue #7456)
 
 No backend keeps a native adapter, so the sampled read shadow that compared a
