@@ -408,6 +408,9 @@ func commentsOf(t tracker.Target, number string) ([]tracker.Comment, error) {
 				Minimized:       c.IsMinimized,
 				MinimizedReason: deref(c.MinimizedReason),
 				Association:     c.AuthorAssociation,
+				// A deleted account has a null author; core refuses an empty
+				// one, and "ghost" is the login GitHub itself shows.
+				Author: "ghost",
 			}
 			if c.Author != nil {
 				out.Author = c.Author.Login
