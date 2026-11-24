@@ -165,6 +165,12 @@ const (
 	CallBudgetSeconds = 5
 	// InitBudgetSeconds: Seconds of guest work for _initialize.
 	InitBudgetSeconds = 30
+	// LabeledMaxBytes: Bytes of answers one tracker.labeled walk holds before core keeps what it has and warns.
+	LabeledMaxBytes = 67108864
+	// LabeledMaxPages: Count of pages one tracker.labeled walk reads before core keeps what it has and warns.
+	LabeledMaxPages = 1000
+	// MaxCountIntervalSeconds: Seconds, at most, of the cadence a tracker.countInterval answer may ask for.
+	MaxCountIntervalSeconds = 86400
 	// MaxErrorText: Bytes of Connector-supplied error text core keeps.
 	MaxErrorText = 256
 	// MaxFrameSlots: Slots in one function's frame, checked at load.
@@ -201,6 +207,8 @@ const (
 	MemoryPerRequestByte = 16
 	// OutputPerRequestByte: Bytes of response a call adds per request byte.
 	OutputPerRequestByte = 6
+	// ResultPageLimit: Count of issues core keeps from one tracker list or search page, and the cap on a tracker.count answer.
+	ResultPageLimit = 100
 )
 
 // The canonical event kinds.
@@ -241,12 +249,32 @@ const (
 	CheckBatchEvents = "batchEvents"
 	// CheckBehindCount: connectorforge prForge.NeedsUpdate refuses a negative behindBy.
 	CheckBehindCount = "behindCount"
+	// CheckCommentShape: connectortracker commentsLayer.Comments refuses a comment whose author is empty or holds a control character, or whose createdAt is not RFC3339; an association outside forge.KnownAssociation's vocabulary is blanked, not refused.
+	CheckCommentShape = "commentShape"
+	// CheckCountClamp: connectortracker countLayer.CountReady refuses a negative count and clamps the rest to resultPageLimit.
+	CheckCountClamp = "countClamp"
+	// CheckCountInterval: connectortracker readCountInterval refuses seconds outside 1 to maxCountIntervalSeconds.
+	CheckCountInterval = "countInterval"
+	// CheckCreateMetaIssueType: connectortracker createMetaLayer.CheckIssueType refuses an answer whose issueTypes omit the issue type core files as (forge.IssueTypeNotOffered).
+	CheckCreateMetaIssueType = "createMetaIssueType"
 	// CheckDecode: Core decodes the result into its Go type and checks nothing more (ErrMalformedOutput otherwise).
 	CheckDecode = "decode"
 	// CheckDescribe: connectorhost.DriverStrategy refuses an unknown pattern reason, totals or result name.
 	CheckDescribe = "describe"
+	// CheckFiledURL: connectortracker reads.unusableFiledURL refuses a url that is empty, not https, carrying userinfo, off the tracker's web host (Lifecycle.WebHost) or not ending in an issue id; the issue was filed, so the error says so and core must not refile.
+	CheckFiledURL = "filedURL"
 	// CheckGuestEvents: connectorhost.guestEvents decodes strictly: an unknown field, an unknown kind or a host_op rejects the answer.
 	CheckGuestEvents = "guestEvents"
+	// CheckIdList: connectortracker reads.idList refuses an id outside the Connector's id grammar and drops a repeated one.
+	CheckIdList = "idList"
+	// CheckIssueAnswer: connectortracker reads.readIssue applies issueShape, then refuses an issue other than the one asked for.
+	CheckIssueAnswer = "issueAnswer"
+	// CheckIssueShape: connectortracker wireIssue.issue refuses an issue whose number is outside the Connector's id grammar (a positive integer, or a project key and number under tracker.ids.projectKey), whose state is not open or closed (a listIssues answer may leave it empty), or that has an empty or control-character label name (checkLabels); a hit tracker.searchIssues returns outside the state or label asked for is dropped, not refused.
+	CheckIssueShape = "issueShape"
+	// CheckLabelNames: connectortracker labelsLayer.ListLabels refuses an empty or control-character label name (checkLabels).
+	CheckLabelNames = "labelNames"
+	// CheckLabeledPaging: connectortracker labeledLayer.walkLabeled applies issueShape to each issue, and fails the label closed on a next cursor already returned or a page of only issues already read; a walk past labeledMaxPages or labeledMaxBytes keeps what it read and warns.
+	CheckLabeledPaging = "labeledPaging"
 	// CheckPrAnswer: connectorforge reads.pr applies prShape and refuses a PR other than the one asked for; the callers go on to refuse a mergeable value outside MERGEABLE, CONFLICTING and UNKNOWN (Mergeable), a merge commit that is not a full lowercase hex id (MergeCommit), an empty head commit (HeadCommitSHA), and, before a rebase, a head other than the agent branch core derived (RebasePRHead).
 	CheckPrAnswer = "prAnswer"
 	// CheckPrFiles: connectorforge prForge.ListPRFiles refuses a missing or empty list, and an entry that is not a clean repository-relative path (cleanRepoPath), because the merge guard reads it.
@@ -255,6 +283,8 @@ const (
 	CheckPrShape = "prShape"
 	// CheckProbeRepo: connectorforge probeRepo refuses an empty repo.
 	CheckProbeRepo = "probeRepo"
+	// CheckProbeStatus: connectortracker probeLayer.Probe reads the status: 2xx proves the repository, 401 and 403 are an auth failure, any other status means the repository is unreachable.
+	CheckProbeStatus = "probeStatus"
 	// CheckRemoteURLs: connectorforge pushOnly.checkURL refuses a clone or web URL that is not https with a host, carries userinfo, or names a host outside core's web host (Git.WebHost) or, without one, the Connector's declared routes; a refusal is audited.
 	CheckRemoteURLs = "remoteURLs"
 	// CheckResolveExitGuard: connectorhost.DriverStrategy refuses an answer that resolves a non-zero exit to 0.
@@ -265,6 +295,8 @@ const (
 	CheckRunLink = "runLink"
 	// CheckTokenGrant: connectorforge.checkGrant refuses writeCapable or scopes without introspectable and a scope that is not a well-formed token (wellFormedScope); cleanReason then sanitises the reason and caps it at maxReasonLen; a scope is capped at maxScopeLen.
 	CheckTokenGrant = "tokenGrant"
+	// CheckTransitionOutcome: connectortracker transitionLayer.TransitionState refuses an outcome other than moved, unavailable and unmapped.
+	CheckTransitionOutcome = "transitionOutcome"
 )
 
 // The method names.
@@ -339,6 +371,48 @@ const (
 	MethodForgeOpenPR = "forge.openPR"
 	// MethodForgeTokenGrant: What the credential the host attached may do on the repository; the request carries only the token's non-secret prefix.
 	MethodForgeTokenGrant = "forge.tokenGrant"
+	// MethodTrackerListIssues: The open issues carrying `label` or in `status` (an empty one ignored, both empty for every open issue), narrowed by `route`; core asks for `limit` and does not trust the guest to honour it.
+	MethodTrackerListIssues = "tracker.listIssues"
+	// MethodTrackerIssue: One issue by number.
+	MethodTrackerIssue = "tracker.issue"
+	// MethodTrackerComments: The issue's comments, oldest first.
+	MethodTrackerComments = "tracker.comments"
+	// MethodTrackerNativeDeps: The ids of the issues `number` is blocked on, in the API's order.
+	MethodTrackerNativeDeps = "tracker.nativeDeps"
+	// MethodTrackerBlocks: The ids of the issues `number` blocks, in the API's order.
+	MethodTrackerBlocks = "tracker.blocks"
+	// MethodTrackerProbe: The HTTP status of one authenticated read; an error only when the request could not be sent.
+	MethodTrackerProbe = "tracker.probe"
+	// MethodTrackerStatuses: The name of every status in the project's workflows, and each one's category where the tracker reports it (`done` marks a terminal one).
+	MethodTrackerStatuses = "tracker.statuses"
+	// MethodTrackerCreateMeta: Every issue type the project offers and the create fields of `issueType`, none when it is not offered.
+	MethodTrackerCreateMeta = "tracker.createMeta"
+	// MethodTrackerCount: How many issues the selection matches, possibly approximate; `fresh` asks the Connector to bypass any conditional-request cache.
+	MethodTrackerCount = "tracker.count"
+	// MethodTrackerCountInterval: How often core re-asks tracker.count; read once, when the tracker is built.
+	MethodTrackerCountInterval = "tracker.countInterval"
+	// MethodTrackerRemovedLabels: The names of the labels removed from the issue, oldest first.
+	MethodTrackerRemovedLabels = "tracker.removedLabels"
+	// MethodTrackerSearchIssues: The issues matching `text` in `state` (and carrying `label` unless it is empty), in match order.
+	MethodTrackerSearchIssues = "tracker.searchIssues"
+	// MethodTrackerLabeled: One page of the issues carrying `label` in `state`, newest first, closedAt and closedNotPlanned filled for closed ones; `next` is the opaque cursor of the following page, empty at the end.
+	MethodTrackerLabeled = "tracker.labeled"
+	// MethodTrackerTransition: Moves the issue to the native status core's `mapping` names for `state`; core decides the fallback, the refusal and the label strip.
+	MethodTrackerTransition = "tracker.transition"
+	// MethodTrackerEditLabels: One edit that adds and removes the named labels.
+	MethodTrackerEditLabels = "tracker.editLabels"
+	// MethodTrackerComment: Posts one comment: `body` is canonical Markdown without the research marker line, `research` says the comment carries it.
+	MethodTrackerComment = "tracker.comment"
+	// MethodTrackerFileIssue: Files one issue and answers its browse URL; `body` is canonical Markdown without the dedup marker line, which `dedupMarker` carries verbatim.
+	MethodTrackerFileIssue = "tracker.fileIssue"
+	// MethodTrackerCloseIssue: Closes the issue as completed, never as not planned; core calls it only on an open issue.
+	MethodTrackerCloseIssue = "tracker.closeIssue"
+	// MethodTrackerListLabels: Every label the tracker knows.
+	MethodTrackerListLabels = "tracker.listLabels"
+	// MethodTrackerCreateLabel: Adds a label to the registry; a no-op where the tracker has none.
+	MethodTrackerCreateLabel = "tracker.createLabel"
+	// MethodTrackerMatchesRoute: Whether issue `number` matches every selector in `route`; core sends it only for a non-empty route.
+	MethodTrackerMatchesRoute = "tracker.matchesRoute"
 )
 
 // Retry says how core may repeat a failed call. Safe is true when repeating a
@@ -397,4 +471,25 @@ var Methods = map[string]Method{
 	MethodForgeProbe:             {Name: MethodForgeProbe, Axis: AxisForge, Capability: CapForgeProbe, Retry: Retry{Safe: true}, ResultCheck: CheckProbeRepo},
 	MethodForgeOpenPR:            {Name: MethodForgeOpenPR, Axis: AxisForge, Capability: CapForgeDraftPRs, ResultCheck: CheckPrShape},
 	MethodForgeTokenGrant:        {Name: MethodForgeTokenGrant, Axis: AxisForge, Capability: CapForgeTokenGrant, Retry: Retry{Safe: true}, ResultCheck: CheckTokenGrant},
+	MethodTrackerListIssues:      {Name: MethodTrackerListIssues, Axis: AxisTracker, Capability: CapTracker, Retry: Retry{Safe: true}, ResultCheck: CheckIssueShape},
+	MethodTrackerIssue:           {Name: MethodTrackerIssue, Axis: AxisTracker, Capability: CapTracker, Retry: Retry{Safe: true}, ResultCheck: CheckIssueAnswer},
+	MethodTrackerComments:        {Name: MethodTrackerComments, Axis: AxisTracker, Capability: CapTrackerComments, Retry: Retry{Safe: true}, ResultCheck: CheckCommentShape},
+	MethodTrackerNativeDeps:      {Name: MethodTrackerNativeDeps, Axis: AxisTracker, Capability: CapTrackerNativeDeps, Retry: Retry{Safe: true}, ResultCheck: CheckIdList},
+	MethodTrackerBlocks:          {Name: MethodTrackerBlocks, Axis: AxisTracker, Capability: CapTrackerBlocks, Retry: Retry{Safe: true}, ResultCheck: CheckIdList},
+	MethodTrackerProbe:           {Name: MethodTrackerProbe, Axis: AxisTracker, Capability: CapTrackerProbe, Retry: Retry{Safe: true}, ResultCheck: CheckProbeStatus},
+	MethodTrackerStatuses:        {Name: MethodTrackerStatuses, Axis: AxisTracker, Capability: CapTrackerStatuses, Retry: Retry{Safe: true}, ResultCheck: CheckDecode},
+	MethodTrackerCreateMeta:      {Name: MethodTrackerCreateMeta, Axis: AxisTracker, Capability: CapTrackerCreateMeta, Retry: Retry{Safe: true}, ResultCheck: CheckCreateMetaIssueType},
+	MethodTrackerCount:           {Name: MethodTrackerCount, Axis: AxisTracker, Capability: CapTrackerCount, Retry: Retry{Safe: true}, ResultCheck: CheckCountClamp},
+	MethodTrackerCountInterval:   {Name: MethodTrackerCountInterval, Axis: AxisTracker, Capability: CapTrackerCount, Retry: Retry{Safe: true}, ResultCheck: CheckCountInterval},
+	MethodTrackerRemovedLabels:   {Name: MethodTrackerRemovedLabels, Axis: AxisTracker, Capability: CapTrackerRemovedLabels, Retry: Retry{Safe: true}, ResultCheck: CheckDecode},
+	MethodTrackerSearchIssues:    {Name: MethodTrackerSearchIssues, Axis: AxisTracker, Capability: CapTrackerSearchIssues, Retry: Retry{Safe: true}, ResultCheck: CheckIssueShape},
+	MethodTrackerLabeled:         {Name: MethodTrackerLabeled, Axis: AxisTracker, Capability: CapTrackerLabeled, Retry: Retry{Safe: true}, ResultCheck: CheckLabeledPaging},
+	MethodTrackerTransition:      {Name: MethodTrackerTransition, Axis: AxisTracker, Capability: CapTrackerTransition, ResultCheck: CheckTransitionOutcome},
+	MethodTrackerEditLabels:      {Name: MethodTrackerEditLabels, Axis: AxisTracker, Capability: CapTrackerEditLabels, Retry: Retry{Safe: true}, ResultCheck: CheckDecode},
+	MethodTrackerComment:         {Name: MethodTrackerComment, Axis: AxisTracker, Capability: CapTrackerComment, ResultCheck: CheckDecode},
+	MethodTrackerFileIssue:       {Name: MethodTrackerFileIssue, Axis: AxisTracker, Capability: CapTrackerFileIssue, ResultCheck: CheckFiledURL},
+	MethodTrackerCloseIssue:      {Name: MethodTrackerCloseIssue, Axis: AxisTracker, Capability: CapTrackerCloseIssue, Retry: Retry{Safe: true}, ResultCheck: CheckDecode},
+	MethodTrackerListLabels:      {Name: MethodTrackerListLabels, Axis: AxisTracker, Capability: CapTrackerLabels, Retry: Retry{Safe: true}, ResultCheck: CheckLabelNames},
+	MethodTrackerCreateLabel:     {Name: MethodTrackerCreateLabel, Axis: AxisTracker, Capability: CapTrackerLabels, ResultCheck: CheckDecode},
+	MethodTrackerMatchesRoute:    {Name: MethodTrackerMatchesRoute, Axis: AxisTracker, Capability: CapTrackerRoute, Retry: Retry{Safe: true}, ResultCheck: CheckDecode},
 }
