@@ -651,7 +651,7 @@ withRowKnobs {
     group = "forge";
     flag = "forge-backend";
     default = "github";
-    doc = "code-landing backend: github (open PR, watch CI, merge), git (push-only to CODE_FORGE_REMOTE_URL; no PR, CI-watch, or merge gate), local (host-mediated landing onto the Accumulation repo's Integration branch by rebase and fast-forward, never a merge commit; no PR, CI-watch, or network; ADR 0033, issue #1889), or forgejo (open PR, watch CI, merge under MERGE_MODE on a Forgejo/Gitea instance through the forgejo Connector, authorized by SPINDRIFT_FORGEJO_CONNECTOR_TOKEN, with FORGEJO_TOKEN as git's credential; ADR 0038)";
+    doc = "code-landing backend: github (open PR, watch CI, merge), git (push-only to CODE_FORGE_REMOTE_URL; no PR, CI-watch, or merge gate), local (host-mediated landing onto the Accumulation repo's Integration branch by rebase and fast-forward, never a merge commit; no PR, CI-watch, or network; ADR 0033, issue #1889), or forgejo (open PR, watch CI, merge under MERGE_MODE on a Forgejo/Gitea instance through the forgejo Connector, with FORGEJO_TOKEN authorizing Connector requests and git; ADR 0038)";
     choices = map (r: r.name) (builtins.filter (r: r.validAsCodeForge or false) backends);
     flakeOption = true;
     nixSubPath = "backend";

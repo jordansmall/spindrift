@@ -2829,8 +2829,8 @@ every other read under the repository), `POST` and `PATCH` on `.../pulls`,
 `DELETE .../branches`, plus an unpinned read-only `GET /api/v1/orgs` for org
 labels, since core substitutes only `{repo}`; the write roots admit more than
 the Connector sends, as `connectors/forgejo/routes.nix` explains. Its row
-authorizes with the host-only `SPINDRIFT_FORGEJO_CONNECTOR_TOKEN` (the
-`forgejoConnectorToken` knob), with `FORGEJO_BASE_URL` as the base.
+authorizes with the host-only `FORGEJO_TOKEN` (the core `forgejoToken` knob),
+with `FORGEJO_BASE_URL` as the base.
 `connector-forgejo-conformance` holds the forge half to the CodeForge, PRForge
 and host-mediation contracts, and the tracker half to the tracker,
 host-posted-comment and issue-filer contracts, in
@@ -2864,10 +2864,14 @@ that sets one fails evaluation (see [Backend
 Connectors](#backend-connectors)). A forgejo Consumer config that never set
 them evaluates unchanged.
 
-- The Connector authorizes with `SPINDRIFT_FORGEJO_CONNECTOR_TOKEN`, resolved
-  by the launcher and the daemon like any secret knob (the value, `_CMD`, or
-  `SECRET_CMD`) and never reaches the Box. `FORGEJO_TOKEN` stays the
-  git credential, so both are needed.
+- `FORGEJO_TOKEN` is the one credential of a forgejo run. It authorizes the
+  Connector's requests (tracker and forge) and core git (push, bundle relay,
+  mirror seed, Ledger), is resolved by the launcher and the daemon like any
+  secret knob (the value, `_CMD`, or `SECRET_CMD`), and never reaches the Box.
+  It is read at each use from the process environment, so a change to
+  `FORGEJO_TOKEN` there reaches the next request and push; a `_CMD` runs once at
+  launch, with no mid-run re-run. `SPINDRIFT_FORGEJO_CONNECTOR_TOKEN` was
+  removed (issue #7500).
 - `MERGE_METHOD` must be `rebase` or unset: the Connector merges by rebase only,
   and the launcher refuses to build the forge for `squash` or `merge` rather
   than ignore the knob.
@@ -4516,19 +4520,15 @@ secret) may appear in host-side logs. The plaintext direct-value and
 `--<secret>-file` forms remain fully supported and are not deprecated;
 with this in place, `harness.env` is expected to hold fetch recipes
 rather than live credentials. The github row's credential is core's `GH_TOKEN`
-and resolves through `GH_TOKEN_CMD` (`--gh-token-cmd`) as any core secret does.
-The forgejo Connector row's host-only credential
-(`SPINDRIFT_FORGEJO_CONNECTOR_TOKEN`) resolves
-the same way: `<ENV>_CMD`, then
-the plain env var, then the `SECRET_CMD` template. The template applies
-only to a row this run reads through: its backend is the active
-`CODE_FORGE` or `ISSUE_TRACKER`. An explicit `<ENV>_CMD` runs regardless. The
-jira row's credential is core's own `JIRA_TOKEN`, resolved by the ordinary
-secret chain above; its paired identity, `JIRA_EMAIL`, is not a secret and gets
-no `_CMD` or template resolution. A Connector-owned token (the forgejo row's
-`SPINDRIFT_FORGEJO_CONNECTOR_TOKEN`) has no `--<secret>-cmd` or
-`--<secret>-file` flag, and a failing command or template fails startup naming the env var,
-not the command. See `spindrift --help --all` for the full
+and the forgejo row's is core's `FORGEJO_TOKEN`; each resolves through its
+`<ENV>_CMD` (`--gh-token-cmd`, `--forgejo-token-cmd`) as any core secret does:
+`<ENV>_CMD`, then the plain env var, then the `SECRET_CMD` template. The
+template applies only to a row this run reads through: its backend is the
+active `CODE_FORGE` or `ISSUE_TRACKER`. An explicit `<ENV>_CMD` runs
+regardless. The jira row's credential is core's own `JIRA_TOKEN`, resolved by
+the ordinary secret chain above; its paired identity, `JIRA_EMAIL`, is not a
+secret and gets no `_CMD` or template resolution. A failing command or template
+fails startup naming the env var, not the command. See `spindrift --help --all` for the full
 `--<secret>-cmd`/`--<secret>-file` flag list. When the launcher's own stdin
 and stderr are both TTYs, an interactive vault unlock prompt passes through
 instead of being discarded — see [Secret exposure
@@ -4595,7 +4595,7 @@ When a vault's naming isn't uniform, fall back to the per-secret
 | `ANTHROPIC_API_KEY`       | —                      | alternative to the OAuth token (secret; env only) |
 | `GIT_USER_NAME`           | host `git config`; baked via `git.user.name` | commit author name (applied repo-locally inside the Box — see [Hermetic git config](#hermetic-git-config); the `github` Code Forge's host-side Rebase also pins it on its throwaway clone) |
 | `GIT_USER_EMAIL`          | host `git config`; baked via `git.user.email` | commit author email (applied repo-locally inside the Box — see [Hermetic git config](#hermetic-git-config); the `github` Code Forge's host-side Rebase also pins it on its throwaway clone) |
-| `CODE_FORGE`              | `github` (baked)       | code-landing backend: `github` (open PR, watch CI, merge), `git` (push-only to `CODE_FORGE_REMOTE_URL`; no PR, CI-watch, or merge gate — see [ADR 0013](../docs/adr/0013-issue-tracker-and-code-forge-are-independent-seams.md)), `local` (host-mediated landing onto the Accumulation repo's Integration branch; no PR, CI-watch, or network — see [ADR 0033](../docs/adr/0033-host-mediated-local-code-forge.md)), or `forgejo` (open a PR, watch the CI rollup, and merge under `MERGE_MODE` on a Forgejo/Gitea instance through the forgejo Connector, authorized by `SPINDRIFT_FORGEJO_CONNECTOR_TOKEN`, with `FORGEJO_TOKEN` as git's credential — the second full `PRForge` backend beside `github`; see [ADR 0038](../docs/adr/0038-the-forgejo-backend-decision-set.md)) |
+| `CODE_FORGE`              | `github` (baked)       | code-landing backend: `github` (open PR, watch CI, merge), `git` (push-only to `CODE_FORGE_REMOTE_URL`; no PR, CI-watch, or merge gate — see [ADR 0013](../docs/adr/0013-issue-tracker-and-code-forge-are-independent-seams.md)), `local` (host-mediated landing onto the Accumulation repo's Integration branch; no PR, CI-watch, or network — see [ADR 0033](../docs/adr/0033-host-mediated-local-code-forge.md)), or `forgejo` (open a PR, watch the CI rollup, and merge under `MERGE_MODE` on a Forgejo/Gitea instance through the forgejo Connector, with `FORGEJO_TOKEN` authorizing Connector requests and git — the second full `PRForge` backend beside `github`; see [ADR 0038](../docs/adr/0038-the-forgejo-backend-decision-set.md)) |
 | `CODE_FORGE_REMOTE_URL`   | — (required when `CODE_FORGE=git`) | plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo) |
 | `CODE_FORGE_ACCUMULATION_REPO_DIR` | `.spindrift/accum.git` under the launcher's working directory when `CODE_FORGE=local` (auto-created and seeded); an explicit value overrides it | host path to the bare Accumulation repo, mounted read-only into the Box and landed into host-side |
 | `BOX_FORGE_AND_ISSUE_ACCESS` | `read-only` (baked; issue #6899)   | a third axis, orthogonal to `CODE_FORGE`/`ISSUE_TRACKER` (issue #1914): `read-only` is the only value, and the default: the Launcher host-mediates every write — see [Read-only Box](#read-only-box-box_forge_and_issue_accessread-only). `read-write` was removed in issue #6901 and is rejected at build, dispatch, daemon start and `spindrift doctor` (see [MIGRATING.md](../MIGRATING.md)). The selection is coherence-checked against the selected forge/tracker's registry capability bits at `nix build` (Consumer eval) time (issue #2526) — the selected forge must implement bundle-relay (and host-side draft-PR-create when it has pull requests) and the selected tracker must implement host-posted comments; `local`, `github`, and `forgejo` satisfy both sides of the check today, the plain `git` forge satisfies the forge side by bundle relay alone (issue #6898), and the `jira` tracker satisfies the tracker side (paired with a `github`, `forgejo`, or `git` Code Forge, issues #6355, #6898); a Go startup gate remains only as a backstop for a runtime override past what nix already validated |
@@ -5454,7 +5454,8 @@ Target repo: update the configured URL (issue #7466).
 Userinfo replaces any ambient credential helper for that call, so a URL
 whose password lives in a helper should carry no userinfo (put the
 username in the helper's config instead). The Forgejo backend's host-side
-git calls authenticate with `FORGEJO_TOKEN` the same way.
+git calls authenticate with `FORGEJO_TOKEN` the same way, read at each git
+use so a rotated token reaches the next push.
 
 Under `BOX_FORGE_AND_ISSUE_ACCESS=read-only` the same `git` forge is
 host-mediated (issue #6898): the Box holds no credential for
