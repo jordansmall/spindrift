@@ -105,6 +105,20 @@
       nixSubPath = "jira.email";
       boxEnv = false;
     };
+    jiraDeployment = {
+      env = "JIRA_DEPLOYMENT";
+      group = "issues";
+      default = "cloud";
+      doc = "selects the jira Connector's API dialect: cloud (the default) uses Jira Cloud's search APIs; server keeps Server/Data Center's v2 /search; a Server/Data Center site must set server";
+      choices = [
+        "cloud"
+        "server"
+      ];
+      flakeOption = true;
+      legacySettingsExempt = true;
+      nixSubPath = "jira.deployment";
+      boxEnv = false;
+    };
     jiraStatusMapping = {
       env = "JIRA_STATUS_MAPPING";
       group = "issues";

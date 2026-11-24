@@ -123,6 +123,7 @@ let
         "overlapGate"
         "mergeMethod"
         "syncMethod"
+        "jiraDeployment"
         "boxForgeAndIssueAccess"
         "networkMode"
         "signalCarrier"
@@ -1612,6 +1613,12 @@ checkedMerge {
         "merge"
       ]
     ) "lib/env-schema.nix: syncMethod.choices must be [ rebase merge ]";
+    assert pkgs.lib.assertMsg (
+      schema.jiraDeployment.choices or [ ] == [
+        "cloud"
+        "server"
+      ]
+    ) "lib/env-schema.nix: jiraDeployment.choices must be [ cloud server ]";
     assert pkgs.lib.assertMsg (
       schema.boxForgeAndIssueAccess.choices or [ ] == [ "read-only" ]
     ) "lib/env-schema.nix: boxForgeAndIssueAccess.choices must be [ read-only ] (issue #6901)";

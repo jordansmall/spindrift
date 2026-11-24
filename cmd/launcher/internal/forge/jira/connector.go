@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"slices"
 	"strings"
 
@@ -75,13 +76,9 @@ func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (for
 	if err != nil {
 		return nil, err
 	}
-	dialect := "server"
-	if k.JiraEmail != "" {
-		dialect = "cloud"
-	}
 	row.Routes = connectortracker.Routes(row.Routes, k.JiraProjectKey)
 	it, err := connectortracker.NewReloading(func() (*connectorhost.Connector, error) {
-		conn, err := loadRowConnector(context.Background(), row, backendrows.Options{Client: connectorClient})
+		conn, err := loadRowConnector(context.Background(), row, backendrows.Options{Client: connectorClient, Getenv: identityGetenv(row, k)})
 		if err != nil {
 			return nil, err
 		}
@@ -102,13 +99,26 @@ func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (for
 	}, connectortracker.Target{
 		API:     strings.TrimRight(k.JiraBaseURL, "/"),
 		Repo:    k.JiraProjectKey,
-		Dialect: dialect,
+		Dialect: k.JiraDeployment,
 	}, connectorClock)
 	if err != nil {
 		recordFailure("load the Connector", err)
 		return nil, err
 	}
 	return connectorTracker{it}, nil
+}
+
+// identityGetenv serves the identity env var from k, since a flake option or
+// flag reaches the launcher only through the document, never the process env.
+// Unlike the token it is a config-time snapshot, not read per request; that is
+// safe because JIRA_EMAIL has no _CMD form to refresh mid-process.
+func identityGetenv(row backendrows.Row, k Knobs) func(string) string {
+	return func(name string) string {
+		if name == row.IdentityEnv && k.JiraEmail != "" {
+			return k.JiraEmail
+		}
+		return os.Getenv(name)
+	}
 }
 
 // recordFailure records a Connector failure in the connectorrecord .log.

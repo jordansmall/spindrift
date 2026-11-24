@@ -70,6 +70,7 @@ var consumerStanzas = map[string]consumerStanza{
 		DisplayName: "Jira",
 		Settings: []stanzaSetting{
 			{Env: "JIRA_BASE_URL", Path: "issues.jira.baseURL", Default: "\"\""},
+			{Env: "JIRA_DEPLOYMENT", Path: "issues.jira.deployment", Default: "\"cloud\""},
 			{Env: "JIRA_EMAIL", Path: "issues.jira.email", Default: "\"\""},
 			{Env: "JIRA_INCLUDE_COMMENTS", Path: "issues.jira.includeComments", Default: "false"},
 			{Env: "JIRA_ISSUE_TYPE", Path: "issues.jira.issueType", Default: "\"Task\""},

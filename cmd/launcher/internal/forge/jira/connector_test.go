@@ -35,6 +35,7 @@ const (
 	connectorRoutesEnv = "SPINDRIFT_BACKEND_CONNECTOR_ROUTES"
 	connectorProject   = "PROJ"
 	connectorEmail     = "bot@example.com"
+	connectorUsername  = "svc-bot"
 	connectorToken     = "connector-test-token"
 	jiraTimeLayout     = "2006-01-02T15:04:05.000-0700"
 )
@@ -62,7 +63,7 @@ func newConnectorHarness(t *testing.T, cloud bool) *connectorHarness {
 
 func newConnectorHarnessWith(t *testing.T, cloud bool, lc connectortracker.Lifecycle) *connectorHarness {
 	t.Helper()
-	h, path, table := newConnectorBackend(t, cloud, false)
+	h, path, table := newConnectorBackend(t, cloud)
 	wasm, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -86,11 +87,7 @@ func newConnectorHarnessWith(t *testing.T, cloud bool, lc connectortracker.Lifec
 		Name:   name,
 		Routes: h.routes,
 		Authorize: func(r *http.Request) error {
-			if cloud {
-				r.SetBasicAuth(connectorEmail, connectorToken)
-			} else {
-				r.Header.Set("Authorization", "Bearer "+connectorToken)
-			}
+			r.SetBasicAuth(connectorIdentity(cloud), connectorToken)
 			return nil
 		},
 		Client: h.srv.Client(),
@@ -111,12 +108,21 @@ func newConnectorHarnessWith(t *testing.T, cloud bool, lc connectortracker.Lifec
 	return h
 }
 
+// connectorIdentity is the Basic identity the operator sets: an email on
+// Cloud, a username on Server.
+func connectorIdentity(cloud bool) string {
+	if cloud {
+		return connectorEmail
+	}
+	return connectorUsername
+}
+
 // newConnectorBackend serves the scripted backend over TLS for a Connector
 // harness and returns the compiled module's path and the route table, whose
 // hosts are still {base}. The backend checks that each request carries the
-// credential the host attaches: Basic in Cloud, and in Server too when
-// basicOnly (the production row has one scheme), else Bearer.
-func newConnectorBackend(t *testing.T, cloud, basicOnly bool) (*connectorHarness, string, []connectorhost.Route) {
+// credential the host attaches: Basic in both dialects, as the production row
+// has one scheme and JIRA_EMAIL is the identity on Server too.
+func newConnectorBackend(t *testing.T, cloud bool) (*connectorHarness, string, []connectorhost.Route) {
 	t.Helper()
 	path := os.Getenv(connectorWasmEnv)
 	if path == "" {
@@ -133,12 +139,9 @@ func newConnectorBackend(t *testing.T, cloud, basicOnly bool) (*connectorHarness
 	}
 
 	h := &connectorHarness{cloud: cloud, audit: &bytes.Buffer{}}
-	wantAuth := "Bearer " + connectorToken
-	if cloud || basicOnly {
-		req, _ := http.NewRequest(http.MethodGet, "https://example.invalid", nil)
-		req.SetBasicAuth(connectorEmail, connectorToken)
-		wantAuth = req.Header.Get("Authorization")
-	}
+	req, _ := http.NewRequest(http.MethodGet, "https://example.invalid", nil)
+	req.SetBasicAuth(connectorIdentity(cloud), connectorToken)
+	wantAuth := req.Header.Get("Authorization")
 	h.jiraHarness = newJiraBackend(t, cloud, func(next http.Handler) *httptest.Server {
 		return httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			h.record(r, wantAuth)
@@ -177,7 +180,7 @@ func (b connectorBuild) harness(t *testing.T, cloud bool, tr dispatchkind.Tracke
 // credential env are the operator's, only the site is the scripted backend.
 func newProductionHarness(t *testing.T, cloud bool, tr dispatchkind.Tracker, mapping, lifecycle, issueType string, adjust ...func(*backendrows.Row)) *connectorHarness {
 	t.Helper()
-	h, path, table := newConnectorBackend(t, cloud, true)
+	h, path, table := newConnectorBackend(t, cloud)
 	t.Chdir(t.TempDir()) // the tracker's audit file lands under the host log dir
 	pwd, err := os.Getwd()
 	if err != nil {
@@ -186,7 +189,6 @@ func newProductionHarness(t *testing.T, cloud bool, tr dispatchkind.Tracker, map
 	h.auditPath = filepath.Join(hostpaths.LogDir(pwd), connectorrecord.Name("jira", ".audit.jsonl"))
 
 	t.Setenv("JIRA_TOKEN", connectorToken)
-	t.Setenv("JIRA_EMAIL", connectorEmail)
 	r := backendrows.Row{
 		Name: "jira", Module: path, Routes: table,
 		CredentialEnv: "JIRA_TOKEN", CredentialScheme: backendrows.SchemeBasic,
@@ -206,9 +208,13 @@ func newProductionHarness(t *testing.T, cloud bool, tr dispatchkind.Tracker, map
 		jira.JiraIssueTypeEnv:     issueType,
 		jira.JiraStatusMappingEnv: mapping,
 		jira.JiraLifecycleEnv:     lifecycle,
+		// The identity reaches the launcher only through the document, never
+		// the process env; a Server username must not flip the dialect, which
+		// only JIRA_DEPLOYMENT selects.
+		jira.JiraEmailEnv: connectorIdentity(cloud),
 	}
-	if cloud {
-		env[jira.JiraEmailEnv] = connectorEmail
+	if !cloud {
+		env[jira.JiraDeploymentEnv] = "server"
 	}
 	if err := backendrows.Use(row, func(k string) string { return env[k] }); err != nil {
 		t.Fatal(err)

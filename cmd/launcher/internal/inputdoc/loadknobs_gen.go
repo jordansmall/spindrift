@@ -105,6 +105,7 @@ func LoadKnobs(src KnobSource) Knobs {
 			"FORGEJO_BASE_URL":                 src.String("FORGEJO_BASE_URL"),
 			"FORGEJO_TOKEN":                    src.Secret("FORGEJO_TOKEN"),
 			"JIRA_BASE_URL":                    src.String("JIRA_BASE_URL"),
+			"JIRA_DEPLOYMENT":                  src.String("JIRA_DEPLOYMENT"),
 			"JIRA_EMAIL":                       src.String("JIRA_EMAIL"),
 			"JIRA_INCLUDE_COMMENTS":            src.String("JIRA_INCLUDE_COMMENTS"),
 			"JIRA_ISSUE_TYPE":                  src.String("JIRA_ISSUE_TYPE"),

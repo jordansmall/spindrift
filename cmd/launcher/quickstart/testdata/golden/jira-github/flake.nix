@@ -44,6 +44,7 @@
 
             # Jira backend (jira)
             # issues.jira.baseURL = "";
+            # issues.jira.deployment = "cloud";
             # issues.jira.email = "";
             # issues.jira.includeComments = false;
             # issues.jira.issueType = "Task";

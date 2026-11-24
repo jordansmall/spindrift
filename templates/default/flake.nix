@@ -284,6 +284,8 @@
             #   jira = {
             #     # Jira site base URL (e.g. https://yourcompany.atlassian.net); required when ISSUE_TRACKER=jira
             #     baseURL = "";
+            #     # selects the jira Connector's API dialect: cloud (the default) uses Jira Cloud's search APIs; server keeps Server/Data Center's v2 /search; a Server/Data Center site must set server
+            #     deployment = "cloud";
             #     # Basic-auth identity the jira Connector's backend row pairs with JIRA_TOKEN: the Jira Cloud account email (Server/Data Center: the username); host-only, never reaches the Box
             #     email = "";
             #     # DEPRECATED no-op: Jira comments always reach the prompt (the last 10, attributed, through the adapter's comment lister) whether or not this is set. Kept so existing configs still evaluate; will be removed
