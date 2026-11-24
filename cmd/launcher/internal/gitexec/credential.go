@@ -16,6 +16,24 @@ import (
 // is a no-op on it.
 type Credential struct{ Username, Password string }
 
+// CredentialSource yields the Credential for one git operation, read at the
+// moment of use so a token rotated since the source was built is honoured. A
+// nil source is the zero Credential.
+type CredentialSource func() (Credential, error)
+
+// StaticCredential is the source of a Credential that never changes.
+func StaticCredential(c Credential) CredentialSource {
+	return func() (Credential, error) { return c, nil }
+}
+
+// Get reads the source; a nil one yields the zero Credential.
+func (s CredentialSource) Get() (Credential, error) {
+	if s == nil {
+		return Credential{}, nil
+	}
+	return s()
+}
+
 // String redacts the password so a stray %v cannot log it.
 func (c Credential) String() string { return "Credential{redacted}" }
 

@@ -113,3 +113,32 @@ func TestNewRemote_RedirectedRepoNamesTheConfiguredTargetRepo(t *testing.T) {
 		}
 	}
 }
+
+// A Ledger entry is pushed with the credential the source yields at that
+// moment, not the one it yielded when the Remote was built: a token rotated
+// mid-run (the github Connector's GH_TOKEN) is the one the next push presents.
+func TestRemoteCredentialSourceIsReadAtEachPush(t *testing.T) {
+	setGitIdentityEnv(t)
+	remote := gitexectest.NewAuthRemote(t, "oauth2", remoteToken)
+	token := remoteToken
+	src := func() (gitexec.Credential, error) {
+		return gitexec.Credential{Username: "oauth2", Password: token}, nil
+	}
+
+	r, err := ledger.NewRemoteFrom(t.TempDir(), remote.URL, src)
+	if err != nil {
+		t.Fatalf("NewRemoteFrom: %v", err)
+	}
+	commit, err := r.Append("chore-rotate", "", ledger.State{Phase: ledger.Claimed}, time.Now())
+	if err != nil {
+		t.Fatalf("Append with the live token: %v", err)
+	}
+
+	token = "rotated-away-token"
+	if _, err := r.Append("chore-rotate", commit, ledger.State{Phase: ledger.Done}, time.Now()); err == nil {
+		t.Fatal("Append after rotating to a token the remote rejects: got nil error, the push reused the old token")
+	}
+	if !remote.Presented("rotated-away-token") {
+		t.Error("the push after rotation never presented the rotated token")
+	}
+}

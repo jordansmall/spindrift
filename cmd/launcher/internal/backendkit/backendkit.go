@@ -51,10 +51,10 @@ type Shared struct {
 type LedgerSite struct {
 	URL     string
 	GitArgs []string
-	// Credential is attached to every git call core makes against URL, which
-	// itself carries no userinfo. Zero for a forge that authenticates through
+	// Credential is read for every git call core makes against URL, which
+	// itself carries no userinfo. Nil for a forge that authenticates through
 	// GitArgs (github's gh credential helper).
-	Credential gitexec.Credential
+	Credential gitexec.CredentialSource
 	Repo       string
 }
 

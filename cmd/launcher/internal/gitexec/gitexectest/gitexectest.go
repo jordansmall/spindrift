@@ -41,8 +41,9 @@ type Remote struct {
 
 // Request is one request the server received.
 type Request struct {
-	Path    string
-	HasAuth bool // an Authorization header was present, right or wrong
+	Path     string
+	HasAuth  bool   // an Authorization header was present, right or wrong
+	Password string // the basic-auth password presented, "" when none
 }
 
 // Requests returns every request received so far, in arrival order.
@@ -146,7 +147,8 @@ func (h *AuthHandler) Requests() []Request {
 
 func (h *AuthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
-	h.reqs = append(h.reqs, Request{Path: r.URL.Path, HasAuth: r.Header.Get("Authorization") != ""})
+	_, pass, _ := r.BasicAuth()
+	h.reqs = append(h.reqs, Request{Path: r.URL.Path, HasAuth: r.Header.Get("Authorization") != "", Password: pass})
 	h.mu.Unlock()
 	if redirect(w, r, h.Redirects) {
 		return
@@ -207,4 +209,15 @@ func RequireAuthOnlyUnder(t testing.TB, reqs []Request, pathPrefix string) {
 	if authed == 0 {
 		t.Error("no authenticated git request reached the backend")
 	}
+}
+
+// Presented reports whether any request so far carried pass as its basic-auth
+// password, so a test can tell a rejected credential from an unrelated failure.
+func (r *Remote) Presented(pass string) bool {
+	for _, q := range r.Requests() {
+		if q.Password == pass {
+			return true
+		}
+	}
+	return false
 }

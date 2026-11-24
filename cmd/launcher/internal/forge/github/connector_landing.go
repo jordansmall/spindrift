@@ -18,7 +18,7 @@ import (
 
 // gitCredential is the credential core's own git presents to the Connector's
 // clone URL under row. It is read from the row's env at each operation, so a
-// rotated token is honoured (the Ledger site holds one for a chore run), and an
+// rotated token is honoured (the Ledger site reads it per git call), and an
 // unset one fails here by name rather than reaching git as an empty password.
 func gitCredential(row backendrows.Row) (gitexec.Credential, error) {
 	token := os.Getenv(row.CredentialEnv)
@@ -199,11 +199,14 @@ func (e *execClient) seedMirror(row backendrows.Row, dir string) error {
 
 // ledgerSite is the butler Ledger's remote under a routed row: the
 // clone URL Compose validated and the row's credential, so the Ledger's git
-// carries no gh credential helper.
+// carries no gh credential helper. The credential is a source, read by each
+// Ledger git call: the site outlives a token refresh.
 func (e *execClient) ledgerSite(row backendrows.Row) (backendkit.LedgerSite, error) {
 	var site backendkit.LedgerSite
 	err := e.forgeGit(row, "reach the Ledger", func(_ forge.CodeForge, _ forge.Capabilities, g *coreGit) error {
-		site = backendkit.LedgerSite{URL: g.cloneURL, Credential: g.cred}
+		// forgeGit already resolved the credential once, so an unset one fails
+		// here at build; each Ledger git call resolves it afresh.
+		site = backendkit.LedgerSite{URL: g.cloneURL, Credential: func() (gitexec.Credential, error) { return gitCredential(row) }}
 		return nil
 	})
 	return site, err
