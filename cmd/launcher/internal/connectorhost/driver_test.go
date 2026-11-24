@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/logscan"
@@ -596,5 +597,25 @@ func TestDriverRawBatchesWithoutDecodeBatch(t *testing.T) {
 	want := strategy(t, "driver.wasm").NewBatchDecoder()(lines)
 	if got := s.NewBatchDecoder()(lines); !reflect.DeepEqual(got, want) {
 		t.Errorf("batch = %+v, want %+v", got, want)
+	}
+}
+
+// A Connector's session answer crosses the wire as one intact Value, and the
+// row, not the Connector, then decides whether its Flag may reach argv.
+func TestDriverSessionAnswerOverTheWireMeetsTheRow(t *testing.T) {
+	s := conformingStrategy(t, "driver.wasm")
+	got, err := s.SessionFlags("implement", "o/r", "7", "/home/two words")
+	want := driverkit.SessionFlag{Flag: "--session-id", Value: "implement|o/r|7|/home/two words"}
+	if err != nil || got != want {
+		t.Fatalf("SessionFlags = %+v, %v; want %+v", got, err, want)
+	}
+	argv, err := driver.SessionArgs("claude", got)
+	if err != nil || !reflect.DeepEqual(argv, []string{"--session-id", want.Value}) {
+		t.Errorf("SessionArgs(claude) = %q, %v; want the flag and the spaced value as two words", argv, err)
+	}
+	// opencode's row declares --title and --session, not the flag the Connector answered.
+	argv, err = driver.SessionArgs("opencode", got)
+	if err == nil || argv != nil || !strings.Contains(err.Error(), `"opencode"`) || !strings.Contains(err.Error(), `"--session-id"`) {
+		t.Errorf("SessionArgs(opencode) = %q, %v; want a refusal naming the Driver and the undeclared flag", argv, err)
 	}
 }

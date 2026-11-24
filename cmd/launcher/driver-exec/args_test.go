@@ -1,12 +1,15 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"testing"
 
+	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/promptassembly"
 )
 
@@ -461,5 +464,73 @@ func TestBuildDriverArgsSyntheticShapeIsDataDriven(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("buildDriverArgs = %q, want %q", got, want)
+	}
+}
+
+// piShape mirrors the argv shape lib/drivers/pi.nix declares; unlike claude's
+// and opencode's it is not otherwise pinned in this package.
+var piShape = promptassembly.ArgvShape{
+	PromptStyle:    "positional",
+	ModelFlag:      "--model",
+	ModelOmitEmpty: true,
+	EffortFlag:     "--thinking",
+	Order:          []string{"driverFlags", "model", "effort", "session", "prompt"},
+}
+
+// A Driver's structured session answer crosses the Box's gate and its JSON
+// session file into the agent argv at the session slot, one word per element.
+func TestSessionAnswerReachesAgentArgv(t *testing.T) {
+	uuid := driverkit.SessionUUID("o/r", "7")
+	title := "spindrift-" + driverkit.SessionKey("o/r", "7")
+	for _, c := range []struct {
+		name, driver string
+		shape        promptassembly.ArgvShape
+		answer       driverkit.SessionFlag
+		want         []string
+	}{
+		{"claude initial", "claude", claudeShape, driverkit.SessionFlag{Flag: "--session-id", Value: uuid},
+			[]string{"-p", "do it", "--model", "m", "--session-id", uuid}},
+		{"claude resume", "claude", claudeShape, driverkit.SessionFlag{},
+			[]string{"-p", "do it", "--model", "m"}},
+		{"opencode initial", "opencode", opencodeShape, driverkit.SessionFlag{Flag: "--title", Value: title},
+			[]string{"-m", "m", "--title", title, "do it"}},
+		{"opencode resume", "opencode", opencodeShape, driverkit.SessionFlag{Flag: "--session", Value: "ses_x"},
+			[]string{"-m", "m", "--session", "ses_x", "do it"}},
+		{"opencode value with spaces", "opencode", opencodeShape, driverkit.SessionFlag{Flag: "--title", Value: "spindrift-o/r 7 two words"},
+			[]string{"-m", "m", "--title", "spindrift-o/r 7 two words", "do it"}},
+		{"pi initial", "pi", piShape, driverkit.SessionFlag{Flag: "--session-id", Value: uuid},
+			[]string{"--model", "m", "--session-id", uuid, "do it"}},
+		{"pi resume", "pi", piShape, driverkit.SessionFlag{Flag: "--session-id", Value: uuid},
+			[]string{"--model", "m", "--session-id", uuid, "do it"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			argv, err := driver.SessionArgs(c.driver, c.answer)
+			if err != nil {
+				t.Fatalf("SessionArgs: %v", err)
+			}
+			session := ""
+			if len(argv) > 0 {
+				b, err := json.Marshal(argv)
+				if err != nil {
+					t.Fatal(err)
+				}
+				session = string(b)
+			}
+			dir := t.TempDir()
+			promptFile := filepath.Join(dir, "prompt.txt")
+			sessionFile := filepath.Join(dir, "session.json")
+			for path, body := range map[string]string{promptFile: "do it", sessionFile: session} {
+				if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := buildDriverArgs(driverInput{shape: c.shape, promptFile: promptFile, model: "m", sessionFile: sessionFile})
+			if err != nil {
+				t.Fatalf("buildDriverArgs: %v", err)
+			}
+			if !reflect.DeepEqual(got, c.want) {
+				t.Errorf("argv = %q, want %q", got, c.want)
+			}
+		})
 	}
 }

@@ -265,22 +265,36 @@ func TestNewDescriptorWithoutDriverNamesTheMissingRow(t *testing.T) {
 	}
 }
 
-func TestSessionFlagDeclared(t *testing.T) {
+func TestSessionArgs(t *testing.T) {
 	for _, c := range []struct {
-		name, flag string
-		want       bool
+		name    string
+		driver  string
+		answer  driverkit.SessionFlag
+		want    []string
+		wantErr string
 	}{
-		{"claude", "--session-id", true},
-		{"claude", "--title", false},
-		{"opencode", "--title", true},
-		{"opencode", "--session", true},
-		{"opencode", "--session-id", false},
-		{"pi", "--session-id", true},
-		{"bogus", "--session-id", false},
-		{"claude", "", false},
+		{"zero answer renders nothing", "claude", driverkit.SessionFlag{}, nil, ""},
+		{"declared flag and value", "claude", driverkit.SessionFlag{Flag: "--session-id", Value: "u-1"}, []string{"--session-id", "u-1"}, ""},
+		{"second declared flag", "opencode", driverkit.SessionFlag{Flag: "--session", Value: "ses_x"}, []string{"--session", "ses_x"}, ""},
+		{"value with spaces is one word", "opencode", driverkit.SessionFlag{Flag: "--title", Value: "spindrift-o/r 7 x"}, []string{"--title", "spindrift-o/r 7 x"}, ""},
+		{"undeclared flag", "claude", driverkit.SessionFlag{Flag: "--settings", Value: "x"}, nil, `driver "claude" answered session flag "--settings"`},
+		{"another Driver's flag", "claude", driverkit.SessionFlag{Flag: "--title", Value: "x"}, nil, `session flag "--title"`},
+		{"dash-led value is refused", "opencode", driverkit.SessionFlag{Flag: "--title", Value: "--model=evil/x"}, nil, `driver "opencode" answered session flag "--title" with value "--model=evil/x"`},
+		{"bare dash value is refused", "claude", driverkit.SessionFlag{Flag: "--session-id", Value: "-x"}, nil, `with value "-x"`},
+		{"unknown Driver has no row", "bogus", driverkit.SessionFlag{Flag: "--session-id", Value: "x"}, nil, `driver "bogus" has no row declaring session flags`},
+		{"value with no flag", "claude", driverkit.SessionFlag{Value: "--settings"}, nil, `driver "claude" answered session value "--settings" with no flag`},
 	} {
-		if got := SessionFlagDeclared(c.name, c.flag); got != c.want {
-			t.Errorf("SessionFlagDeclared(%q, %q) = %v, want %v", c.name, c.flag, got, c.want)
-		}
+		t.Run(c.name, func(t *testing.T) {
+			got, err := SessionArgs(c.driver, c.answer)
+			if c.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+					t.Fatalf("SessionArgs error = %v, want it to contain %q", err, c.wantErr)
+				}
+				return
+			}
+			if err != nil || !slices.Equal(got, c.want) {
+				t.Errorf("SessionArgs = %q, %v; want %q", got, err, c.want)
+			}
+		})
 	}
 }
