@@ -270,7 +270,10 @@ and in the in-box `box` program; the only bash left is the generated shim that
   data — methods, capabilities, limits, result checks and JSON types — rendered
   by its own `render.nix` into `cmd/launcher/internal/connectorprotocol/`'s
   `protocol_gen.go` and `protocol.schema.json`, drift-guarded by the
-  `connector-protocol-gen` and `connector-protocol-schema-gen` checks),
+  `connector-protocol-gen` and `connector-protocol-schema-gen` checks;
+  `sdk.nix` binds the SDK's Go spelling, and `render.nix`'s `renderSDK` also
+  renders each `sdk/*/protocol_gen.go`, drift-guarded by the
+  `connector-protocol-sdk-gen` check),
   `backends/default.nix` (the backend descriptor registry — one row per
   ISSUE_TRACKER/CODE_FORGE backend, each in its own `backends/<name>.nix`
   file; `env-schema.nix`'s tracker/forge choices derive from it),
@@ -298,7 +301,8 @@ and in the in-box `box` program; the only bash left is the generated shim that
   from `lib/dispatch-kinds/default.nix`),
   `connectorprotocol` (the Connector protocol description; `protocol_gen.go`
   and `protocol.schema.json` are generated from `lib/connector-protocol/`, and
-  its `schematest` subpackage validates exchanges against the schema),
+  its `schematest` subpackage validates exchanges against the schema and its
+  `wiretest` subpackage holds a core struct to the description's wire shape),
   `backend` (the Descriptor registry; `registry_gen.go` is generated from
   `lib/backends/default.nix`), `backendkit` (the Backend Strategy type and
   registry every binary builds and validates adapters through),
@@ -321,15 +325,16 @@ and in the in-box `box` program; the only bash left is the generated shim that
 - **`sdk/`** — the Connector Go SDK
   ([ADR 0073](docs/adr/0073-backends-and-drivers-are-trust-no-one-wasm-connectors.md)).
   Its own Go module (`spindrift.dev/sdk`), so Connector authors do not depend
-  on core internals. It carries a published copy of the event vocabulary,
-  kept in parity with driverkit by `sdk/event/parity_test.go`. It also
-  carries twins of the driverkit helpers a Connector needs (`ToolTarget`,
-  `ErrorText`, `CompactJSON`, `SessionKey`, `SessionUUID`, `IsProgress`,
-  `LineFramer`), pinned by `TestHelperParity` and `TestLineFramerParity` in
-  `sdk/driver/parity_test.go` and `TestIsProgressParity` in
-  `sdk/event/parity_test.go`. Fixture
-  Connectors live under `nix/fixtures/connector-wasm`, except the fixture Driver
-  Connector, which is `nix/fixtures/connector` itself.
+  on core internals. Its protocol constants, wire structs and event vocabulary
+  are rendered from `lib/connector-protocol` into each package's
+  `protocol_gen.go` (`nix run .#regen`), and core's agreement tests hold
+  core's own copies to the same description. It also carries twins of the
+  driverkit helpers a Connector needs (`ToolTarget`, `ErrorText`,
+  `CompactJSON`, `SessionKey`, `SessionUUID`, `LineFramer`), pinned by
+  `TestHelperParity`, `TestStreamFilterParity` and `TestLineFramerParity` in
+  `sdk/driver/twin_test.go`. Fixture Connectors live under
+  `nix/fixtures/connector-wasm`, except the fixture Driver Connector, which is
+  `nix/fixtures/connector` itself.
 - **`connectors/`** — shipped Connector subflakes, each its own Go module built
   to a wasip1 reactor by its own `package.nix`. `connectors/claude` is the
   claude Driver's host half (`spindrift.dev/connector/claude`);

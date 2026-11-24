@@ -17,8 +17,8 @@ import (
 )
 
 // The generated protocol description (lib/connector-protocol) is an agreement
-// target, not a source: core's hand-written constants stay literal because the
-// SDK's parity tests evaluate them. These tests fail when either side moves.
+// target, not a source: core's hand-written constants stay literal, and these
+// tests fail when either side moves.
 
 func TestProtocolVersionAgrees(t *testing.T) {
 	if connectorprotocol.Version != ProtocolVersion {
