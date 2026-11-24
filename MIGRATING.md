@@ -1,5 +1,41 @@
 # Migration Guide
 
+## Server/Data Center jira sites must set `JIRA_DEPLOYMENT=server` (issue #7501)
+
+**A Jira Server/Data Center site must now set `JIRA_DEPLOYMENT=server`
+(`issues.jira.deployment = "server"`).** The jira Connector's API dialect no
+longer follows `JIRA_EMAIL`. `JIRA_DEPLOYMENT` is `cloud` (the default) or
+`server`, and an unset value means Cloud, so a Server/Data Center site that
+left `JIRA_EMAIL` empty to get the v2 `/search` dialect now gets Jira Cloud's
+search APIs, and its jira runs fail until it sets `server`. A Cloud site needs
+nothing for the dialect.
+
+The jira Connector also authorizes with core's own knobs now:
+
+- **`SPINDRIFT_JIRA_CONNECTOR_TOKEN` is renamed `JIRA_TOKEN`** and
+  **`SPINDRIFT_JIRA_CONNECTOR_EMAIL` is renamed `JIRA_EMAIL`.** Setting either
+  old name, or the token's `_CMD` form, in the environment, `harness.env`, or an
+  `--input` document fails launch and `spindrift doctor` (the `removed-knobs`
+  check) with a message naming its replacement. Move the
+  values over: `JIRA_TOKEN` is the Cloud API token (Server/Data Center: the
+  password or token), `JIRA_EMAIL` the Cloud account email (Server/Data Center:
+  the username). The row is Basic, so a Server/Data Center Bearer PAT still does
+  not work. The host attaches both on every Connector request; the Connector
+  never holds them.
+- **A `_CMD` recipe moves with the name.** `SPINDRIFT_JIRA_CONNECTOR_TOKEN_CMD`
+  becomes `JIRA_TOKEN_CMD`. `JIRA_EMAIL` is not a secret and takes no `_CMD`.
+- **`JIRA_TOKEN` is no longer a leftover.** It was required but unused; it is
+  now the credential, so a value that was a placeholder must be the real token.
+
+```sh
+# before
+SPINDRIFT_JIRA_CONNECTOR_TOKEN_CMD="rbw get spindrift-jira"
+SPINDRIFT_JIRA_CONNECTOR_EMAIL=me@example.com
+# after (Server/Data Center adds JIRA_DEPLOYMENT=server)
+JIRA_TOKEN_CMD="rbw get spindrift-jira"
+JIRA_EMAIL=me@example.com
+```
+
 ## The github Connector takes `GH_TOKEN` as its only credential (issue #7499)
 
 A github run now takes one credential, `GH_TOKEN`. The github Connector no
@@ -425,11 +461,14 @@ What changed for a Jira Consumer:
     inputs.jira.flakeModules.default
   ];
   ```
-- **Set `SPINDRIFT_JIRA_CONNECTOR_TOKEN` and `SPINDRIFT_JIRA_CONNECTOR_EMAIL`.**
-  The Connector authorizes with them (Basic) on every jira run. A Server/Data
-  Center site needs a username and password or token there, not a Bearer PAT.
-- **`JIRA_TOKEN` is unused.** It is still required at startup, so leave it
-  set. `JIRA_EMAIL` still selects the API dialect (Cloud when set).
+- **Set `JIRA_TOKEN` and `JIRA_EMAIL`.** The Connector authorizes with them
+  (Basic) on every jira run. A Server/Data Center site needs a username and
+  password or token there, not a Bearer PAT. (This entry first named
+  `SPINDRIFT_JIRA_CONNECTOR_TOKEN` and `SPINDRIFT_JIRA_CONNECTOR_EMAIL`; those
+  are removed, see [the jira credentials
+  entry](#serverdata-center-jira-sites-must-set-jira_deploymentserver-issue-7501).)
+- **`JIRA_DEPLOYMENT` selects the API dialect,** `cloud` (the default) or
+  `server`; `JIRA_EMAIL` no longer affects it (same entry).
 - **`spindrift.connectors.jira.primary` is refused.** Delete it: the
   Connector is always the tracker.
 

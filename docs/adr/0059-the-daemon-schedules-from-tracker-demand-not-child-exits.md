@@ -101,6 +101,9 @@ by-name check with a descriptor enablement row.
   acceptable because it only decides whether to start a child, and the child
   lists issues itself. Server/Data Center, with no `JIRA_EMAIL`, keeps the
   v2 `total`.)
+  (Amended by issue #7501: `JIRA_DEPLOYMENT` (`cloud`, the default, or
+  `server`) now selects the dialect; `JIRA_EMAIL` is only the Basic identity
+  and no longer decides it.)
 - **butler** is `ChildReported`. A new pure `chore.NextDue`, beside
   `chore.Check` and fed the same inputs, maps each not-due reason to when it
   lifts: `IntervalNotElapsed` → last Done + `Every`; `LiveClaim` → claim
