@@ -13,7 +13,6 @@ import (
 
 	"go/ast"
 
-	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectorprotocol"
 	"spindrift.dev/launcher/internal/connectortracker"
 )
@@ -89,38 +88,5 @@ func TestProtocolTrackerAxisAgrees(t *testing.T) {
 		if !served[c] && c != connectortracker.CapProjectKeyIDs {
 			t.Errorf("capability %s serves no method", c)
 		}
-	}
-}
-
-// TestProtocolTrackerRetryAgrees pins the rows' retry fields to the policy core
-// runs every tracker call under.
-func TestProtocolTrackerRetryAgrees(t *testing.T) {
-	p := connectortracker.CallPolicy()
-	var unsafe []string
-	for name, m := range connectorprotocol.Methods {
-		if m.Axis != connectorprotocol.AxisTracker {
-			continue
-		}
-		if !m.Retry.Safe {
-			unsafe = append(unsafe, name)
-		}
-		for _, class := range connectorprotocol.Classes {
-			done := slices.Contains(m.Retry.DoneOn, class)
-			if p.OnRetryFailure == nil {
-				if done {
-					t.Errorf("%s: the row's doneOn names %s, but the tracker policy has no OnRetryFailure", name, class)
-				}
-				continue
-			}
-			err := p.OnRetryFailure(name, &connectorhost.CallError{Class: connectorhost.Class(class)})
-			if (err == nil) != done {
-				t.Errorf("%s: policy turns a retried %s failure into success = %t, the row's doneOn says %t", name, class, err == nil, done)
-			}
-		}
-	}
-	slices.Sort(unsafe)
-	notRetried := slices.Sorted(slices.Values(p.NotRetried))
-	if !slices.Equal(unsafe, notRetried) {
-		t.Errorf("rows with retry.safe = false are %v, CallPolicy().NotRetried is %v", unsafe, notRetried)
 	}
 }

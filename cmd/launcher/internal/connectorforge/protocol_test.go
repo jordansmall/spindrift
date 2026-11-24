@@ -12,8 +12,6 @@ import (
 	"strings"
 	"testing"
 
-	"spindrift.dev/launcher/internal/connectorforge"
-	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectorprotocol"
 )
 
@@ -103,38 +101,5 @@ func TestProtocolForgeAxisAgrees(t *testing.T) {
 		if m.Capability == "" || connectorprotocol.Capabilities[m.Capability] != connectorprotocol.AxisForge {
 			t.Errorf("method %s names capability %q, which is not a forge capability", name, m.Capability)
 		}
-	}
-}
-
-// TestProtocolForgeRetryAgrees pins the rows' retry fields to the policy core
-// runs every forge call under.
-func TestProtocolForgeRetryAgrees(t *testing.T) {
-	p := connectorforge.CallPolicy()
-	var unsafe []string
-	for name, m := range connectorprotocol.Methods {
-		if m.Axis != connectorprotocol.AxisForge {
-			continue
-		}
-		if !m.Retry.Safe {
-			unsafe = append(unsafe, name)
-		}
-		for _, class := range connectorprotocol.Classes {
-			done := slices.Contains(m.Retry.DoneOn, class)
-			if p.OnRetryFailure == nil {
-				if done {
-					t.Errorf("%s: the row's doneOn names %s, but the forge policy has no OnRetryFailure", name, class)
-				}
-				continue
-			}
-			err := p.OnRetryFailure(name, &connectorhost.CallError{Class: connectorhost.Class(class)})
-			if (err == nil) != done {
-				t.Errorf("%s: policy turns a retried %s failure into success = %t, the row's doneOn says %t", name, class, err == nil, done)
-			}
-		}
-	}
-	slices.Sort(unsafe)
-	notRetried := slices.Sorted(slices.Values(p.NotRetried))
-	if !slices.Equal(unsafe, notRetried) {
-		t.Errorf("rows with retry.safe = false are %v, CallPolicy().NotRetried is %v", unsafe, notRetried)
 	}
 }

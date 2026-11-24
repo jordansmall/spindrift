@@ -1,13 +1,12 @@
 # The tracker axis's methods, in the order docs/reference.md's "Tracker
 # capabilities" table lists them. Params follow the structs connectortracker
 # sends and results the ones it decodes (wireIssue, wireComment, ...);
-# sdk/tracker serves the same. Retry follows connectortracker.CallPolicy, which
-# every tracker call goes through: comment, fileIssue, createLabel and
-# transition are called once, since a lost response would repeat the write or
-# meet a state that no longer offers it. editLabels and closeIssue are retried,
-# as the policy's own comment says, though docs/reference.md does not list them
-# among the writes called once. The policy has no OnRetryFailure, so no row has a
-# doneOn.
+# sdk/tracker serves the same. A row's retry is the policy connectorcall.Classify
+# reads for every tracker call: comment, fileIssue, createLabel and transition are
+# called once, since a lost response would repeat the write or meet a state that
+# no longer offers it. editLabels and closeIssue are retried, though
+# docs/reference.md does not list them among the writes called once. No row has
+# a doneOn.
 { t, types }:
 let
   retryable = {

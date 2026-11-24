@@ -292,6 +292,7 @@ let
       "connectorcall"
       "connectorforge"
       "connectorhost"
+      "connectorprotocol"
       "connectorrecord"
       "connectorsandbox"
       "connectortracker"
