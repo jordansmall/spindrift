@@ -86,12 +86,7 @@ func TestWireShapesMatchCore(t *testing.T) {
 			rename[name] = sdk
 		}
 	}
-	mine := structLines(t, "forge.go", nil)
-	for _, file := range []string{"branches.go", "prs.go"} {
-		for name, lines := range structLines(t, file, nil) {
-			mine[name] = lines
-		}
-	}
+	mine := structLines(t, "protocol_gen.go", nil)
 	core := structLines(t, coreFile, rename)
 	for sdk, name := range pairs {
 		want, ok := mine[sdk]

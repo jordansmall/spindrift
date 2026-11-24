@@ -95,6 +95,14 @@ func (c *Connector) DriverStrategy() (driverkit.Strategy, error) {
 	return c.DriverStrategyWithout()
 }
 
+// The describe answer's enum names. An absent name is the zero value, so a
+// guest built before the field existed stays valid; protocol_test.go holds
+// the rest of each map to the description.
+var (
+	totalsNames = map[string]driverkit.TotalsSource{"": driverkit.PerCallTotals, "perCall": driverkit.PerCallTotals, "session": driverkit.SessionTotals}
+	resultNames = map[string]driverkit.ResultReader{"": driverkit.ResultEvents, "events": driverkit.ResultEvents, "lastMessage": driverkit.LastMessage}
+)
+
 // DriverStrategyWithout is DriverStrategy as if the Connector had not
 // advertised caps, so a test can check a capability's answers against its
 // fallback's over one loaded Connector.
@@ -121,12 +129,11 @@ func (c *Connector) DriverStrategyWithout(caps ...string) (driverkit.Strategy, e
 	if err != nil {
 		return driverkit.Strategy{}, err
 	}
-	// An absent name is the zero value, so a guest built before it existed stays valid.
-	totals, ok := map[string]driverkit.TotalsSource{"": driverkit.PerCallTotals, "perCall": driverkit.PerCallTotals, "session": driverkit.SessionTotals}[d.Totals]
+	totals, ok := totalsNames[d.Totals]
 	if !ok {
 		return driverkit.Strategy{}, fmt.Errorf("%w: unknown totals %q", ErrCall, capText(d.Totals))
 	}
-	result, ok := map[string]driverkit.ResultReader{"": driverkit.ResultEvents, "events": driverkit.ResultEvents, "lastMessage": driverkit.LastMessage}[d.Result]
+	result, ok := resultNames[d.Result]
 	if !ok {
 		return driverkit.Strategy{}, fmt.Errorf("%w: unknown result %q", ErrCall, capText(d.Result))
 	}

@@ -10,6 +10,7 @@ let
     concatStringsSep
     deepSeq
     elem
+    elemAt
     filter
     foldl'
     genList
@@ -79,6 +80,23 @@ let
       let
         missing = filter (f: !(row ? ${f})) wanted;
         unknown = filter (f: !(elem f wanted)) (attrNames row);
+      in
+      if missing != [ ] then
+        fail "${what}: missing field(s): ${concatStringsSep ", " missing}"
+      else if unknown != [ ] then
+        fail "${what}: unknown field(s): ${concatStringsSep ", " unknown}"
+      else
+        true;
+
+  # checkFields for a row that may leave some of its optional keys out.
+  checkKeys =
+    what: row: allowed: required:
+    if !isAttrs row then
+      fail "${what}: must be an attribute set"
+    else
+      let
+        missing = filter (f: !(row ? ${f})) required;
+        unknown = filter (f: !(elem f allowed)) (attrNames row);
       in
       if missing != [ ] then
         fail "${what}: missing field(s): ${concatStringsSep ", " missing}"
@@ -422,6 +440,8 @@ let
       "HostLineType"
       "HostLineOpPassStart"
       "PassRoles"
+      "WireFields"
+      "WireEnums"
       "TransitionOutcomes"
     ]
     ++ ids "Cap" (allCapNames desc)
@@ -440,6 +460,327 @@ let
   constBlock = rows: "const (\n" + concat rows + ")\n\n";
   commented = ident: doc: "// ${ident}: ${doc}\n";
 
+  # --- SDK wire structs -------------------------------------------------------
+  # What a struct's field set is held to, and how it is spelled, is in sdk.nix.
+  structKeys = [
+    "name"
+    "type"
+    "params"
+    "doc"
+    "tagless"
+    "fields"
+  ];
+  fieldKeys = [
+    "json"
+    "go"
+    "type"
+    "omitempty"
+    "doc"
+    "embed"
+  ];
+  initialisms = {
+    Api = "API";
+    Url = "URL";
+    Id = "ID";
+    Sha = "SHA";
+  };
+  # "headSha" -> "HeadSHA": camelCase words, each in Go case, initialisms upper.
+  goFieldName =
+    j:
+    concat (
+      map (
+        p:
+        let
+          w = if isList p then head p else upperFirst p;
+        in
+        initialisms.${w} or w
+      ) (filter (p: p != "") (split "([A-Z][a-z0-9]*)" j))
+    );
+  fieldSpec = f: if isString f then { json = f; } else f;
+  # A doc is lines; the blank ones stay a bare `//`.
+  docLines =
+    indent: doc:
+    let
+      ls = filter isString (split "\n" doc);
+      n = length ls;
+      kept = if n > 0 && elemAt ls (n - 1) == "" then genList (elemAt ls) (n - 1) else ls;
+    in
+    concat (map (l: if l == "" then "${indent}//\n" else "${indent}// ${l}\n") kept);
+  isObjectType =
+    ty:
+    elem (ty.kind or null) [
+      "object"
+      "open"
+    ];
+
+  # Every object shape of the description by the key WireFields uses: a types row
+  # by its name, a method's params by "<method>.params".
+  wireShapes =
+    desc:
+    listToAttrs (
+      map (n: {
+        name = n;
+        value = desc.types.${n}.fields;
+      }) (filter (n: isObjectType desc.types.${n}) (attrNames desc.types))
+      ++ concatMap' (
+        m:
+        if isObjectType m.params then
+          [
+            {
+              name = "${m.name}.params";
+              value = m.params.fields;
+            }
+          ]
+        else
+          [ ]
+      ) desc.methods
+    );
+
+  # Every enum the description declares at an object field, by the dotted path to
+  # the field, values sorted: a shape key as wireShapes spells it (a method's
+  # result is "<method>.result"), then ".<field>" down through nested objects.
+  # A ref is not followed (the type row has its own key). A list or map item that
+  # holds an enum is refused, not skipped: WireEnums and the agreement tests would
+  # silently lack it.
+  wireEnums =
+    desc:
+    let
+      at =
+        path: ty0:
+        let
+          ty = if ty0.kind == "optional" || ty0.kind == "nullable" then ty0.inner else ty0;
+        in
+        if ty.kind == "enum" then
+          [
+            {
+              name = path;
+              value = builtins.sort builtins.lessThan ty.values;
+            }
+          ]
+        else if isObjectType ty then
+          concatMap' (f: at "${path}.${f}" ty.fields.${f}) (attrNames ty.fields)
+        else if ty.kind == "list" || ty.kind == "map" then
+          let
+            found = if ty.kind == "list" then at "${path}[]" ty.items else at "${path}{}" ty.values;
+          in
+          if found == [ ] then
+            [ ]
+          else
+            fail "enum at ${(head found).name} sits in a list or map item, which WireEnums does not cover"
+        else
+          [ ];
+    in
+    listToAttrs (
+      concatMap' (n: at n desc.types.${n}) (attrNames desc.types)
+      ++ concatMap' (m: at "${m.name}.params" m.params ++ at "${m.name}.result" m.result) desc.methods
+    );
+
+  # The Go source of one package's maps from the SDK's Go value of a description
+  # enum to its wire name, after checking each binding against the enum.
+  sdkEnums =
+    desc: pkg: enums:
+    let
+      all = wireEnums desc;
+      keys = [
+        "var"
+        "path"
+        "type"
+        "names"
+      ];
+      where = e: "sdk binding ${pkg}.enums ${toJSON (e.var or "?")}";
+      one =
+        e:
+        let
+          wire = all.${e.path} or (fail "${where e}: path ${toJSON e.path} names no enum of the description");
+          bound = attrNames e.names;
+          missing = filter (v: !elem v bound) wire;
+          extra = filter (v: !elem v wire) bound;
+        in
+        seq
+          (deepSeq [
+            (checkKeys (where e) e keys keys)
+            (checkName (where e) "[a-z][A-Za-z0-9]*" e.var)
+            (checkName "${where e} type" "[A-Z][A-Za-z0-9]*" e.type)
+            (map (v: checkName "${where e} name of ${toJSON v}" "[A-Z][A-Za-z0-9]*" e.names.${v}) bound)
+            (
+              if missing == [ ] then
+                true
+              else
+                fail "${where e}: names no Go value for ${toJSON (head missing)}, which the description's enum has (${concatStringsSep ", " wire})"
+            )
+            (
+              if extra == [ ] then
+                true
+              else
+                fail "${where e}: ${toJSON (head extra)} is not in the description's enum (${concatStringsSep ", " wire})"
+            )
+          ] true)
+          {
+            text =
+              "// ${e.var} maps each ${e.type} to its wire name.\n"
+              + "var ${e.var} = map[${e.type}]string{${
+                concatStringsSep ", " (map (v: "${e.names.${v}}: ${goString v}") wire)
+              }}\n\n";
+            idents = [ e.var ];
+          };
+      parts = map one enums;
+    in
+    {
+      text = concat (map (p: p.text) parts);
+      idents = concatMap' (p: p.idents) parts;
+    };
+
+  # The Go source of one package's bound structs and the imports its field types
+  # need, after checking each against the description's shape.
+  sdkStructs =
+    desc: pkg: structs:
+    let
+      where = s: "sdk binding ${pkg}.structs ${toJSON (s.name or "?")}";
+      byName =
+        s: n:
+        let
+          m = filter (o: o.name == n) structs;
+        in
+        if m == [ ] then fail "${where s}: embeds ${toJSON n}, which ${pkg} does not bind" else head m;
+      shapeOf =
+        s:
+        let
+          shape =
+            if (s ? type) == (s ? params) then
+              fail "${where s}: needs exactly one of type and params"
+            else if s ? type then
+              desc.types.${s.type} or (fail "${where s}: type ${toJSON s.type} is not a description type")
+            else
+              let
+                ms = filter (m: m.name == s.params) desc.methods;
+              in
+              if ms == [ ] then
+                fail "${where s}: params ${toJSON s.params} is not a description method"
+              else
+                (head ms).params;
+        in
+        if isObjectType shape then shape.fields else fail "${where s}: the shape is not an object";
+      # The JSON field names the struct covers, an embedded struct's included.
+      namesOf =
+        s:
+        concatMap' (
+          f0:
+          let
+            f = fieldSpec f0;
+          in
+          if f ? embed then namesOf (byName s f.embed) else [ f.json ]
+        ) s.fields;
+      goTypeOf =
+        s: ty:
+        let
+          k = ty.kind;
+          go = goTypeOf s;
+        in
+        if k == "string" || k == "enum" then
+          "string"
+        else if k == "boolean" then
+          "bool"
+        else if k == "integer" then
+          "int"
+        else if k == "number" then
+          "float64"
+        else if k == "any" then
+          "any"
+        else if k == "list" then
+          "[]${go ty.items}"
+        else if k == "map" then
+          "map[string]${go ty.values}"
+        else if k == "optional" || k == "nullable" then
+          go ty.inner
+        else if k == "ref" then
+          let
+            m = filter (o: (o.type or null) == ty.name) structs;
+          in
+          if m == [ ] then
+            fail "${where s}: no ${pkg} struct is bound to type ${toJSON ty.name}; give the field a type"
+          else
+            (head m).name
+        else
+          fail "${where s}: no Go type for a ${k}; give the field a type";
+      fieldType = s: f: f.type or (goTypeOf s (shapeOf s).${f.json});
+      realFields = s: filter (f: !(f ? embed)) (map fieldSpec s.fields);
+      checks =
+        s:
+        let
+          shape = shapeOf s;
+          bound = namesOf s;
+          want = attrNames shape;
+          missing = filter (n: !(shape ? ${n})) bound;
+          omitted = filter (n: !elem n bound) want;
+        in
+        [
+          (checkKeys (where s) s structKeys [
+            "name"
+            "fields"
+          ])
+          (checkName (where s) "[A-Za-z][A-Za-z0-9]*" s.name)
+          (noDups "${where s} fields" bound)
+          (
+            if missing == [ ] then
+              true
+            else
+              fail "${where s}: field ${toJSON (head missing)} is not in the description's shape (${concatStringsSep ", " want})"
+          )
+          (
+            if omitted == [ ] then
+              true
+            else
+              fail "${where s}: the description's field ${toJSON (head omitted)} is left out; the description governs the field set"
+          )
+        ]
+        ++ map (
+          f: checkKeys "${where s} field" f fieldKeys (if f ? embed then [ "embed" ] else [ "json" ])
+        ) (map fieldSpec s.fields)
+        ++ map (f: if isString (f.type or "") then true else fail "${where s}: type must be a string") (
+          realFields s
+        )
+        ++ [ (seq (map (f: fieldType s f) (realFields s)) true) ];
+      fieldLine =
+        s: f:
+        if f ? embed then
+          "${f.embed}\n"
+        else
+          let
+            name = f.go or (if s.tagless or false then f.json else goFieldName f.json);
+            tag =
+              if s.tagless or false then
+                ""
+              else
+                " `json:\"${f.json}${if f.omitempty or false then ",omitempty" else ""}\"`";
+          in
+          (if f ? doc then docLines "\t" f.doc else "") + "${name} ${fieldType s f}${tag}\n";
+      # A documented field is set off by a blank line, as the SDK's own are.
+      fieldsText =
+        s:
+        concat (
+          genList (
+            i:
+            let
+              f = fieldSpec (elemAt s.fields i);
+            in
+            (if i > 0 && (f.doc or null) != null then "\n" else "") + fieldLine s f
+          ) (length s.fields)
+        );
+      structText =
+        s: (if s ? doc then docLines "" s.doc else "") + "type ${s.name} struct {\n${fieldsText s}}\n\n";
+      types = concatMap' (s: map (f: fieldType s f) (realFields s)) structs;
+      uses = sub: filter (t: length (split sub t) > 1) types != [ ];
+    in
+    seq (deepSeq (concatMap' checks structs) null) (
+      seq (noDups "${pkg} structs" (map (s: s.name) structs)) {
+        text = concat (map structText structs);
+        idents = map (s: s.name) structs;
+        imports =
+          (if uses "json\\.RawMessage" then [ "encoding/json" ] else [ ])
+          ++ (if uses "time\\.Time" then [ "time" ] else [ ]);
+      }
+    );
+
   renderGo =
     description:
     let
@@ -450,6 +791,8 @@ let
       limitNames = attrNames desc.limits;
       checkNames = attrNames desc.resultChecks;
       goList = items: "[]string{${concatStringsSep ", " items}}";
+      shapes = wireShapes desc;
+      enums = wireEnums desc;
       axisConst = axis: "Axis${goIdent axis}";
       methodEntry =
         m:
@@ -596,6 +939,21 @@ let
     + "// Methods maps every method name to its row.\n"
     + "var Methods = map[string]Method{\n"
     + concat (map methodEntry desc.methods)
+    + "}\n\n"
+    + "// WireFields lists the JSON field names of each object shape the protocol\n"
+    + "// describes, sorted: a shared type under its name, a method's params under\n"
+    + "// \"<method>.params\". Core's own wire structs are held to it by agreement tests.\n"
+    + "var WireFields = map[string][]string{\n"
+    + concat (
+      map (k: "${goString k}: ${goList (map goString (attrNames shapes.${k}))},\n") (attrNames shapes)
+    )
+    + "}\n\n"
+    + "// WireEnums lists the values of each enum the protocol describes at an object\n"
+    + "// field, sorted, under the field's dotted path: a shape key as WireFields spells\n"
+    + "// it (a method's result is \"<method>.result\"), then \".<field>\". Core's own\n"
+    + "// name maps are held to it by agreement tests.\n"
+    + "var WireEnums = map[string][]string{\n"
+    + concat (map (k: "${goString k}: ${goList (map goString enums.${k})},\n") (attrNames enums))
     + "}\n";
 
   # --- SDK ------------------------------------------------------------------
@@ -659,7 +1017,11 @@ let
         pkg:
         let
           fields = attrNames (binding.${pkg} or { });
-          allowed = attrNames keys.${pkg};
+          kinds = [
+            "structs"
+            "enums"
+          ];
+          allowed = attrNames keys.${pkg} ++ kinds;
           bad = filter (f: !elem f allowed) fields;
         in
         [
@@ -670,7 +1032,7 @@ let
               fail "sdk binding ${pkg}: unknown field(s): ${concatStringsSep ", " bad}"
           )
         ]
-        ++ concatMap' (fieldChecks pkg) (filter (f: elem f allowed) fields);
+        ++ concatMap' (fieldChecks pkg) (filter (f: !elem f kinds && elem f allowed) fields);
       unknownPkgs = filter (p: !elem p sdkPackages) (attrNames binding);
     in
     deepSeq (
@@ -692,9 +1054,32 @@ let
       ok = checkSdkBinding desc binding;
       bound = pkg: field: binding.${pkg}.${field} or { };
       limits = binding.connector.limits or [ ];
+      structsOf = pkg: binding.${pkg}.structs or [ ];
+      enumsOf = pkg: binding.${pkg}.enums or [ ];
+      built = listToAttrs (
+        map (pkg: {
+          name = pkg;
+          value =
+            let
+              s = sdkStructs desc pkg (structsOf pkg);
+              e = sdkEnums desc pkg (enumsOf pkg);
+            in
+            s
+            // {
+              text = s.text + e.text;
+              idents = s.idents ++ e.idents;
+            };
+        }) sdkPackages
+      );
       header =
         pkg:
-        "// Code generated by nix/regen.nix from lib/connector-protocol/*.nix. DO NOT EDIT.\n\npackage ${pkg}\n\n";
+        "// Code generated by nix/regen.nix from lib/connector-protocol/*.nix. DO NOT EDIT.\n\npackage ${pkg}\n\n"
+        + (
+          if built.${pkg}.imports == [ ] then
+            ""
+          else
+            "import (\n" + concat (map (i: "\t${goString i}\n") built.${pkg}.imports) + ")\n\n"
+        );
       suffixOf =
         axis: name:
         if name == axis then axis else substring (stringLength axis + 1) (stringLength name) name;
@@ -843,8 +1228,8 @@ let
       listToAttrs (
         map (pkg: {
           name = "sdk/${pkg}/protocol_gen.go";
-          value = seq (noDups "sdk/${pkg} Go identifiers" files.${pkg}.idents) (
-            header pkg + files.${pkg}.text
+          value = seq (noDups "sdk/${pkg} Go identifiers" (files.${pkg}.idents ++ built.${pkg}.idents)) (
+            header pkg + files.${pkg}.text + built.${pkg}.text
           );
         }) sdkPackages
       )

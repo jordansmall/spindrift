@@ -147,7 +147,7 @@ const (
 	ClassNotFound = "not-found"
 	// ClassAuth: The credential was refused or lacks standing.
 	ClassAuth = "auth"
-	// ClassNotMergeable: A forge refused a merge because the PR is not mergeable as it stands.
+	// ClassNotMergeable: A forge refused a merge because the PR is not mergeable as it stands: a conflict, a missing required check or review, or a draft, closed, or merged state. Core re-reads the PR on this class only.
 	ClassNotMergeable = "not-mergeable"
 	// ClassPermanent: Every other failure, and any answer naming no class or one core does not know.
 	ClassPermanent = "permanent"
@@ -553,4 +553,102 @@ var Methods = map[string]Method{
 	MethodTrackerListLabels:      {Name: MethodTrackerListLabels, Axis: AxisTracker, Capability: CapTrackerLabels, Retry: Retry{Safe: true}, ResultCheck: CheckLabelNames},
 	MethodTrackerCreateLabel:     {Name: MethodTrackerCreateLabel, Axis: AxisTracker, Capability: CapTrackerLabels, ResultCheck: CheckDecode},
 	MethodTrackerMatchesRoute:    {Name: MethodTrackerMatchesRoute, Axis: AxisTracker, Capability: CapTrackerRoute, Retry: Retry{Safe: true}, ResultCheck: CheckDecode},
+}
+
+// WireFields lists the JSON field names of each object shape the protocol
+// describes, sorted: a shared type under its name, a method's params under
+// "<method>.params". Core's own wire structs are held to it by agreement tests.
+var WireFields = map[string][]string{
+	"check":                          []string{"conclusion", "jobId", "kind", "name", "summary"},
+	"comment":                        []string{"association", "author", "body", "createdAt", "minimized", "minimizedReason", "researchMarker"},
+	"commentRequest":                 []string{"body", "research"},
+	"createField":                    []string{"fieldId", "hasDefaultValue", "name", "required"},
+	"driver.decode.params":           []string{"decoder", "line"},
+	"driver.decodeBatch.params":      []string{"decoder", "lines"},
+	"driver.describe.params":         []string{},
+	"driver.freeDecoder.params":      []string{"decoder"},
+	"driver.freeStreamFilter.params": []string{"filter"},
+	"driver.modelFamily.params":      []string{"model"},
+	"driver.newDecoder.params":       []string{"now"},
+	"driver.newStreamFilter.params":  []string{},
+	"driver.resolveExit.params":      []string{"exitCode", "log"},
+	"driver.resultEvent.params":      []string{"text"},
+	"driver.sessionFlags.params":     []string{"home", "issue", "mode", "repoSlug"},
+	"driver.streamFlush.params":      []string{"filter"},
+	"driver.streamWrite.params":      []string{"data", "filter"},
+	"driver.toolKind.params":         []string{"tool"},
+	"driver.toolPhase.params":        []string{"input", "tool"},
+	"event":                          []string{"DurationAPIMs", "DurationMs", "Effort", "InSubagent", "IsError", "Kind", "MessageID", "Model", "ModelOutput", "Models", "NoTotals", "NoTurns", "NumTurns", "ResetAt", "Role", "SessionID", "Subagent", "Synthetic", "Text", "Timestamp", "Tokens", "ToolID", "ToolInput", "ToolName", "ToolOutput", "ToolTarget"},
+	"forge.autoMergeAllowed.params":  []string{"target"},
+	"forge.behind.params":            []string{"number", "target"},
+	"forge.branchExists.params":      []string{"branch", "target"},
+	"forge.branchProtected.params":   []string{"branch", "target"},
+	"forge.checks.params":            []string{"number", "target"},
+	"forge.ciRun.params":             []string{"number", "target"},
+	"forge.comment.params":           []string{"body", "number", "target"},
+	"forge.deleteBranch.params":      []string{"branch", "target"},
+	"forge.enqueueAutoMerge.params":  []string{"number", "target"},
+	"forge.jobLog.params":            []string{"errorLines", "jobId", "tail", "target"},
+	"forge.merge.params":             []string{"number", "target"},
+	"forge.openPR.params":            []string{"pr", "target"},
+	"forge.pr.params":                []string{"number", "target"},
+	"forge.prFiles.params":           []string{"number", "target"},
+	"forge.probe.params":             []string{"target"},
+	"forge.prsForBranch.params":      []string{"branch", "target"},
+	"forge.remote.params":            []string{"target"},
+	"forge.setDraft.params":          []string{"draft", "number", "target"},
+	"forge.tokenGrant.params":        []string{"target", "tokenPrefix"},
+	"grant":                          []string{"introspectable", "reason", "scopes", "writeCapable"},
+	"httpRequest":                    []string{"body", "headers", "method", "url"},
+	"issue":                          []string{"body", "closedAt", "closedNotPlanned", "dedupMarker", "labels", "number", "state", "status", "title"},
+	"issueRequest":                   []string{"body", "dedupMarker", "issueType", "labels", "route", "title"},
+	"pattern":                        []string{"reason", "substr"},
+	"pr":                             []string{"crossRepo", "draft", "head", "headSha", "mergeCommit", "mergeable", "merged", "number", "state", "url"},
+	"remote":                         []string{"cloneUrl", "webUrl"},
+	"rollup":                         []string{"checks", "state"},
+	"route":                          []string{"kind", "value"},
+	"statusTarget":                   []string{"resolution", "status"},
+	"target":                         []string{"api", "repo"},
+	"tokens":                         []string{"CacheRead", "CacheWrite1h", "CacheWrite5m", "CostUSD", "Input", "Output"},
+	"tracker.blocks.params":          []string{"number", "target"},
+	"tracker.closeIssue.params":      []string{"number", "target"},
+	"tracker.comment.params":         []string{"body", "number", "research", "target"},
+	"tracker.comments.params":        []string{"number", "target"},
+	"tracker.count.params":           []string{"fresh", "label", "limit", "route", "status", "target"},
+	"tracker.countInterval.params":   []string{},
+	"tracker.createLabel.params":     []string{"color", "description", "name", "target"},
+	"tracker.createMeta.params":      []string{"issueType", "target"},
+	"tracker.editLabels.params":      []string{"add", "number", "remove", "target"},
+	"tracker.fileIssue.params":       []string{"body", "dedupMarker", "issueType", "labels", "route", "target", "title"},
+	"tracker.issue.params":           []string{"number", "target"},
+	"tracker.labeled.params":         []string{"cursor", "label", "limit", "route", "state", "target"},
+	"tracker.listIssues.params":      []string{"label", "limit", "route", "status", "target"},
+	"tracker.listLabels.params":      []string{"target"},
+	"tracker.matchesRoute.params":    []string{"number", "route", "target"},
+	"tracker.nativeDeps.params":      []string{"number", "target"},
+	"tracker.probe.params":           []string{"target"},
+	"tracker.removedLabels.params":   []string{"number", "target"},
+	"tracker.searchIssues.params":    []string{"label", "limit", "state", "target", "text"},
+	"tracker.statuses.params":        []string{"target"},
+	"tracker.transition.params":      []string{"mapping", "number", "state", "target"},
+	"trackerTarget":                  []string{"api", "dialect", "repo"},
+	"transitionRequest":              []string{"mapping", "state"},
+	"transitionResult":               []string{"offered", "outcome", "status"},
+}
+
+// WireEnums lists the values of each enum the protocol describes at an object
+// field, sorted, under the field's dotted path: a shape key as WireFields spells
+// it (a method's result is "<method>.result"), then ".<field>". Core's own
+// name maps are held to it by agreement tests.
+var WireEnums = map[string][]string{
+	"driver.describe.result.result":     []string{"events", "lastMessage"},
+	"driver.describe.result.totals":     []string{"perCall", "session"},
+	"event.Kind":                        []string{"error", "model", "reasoning", "result", "start", "text", "tool_call", "tool_result", "unparsed", "usage"},
+	"issue.state":                       []string{"", "closed", "open"},
+	"pr.mergeable":                      []string{"CONFLICTING", "MERGEABLE", "UNKNOWN"},
+	"pr.state":                          []string{"closed", "open"},
+	"rollup.state":                      []string{"", "ERROR", "EXPECTED", "FAILURE", "PENDING", "SUCCESS"},
+	"tracker.labeled.params.state":      []string{"closed", "open"},
+	"tracker.searchIssues.params.state": []string{"closed", "open"},
+	"transitionResult.outcome":          []string{"moved", "unavailable", "unmapped"},
 }

@@ -6,59 +6,6 @@ import (
 	"spindrift.dev/sdk/connector"
 )
 
-// StatusTarget is the tracker status a Dispatch state maps to and the
-// resolution to set on entering it ("" for none).
-type StatusTarget struct {
-	Status     string `json:"status"`
-	Resolution string `json:"resolution"`
-}
-
-// TransitionRequest asks a Connector to move an issue to a Dispatch state.
-// State and the keys of Mapping are core's canonical state names (dispatchable,
-// in-progress, complete, failed, ambiguous, ...). A Connector has no config
-// channel, so core ships the whole table on every call and the Connector
-// applies Mapping[State], including the rule that only failed and ambiguous
-// may share a status. Mapping holds only the states that name a status.
-type TransitionRequest struct {
-	State   string                  `json:"state"`
-	Mapping map[string]StatusTarget `json:"mapping"`
-}
-
-// TransitionResult is how a Transition ended. Status is the tracker status the
-// Connector resolved State to ("" when unmapped), so core can name it in a
-// refusal. Any other failure, such as a transport error or a transition that
-// needs a field the request cannot supply, is an error, never an outcome.
-type TransitionResult struct {
-	Outcome string   `json:"outcome"`
-	Status  string   `json:"status"`
-	Offered []string `json:"offered"`
-}
-
-// CommentRequest is a comment to post. Body is canonical Markdown with the
-// research marker line already removed; Research says the comment carries that
-// marker, which the Connector stores the way its tracker can (Jira: a comment
-// entity property).
-type CommentRequest struct {
-	Body     string `json:"body"`
-	Research bool   `json:"research"`
-}
-
-// IssueRequest is an issue to file. Body is canonical Markdown without the
-// dedup marker line; DedupMarker is that line verbatim ("" for none), stored
-// where the tracker can find it on read (Jira: an issue entity property).
-// IssueType is the type core files as; a Connector has no config channel, so
-// core ships it on each call. Route is the Issue route the filed issue must
-// carry (its stamp): a Connector sets every selector, so the issue matches the
-// same route's Query; empty stamps nothing.
-type IssueRequest struct {
-	Title       string     `json:"title"`
-	Body        string     `json:"body"`
-	Labels      []string   `json:"labels"`
-	DedupMarker string     `json:"dedupMarker"`
-	IssueType   string     `json:"issueType"`
-	Route       []Selector `json:"route,omitempty"`
-}
-
 // Writer is the write primitives of a Connector-backed tracker. Each func is
 // optional and declares its capability only when set. Core decides lifecycle
 // policy (fallback, refusal, claim checks, verdicts); a Writer applies the
@@ -124,11 +71,7 @@ func writeHandlers(w Writer) ([]string, map[string]method) {
 	if w.Transition != nil {
 		caps = append(caps, CapTransition)
 		m[CapTransition] = func(params json.RawMessage) (any, error) {
-			var p struct {
-				Target Target `json:"target"`
-				Number string `json:"number"`
-				TransitionRequest
-			}
+			var p transitionParams
 			if err := unmarshal(params, &p); err != nil {
 				return nil, err
 			}
@@ -145,12 +88,7 @@ func writeHandlers(w Writer) ([]string, map[string]method) {
 	if w.EditLabels != nil {
 		caps = append(caps, CapEditLabels)
 		m[CapEditLabels] = func(params json.RawMessage) (any, error) {
-			var p struct {
-				Target Target   `json:"target"`
-				Number string   `json:"number"`
-				Add    []string `json:"add"`
-				Remove []string `json:"remove"`
-			}
+			var p editLabelsParams
 			if err := unmarshal(params, &p); err != nil {
 				return nil, err
 			}
@@ -160,11 +98,7 @@ func writeHandlers(w Writer) ([]string, map[string]method) {
 	if w.Comment != nil {
 		caps = append(caps, CapComment)
 		m[CapComment] = func(params json.RawMessage) (any, error) {
-			var p struct {
-				Target Target `json:"target"`
-				Number string `json:"number"`
-				CommentRequest
-			}
+			var p commentParams
 			if err := unmarshal(params, &p); err != nil {
 				return nil, err
 			}
@@ -174,10 +108,7 @@ func writeHandlers(w Writer) ([]string, map[string]method) {
 	if w.FileIssue != nil {
 		caps = append(caps, CapFileIssue)
 		m[CapFileIssue] = func(params json.RawMessage) (any, error) {
-			var p struct {
-				Target Target `json:"target"`
-				IssueRequest
-			}
+			var p fileIssueParams
 			if err := unmarshal(params, &p); err != nil {
 				return nil, err
 			}
@@ -193,10 +124,7 @@ func writeHandlers(w Writer) ([]string, map[string]method) {
 	if w.CloseIssue != nil {
 		caps = append(caps, CapCloseIssue)
 		m[CapCloseIssue] = func(params json.RawMessage) (any, error) {
-			var p struct {
-				Target Target `json:"target"`
-				Number string `json:"number"`
-			}
+			var p closeIssueParams
 			if err := unmarshal(params, &p); err != nil {
 				return nil, err
 			}
@@ -222,12 +150,7 @@ func writeHandlers(w Writer) ([]string, map[string]method) {
 			}{names}, nil
 		}
 		m[CapCreateLabel] = func(params json.RawMessage) (any, error) {
-			var p struct {
-				Target      Target `json:"target"`
-				Name        string `json:"name"`
-				Description string `json:"description"`
-				Color       string `json:"color"`
-			}
+			var p createLabelParams
 			if err := unmarshal(params, &p); err != nil {
 				return nil, err
 			}

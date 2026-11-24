@@ -152,12 +152,6 @@ type Heartbeat struct {
 	Family func(model string) (label string, rank int)
 }
 
-// The enums cross as these names; each zero value is the default.
-var (
-	totalsWire = map[TotalsSource]string{PerCallTotals: "perCall", SessionTotals: "session"}
-	resultWire = map[ResultReader]string{ResultEvents: "events", LastMessage: "lastMessage"}
-)
-
 // method serves one request. Its argument is the request's params bytes: JSON
 // for every method but methodDecodeRaw, whose bytes are the raw payload.
 type method = func([]byte) (any, error)

@@ -6,15 +6,6 @@ import (
 	"spindrift.dev/sdk/connector"
 )
 
-// Remote is a repository's git identity. CloneURL is what core's git plumbing
-// pushes to and WebURL is the repository's web page. Neither may carry
-// credentials: core refuses one that does, and one naming a host outside the
-// Connector's declared routes.
-type Remote struct {
-	CloneURL string `json:"cloneUrl"`
-	WebURL   string `json:"webUrl"`
-}
-
 // Branches is everything a Connector-backed Code Forge needs of the forge
 // itself for branches; core does every git operation against Remote.
 type Branches struct {

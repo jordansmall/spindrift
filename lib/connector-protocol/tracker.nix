@@ -8,7 +8,7 @@
 # as the policy's own comment says, though docs/reference.md does not list them
 # among the writes called once. The policy has no OnRetryFailure, so no row has a
 # doneOn.
-{ t, outcomes }:
+{ t, types }:
 let
   retryable = {
     safe = true;
@@ -31,6 +31,9 @@ let
     raw = false;
   };
   target = t.ref "trackerTarget";
+  # A request's fields are the types row's, so the params and the SDK's request
+  # struct cannot differ.
+  requestFields = name: types.${name}.fields;
   route = t.optional (t.list (t.ref "route"));
   targeted = t.object { inherit target; };
   numbered = t.object {
@@ -87,14 +90,7 @@ in
     })
     (t.open {
       issueTypes = t.list t.string;
-      fields = t.list (
-        t.open {
-          fieldId = t.string;
-          name = t.string;
-          required = t.boolean;
-          hasDefaultValue = t.boolean;
-        }
-      );
+      fields = t.list (t.ref "createField");
     })
     retryable
     "createMetaIssueType"
@@ -157,17 +153,14 @@ in
     "One page of the issues carrying `label` in `state`, newest first, closedAt and closedNotPlanned filled for closed ones; `next` is the opaque cursor of the following page, empty at the end."
   )
   (method "tracker.transition" "tracker.transition"
-    (t.object {
-      inherit target;
-      number = t.string;
-      state = t.string;
-      mapping = t.map (t.ref "statusTarget");
-    })
-    (t.open {
-      outcome = t.enum outcomes;
-      status = t.string;
-      offered = t.optional (t.list t.string);
-    })
+    (t.object (
+      {
+        inherit target;
+        number = t.string;
+      }
+      // requestFields "transitionRequest"
+    ))
+    (t.ref "transitionResult")
     once
     "transitionOutcome"
     "Moves the issue to the native status core's `mapping` names for `state`; core decides the fallback, the refusal and the label strip."
@@ -179,26 +172,20 @@ in
     remove = t.list t.string;
   }) done retryable "decode" "One edit that adds and removes the named labels.")
   (method "tracker.comment" "tracker.comment"
-    (t.object {
-      inherit target;
-      number = t.string;
-      body = t.string;
-      research = t.boolean;
-    })
+    (t.object (
+      {
+        inherit target;
+        number = t.string;
+      }
+      // requestFields "commentRequest"
+    ))
     done
     once
     "decode"
     "Posts one comment: `body` is canonical Markdown without the research marker line, `research` says the comment carries it."
   )
   (method "tracker.fileIssue" "tracker.fileIssue"
-    (t.object {
-      inherit target route;
-      title = t.string;
-      body = t.string;
-      labels = t.list t.string;
-      dedupMarker = t.string;
-      issueType = t.string;
-    })
+    (t.object ({ inherit target; } // requestFields "issueRequest"))
     (t.open { url = t.string; })
     once
     "filedURL"

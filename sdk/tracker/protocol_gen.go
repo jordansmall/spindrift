@@ -105,3 +105,154 @@ const (
 	// TransitionUnmapped: The mapping holds no non-empty status for the state.
 	TransitionUnmapped = "unmapped"
 )
+
+// Target names the tracker repository a call reads from. API is the https
+// base URL without a trailing slash, for example https://api.github.com.
+// Dialect names the tracker deployment's API dialect (a Jira Connector takes
+// "cloud" or "server"); it is "" for a tracker with one.
+type Target struct {
+	API     string `json:"api"`
+	Repo    string `json:"repo"`
+	Dialect string `json:"dialect"`
+}
+
+// Selector is one Route term: Kind names how the tracker matches (a kind the
+// tracker declares it supports) and Value is what it matches against.
+type Selector struct {
+	Kind  string `json:"kind"`
+	Value string `json:"value"`
+}
+
+// Issue is one tracker issue. State is "open" or "closed"; a listIssues answer
+// may leave Body and State empty.
+type Issue struct {
+	Number string   `json:"number"`
+	Title  string   `json:"title"`
+	Body   string   `json:"body"`
+	State  string   `json:"state"`
+	Labels []string `json:"labels"`
+
+	// ClosedAt is RFC3339, "" when the issue is open or the date is unknown.
+	// Core ignores it and ClosedNotPlanned for an open issue.
+	ClosedAt         string `json:"closedAt"`
+	ClosedNotPlanned bool   `json:"closedNotPlanned"`
+
+	// DedupMarker is the raw dedup marker line from the tracker's side store,
+	// "" when there is none. It is never part of Body.
+	DedupMarker string `json:"dedupMarker"`
+
+	// Status is the tracker's workflow status name, "" for a tracker without
+	// one.
+	Status string `json:"status"`
+}
+
+// Comment is one issue comment. CreatedAt is RFC3339 as the forge reports it.
+type Comment struct {
+	Author          string `json:"author"`
+	CreatedAt       string `json:"createdAt"`
+	Body            string `json:"body"`
+	Minimized       bool   `json:"minimized"`
+	MinimizedReason string `json:"minimizedReason"`
+	Association     string `json:"association"`
+
+	// ResearchMarker reports that the comment carries the research marker in
+	// a side store; Body excludes it.
+	ResearchMarker bool `json:"researchMarker"`
+}
+
+// CreateField is one field of an issue type's create form.
+type CreateField struct {
+	ID              string `json:"fieldId"`
+	Name            string `json:"name"`
+	Required        bool   `json:"required"`
+	HasDefaultValue bool   `json:"hasDefaultValue"`
+}
+
+// StatusTarget is the tracker status a Dispatch state maps to and the
+// resolution to set on entering it ("" for none).
+type StatusTarget struct {
+	Status     string `json:"status"`
+	Resolution string `json:"resolution"`
+}
+
+// TransitionRequest asks a Connector to move an issue to a Dispatch state.
+// State and the keys of Mapping are core's canonical state names (dispatchable,
+// in-progress, complete, failed, ambiguous, ...). A Connector has no config
+// channel, so core ships the whole table on every call and the Connector
+// applies Mapping[State], including the rule that only failed and ambiguous
+// may share a status. Mapping holds only the states that name a status.
+type TransitionRequest struct {
+	State   string                  `json:"state"`
+	Mapping map[string]StatusTarget `json:"mapping"`
+}
+
+// TransitionResult is how a Transition ended. Status is the tracker status the
+// Connector resolved State to ("" when unmapped), so core can name it in a
+// refusal. Any other failure, such as a transport error or a transition that
+// needs a field the request cannot supply, is an error, never an outcome.
+type TransitionResult struct {
+	Outcome string   `json:"outcome"`
+	Status  string   `json:"status"`
+	Offered []string `json:"offered"`
+}
+
+// CommentRequest is a comment to post. Body is canonical Markdown with the
+// research marker line already removed; Research says the comment carries that
+// marker, which the Connector stores the way its tracker can (Jira: a comment
+// entity property).
+type CommentRequest struct {
+	Body     string `json:"body"`
+	Research bool   `json:"research"`
+}
+
+// IssueRequest is an issue to file. Body is canonical Markdown without the
+// dedup marker line; DedupMarker is that line verbatim ("" for none), stored
+// where the tracker can find it on read (Jira: an issue entity property).
+// IssueType is the type core files as; a Connector has no config channel, so
+// core ships it on each call. Route is the Issue route the filed issue must
+// carry (its stamp): a Connector sets every selector, so the issue matches the
+// same route's Query; empty stamps nothing.
+type IssueRequest struct {
+	Title       string     `json:"title"`
+	Body        string     `json:"body"`
+	Labels      []string   `json:"labels"`
+	DedupMarker string     `json:"dedupMarker"`
+	IssueType   string     `json:"issueType"`
+	Route       []Selector `json:"route,omitempty"`
+}
+
+type transitionParams struct {
+	Target Target `json:"target"`
+	Number string `json:"number"`
+	TransitionRequest
+}
+
+type editLabelsParams struct {
+	Target Target   `json:"target"`
+	Number string   `json:"number"`
+	Add    []string `json:"add"`
+	Remove []string `json:"remove"`
+}
+
+type commentParams struct {
+	Target Target `json:"target"`
+	Number string `json:"number"`
+	CommentRequest
+}
+
+type fileIssueParams struct {
+	Target Target `json:"target"`
+	IssueRequest
+}
+
+type closeIssueParams struct {
+	Target Target `json:"target"`
+	Number string `json:"number"`
+}
+
+type createLabelParams struct {
+	Target      Target `json:"target"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Color       string `json:"color"`
+}

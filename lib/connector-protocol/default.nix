@@ -73,7 +73,7 @@ let
       (entry "rate-limited" "Refused for sending too much; core's rate-limit hold handles it, not a retry loop.")
       (entry "not-found" "The subject does not exist.")
       (entry "auth" "The credential was refused or lacks standing.")
-      (entry "not-mergeable" "A forge refused a merge because the PR is not mergeable as it stands.")
+      (entry "not-mergeable" "A forge refused a merge because the PR is not mergeable as it stands: a conflict, a missing required check or review, or a draft, closed, or merged state. Core re-reads the PR on this class only.")
       (entry "permanent" "Every other failure, and any answer naming no class or one core does not know.")
     ];
 
@@ -368,6 +368,38 @@ let
         dedupMarker = t.optional t.string;
         status = t.optional t.string;
       };
+      # One field of an issue type's create form (tracker.createMeta).
+      createField = t.open {
+        fieldId = t.string;
+        name = t.string;
+        required = t.boolean;
+        hasDefaultValue = t.boolean;
+      };
+      # The tracker.transition params after target and number, and its result;
+      # core ships the whole mapping on every call.
+      transitionRequest = t.object {
+        state = t.string;
+        mapping = t.map (t.ref "statusTarget");
+      };
+      transitionResult = t.open {
+        outcome = t.enum (map (o: o.name) self.transitionOutcomes);
+        status = t.string;
+        offered = t.optional (t.list t.string);
+      };
+      # The tracker.comment params after target and number.
+      commentRequest = t.object {
+        body = t.string;
+        research = t.boolean;
+      };
+      # The tracker.fileIssue params after target.
+      issueRequest = t.object {
+        title = t.string;
+        body = t.string;
+        labels = t.list t.string;
+        dedupMarker = t.string;
+        issueType = t.string;
+        route = t.optional (t.list (t.ref "route"));
+      };
       # connectortracker.wireComment.
       comment = t.open {
         author = t.string;
@@ -410,6 +442,19 @@ let
         summary = t.optional t.string;
         jobId = t.optional t.string;
       };
+      # A PR head commit's status-check rollup; state is "" when it has no
+      # checks.
+      rollup = t.open {
+        state = t.enum [
+          ""
+          "SUCCESS"
+          "PENDING"
+          "EXPECTED"
+          "FAILURE"
+          "ERROR"
+        ];
+        checks = t.list (t.ref "check");
+      };
       remote = t.open {
         cloneUrl = t.string;
         webUrl = t.string;
@@ -419,6 +464,14 @@ let
         writeCapable = t.optional t.boolean;
         reason = t.optional t.string;
         scopes = t.optional (t.list t.string);
+      };
+      # The wire form of a guest's http_request Host call (not a method: the host
+      # call carries it as one JSON argument).
+      httpRequest = t.object {
+        method = t.string;
+        url = t.string;
+        headers = t.optional (t.map t.string);
+        body = t.optional t.string;
       };
       pattern = t.open {
         substr = t.string;
@@ -470,7 +523,7 @@ let
       ++ import ./forge.nix { inherit t; }
       ++ import ./tracker.nix {
         inherit t;
-        outcomes = map (o: o.name) self.transitionOutcomes;
+        inherit (self) types;
       };
   };
 in

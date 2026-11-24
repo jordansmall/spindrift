@@ -46,20 +46,7 @@ in
     prs = t.list (t.ref "pr");
   }) retryable "prShape" "Every PR whose head is `branch`, any state, newest first.")
   (method "forge.pr" "forge" numbered (t.ref "pr") retryable "prAnswer" "One PR by number.")
-  (method "forge.checks" "forge" numbered
-    (t.open {
-      state = t.enum [
-        ""
-        "SUCCESS"
-        "PENDING"
-        "EXPECTED"
-        "FAILURE"
-        "ERROR"
-      ];
-      checks = t.list (t.ref "check");
-    })
-    retryable
-    "rollupState"
+  (method "forge.checks" "forge" numbered (t.ref "rollup") retryable "rollupState"
     "The status-check rollup of the PR's head commit; an empty `state` means it has no checks."
   )
   (method "forge.jobLog" "forge"
