@@ -14,7 +14,7 @@ func (c *execClient) RelayBundle(outboxDir, ref string) error {
 	if err != nil {
 		return err
 	}
-	return c.relayBundleViaConnector(row, outboxDir, ref)
+	return c.relayBundle(row, outboxDir, ref)
 }
 
 // CommitSubjects returns the bundle's one-line commit subjects for ref
@@ -26,7 +26,7 @@ func (c *execClient) CommitSubjects(outboxDir, base, ref string) ([]string, erro
 	if err != nil {
 		return nil, err
 	}
-	return c.commitSubjectsViaConnector(row, outboxDir, base, ref)
+	return c.commitSubjects(row, outboxDir, base, ref)
 }
 
 var _ forge.BundleCommitSubjects = (*execClient)(nil)

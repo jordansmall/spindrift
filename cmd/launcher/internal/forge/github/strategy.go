@@ -47,7 +47,7 @@ var Strategy = backendkit.Strategy{
 		if err != nil {
 			return backendkit.LedgerSite{}, err
 		}
-		return NewExecClient(s.RepoSlug, s.Labels, codeForgeOpts(s)...).ledgerSiteViaConnector(row)
+		return NewExecClient(s.RepoSlug, s.Labels, codeForgeOpts(s)...).ledgerSite(row)
 	},
 	WebURL: func(s backendkit.Shared, _ backendkit.Lookup) string {
 		if s.RepoSlug == "" {

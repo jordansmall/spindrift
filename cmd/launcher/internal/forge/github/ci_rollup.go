@@ -8,5 +8,5 @@ func (e *execClient) FailureDetail(url string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return e.failureDetailViaConnector(row, url)
+	return e.failureDetail(row, url)
 }

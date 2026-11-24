@@ -45,7 +45,7 @@ func applyGithubRow(t *testing.T, host string, adjust func(*backendrows.Row)) {
 // The Strategy's introspection loads the backend row's Connector with the
 // token under audit as its credential, records the requests it made, and never
 // runs gh.
-func TestIntrospectViaConnector_ReportsTheGrantAndAuditsTheRequests(t *testing.T) {
+func TestIntrospect_ReportsTheGrantAndAuditsTheRequests(t *testing.T) {
 	scopes := "read:org, repo"
 	b := newTokenBackend(t, "ghp_abc")
 	b.scopes = &scopes
@@ -53,11 +53,11 @@ func TestIntrospectViaConnector_ReportsTheGrantAndAuditsTheRequests(t *testing.T
 	calls := countGH(t)
 	auditPath := chdirAuditPath(t)
 
-	got, err := introspectViaConnector(githubRow(t), backendrows.Options{Client: b.Client()}, "ghp_abc", connectorRepo)
+	got, err := introspect(githubRow(t), backendrows.Options{Client: b.Client()}, "ghp_abc", connectorRepo)
 
 	want := backendkit.TokenIntrospection{Introspectable: true, WriteCapable: true, Scopes: []string{"read:org", "repo"}}
 	if err != nil || !reflect.DeepEqual(got, want) {
-		t.Fatalf("introspectViaConnector = (%+v, %v), want %+v", got, err, want)
+		t.Fatalf("introspect = (%+v, %v), want %+v", got, err, want)
 	}
 	if n := calls(); n != 0 {
 		t.Errorf("introspection ran gh %d times", n)
@@ -77,13 +77,13 @@ func TestIntrospectViaConnector_ReportsTheGrantAndAuditsTheRequests(t *testing.T
 
 // The host's own credential is never the one audited: the Connector is loaded
 // with the token under audit even when the row's env var holds another.
-func TestIntrospectViaConnector_IgnoresTheHostsCredential(t *testing.T) {
+func TestIntrospect_IgnoresTheHostsCredential(t *testing.T) {
 	t.Setenv(tokenCredentialEnv, "ghp_hosts_own")
 	chdirAuditPath(t)
 	b := newTokenBackend(t, "ghp_abc")
 	useGithubRow(t, b)
 
-	if _, err := introspectViaConnector(githubRow(t), backendrows.Options{Client: b.Client()}, "ghp_abc", connectorRepo); err != nil {
+	if _, err := introspect(githubRow(t), backendrows.Options{Client: b.Client()}, "ghp_abc", connectorRepo); err != nil {
 		t.Fatal(err)
 	}
 	for _, a := range b.seenAuth {
@@ -94,12 +94,12 @@ func TestIntrospectViaConnector_IgnoresTheHostsCredential(t *testing.T) {
 }
 
 // A refused read is a failed introspection, not an unsupported one.
-func TestIntrospectViaConnector_RefusedReadIsAnError(t *testing.T) {
+func TestIntrospect_RefusedReadIsAnError(t *testing.T) {
 	chdirAuditPath(t)
 	b := newTokenBackend(t, "ghp_abc")
 	b.userStatus = http.StatusUnauthorized
 	useGithubRow(t, b)
-	_, err := introspectViaConnector(githubRow(t), backendrows.Options{Client: b.Client()}, "ghp_abc", connectorRepo)
+	_, err := introspect(githubRow(t), backendrows.Options{Client: b.Client()}, "ghp_abc", connectorRepo)
 	if err == nil || errors.Is(err, backendkit.ErrUnsupported) {
 		t.Fatalf("err = %v, want a non-unsupported error", err)
 	}
@@ -138,7 +138,7 @@ func chdirAuditPath(t *testing.T) string {
 
 // A Connector never runs unrecorded: an audit file that will not open fails the
 // load with its path, and nothing reaches the backend.
-func TestIntrospectViaConnector_UnopenableAuditFileFailsTheLoad(t *testing.T) {
+func TestIntrospect_UnopenableAuditFileFailsTheLoad(t *testing.T) {
 	b := newTokenBackend(t, "ghp_abc")
 	useGithubRow(t, b)
 	auditPath := chdirAuditPath(t)
@@ -150,7 +150,7 @@ func TestIntrospectViaConnector_UnopenableAuditFileFailsTheLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := introspectViaConnector(githubRow(t), backendrows.Options{Client: b.Client()}, "ghp_abc", connectorRepo)
+	_, err := introspect(githubRow(t), backendrows.Options{Client: b.Client()}, "ghp_abc", connectorRepo)
 
 	if err == nil || !strings.Contains(err.Error(), auditPath) {
 		t.Fatalf("err = %v, want one naming %s", err, auditPath)

@@ -53,24 +53,24 @@ var routedWrites = []struct {
 		nil},
 }
 
-func routedWriteClient() *execClient {
+func connectorWriteClient() *execClient {
 	return NewExecClient(connectorRepo, testLabels, WithVerdictLabels(forge.ResearchVerdictLabels()))
 }
 
 // Under a routed row each tracker write reaches the Connector's backend and
 // runs no gh.
-func TestRoutedRow_TrackerWritesGoThroughTheConnector(t *testing.T) {
+func TestConnectorRow_TrackerWritesGoThroughTheConnector(t *testing.T) {
 	for _, tc := range routedWrites {
 		t.Run(tc.name, func(t *testing.T) {
 			h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
 			h.SeedIssue(tc.seed)
 
-			if err := tc.write(routedWriteClient()); err != nil {
+			if err := tc.write(connectorWriteClient()); err != nil {
 				t.Fatalf("%s: %v", tc.name, err)
 			}
 
 			if n := calls(); n != 0 {
-				t.Errorf("%s ran gh %d times under a primary row", tc.name, n)
+				t.Errorf("%s ran gh %d times under a routed row", tc.name, n)
 			}
 			h.backend.mu.Lock()
 			defer h.backend.mu.Unlock()
@@ -85,13 +85,13 @@ func TestRoutedRow_TrackerWritesGoThroughTheConnector(t *testing.T) {
 }
 
 // A host-filed finding lands in the Connector's backend with its labels, and
-// the Connector-routed backlog read returns the dedup marker the launcher
+// the backlog read through the Connector returns the dedup marker the launcher
 // appended, so finding dedup and butler promotion see it as a gh-filed one.
 // settle's own sweep is not driven here: the backend go-test fileset leaves
 // settle out (nix/checks/go.nix backendGoTestShared).
-func TestRoutedRow_PostedIssueKeepsItsMarkerAndLabels(t *testing.T) {
+func TestConnectorRow_PostedIssueKeepsItsMarkerAndLabels(t *testing.T) {
 	h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
-	c := routedWriteClient()
+	c := connectorWriteClient()
 	marker := dedupmarker.Build([]string{"pkg/a.go"})
 	labels := []string{"agent-butler-finding", "ready-for-agent"}
 
@@ -121,17 +121,17 @@ func TestRoutedRow_PostedIssueKeepsItsMarkerAndLabels(t *testing.T) {
 		}
 	}
 	if n := calls(); n != 0 {
-		t.Errorf("filing ran gh %d times under a primary row", n)
+		t.Errorf("filing ran gh %d times under a routed row", n)
 	}
 }
 
 // A claim on an issue already in progress is refused by the Connector path
 // with forge.ErrAlreadyClaimed, and without gh.
-func TestRoutedRow_ClaimOfAClaimedIssueIsRefused(t *testing.T) {
+func TestConnectorRow_ClaimOfAClaimedIssueIsRefused(t *testing.T) {
 	h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
 	h.SeedIssue(forge.Issue{Number: "7", Labels: []string{testLabels.InProgress}})
 
-	err := routedWriteClient().TransitionState("7", forge.Dispatchable, forge.InProgress)
+	err := connectorWriteClient().TransitionState("7", forge.Dispatchable, forge.InProgress)
 
 	if !errors.Is(err, forge.ErrAlreadyClaimed) {
 		t.Errorf("TransitionState of a claimed issue = %v, want ErrAlreadyClaimed", err)
@@ -148,7 +148,7 @@ func TestTrackerWrites_PlainRowRoutesWrites(t *testing.T) {
 			h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
 			h.SeedIssue(tc.seed)
 
-			_ = tc.write(routedWriteClient())
+			_ = tc.write(connectorWriteClient())
 
 			if n := calls(); n != 0 {
 				t.Errorf("%s under a plain row ran gh %d times", tc.name, n)
@@ -170,7 +170,7 @@ func TestPlainRow_LoadFailureFailsTheWrite(t *testing.T) {
 				return nil, boom
 			}
 
-			if err := tc.write(routedWriteClient()); !errors.Is(err, boom) {
+			if err := tc.write(connectorWriteClient()); !errors.Is(err, boom) {
 				t.Errorf("err = %v, want the load error", err)
 			}
 			if n := calls(); n != 0 {
@@ -197,7 +197,7 @@ func TestPlainRow_RefusedRouteFailsTheWrite(t *testing.T) {
 			})
 			h.SeedIssue(tc.seed)
 
-			if err := tc.write(routedWriteClient()); !errors.Is(err, connectorhost.ErrRouteRefused) {
+			if err := tc.write(connectorWriteClient()); !errors.Is(err, connectorhost.ErrRouteRefused) {
 				t.Errorf("err = %v, want the route refusal", err)
 			}
 			if n := calls(); n != 0 {
@@ -209,7 +209,7 @@ func TestPlainRow_RefusedRouteFailsTheWrite(t *testing.T) {
 
 // A Connector that does not advertise what a write needs fails it with the
 // named capability error instead of reaching gh.
-func TestRoutedRow_MissingCapabilityFailsTheWrite(t *testing.T) {
+func TestConnectorRow_MissingCapabilityFailsTheWrite(t *testing.T) {
 	for _, tc := range []struct{ write, capName string }{
 		{"TransitionState", "tracker.editLabels"},
 		{"TransitionState", "tracker.transition"},
@@ -231,12 +231,12 @@ func TestRoutedRow_MissingCapabilityFailsTheWrite(t *testing.T) {
 				}
 				matched = true
 				h.SeedIssue(w.seed)
-				if err := w.write(routedWriteClient()); !errors.Is(err, errNoCapability) {
+				if err := w.write(connectorWriteClient()); !errors.Is(err, errNoCapability) {
 					t.Errorf("err = %v, want errNoCapability", err)
 				}
 			}
 			if !matched {
-				t.Fatalf("no primary write named %q", tc.write)
+				t.Fatalf("no routed write named %q", tc.write)
 			}
 			if n := calls(); n != 0 {
 				t.Errorf("the unsupported write ran gh %d times", n)
@@ -246,20 +246,20 @@ func TestRoutedRow_MissingCapabilityFailsTheWrite(t *testing.T) {
 }
 
 // A lost claim race is core policy, not a Connector fault, so it leaves the
-// primary log empty; any other failed write is recorded.
-func TestNotePrimary_SkipsALostClaimRace(t *testing.T) {
+// Connector record empty; any other failed write is recorded.
+func TestNoteRouted_SkipsALostClaimRace(t *testing.T) {
 	_, _, _, logDir := routedLogHarness(t, useGithubRowAt)
 
 	claimed := fmt.Errorf("tracker: issue 7: %w", forge.ErrAlreadyClaimed)
 	if got := noteRouted("transition an issue", claimed); got != claimed {
 		t.Errorf("noteRouted = %v, want the error unchanged", got)
 	}
-	if logs := routedFiles(t, logDir, ".log"); len(logs) != 0 {
+	if logs := connectorFiles(t, logDir, ".log"); len(logs) != 0 {
 		t.Errorf("a lost claim race wrote Connector logs %v", logs)
 	}
 
 	_ = noteRouted("transition an issue", errors.New("boom"))
-	if logs := routedFiles(t, logDir, ".log"); len(logs) != 1 {
+	if logs := connectorFiles(t, logDir, ".log"); len(logs) != 1 {
 		t.Errorf("a failed write wrote Connector logs %v, want one", logs)
 	}
 }

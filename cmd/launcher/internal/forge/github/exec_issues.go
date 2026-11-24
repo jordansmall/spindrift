@@ -9,7 +9,7 @@ func (e *execClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error
 	if err != nil {
 		return nil, err
 	}
-	return e.listIssuesViaConnector(row, state)
+	return e.listIssues(row, state)
 }
 
 // ListOpenIssues returns every open issue in ascending number order. Unlike
@@ -20,7 +20,7 @@ func (e *execClient) ListOpenIssues() ([]forge.Issue, error) {
 	if err != nil {
 		return nil, err
 	}
-	return e.listOpenIssuesViaConnector(row)
+	return e.listOpenIssues(row)
 }
 
 // ListIssuesWithLabels implements forge.LabeledBacklogLister (issues #3873,
@@ -32,7 +32,7 @@ func (e *execClient) ListIssuesWithLabels(state forge.IssueState, labels []strin
 	if err != nil {
 		return nil, err
 	}
-	return e.listIssuesWithLabelsViaConnector(row, state, labels)
+	return e.listIssuesWithLabels(row, state, labels)
 }
 
 func (e *execClient) Issue(num string) (forge.Issue, error) {
@@ -40,7 +40,7 @@ func (e *execClient) Issue(num string) (forge.Issue, error) {
 	if err != nil {
 		return forge.Issue{}, err
 	}
-	return e.issueViaConnector(row, num)
+	return e.issue(row, num)
 }
 
 // Comments returns issue num's comments oldest-first, the order
@@ -50,7 +50,7 @@ func (e *execClient) Comments(num string) ([]forge.Comment, error) {
 	if err != nil {
 		return nil, err
 	}
-	return e.commentsViaConnector(row, num)
+	return e.comments(row, num)
 }
 
 var _ forge.CommentLister = (*execClient)(nil)
@@ -72,7 +72,7 @@ func (e *execClient) TransitionState(num string, from, to forge.DispatchState) e
 	if err != nil {
 		return err
 	}
-	return e.transitionViaConnector(row, num, from, to)
+	return e.transition(row, num, from, to)
 }
 
 // AddLabels implements forge.IssueLabeler (issue #4074).
@@ -81,7 +81,7 @@ func (e *execClient) AddLabels(num string, labels []string) error {
 	if err != nil {
 		return err
 	}
-	return e.addLabelsViaConnector(row, num, labels)
+	return e.addLabels(row, num, labels)
 }
 
 var _ forge.IssueLabeler = (*execClient)(nil)
@@ -96,7 +96,7 @@ func (e *execClient) CompleteVerdict(num string, verdict forge.Verdict) error {
 	if err != nil {
 		return err
 	}
-	return e.completeVerdictViaConnector(row, num, verdict)
+	return e.completeVerdict(row, num, verdict)
 }
 
 var _ forge.NativeDepsReader = (*execClient)(nil)
@@ -108,7 +108,7 @@ func (e *execClient) NativeDepsOf(num string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return e.nativeDepsViaConnector(row, num)
+	return e.nativeDeps(row, num)
 }
 
 // MatchesRoute reports whether issue num is in the client's Issue route, the
@@ -118,7 +118,7 @@ func (e *execClient) MatchesRoute(num string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return e.matchesRouteViaConnector(row, num)
+	return e.matchesRoute(row, num)
 }
 
 // BlocksOf returns the issues num blocks, read from GitHub's native
@@ -130,7 +130,7 @@ func (e *execClient) BlocksOf(num string) ([]forge.Dependency, error) {
 	if err != nil {
 		return nil, err
 	}
-	return e.blocksOfViaConnector(row, num)
+	return e.blocksOf(row, num)
 }
 
 // PriorClaimState reads issue num's timeline for the most recent "unlabeled"
@@ -142,7 +142,7 @@ func (e *execClient) PriorClaimState(num string) (forge.DispatchState, bool, err
 	if err != nil {
 		return forge.Untriaged, false, err
 	}
-	return e.priorClaimStateViaConnector(row, num)
+	return e.priorClaimState(row, num)
 }
 
 // CloseMergedIssue closes issue num as a backstop for a merged agent PR whose
@@ -154,7 +154,7 @@ func (e *execClient) CloseMergedIssue(num string) error {
 	if err != nil {
 		return err
 	}
-	return e.closeMergedIssueViaConnector(row, num)
+	return e.closeMergedIssue(row, num)
 }
 
 func (e *execClient) Comment(num, body string) error {
@@ -162,7 +162,7 @@ func (e *execClient) Comment(num, body string) error {
 	if err != nil {
 		return err
 	}
-	return e.commentViaConnector(row, num, body)
+	return e.comment(row, num, body)
 }
 
 // PostIssue files an issue against this adapter's own repo, never a
@@ -173,7 +173,7 @@ func (e *execClient) PostIssue(title, body string, labels []string) (string, err
 	if err != nil {
 		return "", err
 	}
-	return e.fileIssueViaConnector(row, title, body, labels)
+	return e.fileIssue(row, title, body, labels)
 }
 
 var _ forge.HostPostedCommenter = (*execClient)(nil)
@@ -187,5 +187,5 @@ func (e *execClient) SearchIssues(text string, state forge.IssueState, label str
 	if err != nil {
 		return nil, err
 	}
-	return e.searchIssuesViaConnector(row, text, state, label, limit)
+	return e.searchIssues(row, text, state, label, limit)
 }

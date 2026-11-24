@@ -119,19 +119,19 @@ func (e *execClient) prWrite(row backendrows.Row, verb string, fn func(forge.PRF
 	})
 }
 
-func (e *execClient) markReadyViaConnector(row backendrows.Row, prURL string) error {
+func (e *execClient) markReady(row backendrows.Row, prURL string) error {
 	return e.prWrite(row, "mark a PR ready", func(pf forge.PRForge) error { return pf.MarkReady(prURL) })
 }
 
-func (e *execClient) markDraftViaConnector(row backendrows.Row, prURL string) error {
+func (e *execClient) markDraft(row backendrows.Row, prURL string) error {
 	return e.prWrite(row, "mark a PR draft", func(pf forge.PRForge) error { return pf.MarkDraft(prURL) })
 }
 
-func (e *execClient) commentPRViaConnector(row backendrows.Row, prURL, body string) error {
+func (e *execClient) commentPR(row backendrows.Row, prURL, body string) error {
 	return e.prWrite(row, "comment on a PR", func(pf forge.PRForge) error { return pf.CommentPR(prURL, body) })
 }
 
-func (e *execClient) deleteBranchViaConnector(row backendrows.Row, branch, base string) error {
+func (e *execClient) deleteBranch(row backendrows.Row, branch, base string) error {
 	return e.forgeWrite(row, "delete a branch", func(_ forge.CodeForge, caps forge.Capabilities) error {
 		if caps.BranchDeleter == nil {
 			return fmt.Errorf("%w: forge.branches", errNoCapability)
@@ -140,7 +140,7 @@ func (e *execClient) deleteBranchViaConnector(row backendrows.Row, branch, base 
 	})
 }
 
-func (e *execClient) createDraftPRViaConnector(row backendrows.Row, title, body, base, head string) (url string, created bool, err error) {
+func (e *execClient) createDraftPR(row backendrows.Row, title, body, base, head string) (url string, created bool, err error) {
 	err = e.forgeWrite(row, "open a draft PR", func(_ forge.CodeForge, caps forge.Capabilities) error {
 		if caps.DraftPRCreator == nil {
 			return fmt.Errorf("%w: forge.draftPRs", errNoCapability)
@@ -152,7 +152,7 @@ func (e *execClient) createDraftPRViaConnector(row backendrows.Row, title, body,
 	return url, created, err
 }
 
-func (e *execClient) pushBranchViaConnector(row backendrows.Row, srcDir, localRef, branch, base string) error {
+func (e *execClient) pushBranch(row backendrows.Row, srcDir, localRef, branch, base string) error {
 	return e.forgeWrite(row, "push a branch", func(_ forge.CodeForge, caps forge.Capabilities) error {
 		if caps.BranchPusher == nil {
 			return fmt.Errorf("%w: forge.draftPRs", errNoCapability)
@@ -161,7 +161,7 @@ func (e *execClient) pushBranchViaConnector(row backendrows.Row, srcDir, localRe
 	})
 }
 
-func (e *execClient) relayBundleViaConnector(row backendrows.Row, outboxDir, ref string) error {
+func (e *execClient) relayBundle(row backendrows.Row, outboxDir, ref string) error {
 	return e.forgeWrite(row, "relay a bundle", func(_ forge.CodeForge, caps forge.Capabilities) error {
 		if caps.BundleRelay == nil {
 			return fmt.Errorf("%w: forge.draftPRs", errNoCapability)
@@ -170,7 +170,7 @@ func (e *execClient) relayBundleViaConnector(row backendrows.Row, outboxDir, ref
 	})
 }
 
-func (e *execClient) commitSubjectsViaConnector(row backendrows.Row, outboxDir, base, ref string) (subjects []string, err error) {
+func (e *execClient) commitSubjects(row backendrows.Row, outboxDir, base, ref string) (subjects []string, err error) {
 	err = e.forgeWrite(row, "read a bundle's commit subjects", func(_ forge.CodeForge, caps forge.Capabilities) error {
 		if caps.BundleCommitSubjects == nil {
 			return fmt.Errorf("%w: forge.draftPRs", errNoCapability)
@@ -182,7 +182,7 @@ func (e *execClient) commitSubjectsViaConnector(row backendrows.Row, outboxDir, 
 	return subjects, err
 }
 
-func (e *execClient) rebasePRHeadViaConnector(row backendrows.Row, prURL, head string) error {
+func (e *execClient) rebasePRHead(row backendrows.Row, prURL, head string) error {
 	return e.forgeWrite(row, "rebase a PR", func(_ forge.CodeForge, caps forge.Capabilities) error {
 		if caps.PRHeadRebaser == nil {
 			return fmt.Errorf("%w: forge.prs", errNoCapability)
@@ -191,16 +191,16 @@ func (e *execClient) rebasePRHeadViaConnector(row backendrows.Row, prURL, head s
 	})
 }
 
-func (e *execClient) seedMirrorViaConnector(row backendrows.Row, dir string) error {
+func (e *execClient) seedMirror(row backendrows.Row, dir string) error {
 	return e.forgeGit(row, "seed the mirror", func(_ forge.CodeForge, _ forge.Capabilities, g *coreGit) error {
 		return g.seedMirror(dir)
 	})
 }
 
-// ledgerSiteViaConnector is the butler Ledger's remote under a routed row: the
+// ledgerSite is the butler Ledger's remote under a routed row: the
 // clone URL Compose validated and the row's credential, so the Ledger's git
 // carries no gh credential helper.
-func (e *execClient) ledgerSiteViaConnector(row backendrows.Row) (backendkit.LedgerSite, error) {
+func (e *execClient) ledgerSite(row backendrows.Row) (backendkit.LedgerSite, error) {
 	var site backendkit.LedgerSite
 	err := e.forgeGit(row, "reach the Ledger", func(_ forge.CodeForge, _ forge.Capabilities, g *coreGit) error {
 		site = backendkit.LedgerSite{URL: g.cloneURL, Credential: g.cred}
@@ -223,12 +223,12 @@ func checkRoutedMergeMethod(method string) error {
 	return nil
 }
 
-// mergeViaConnector merges the PR, then deletes its head branch as gh's
+// merge merges the PR, then deletes its head branch as gh's
 // --delete-branch does. The delete is best effort: the PR has landed by then,
 // and failing the merge would turn it into a failed settle. A head already gone
 // (a repository that deletes merged heads itself) is done, not a fault, so it
 // stays out of the Connector log; any other failure is recorded there and warned.
-func (e *execClient) mergeViaConnector(row backendrows.Row, prURL string) error {
+func (e *execClient) merge(row backendrows.Row, prURL string) error {
 	if err := e.checkRoutedMergeMethod(); err != nil {
 		return err
 	}
@@ -268,7 +268,7 @@ func (e *execClient) mergeViaConnector(row backendrows.Row, prURL string) error 
 	return nil
 }
 
-func (e *execClient) enqueueAutoMergeViaConnector(row backendrows.Row, prURL string) error {
+func (e *execClient) enqueueAutoMerge(row backendrows.Row, prURL string) error {
 	if err := e.checkRoutedMergeMethod(); err != nil {
 		return err
 	}

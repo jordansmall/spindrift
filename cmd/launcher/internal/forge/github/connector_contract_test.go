@@ -58,7 +58,7 @@ func (e *routedContractEnv) assertSplit(t *testing.T, wantFailed int, wantReads 
 		t.Errorf("the contract ran gh %d times under a plain row", n)
 	}
 
-	audits := routedFiles(t, e.logDir, ".audit.jsonl")
+	audits := connectorFiles(t, e.logDir, ".audit.jsonl")
 	if len(audits) != 1 {
 		t.Fatalf("Connector audit files = %v, want one", audits)
 	}
@@ -83,7 +83,7 @@ func (e *routedContractEnv) assertSplit(t *testing.T, wantFailed int, wantReads 
 		}
 	}
 	failed := 0
-	for _, log := range routedFiles(t, e.logDir, ".log") {
+	for _, log := range connectorFiles(t, e.logDir, ".log") {
 		raw, _ := os.ReadFile(log)
 		failed += strings.Count(string(raw), "\n")
 	}
