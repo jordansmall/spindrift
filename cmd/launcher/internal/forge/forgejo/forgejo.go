@@ -13,14 +13,20 @@ import (
 
 // GitRemoteURL builds the clone URL for repo (an owner/repo slug). It carries
 // no userinfo: git authenticates with GitCredential, out of band, so the token
-// never reaches an argv, a persisted remote or an error string. If baseURL
-// fails to parse, it concatenates the slug onto the raw base.
+// never reaches an argv, a persisted remote or an error string. It must equal
+// the Connector's CloneURL for the same base and slug (connectors/forgejo
+// remote): the credential is scoped to this URL's path and git matches paths
+// by whole segments, so a base subpath is kept. If baseURL fails to parse, it
+// concatenates the slug onto the raw base.
 func GitRemoteURL(baseURL, repo string) string {
+	baseURL = strings.TrimSuffix(baseURL, "/")
 	u, err := url.Parse(baseURL)
 	if err != nil {
-		return strings.TrimSuffix(baseURL, "/") + "/" + strings.Trim(repo, "/") + ".git"
+		return baseURL + "/" + strings.Trim(repo, "/") + ".git"
 	}
-	u.Path = "/" + strings.Trim(repo, "/") + ".git"
+	u.User, u.RawQuery, u.Fragment = nil, "", ""
+	u.Path = strings.TrimSuffix(u.Path, "/") + "/" + strings.Trim(repo, "/") + ".git"
+	u.RawPath = ""
 	return u.String()
 }
 
