@@ -15,6 +15,7 @@ let
   skillsLib = import ./skills.nix;
   schema = import ./env-schema.nix;
   removedKnobs = import ./removed-knobs.nix;
+  removedKnobFlake = import ./removed-knob-hits.nix { inherit lib; } removedKnobs;
   names = import ./connector-names.nix;
   backends = import ./backends/default.nix;
   resolveNixPath = import ./nixpath.nix;
@@ -262,10 +263,7 @@ let
     opt = mkKnobOption key entry;
   }) flakeOptionEntries;
 
-  removedKnobTreeEntries = lib.mapAttrsToList (_: row: {
-    path = row.flakePath;
-    opt = removedKnobOption;
-  }) removedKnobs;
+  removedKnobTreeEntries = removedKnobFlake.treeEntries removedKnobOption;
 
   # The one hand-written mkOption per structural knob (issue #2522), keyed by
   # its flat legacy name, which is also the mkHarness arg name and the key set
@@ -878,24 +876,7 @@ in
       // lib.optionalAttrs (primaryDriverConnectors != [ ]) { primaryDrivers = primaryDriverConnectors; }
       // lib.optionalAttrs (byNameModels != null) { byName = byNameModels; }
       // lib.optionalAttrs (runDefaults != { }) { defaults = runDefaults; };
-      # A set removed knob (lib/removed-knobs.nix), by its flake path or its
-      # legacy settings alias, is a hard error naming the knob; `!= null`
-      # catches an explicit `false` too.
-      removedKnobHits = lib.concatLists (
-        lib.mapAttrsToList (
-          key: row:
-          lib.optional (lib.attrByPath row.flakePath null cfg != null) {
-            at = "perSystem.spindrift.${lib.concatStringsSep "." row.flakePath}";
-            inherit (row) message;
-          }
-          ++
-            lib.optional (row ? legacySection && (cfg.settings.${row.legacySection}.${key} or null) != null)
-              {
-                at = "perSystem.spindrift.settings.${row.legacySection}.${key}";
-                inherit (row) message;
-              }
-        ) removedKnobs
-      );
+      removedKnobHits = removedKnobFlake.hits cfg;
 
       # What the Consumer set in the single-Driver form, by dotted path; the
       # resolver rejects mixing it with agents.drivers.
