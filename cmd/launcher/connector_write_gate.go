@@ -45,13 +45,13 @@ func githubSides(c config) []githubSide {
 	return sides
 }
 
-// githubApplies reports whether the github backend row reads through the Connector
-// and the Connector carries github writes. It looks the row up per call:
-// backendrows loads after package init, when gateRegistry is built.
+// githubApplies reports whether the github backend row reads through the
+// Connector and the Connector carries github writes. It looks the row up per
+// call: backendrows loads after package init, when gateRegistry is built.
 func githubApplies(c config) bool {
 	row, ok := backendrows.Lookup(backend.GitHub.Name)
-	viaConnector := ok && backendkit.ForgeReadsThroughConnector(row.Name)
-	return viaConnector && len(githubSides(c)) > 0
+	readsThroughConnector := ok && backendkit.ForgeReadsThroughConnector(row.Name)
+	return readsThroughConnector && len(githubSides(c)) > 0
 }
 
 // githubWrites describes what the Connector writes with the credential
