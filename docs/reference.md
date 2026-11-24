@@ -2330,8 +2330,8 @@ mean at runtime is issue #6751. The worked example is the fixture Connector in
   exclusive, and a row with neither a `driver` nor a `backend` is refused. A
   `backend` row takes neither switch (nor `shadowEvery`): github, jira and
   forgejo are Connector-only, with no native backend to shadow or replace, and
-  a row that sets one fails evaluation (issue #7456; see [Backend primary
-  mode](#backend-primary-mode)). Every Consumer of the root
+  a row that sets one fails evaluation (issue #7456; see [Backend
+  Connectors](#backend-connectors)). Every Consumer of the root
   `spindrift.flakeModules.default` carries the github row, and a plain row
   answers every github read and write. `claude` takes neither: it has no native Strategy to shadow or lead
   (issue #6799), and its Connector is always the claude Driver, so
@@ -2573,10 +2573,10 @@ and doctor shows it. The launcher and the daemon validate and
 store the rows (the `backendrows` package: `Use` validates the rows whole and
 exits `config-invalid` on a bad one). `Lookup` finds a row and `Load` binds its
 module to its Route table through the Connector host. The routed backends
-([Backend primary mode](#backend-primary-mode)) call them. The host reads the credential from
-its own environment at each request and attaches it on a route match; the
-module never sees it. The Box's binaries read no backend rows, since the Box
-never brokers a forge credential.
+([Backend Connectors](#backend-connectors)) call them. The host reads the
+credential from its own environment at each request and attaches it on a route
+match; the module never sees it. The Box's binaries read no backend rows,
+since the Box never brokers a forge credential.
 
 A backend without a row is built from the generated registry as before, except
 jira, which has no native backend and needs its Connector row, and a
@@ -2667,7 +2667,7 @@ because GitHub answers a log read with a 302 to a pre-signed blob URL on a host
 that varies; the host follows that one hop with no credential, and doctor shows
 the opt-in as `(follows redirect)` on the route. Two more read routes are not
 pinned to `{repo}`. `GET /installation/repositories` serves an App installation
-token's push permission to the primary Connector write gate, and it lets any
+token's push permission to the Connector write gate, and it lets any
 load of the Connector list every repository the installation reaches, with its
 permissions.
 `GET /search/issues` serves the issue search; a Route restricts no query string,
@@ -2692,7 +2692,7 @@ reports each comment's `minimized` faithfully, so the launcher still drops a
 maintainer-minimized comment. The Connector is github's default backend: the
 row is registered unconditionally, so every Consumer of the root
 `spindrift.flakeModules.default` has it, and every covered read and write
-(see [Backend primary mode](#backend-primary-mode)) goes through it with no
+(see [Backend Connectors](#backend-connectors)) goes through it with no
 `gh` fallback. The native github adapter is deleted (issues #6811 for reads
 and #6888 for writes): a read or write that finds no routed row fails with
 `ErrNoRoute` naming the cause, and never falls back to `gh`. There are three
@@ -2724,7 +2724,7 @@ the `MERGE_MODE=auto` preflight (`forge.autoMerge`), the issue list by dispatch
 state (the core tracker list, which doctor's recoverable-issue row and dispatch
 both read), the label list (`tracker.labels`), the daemon's demand count
 (`tracker.count`), recover's prior-claim read (`tracker.removedLabels`) and
-the primary write gate's token introspection (`forge.tokenGrant`) go through the
+the write gate's token introspection (`forge.tokenGrant`) go through the
 Connector and never run `gh`. They share one loaded Connector per repository
 for the life of the process; token introspection loads its own, with the
 candidate token as its credential. A Connector that does not declare one
@@ -2853,9 +2853,9 @@ absent fails to build either with `ErrNoConnectorRow`, and
 every Consumer of the root `spindrift.flakeModules.default` carries the row.
 The forgejo issue tracker is the Connector's too, since the native tracker was
 deleted (issue #7122). The row takes no `shadow` or `primary`: a forgejo row
-that sets one fails evaluation (see [Backend primary
-mode](#backend-primary-mode)). A forgejo Consumer config that never set them
-evaluates unchanged.
+that sets one fails evaluation (see [Backend
+Connectors](#backend-connectors)). A forgejo Consumer config that never set
+them evaluates unchanged.
 
 - The Connector authorizes with `SPINDRIFT_FORGEJO_CONNECTOR_TOKEN`, resolved
   by the launcher and the daemon like any secret knob (the value, `_CMD`, or
@@ -2868,8 +2868,8 @@ evaluates unchanged.
   load, or a request its Route table refuses, fails the operation with the
   Connector's own error, and the native adapter never answers instead. The
   Connector writes the same per-process record pair as github and jira
-  (`connector-forgejo-<stamp>-<pid>`, see [Backend primary
-  mode](#backend-primary-mode)): its audit lines and its failed calls.
+  (`connector-forgejo-<stamp>-<pid>`, see [Backend
+  Connectors](#backend-connectors)): its audit lines and its failed calls.
 - Every tracker operation goes through the Connector: reads,
   the claim and every transition, label edits and creation, comments (the
   agent-facing and the host-posted ones), filed findings, and native
@@ -2904,8 +2904,8 @@ refuses one with no `module` or no core Driver of that name. Only a Box
 running the shadowed Driver replays anything, and the Box rows file carries the
 flag to `driver-exec`. Only a Driver row can shadow: a backend row (github,
 jira or forgejo) is Connector-only, and evaluation refuses `shadow`,
-`shadowEvery` and `primary` on it (issue #7456; see [Backend primary
-mode](#backend-primary-mode)). The github Connector's row and its
+`shadowEvery` and `primary` on it (issue #7456; see [Backend
+Connectors](#backend-connectors)). The github Connector's row and its
 `githubConnectorToken` knob (the host-only `SPINDRIFT_GITHUB_CONNECTOR_TOKEN`)
 are registered for every Consumer of the root `spindrift.flakeModules.default`
 (issue #7139, which reverses #6912's conditional row). A flake with no github
@@ -3175,7 +3175,7 @@ Strategy with no code revert, except for claude, whose native Strategy is gone.
 A primary Driver emits no `shadow_summary`, so the
 [streak recipe](#driver-replay) no longer counts its runs.
 
-##### Backend primary mode
+##### Backend Connectors
 
 A backend row's Connector answers in place of a native backend (issues #6998,
 #7127, #7128), in every launcher process that builds the adapter (dispatch,
@@ -3201,7 +3201,7 @@ the butler patch path's) over the Connector, and runs push (`PushBranch`),
 the read-only bundle relay (`RelayBundle`, `CommitSubjects`), `Rebase`,
 the read-only Box's mirror seed and the butler Ledger push in core's git
 against the Connector's clone URL with the row's credential, never `gh auth
-git-credential`. A primary rebase syncs onto `BASE_BRANCH`, because the
+git-credential`. The Connector's rebase syncs onto `BASE_BRANCH`, because the
 Connector's PR read carries no base. Since switch 4 (#6887) it also routes
 `Merge`, which then deletes the PR's head branch through the Connector as `gh
 pr merge --delete-branch` did, `EnqueueAutoMerge` under `MERGE_MODE=auto`, and
@@ -3270,7 +3270,7 @@ token scoped to the one repository with these repository permissions:
 A classic token needs the `repo` scope (`public_repo` for a public repository).
 
 The Route table admits `POST /graphql`, whose body the host does not restrict.
-So under primary the untrusted Connector can exercise a credential that can
+So the untrusted Connector can exercise a credential that can
 push to the repository, not only write issues and PRs, and the token's scope is
 the only barrier. [ADR 0073's #7209
 amendment](adr/0073-backends-and-drivers-are-trust-no-one-wasm-connectors.md#amendment-issue-7209-a-primary-github-connector-holds-a-push-capable-credential)
@@ -3288,7 +3288,7 @@ which cannot be introspected; for an App installation token (`ghs_`), whose
 introspection reports repository push (Contents write), not the Issues or Pull
 requests permissions; for a Connector that declares no `forge.tokenGrant`, so
 introspection is unsupported; and for an unset credential. The refusal and
-every warning name the primary set above when `CODE_FORGE` is `github`; with
+every warning name the permission set above when `CODE_FORGE` is `github`; with
 only `ISSUE_TRACKER` on `github`, the Connector carries no PR writes, so they
 name Issues write and drop Pull requests and Contents. `spindrift doctor`
 reports the same.
@@ -3348,7 +3348,7 @@ flight, and the recipe skips it. The recipe checks the pid with `kill -0` on
 the host it runs on, so for records fetched from CI, which have all ended, set
 `finished=1`. On the live host a reused pid of a dead launcher still reads as in
 flight, and `kill -0` fails when the recipe runs as a different user from the
-launcher, so run it as the daemon's user. Primary cut over (#6811, which
+launcher, so run it as the daemon's user. The github row cut over (#6811, which
 deleted the native github read path) after 20 consecutive clean dogfood runs.
 The recipe counts them from the newest record back, ordering by the stamp:
 
@@ -3438,8 +3438,8 @@ before. The row always authorizes with Basic, so a Server/Data Center site needs
 a username and password or token in those two variables, not a Bearer PAT. The
 API dialect follows `JIRA_EMAIL`: Jira Cloud when it is set, Server/Data Center
 otherwise. Each process appends the Connector's audit lines to
-`.spindrift/logs/connector-jira-<stamp>-<pid>.audit.jsonl` and every failed load or
-call to the matching `.log`. The jira row is not on dogfood's
+`.spindrift/logs/connector-jira-<stamp>-<pid>.audit.jsonl` and every failed
+load or call to the matching `.log`. The jira row is not on dogfood's
 `nix/dogfood-primary.nix`, so no streak recipe counts its runs.
 
 ### Authoring a Connector
@@ -3836,7 +3836,7 @@ This is protocol version **0.3.0**. The host is
   failure is not fatal: status `0` hands the guest a fixed reason, never
   the error detail. The detail (the unset credential variable, the
   transport's error) stays host-side: when the call then fails, `Call`'s
-  error carries it, and so does a primary row's `.log`. The response body is
+  error carries it, and so does a Connector's `.log`. The response body is
   arbitrary upstream bytes: the host checks only its size and the
   status/length framing, while the Connector's result is schema-checked as
   for any call. A route does not restrict the query string. Each Host call
@@ -3845,7 +3845,7 @@ This is protocol version **0.3.0**. The host is
   (`sent`, `refused` or `failed`), plus `reason` on a refusal or failure, and,
   when set, `rate_limit` (`primary` or `secondary`, on a 403 that carries a
   rate-limit signal or on any 429) and `retry_after` (the `Retry-After` header, on a 403 or
-  429; [Backend primary mode](#backend-primary-mode) has the classification); a
+  429; [Backend Connectors](#backend-connectors) has the classification); a
   request the log cannot record fails closed (`ErrAudit`) and leaves no line.
   Any failed call of a network Connector whose failure no Host call already
   audited adds a `failed` line naming the Connector. The SDK's

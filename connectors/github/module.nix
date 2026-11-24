@@ -27,7 +27,7 @@ in
     env = "SPINDRIFT_GITHUB_CONNECTOR_TOKEN";
     group = "dispatch";
     secret = true;
-    doc = "bearer token the github Connector's backend row authorizes its reads and writes with (write-capable, permission table in docs/reference.md#backend-primary-mode); host-only, never reaches the Box; needed on every run whose CODE_FORGE or ISSUE_TRACKER is github, since the Connector answers github's reads and writes for every Consumer";
+    doc = "bearer token the github Connector's backend row authorizes its reads and writes with (write-capable, permission table in docs/reference.md#backend-connectors); host-only, never reaches the Box; needed on every run whose CODE_FORGE or ISSUE_TRACKER is github, since the Connector answers github's reads and writes for every Consumer";
     flakeOption = false;
     boxEnv = false;
   };

@@ -376,7 +376,7 @@ rec {
   # verified, but a narrower one is safer.
   connectorCredentialNote =
     "# The Connector authorizes its reads and writes with this token. A separate,\n"
-    + "# least-privilege token may replace it: see docs/reference.md#backend-primary-mode.\n";
+    + "# least-privilege token may replace it: see docs/reference.md#backend-connectors.\n";
 
   # templates/default/harness.env.example content. Core's knobs are secrets only
   # (ADR 0020): from #625 onward env configures nothing else, so listing a

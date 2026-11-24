@@ -10,8 +10,8 @@ has. Nothing to do on a live host, since new runs write the new names. The
 stderr line printed when a record cannot be written begins `Connector
 <backend>`, not `primary <backend>`; update any log grep that matches it.
 
-The clean-run recipe in [Backend primary
-mode](docs/reference.md#backend-primary-mode) globs the new prefix, so old
+The clean-run recipe in [Backend
+Connectors](docs/reference.md#backend-connectors) globs the new prefix, so old
 `primary-*` records in an existing log directory or a CI artifact are never
 counted. A streak spanning the rename starts over from the first
 `connector-*` record. To count older records, rename them:
@@ -25,15 +25,24 @@ done
 The recipe's marker comment is now `# connector=github`, where it was
 `# primary=github`; copy the recipe afresh rather than patching a saved one.
 
-## The github Connector write gate is renamed (issue #7468)
+What else changed:
 
-The launch gate that checks the github Connector's write credential is now
-`connector-write-github`, not `primary-connector-write-github`. The id appears
-only in `spindrift doctor` and launch output (`ok:`, `MISSING:` and warning
-lines); no setting takes it. The gate's warning, error and refusal lines
-likewise say `the github Connector` where they said `the primary github
-Connector`. Change any log grep, alert or script that matches the old id or
-text. Nothing to do otherwise.
+- **The github Connector write gate is renamed.** The launch gate that checks
+  the github Connector's write credential is now `connector-write-github`, not
+  `primary-connector-write-github`. The id appears only in `spindrift doctor`
+  and launch output (`ok:`, `MISSING:` and warning lines); no setting takes it.
+  The gate's warning, error and refusal lines likewise say `the github
+  Connector` where they said `the primary github Connector`. Change any log
+  grep, alert or script that matches the old id or text. Nothing to do
+  otherwise.
+- **The reference's `Backend primary mode` section is now [Backend
+  Connectors](docs/reference.md#backend-connectors),** since no backend row has
+  a primary mode. Point any bookmark or link at
+  `docs/reference.md#backend-connectors` instead of
+  `docs/reference.md#backend-primary-mode`; the old anchor no longer resolves.
+  The generated `harness.env` comments and the quickstart stanza cite the new
+  anchor. A `harness.env` you saved earlier still carries the old link in a
+  comment, which is harmless; update it when convenient.
 
 ## The Route baseline is merge-guarded by default (issue #7465)
 
@@ -80,7 +89,7 @@ What else changed:
 - **No `shadow-<backend>-*.log` is written, and the connector audit line has no
   `shadow` mark.** Archived `shadow_summary` records keep their shape.
 
-See [Backend primary mode](docs/reference.md#backend-primary-mode).
+See [Backend Connectors](docs/reference.md#backend-connectors).
 
 ## The native forgejo tracker is deleted (issue #7122)
 
@@ -229,8 +238,8 @@ The rest of the native github adapter is gone: the github Connector is the only
 github implementation, for writes as well as reads, and the ADR 0073 migration
 window is closed. A write with no routed github row fails with `ErrNoRoute`
 naming the cause, in place of running `gh`. See [The github
-Connector](docs/reference.md#the-github-connector) and [Backend primary
-mode](docs/reference.md#backend-primary-mode).
+Connector](docs/reference.md#the-github-connector) and [Backend
+Connectors](docs/reference.md#backend-connectors).
 
 What changed for a Consumer:
 
@@ -306,17 +315,17 @@ What changed for a Consumer:
 
 Every non-shadow github row now routes its covered reads and writes through the
 github Connector, with or without `primary`, and with no `gh` fallback. See [The
-github Connector](docs/reference.md#the-github-connector) and [Backend primary
-mode](docs/reference.md#backend-primary-mode). The native adapter stays in the
-build until #6811 and #6888 delete it, so reverting the change restores native
-routing.
+github Connector](docs/reference.md#the-github-connector) and [Backend
+Connectors](docs/reference.md#backend-connectors). The native adapter stays in
+the build until #6811 and #6888 delete it, so reverting the change restores
+native routing.
 
 What changed for a github Consumer:
 
 - **Set `SPINDRIFT_GITHUB_CONNECTOR_TOKEN`.** Every run whose `CODE_FORGE` or
   `ISSUE_TRACKER` is `github` needs it, where it used to be needed only under
   `shadow` or `primary`. It must be write-capable: see the permission table in
-  [Backend primary mode](docs/reference.md#backend-primary-mode). Without
+  [Backend Connectors](docs/reference.md#backend-connectors). Without
   it the run fails.
 - **`MERGE_METHOD=merge` and `squash` are refused at launch.** The Connector
   merges by rebase only. Drop the setting, or use `rebase`.
