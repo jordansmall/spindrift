@@ -208,7 +208,7 @@ func TestPlainRow_RefusedRouteFailsTheWrite(t *testing.T) {
 }
 
 // A Connector that does not advertise what a write needs fails it with the
-// named capability error instead of reaching the nil native tracker or gh.
+// named capability error instead of reaching gh.
 func TestRoutedRow_MissingCapabilityFailsTheWrite(t *testing.T) {
 	for _, tc := range []struct{ write, capName string }{
 		{"TransitionState", "tracker.editLabels"},

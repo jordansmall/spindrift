@@ -19,7 +19,7 @@ func TestLabeledLayerScansEachLabelAndMapsClosedFields(t *testing.T) {
 	call, calls := stubGuest(t, map[string]string{CapLabeled: `{"issues":[
 		{"number":"9","title":"newer","body":"b","state":"closed","labels":["agent-review-finding"],"closedAt":"2026-01-02T03:04:05Z","closedNotPlanned":true},
 		{"number":"4","title":"older","state":"closed","labels":["agent-review-finding"]}]}`})
-	tr := mustTracker(t, call, newNative(), testLifecycle, testTarget, []string{CapLabeled}, true)
+	tr := mustTracker(t, call, testLifecycle, testTarget, []string{CapLabeled}, true)
 	l, ok := forge.As[forge.LabeledBacklogLister](tr)
 	if !ok {
 		t.Fatal("a Connector advertising tracker.labeled resolved no LabeledBacklogLister")
@@ -42,7 +42,7 @@ func TestLabeledLayerScansEachLabelAndMapsClosedFields(t *testing.T) {
 
 func TestLabeledLayerRefusesAStateTheScanDoesNotCover(t *testing.T) {
 	call, calls := stubGuest(t, nil)
-	tr := mustTracker(t, call, newNative(), testLifecycle, testTarget, []string{CapLabeled}, true)
+	tr := mustTracker(t, call, testLifecycle, testTarget, []string{CapLabeled}, true)
 	l, _ := forge.As[forge.LabeledBacklogLister](tr)
 	if _, err := l.ListIssuesWithLabels(forge.IssueMerged, []string{"x"}); err == nil || len(*calls) != 0 {
 		t.Errorf("err = %v with %d calls; want a refusal before any call", err, len(*calls))
@@ -51,7 +51,7 @@ func TestLabeledLayerRefusesAStateTheScanDoesNotCover(t *testing.T) {
 
 func TestLabeledLayerFailsClosedOnABadIssueNumber(t *testing.T) {
 	call, _ := stubGuest(t, map[string]string{CapLabeled: `{"issues":[{"number":"../x","state":"open"}]}`})
-	tr := mustTracker(t, call, newNative(), testLifecycle, testTarget, []string{CapLabeled}, true)
+	tr := mustTracker(t, call, testLifecycle, testTarget, []string{CapLabeled}, true)
 	l, _ := forge.As[forge.LabeledBacklogLister](tr)
 	if _, err := l.ListIssuesWithLabels(forge.IssueOpen, []string{"x"}); !errors.Is(err, ErrAnswer) {
 		t.Errorf("err = %v; want ErrAnswer", err)
@@ -120,7 +120,7 @@ func captureStderr(t *testing.T, f func()) string {
 
 func labeledLister(t *testing.T, call func(context.Context, string, any, any) error) forge.LabeledBacklogLister {
 	t.Helper()
-	tr := mustTracker(t, call, newNative(), testLifecycle, testTarget, []string{CapLabeled}, true)
+	tr := mustTracker(t, call, testLifecycle, testTarget, []string{CapLabeled}, true)
 	l, ok := forge.As[forge.LabeledBacklogLister](tr)
 	if !ok {
 		t.Fatal("no LabeledBacklogLister")
@@ -272,7 +272,7 @@ func TestLabeledLayerStopsAtTheByteBudgetWithoutError(t *testing.T) {
 func TestLabeledLayerGuestErrorFailsWhenEveryLabelFails(t *testing.T) {
 	boom := errors.New("boom")
 	call := func(_ context.Context, _ string, _, _ any) error { return boom }
-	tr := mustTracker(t, call, newNative(), testLifecycle, testTarget, []string{CapLabeled}, true)
+	tr := mustTracker(t, call, testLifecycle, testTarget, []string{CapLabeled}, true)
 	l, _ := forge.As[forge.LabeledBacklogLister](tr)
 	if _, err := l.ListIssuesWithLabels(forge.IssueOpen, []string{"x"}); !errors.Is(err, boom) {
 		t.Errorf("err = %v; want boom", err)
@@ -281,7 +281,7 @@ func TestLabeledLayerGuestErrorFailsWhenEveryLabelFails(t *testing.T) {
 
 func TestAbsentLabeledStaysAbsent(t *testing.T) {
 	call, _ := stubGuest(t, nil)
-	tr := mustTracker(t, call, newNative(), testLifecycle, testTarget, nil, true)
+	tr := mustTracker(t, call, testLifecycle, testTarget, nil, true)
 	if _, ok := forge.As[forge.LabeledBacklogLister](tr); ok {
 		t.Error("LabeledBacklogLister resolved without tracker.labeled")
 	}

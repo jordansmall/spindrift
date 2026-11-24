@@ -39,30 +39,6 @@ const (
 	jiraTimeLayout     = "2006-01-02T15:04:05.000-0700"
 )
 
-// failingWrites fills connectortracker's native-writes slot with an
-// implementation that fails every call, so a read-only contract run errors if
-// a read reaches a write.
-type failingWrites struct{ t *testing.T }
-
-func (w failingWrites) fail(name string) error {
-	w.t.Errorf("read contract reached the native writes' %s", name)
-	return nil
-}
-
-func (w failingWrites) ListIssues(forge.DispatchState) ([]forge.Issue, error) {
-	return nil, w.fail("ListIssues")
-}
-func (w failingWrites) ListOpenIssues() ([]forge.Issue, error) { return nil, w.fail("ListOpenIssues") }
-func (w failingWrites) Issue(string) (forge.Issue, error)      { return forge.Issue{}, w.fail("Issue") }
-func (w failingWrites) TransitionState(string, forge.DispatchState, forge.DispatchState) error {
-	return w.fail("TransitionState")
-}
-func (w failingWrites) CompleteVerdict(string, forge.Verdict) error { return w.fail("CompleteVerdict") }
-func (w failingWrites) Comment(string, string) error                { return w.fail("Comment") }
-func (w failingWrites) Probe() (string, error)                      { return "", w.fail("Probe") }
-func (w failingWrites) ListLabels() ([]string, error)               { return nil, w.fail("ListLabels") }
-func (w failingWrites) CreateLabel(string, string, string) error    { return w.fail("CreateLabel") }
-
 // connectorHarness drives the compiled jira Connector, through the Connector
 // host, against the scripted Jira backend served over TLS (the host requires
 // https).
@@ -127,7 +103,7 @@ func newConnectorHarnessWith(t *testing.T, cloud bool, lc connectortracker.Lifec
 	if lc.WebHost == "" {
 		lc.WebHost = u.Host
 	}
-	h.tr, err = connectortracker.New(conn, failingWrites{t}, lc,
+	h.tr, err = connectortracker.New(conn, lc,
 		connectortracker.Target{API: h.srv.URL, Repo: connectorProject, Dialect: dialect}, retry.NoSleepClock())
 	if err != nil {
 		t.Fatal(err)

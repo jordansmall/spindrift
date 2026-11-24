@@ -82,7 +82,7 @@ func TestConnectorRateLimitHoldsAndResumesTheDemandProbe(t *testing.T) {
 		map[string][]error{"tracker.count": {&connectorhost.CallError{Class: connectorhost.RateLimited, Message: "slow down"}}})
 	c := &connectorhost.Connector{Capabilities: []string{"tracker", CapCount}, ProtocolVersion: "0.2.0"}
 	fake, _ := fakeClock()
-	tr, err := newFrom(c, call, &forge.IssueTrackerFake{}, testLifecycle, testTarget, fake)
+	tr, err := newFrom(c, call, testLifecycle, testTarget, fake)
 	if err != nil {
 		t.Fatal(err)
 	}

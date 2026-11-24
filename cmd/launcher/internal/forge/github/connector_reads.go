@@ -170,9 +170,8 @@ func (e *execClient) connectorOp(row backendrows.Row, missing error, verb string
 const coreTracker = ""
 
 // trackerOp runs fn over a tracker view of conn that serves the capability
-// capName names (or coreTracker) and each of alsoCaps. The view has no native
-// tracker under it: a capability it does not serve must fail with
-// errNoCapability, since nothing sits under the view for it to reach.
+// capName names (or coreTracker) and each of alsoCaps. A capability the
+// Connector does not serve fails with errNoCapability.
 func (e *execClient) trackerOp(row backendrows.Row, capName, verb string, fn func(forge.IssueTracker) error, alsoCaps ...string) error {
 	return e.connectorOp(row, connectortracker.ErrNotTracker, verb, func(conn *connectorhost.Connector, api string) error {
 		for _, c := range append([]string{capName}, alsoCaps...) {
@@ -181,7 +180,7 @@ func (e *execClient) trackerOp(row backendrows.Row, capName, verb string, fn fun
 			}
 		}
 		lc := connectortracker.Lifecycle{Labels: e.labels, VerdictLabels: e.verdictLabels, Route: e.route, WebHost: Host()}
-		tr, err := connectortracker.New(conn, nil, lc, connectortracker.Target{API: api, Repo: e.repo}, retry.Clock{})
+		tr, err := connectortracker.New(conn, lc, connectortracker.Target{API: api, Repo: e.repo}, retry.Clock{})
 		if err != nil {
 			return err
 		}

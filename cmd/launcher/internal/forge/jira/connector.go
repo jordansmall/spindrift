@@ -30,7 +30,7 @@ var connectorClock retry.Clock
 var loadRowConnector = backendrows.Load
 
 // errConnectorCapabilities is a Connector whose handshake omits a method
-// core drives, with nothing behind it to fall back to.
+// core drives.
 var errConnectorCapabilities = errors.New("jira Connector lacks required capabilities")
 
 // connectorCapabilities are the capabilities the jira Connector must advertise:
@@ -90,7 +90,7 @@ func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (for
 			return nil, err
 		}
 		return conn, nil
-	}, recordPrimaryFailure, nil, connectortracker.Lifecycle{
+	}, recordPrimaryFailure, connectortracker.Lifecycle{
 		Labels:        s.Labels,
 		VerdictLabels: s.VerdictLabels,
 		IssueType:     k.JiraIssueType,

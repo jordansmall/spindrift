@@ -37,7 +37,7 @@ func routedLifecycle(route forge.Route) Lifecycle {
 // ListOpenIssues is the whole-scope readiness read, so it never carries a route.
 func TestRouteNarrowsQueuesCountBacklogAndFilingButNotOpenList(t *testing.T) {
 	call, calls := stubGuest(t, routeReplies)
-	tr := mustTracker(t, call, newNative(), routedLifecycle(testRoute), testTarget, routeCaps, true)
+	tr := mustTracker(t, call, routedLifecycle(testRoute), testTarget, routeCaps, true)
 	dc, _ := forge.As[forge.DemandCounter](tr)
 	lb, _ := forge.As[forge.LabeledBacklogLister](tr)
 	filer, _ := forge.As[forge.HostPostedIssueFiler](tr)
@@ -72,7 +72,7 @@ func TestRouteNarrowsQueuesCountBacklogAndFilingButNotOpenList(t *testing.T) {
 
 func TestNoRouteLeavesTheParamsWithoutARouteKey(t *testing.T) {
 	call, calls := stubGuest(t, routeReplies)
-	tr := mustTracker(t, call, newNative(), testLifecycle, testTarget, routeCaps, true)
+	tr := mustTracker(t, call, testLifecycle, testTarget, routeCaps, true)
 	dc, _ := forge.As[forge.DemandCounter](tr)
 	lb, _ := forge.As[forge.LabeledBacklogLister](tr)
 	filer, _ := forge.As[forge.HostPostedIssueFiler](tr)
@@ -100,7 +100,7 @@ func TestNoRouteLeavesTheParamsWithoutARouteKey(t *testing.T) {
 // a route is refused unsent.
 func TestConnectorWithoutRouteCapRefusesARouteUnsent(t *testing.T) {
 	call, calls := stubGuest(t, routeReplies)
-	tr := mustTracker(t, call, newNative(), routedLifecycle(testRoute), testTarget, []string{CapCount, CapLabeled, CapFileIssue}, true)
+	tr := mustTracker(t, call, routedLifecycle(testRoute), testTarget, []string{CapCount, CapLabeled, CapFileIssue}, true)
 	*calls = nil
 	if _, err := tr.ListIssues(forge.Dispatchable); !errors.Is(err, connectorhost.ErrProtocolUnsupported) {
 		t.Errorf("ListIssues err = %v, want ErrProtocolUnsupported", err)
@@ -125,7 +125,7 @@ func TestConnectorWithoutRouteCapRefusesARouteUnsent(t *testing.T) {
 // A pre-0.2 Connector's capabilities are not trusted, CapRoute included.
 func TestPre02ConnectorAdvertisingRouteCapRefusesARoute(t *testing.T) {
 	call, calls := stubGuest(t, routeReplies)
-	tr := mustTracker(t, call, newNative(), routedLifecycle(testRoute), testTarget, []string{CapRoute}, false)
+	tr := mustTracker(t, call, routedLifecycle(testRoute), testTarget, []string{CapRoute}, false)
 	*calls = nil
 	if _, err := tr.ListIssues(forge.Dispatchable); !errors.Is(err, connectorhost.ErrProtocolUnsupported) {
 		t.Errorf("ListIssues err = %v, want ErrProtocolUnsupported", err)
@@ -137,7 +137,7 @@ func TestPre02ConnectorAdvertisingRouteCapRefusesARoute(t *testing.T) {
 
 func TestMatchesRouteAsksTheConnectorWithTheRoute(t *testing.T) {
 	call, calls := stubGuest(t, routeReplies)
-	tr := mustTracker(t, call, newNative(), routedLifecycle(testRoute), testTarget, routeCaps, true)
+	tr := mustTracker(t, call, routedLifecycle(testRoute), testTarget, routeCaps, true)
 	rm, ok := forge.As[forge.RouteMatcher](tr)
 	if !ok {
 		t.Fatal("the tracker is not a RouteMatcher")
@@ -159,7 +159,7 @@ func TestMatchesRouteAsksTheConnectorWithTheRoute(t *testing.T) {
 
 func TestMatchesRouteTrueWhenTheConnectorSaysSo(t *testing.T) {
 	call, _ := stubGuest(t, withReply("tracker.matchesRoute", `{"matches":true}`))
-	tr := mustTracker(t, call, newNative(), routedLifecycle(testRoute), testTarget, routeCaps, true)
+	tr := mustTracker(t, call, routedLifecycle(testRoute), testTarget, routeCaps, true)
 	rm, _ := forge.As[forge.RouteMatcher](tr)
 	if got, err := rm.MatchesRoute("7"); err != nil || !got {
 		t.Errorf("MatchesRoute = %v, %v, want true", got, err)
@@ -168,7 +168,7 @@ func TestMatchesRouteTrueWhenTheConnectorSaysSo(t *testing.T) {
 
 func TestMatchesRouteEmptyRouteMatchesWithoutACall(t *testing.T) {
 	call, calls := stubGuest(t, routeReplies)
-	tr := mustTracker(t, call, newNative(), testLifecycle, testTarget, routeCaps, true)
+	tr := mustTracker(t, call, testLifecycle, testTarget, routeCaps, true)
 	rm, _ := forge.As[forge.RouteMatcher](tr)
 	*calls = nil
 	if got, err := rm.MatchesRoute("7"); err != nil || !got {
@@ -181,7 +181,7 @@ func TestMatchesRouteEmptyRouteMatchesWithoutACall(t *testing.T) {
 
 func TestMatchesRouteRefusedUnsentWithoutTheRouteCap(t *testing.T) {
 	call, calls := stubGuest(t, withReply("tracker.matchesRoute", `{"matches":true}`))
-	tr := mustTracker(t, call, newNative(), routedLifecycle(testRoute), testTarget, []string{CapCount}, true)
+	tr := mustTracker(t, call, routedLifecycle(testRoute), testTarget, []string{CapCount}, true)
 	rm, _ := forge.As[forge.RouteMatcher](tr)
 	*calls = nil
 	if _, err := rm.MatchesRoute("7"); !errors.Is(err, connectorhost.ErrProtocolUnsupported) {

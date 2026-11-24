@@ -24,7 +24,7 @@ func connectorIssueHandler(t *testing.T, replies map[string]string, guestErr err
 			return guestErr
 		}
 	}
-	tr := mustTracker(t, guest, newNative(), testLifecycle, testTarget, nil, true)
+	tr := mustTracker(t, guest, testLifecycle, testTarget, nil, true)
 	rd := signalsocket.NewTrackerIssueReader(tr, "o/r", io.Discard)
 	return signalsocket.NewHandler(signalsocket.New(signalsocket.Config{}), nil, rd, nil), calls
 }
@@ -74,7 +74,7 @@ func connectorSearchHandler(t *testing.T, replies map[string]string, guestErr er
 			return guestErr
 		}
 	}
-	tr := mustTracker(t, guest, newNative(), testLifecycle, testTarget, []string{CapSearchIssues}, true)
+	tr := mustTracker(t, guest, testLifecycle, testTarget, []string{CapSearchIssues}, true)
 	c := forge.ResolveCapabilities(nil, tr, backend.Descriptor{}, backend.Descriptor{})
 	if c.IssueSearcher == nil {
 		t.Fatal("a Connector advertising tracker.searchIssues resolved no IssueSearcher")

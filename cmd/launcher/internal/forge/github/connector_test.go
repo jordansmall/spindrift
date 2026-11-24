@@ -587,29 +587,6 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// failingWrites is the native adapter's role in a read-only contract run: the
-// reads must never reach it.
-type failingWrites struct{ t *testing.T }
-
-func (w failingWrites) fail(name string) error {
-	w.t.Errorf("read contract called the native adapter's %s", name)
-	return nil
-}
-
-func (w failingWrites) ListIssues(forge.DispatchState) ([]forge.Issue, error) {
-	return nil, w.fail("ListIssues")
-}
-func (w failingWrites) ListOpenIssues() ([]forge.Issue, error) { return nil, w.fail("ListOpenIssues") }
-func (w failingWrites) Issue(string) (forge.Issue, error)      { return forge.Issue{}, w.fail("Issue") }
-func (w failingWrites) TransitionState(string, forge.DispatchState, forge.DispatchState) error {
-	return w.fail("TransitionState")
-}
-func (w failingWrites) CompleteVerdict(string, forge.Verdict) error { return w.fail("CompleteVerdict") }
-func (w failingWrites) Comment(string, string) error                { return w.fail("Comment") }
-func (w failingWrites) Probe() (string, error)                      { return "", w.fail("Probe") }
-func (w failingWrites) ListLabels() ([]string, error)               { return nil, w.fail("ListLabels") }
-func (w failingWrites) CreateLabel(string, string, string) error    { return w.fail("CreateLabel") }
-
 // failingPRWrites is the native adapter's role as the PRForge in a read-only
 // contract run: the reads must never reach it. The methods the Connector has no
 // primitive for (Mergeable, HeadCommitSHA, NeedsUpdate, ListPRFiles,
@@ -771,7 +748,7 @@ func newHarnessWith(t *testing.T, targetRepo string, lc connectortracker.Lifecyc
 	if lc.WebHost == "" {
 		lc.WebHost = b.host
 	}
-	h.tr, err = connectortracker.New(conn, failingWrites{t}, lc, connectortracker.Target{API: b.URL, Repo: connectorRepo}, retry.NoSleepClock())
+	h.tr, err = connectortracker.New(conn, lc, connectortracker.Target{API: b.URL, Repo: connectorRepo}, retry.NoSleepClock())
 	if err != nil {
 		t.Fatal(err)
 	}
