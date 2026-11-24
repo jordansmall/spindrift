@@ -162,8 +162,8 @@ func TestCredentialApplyExtendsGitConfigCount(t *testing.T) {
 	Credential{testUser, testToken}.Apply(cmd, testRepoURL)
 
 	env := lastEnv(cmd.Env)
-	if env["GIT_CONFIG_COUNT"] != "4" {
-		t.Fatalf("GIT_CONFIG_COUNT = %q, want 4", env["GIT_CONFIG_COUNT"])
+	if env["GIT_CONFIG_COUNT"] != "5" {
+		t.Fatalf("GIT_CONFIG_COUNT = %q, want 5", env["GIT_CONFIG_COUNT"])
 	}
 	if env["GIT_CONFIG_KEY_0"] != "ambient.key" || env["GIT_CONFIG_VALUE_0"] != "ambient" {
 		t.Fatalf("ambient entry 0 not preserved: %v", env)
@@ -176,6 +176,9 @@ func TestCredentialApplyExtendsGitConfigCount(t *testing.T) {
 	}
 	if env["GIT_CONFIG_KEY_3"] != "credential."+testRepoURL+".useHttpPath" || env["GIT_CONFIG_VALUE_3"] != "true" {
 		t.Fatalf("entry 3 must scope the helper to the path: %v", env)
+	}
+	if env["GIT_CONFIG_KEY_4"] != "http."+testRepoURL+".followRedirects" || env["GIT_CONFIG_VALUE_4"] != "false" {
+		t.Fatalf("entry 4 must stop git following a redirect for the URL: %v", env)
 	}
 	if env["GIT_TERMINAL_PROMPT"] != "0" {
 		t.Fatalf("GIT_TERMINAL_PROMPT = %q", env["GIT_TERMINAL_PROMPT"])

@@ -5404,11 +5404,10 @@ through an environment-only credential helper, so the token reaches no
 argv, no clone's `remote.origin.url`, and no error text (issue #6860).
 That helper answers only for the exact repository URL, path included,
 so git never asks it for the credential of an LFS endpoint, another
-repository on the same host, or the target of a redirect. (A forge
-that authenticates before it redirects can still see git forward the
-header to the new path on the same host.) A renamed or transferred
-repository therefore fails with an error naming the configured Target
-repo: update the configured URL (issue #7466).
+repository on the same host, or the target of a redirect. For that
+URL git also does not follow a redirect at all, so a renamed or
+transferred repository fails with an error naming the configured
+Target repo: update the configured URL (issue #7466).
 Userinfo replaces any ambient credential helper for that call, so a URL
 whose password lives in a helper should carry no userinfo (put the
 username in the helper's config instead). The Forgejo backend's host-side
