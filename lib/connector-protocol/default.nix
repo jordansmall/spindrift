@@ -156,6 +156,14 @@ let
         value = 256;
         doc = "Bytes of Connector-supplied error text core keeps.";
       };
+      maxScopeLen = {
+        value = 64;
+        doc = "Bytes of one scope in a forge.tokenGrant answer.";
+      };
+      maxReasonLen = {
+        value = 200;
+        doc = "Runes of the reason in a forge.tokenGrant answer; core truncates a longer one.";
+      };
     };
 
     # The canonical event kinds (ADR 0065), in driverkit's order. A guest may emit
@@ -226,6 +234,15 @@ let
       guestEvents = "connectorhost.guestEvents decodes strictly: an unknown field, an unknown kind or a host_op rejects the answer.";
       batchEvents = "connectorhost.batchEvents requires one element per line, each checked as guestEvents; a bad element fails only its line.";
       resolveExitGuard = "connectorhost.DriverStrategy refuses an answer that resolves a non-zero exit to 0.";
+      prShape = "connectorforge reads.check refuses a PR whose number is not a canonical positive integer, whose URL is not a plain https URL on the forge's web host naming the target repository and that same number, or whose state and merged pair is impossible (anything but open and unmerged, closed and merged, or closed and unmerged).";
+      prAnswer = "connectorforge reads.pr applies prShape and refuses a PR other than the one asked for; the callers go on to refuse a mergeable value outside MERGEABLE, CONFLICTING and UNKNOWN (Mergeable), a merge commit that is not a full lowercase hex id (MergeCommit), an empty head commit (HeadCommitSHA), and, before a rebase, a head other than the agent branch core derived (RebasePRHead).";
+      rollupState = "connectorforge reads.CheckState fails closed on a rollup state outside SUCCESS, PENDING, EXPECTED, FAILURE and ERROR; an empty state reads as no checks.";
+      remoteURLs = "connectorforge pushOnly.checkURL refuses a clone or web URL that is not https with a host, carries userinfo, or names a host outside core's web host (Git.WebHost) or, without one, the Connector's declared routes; a refusal is audited.";
+      behindCount = "connectorforge prForge.NeedsUpdate refuses a negative behindBy.";
+      prFiles = "connectorforge prForge.ListPRFiles refuses a missing or empty list, and an entry that is not a clean repository-relative path (cleanRepoPath), because the merge guard reads it.";
+      runLink = "connectorforge reads.ownRunLink drops, rather than fails on, a URL that is not a plain https URL on the web host under the target repository's path; a backslash is refused.";
+      probeRepo = "connectorforge probeRepo refuses an empty repo.";
+      tokenGrant = "connectorforge.checkGrant refuses writeCapable or scopes without introspectable and a scope that is not a well-formed token (wellFormedScope); cleanReason then sanitises the reason and caps it at maxReasonLen; a scope is capped at maxScopeLen.";
     };
 
     # Shared JSON types, rendered as the schema's $defs. A result field is
@@ -233,6 +250,54 @@ let
     # one core decodes to its zero value when absent is optional, whatever the
     # SDK always emits. Params are all required: core always sends them.
     types = {
+      # The repository a forge call reads; api is the https base URL without a
+      # trailing slash.
+      target = t.object {
+        api = t.string;
+        repo = t.string;
+      };
+      # connectorforge.wirePR: the fields after merged are a PR-capable forge's,
+      # each omitted when empty.
+      pr = t.open {
+        number = t.string;
+        url = t.string;
+        state = t.enum [
+          "open"
+          "closed"
+        ];
+        merged = t.optional t.boolean;
+        draft = t.optional t.boolean;
+        head = t.optional t.string;
+        headSha = t.optional t.string;
+        mergeable = t.optional (
+          t.enum [
+            "MERGEABLE"
+            "CONFLICTING"
+            "UNKNOWN"
+          ]
+        );
+        mergeCommit = t.optional t.string;
+        crossRepo = t.optional t.boolean;
+      };
+      # One context of a head commit's rollup. Core reads kind "CheckRun" and
+      # "StatusContext" and ignores any other.
+      check = t.open {
+        kind = t.string;
+        name = t.optional t.string;
+        conclusion = t.string;
+        summary = t.optional t.string;
+        jobId = t.optional t.string;
+      };
+      remote = t.open {
+        cloneUrl = t.string;
+        webUrl = t.string;
+      };
+      grant = t.open {
+        introspectable = t.optional t.boolean;
+        writeCapable = t.optional t.boolean;
+        reason = t.optional t.string;
+        scopes = t.optional (t.list t.string);
+      };
       pattern = t.open {
         substr = t.string;
         reason = t.string;

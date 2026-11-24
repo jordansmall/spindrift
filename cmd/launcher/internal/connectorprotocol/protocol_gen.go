@@ -185,10 +185,14 @@ const (
 	MaxModuleLocals = 1048576
 	// MaxOutput: Base bytes of one result, a call response or the handshake.
 	MaxOutput = 8388608
+	// MaxReasonLen: Runes of the reason in a forge.tokenGrant answer; core truncates a longer one.
+	MaxReasonLen = 200
 	// MaxRequest: Bytes of one connector_call request, refused before the guest sees it.
 	MaxRequest = 8388608
 	// MaxResponseCredit: Bytes of http_request response one call earns budget for.
 	MaxResponseCredit = 33554432
+	// MaxScopeLen: Bytes of one scope in a forge.tokenGrant answer.
+	MaxScopeLen = 64
 	// MaxTableEntries: Table entries a module may declare in total, checked at load.
 	MaxTableEntries = 65536
 	// MemoryCapBytes: Base bytes of module memory; also the largest minimum a module may declare.
@@ -235,14 +239,32 @@ var GuestEventKinds = []string{EventStart, EventText, EventReasoning, EventToolC
 const (
 	// CheckBatchEvents: connectorhost.batchEvents requires one element per line, each checked as guestEvents; a bad element fails only its line.
 	CheckBatchEvents = "batchEvents"
+	// CheckBehindCount: connectorforge prForge.NeedsUpdate refuses a negative behindBy.
+	CheckBehindCount = "behindCount"
 	// CheckDecode: Core decodes the result into its Go type and checks nothing more (ErrMalformedOutput otherwise).
 	CheckDecode = "decode"
 	// CheckDescribe: connectorhost.DriverStrategy refuses an unknown pattern reason, totals or result name.
 	CheckDescribe = "describe"
 	// CheckGuestEvents: connectorhost.guestEvents decodes strictly: an unknown field, an unknown kind or a host_op rejects the answer.
 	CheckGuestEvents = "guestEvents"
+	// CheckPrAnswer: connectorforge reads.pr applies prShape and refuses a PR other than the one asked for; the callers go on to refuse a mergeable value outside MERGEABLE, CONFLICTING and UNKNOWN (Mergeable), a merge commit that is not a full lowercase hex id (MergeCommit), an empty head commit (HeadCommitSHA), and, before a rebase, a head other than the agent branch core derived (RebasePRHead).
+	CheckPrAnswer = "prAnswer"
+	// CheckPrFiles: connectorforge prForge.ListPRFiles refuses a missing or empty list, and an entry that is not a clean repository-relative path (cleanRepoPath), because the merge guard reads it.
+	CheckPrFiles = "prFiles"
+	// CheckPrShape: connectorforge reads.check refuses a PR whose number is not a canonical positive integer, whose URL is not a plain https URL on the forge's web host naming the target repository and that same number, or whose state and merged pair is impossible (anything but open and unmerged, closed and merged, or closed and unmerged).
+	CheckPrShape = "prShape"
+	// CheckProbeRepo: connectorforge probeRepo refuses an empty repo.
+	CheckProbeRepo = "probeRepo"
+	// CheckRemoteURLs: connectorforge pushOnly.checkURL refuses a clone or web URL that is not https with a host, carries userinfo, or names a host outside core's web host (Git.WebHost) or, without one, the Connector's declared routes; a refusal is audited.
+	CheckRemoteURLs = "remoteURLs"
 	// CheckResolveExitGuard: connectorhost.DriverStrategy refuses an answer that resolves a non-zero exit to 0.
 	CheckResolveExitGuard = "resolveExitGuard"
+	// CheckRollupState: connectorforge reads.CheckState fails closed on a rollup state outside SUCCESS, PENDING, EXPECTED, FAILURE and ERROR; an empty state reads as no checks.
+	CheckRollupState = "rollupState"
+	// CheckRunLink: connectorforge reads.ownRunLink drops, rather than fails on, a URL that is not a plain https URL on the web host under the target repository's path; a backslash is refused.
+	CheckRunLink = "runLink"
+	// CheckTokenGrant: connectorforge.checkGrant refuses writeCapable or scopes without introspectable and a scope that is not a well-formed token (wellFormedScope); cleanReason then sanitises the reason and caps it at maxReasonLen; a scope is capped at maxScopeLen.
+	CheckTokenGrant = "tokenGrant"
 )
 
 // The method names.
@@ -279,6 +301,44 @@ const (
 	MethodDriverStreamFlush = "driver.streamFlush"
 	// MethodDriverFreeStreamFilter: Frees a guest filter.
 	MethodDriverFreeStreamFilter = "driver.freeStreamFilter"
+	// MethodForgePrsForBranch: Every PR whose head is `branch`, any state, newest first.
+	MethodForgePrsForBranch = "forge.prsForBranch"
+	// MethodForgePr: One PR by number.
+	MethodForgePr = "forge.pr"
+	// MethodForgeChecks: The status-check rollup of the PR's head commit; an empty `state` means it has no checks.
+	MethodForgeChecks = "forge.checks"
+	// MethodForgeJobLog: The last `tail` bytes of a job's log, preceded by the error lines of the head it cut, up to `errorLines` bytes; optional, and a failed read only costs failure detail its logs.
+	MethodForgeJobLog = "forge.jobLog"
+	// MethodForgeRemote: The repository's git identity: the clone URL core's git pushes to and the web URL.
+	MethodForgeRemote = "forge.remote"
+	// MethodForgeBranchExists: Whether `branch` exists on the forge.
+	MethodForgeBranchExists = "forge.branchExists"
+	// MethodForgeDeleteBranch: Deletes `branch` from the forge; core refuses the base branch and an option-shaped name before the call.
+	MethodForgeDeleteBranch = "forge.deleteBranch"
+	// MethodForgeBehind: Commits the PR's base has that its head lacks.
+	MethodForgeBehind = "forge.behind"
+	// MethodForgePrFiles: Every path the PR changes.
+	MethodForgePrFiles = "forge.prFiles"
+	// MethodForgeSetDraft: Marks the PR as a draft or ready for review.
+	MethodForgeSetDraft = "forge.setDraft"
+	// MethodForgeComment: Posts `body` on the PR.
+	MethodForgeComment = "forge.comment"
+	// MethodForgeMerge: Merges the PR now; core classifies a failure, and reads the PR only on `not-mergeable`.
+	MethodForgeMerge = "forge.merge"
+	// MethodForgeAutoMergeAllowed: Whether the repository permits native auto-merge.
+	MethodForgeAutoMergeAllowed = "forge.autoMergeAllowed"
+	// MethodForgeEnqueueAutoMerge: Asks the forge to merge the PR once its requirements are met.
+	MethodForgeEnqueueAutoMerge = "forge.enqueueAutoMerge"
+	// MethodForgeCiRun: The URL of the CI run for the PR's head commit, empty when there is none yet.
+	MethodForgeCiRun = "forge.ciRun"
+	// MethodForgeBranchProtected: Whether `branch` carries protection, a classic rule or a ruleset.
+	MethodForgeBranchProtected = "forge.branchProtected"
+	// MethodForgeProbe: The repository's canonical owner/name, proving the forge answers with the Connector's credential.
+	MethodForgeProbe = "forge.probe"
+	// MethodForgeOpenPR: Opens a PR; core only ever opens drafts, and adopts the branch's open PR when the create fails.
+	MethodForgeOpenPR = "forge.openPR"
+	// MethodForgeTokenGrant: What the credential the host attached may do on the repository; the request carries only the token's non-secret prefix.
+	MethodForgeTokenGrant = "forge.tokenGrant"
 )
 
 // Retry says how core may repeat a failed call. Safe is true when repeating a
@@ -318,4 +378,23 @@ var Methods = map[string]Method{
 	MethodDriverStreamWrite:      {Name: MethodDriverStreamWrite, Axis: AxisDriver, Capability: CapDriverStreamFilter, ResultCheck: CheckDecode},
 	MethodDriverStreamFlush:      {Name: MethodDriverStreamFlush, Axis: AxisDriver, Capability: CapDriverStreamFilter, ResultCheck: CheckDecode},
 	MethodDriverFreeStreamFilter: {Name: MethodDriverFreeStreamFilter, Axis: AxisDriver, Capability: CapDriverStreamFilter, ResultCheck: CheckDecode},
+	MethodForgePrsForBranch:      {Name: MethodForgePrsForBranch, Axis: AxisForge, Capability: CapForge, Retry: Retry{Safe: true}, ResultCheck: CheckPrShape},
+	MethodForgePr:                {Name: MethodForgePr, Axis: AxisForge, Capability: CapForge, Retry: Retry{Safe: true}, ResultCheck: CheckPrAnswer},
+	MethodForgeChecks:            {Name: MethodForgeChecks, Axis: AxisForge, Capability: CapForge, Retry: Retry{Safe: true}, ResultCheck: CheckRollupState},
+	MethodForgeJobLog:            {Name: MethodForgeJobLog, Axis: AxisForge, Capability: CapForge, Retry: Retry{Safe: true}, ResultCheck: CheckDecode},
+	MethodForgeRemote:            {Name: MethodForgeRemote, Axis: AxisForge, Capability: CapForgeBranches, Retry: Retry{Safe: true}, ResultCheck: CheckRemoteURLs},
+	MethodForgeBranchExists:      {Name: MethodForgeBranchExists, Axis: AxisForge, Capability: CapForgeBranches, Retry: Retry{Safe: true}, ResultCheck: CheckDecode},
+	MethodForgeDeleteBranch:      {Name: MethodForgeDeleteBranch, Axis: AxisForge, Capability: CapForgeBranches, Retry: Retry{Safe: true, DoneOn: []string{ClassNotFound}}, ResultCheck: CheckDecode},
+	MethodForgeBehind:            {Name: MethodForgeBehind, Axis: AxisForge, Capability: CapForgePrs, Retry: Retry{Safe: true}, ResultCheck: CheckBehindCount},
+	MethodForgePrFiles:           {Name: MethodForgePrFiles, Axis: AxisForge, Capability: CapForgePrs, Retry: Retry{Safe: true}, ResultCheck: CheckPrFiles},
+	MethodForgeSetDraft:          {Name: MethodForgeSetDraft, Axis: AxisForge, Capability: CapForgePrs, Retry: Retry{Safe: true}, ResultCheck: CheckDecode},
+	MethodForgeComment:           {Name: MethodForgeComment, Axis: AxisForge, Capability: CapForgePrs, ResultCheck: CheckDecode},
+	MethodForgeMerge:             {Name: MethodForgeMerge, Axis: AxisForge, Capability: CapForgePrs, ResultCheck: CheckDecode},
+	MethodForgeAutoMergeAllowed:  {Name: MethodForgeAutoMergeAllowed, Axis: AxisForge, Capability: CapForgeAutoMerge, Retry: Retry{Safe: true}, ResultCheck: CheckDecode},
+	MethodForgeEnqueueAutoMerge:  {Name: MethodForgeEnqueueAutoMerge, Axis: AxisForge, Capability: CapForgeAutoMerge, Retry: Retry{Safe: true}, ResultCheck: CheckDecode},
+	MethodForgeCiRun:             {Name: MethodForgeCiRun, Axis: AxisForge, Capability: CapForgeCiRun, Retry: Retry{Safe: true}, ResultCheck: CheckRunLink},
+	MethodForgeBranchProtected:   {Name: MethodForgeBranchProtected, Axis: AxisForge, Capability: CapForgeBranchProtection, Retry: Retry{Safe: true}, ResultCheck: CheckDecode},
+	MethodForgeProbe:             {Name: MethodForgeProbe, Axis: AxisForge, Capability: CapForgeProbe, Retry: Retry{Safe: true}, ResultCheck: CheckProbeRepo},
+	MethodForgeOpenPR:            {Name: MethodForgeOpenPR, Axis: AxisForge, Capability: CapForgeDraftPRs, ResultCheck: CheckPrShape},
+	MethodForgeTokenGrant:        {Name: MethodForgeTokenGrant, Axis: AxisForge, Capability: CapForgeTokenGrant, Retry: Retry{Safe: true}, ResultCheck: CheckTokenGrant},
 }

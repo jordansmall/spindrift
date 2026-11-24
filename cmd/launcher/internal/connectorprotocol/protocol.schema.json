@@ -1,5 +1,29 @@
 {
   "$defs": {
+    "check": {
+      "properties": {
+        "conclusion": {
+          "type": "string"
+        },
+        "jobId": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "conclusion",
+        "kind"
+      ],
+      "type": "object"
+    },
     "event": {
       "additionalProperties": false,
       "properties": {
@@ -124,6 +148,26 @@
       ],
       "type": "object"
     },
+    "grant": {
+      "properties": {
+        "introspectable": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "scopes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "writeCapable": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "pattern": {
       "properties": {
         "reason": {
@@ -136,6 +180,86 @@
       "required": [
         "reason",
         "substr"
+      ],
+      "type": "object"
+    },
+    "pr": {
+      "properties": {
+        "crossRepo": {
+          "type": "boolean"
+        },
+        "draft": {
+          "type": "boolean"
+        },
+        "head": {
+          "type": "string"
+        },
+        "headSha": {
+          "type": "string"
+        },
+        "mergeCommit": {
+          "type": "string"
+        },
+        "mergeable": {
+          "enum": [
+            "MERGEABLE",
+            "CONFLICTING",
+            "UNKNOWN"
+          ],
+          "type": "string"
+        },
+        "merged": {
+          "type": "boolean"
+        },
+        "number": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "open",
+            "closed"
+          ],
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "number",
+        "state",
+        "url"
+      ],
+      "type": "object"
+    },
+    "remote": {
+      "properties": {
+        "cloneUrl": {
+          "type": "string"
+        },
+        "webUrl": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cloneUrl",
+        "webUrl"
+      ],
+      "type": "object"
+    },
+    "target": {
+      "additionalProperties": false,
+      "properties": {
+        "api": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "api",
+        "repo"
       ],
       "type": "object"
     },
@@ -624,6 +748,554 @@
           "phase"
         ],
         "type": "object"
+      }
+    },
+    "forge.autoMergeAllowed": {
+      "capability": "forge.autoMerge",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "target": {
+            "$ref": "#/$defs/target"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "allowed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "allowed"
+        ],
+        "type": "object"
+      }
+    },
+    "forge.behind": {
+      "capability": "forge.prs",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "number": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/target"
+          }
+        },
+        "required": [
+          "number",
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "behindBy": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "behindBy"
+        ],
+        "type": "object"
+      }
+    },
+    "forge.branchExists": {
+      "capability": "forge.branches",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "branch": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/target"
+          }
+        },
+        "required": [
+          "branch",
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "exists": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "exists"
+        ],
+        "type": "object"
+      }
+    },
+    "forge.branchProtected": {
+      "capability": "forge.branchProtection",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "branch": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/target"
+          }
+        },
+        "required": [
+          "branch",
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "protected": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "protected"
+        ],
+        "type": "object"
+      }
+    },
+    "forge.checks": {
+      "capability": "forge",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "number": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/target"
+          }
+        },
+        "required": [
+          "number",
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "checks": {
+            "items": {
+              "$ref": "#/$defs/check"
+            },
+            "type": "array"
+          },
+          "state": {
+            "enum": [
+              "",
+              "SUCCESS",
+              "PENDING",
+              "EXPECTED",
+              "FAILURE",
+              "ERROR"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "checks",
+          "state"
+        ],
+        "type": "object"
+      }
+    },
+    "forge.ciRun": {
+      "capability": "forge.ciRun",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "number": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/target"
+          }
+        },
+        "required": [
+          "number",
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "type": "object"
+      }
+    },
+    "forge.comment": {
+      "capability": "forge.prs",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "number": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/target"
+          }
+        },
+        "required": [
+          "body",
+          "number",
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "type": "object"
+      }
+    },
+    "forge.deleteBranch": {
+      "capability": "forge.branches",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "branch": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/target"
+          }
+        },
+        "required": [
+          "branch",
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "type": "object"
+      }
+    },
+    "forge.enqueueAutoMerge": {
+      "capability": "forge.autoMerge",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "number": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/target"
+          }
+        },
+        "required": [
+          "number",
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "type": "object"
+      }
+    },
+    "forge.jobLog": {
+      "capability": "forge",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "errorLines": {
+            "type": "integer"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "tail": {
+            "type": "integer"
+          },
+          "target": {
+            "$ref": "#/$defs/target"
+          }
+        },
+        "required": [
+          "errorLines",
+          "jobId",
+          "tail",
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "log": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "log"
+        ],
+        "type": "object"
+      }
+    },
+    "forge.merge": {
+      "capability": "forge.prs",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "number": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/target"
+          }
+        },
+        "required": [
+          "number",
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "type": "object"
+      }
+    },
+    "forge.openPR": {
+      "capability": "forge.draftPRs",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "pr": {
+            "additionalProperties": false,
+            "properties": {
+              "base": {
+                "type": "string"
+              },
+              "body": {
+                "type": "string"
+              },
+              "draft": {
+                "type": "boolean"
+              },
+              "head": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "base",
+              "body",
+              "draft",
+              "head",
+              "title"
+            ],
+            "type": "object"
+          },
+          "target": {
+            "$ref": "#/$defs/target"
+          }
+        },
+        "required": [
+          "pr",
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "$ref": "#/$defs/pr"
+      }
+    },
+    "forge.pr": {
+      "capability": "forge",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "number": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/target"
+          }
+        },
+        "required": [
+          "number",
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "$ref": "#/$defs/pr"
+      }
+    },
+    "forge.prFiles": {
+      "capability": "forge.prs",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "number": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/target"
+          }
+        },
+        "required": [
+          "number",
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "files": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "type": "object"
+      }
+    },
+    "forge.probe": {
+      "capability": "forge.probe",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "target": {
+            "$ref": "#/$defs/target"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "repo": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "repo"
+        ],
+        "type": "object"
+      }
+    },
+    "forge.prsForBranch": {
+      "capability": "forge",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "branch": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/target"
+          }
+        },
+        "required": [
+          "branch",
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "prs": {
+            "items": {
+              "$ref": "#/$defs/pr"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "prs"
+        ],
+        "type": "object"
+      }
+    },
+    "forge.remote": {
+      "capability": "forge.branches",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "target": {
+            "$ref": "#/$defs/target"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "$ref": "#/$defs/remote"
+      }
+    },
+    "forge.setDraft": {
+      "capability": "forge.prs",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "draft": {
+            "type": "boolean"
+          },
+          "number": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/target"
+          }
+        },
+        "required": [
+          "draft",
+          "number",
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "type": "object"
+      }
+    },
+    "forge.tokenGrant": {
+      "capability": "forge.tokenGrant",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "target": {
+            "$ref": "#/$defs/target"
+          },
+          "tokenPrefix": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "target",
+          "tokenPrefix"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "$ref": "#/$defs/grant"
       }
     }
   },
