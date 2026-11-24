@@ -95,29 +95,29 @@ func TestPathScopedHelperMatching(t *testing.T) {
 		}
 	})
 
-	// The other redirect shape: the old path authenticates first, then 301s.
-	// Observed with git here: a helper scoped to the old URL answers the old
-	// path's 401, and git then carries that Authorization to the same-host
-	// destination path (the helper is not asked again, so the scope does not
-	// guard it). The clone still fails, since git POSTs git-upload-pack to the
-	// old path and does not follow a 301 on a POST. A rename therefore fails
-	// by design here too, but the token does reach the destination's path.
-	t.Run("redirect after authentication fails and reaches the destination", func(t *testing.T) {
-		before := len(r.Requests())
-		out, err := lsRemoteScoped(t, r.MovedAfterAuthURL, r.MovedAfterAuthURL)
-		if err == nil || !strings.Contains(out, "HTTP 301") {
-			t.Fatalf("ls-remote %s: err=%v, want a failure on the 301:\n%s", r.MovedAfterAuthURL, err, out)
-		}
-		cred := Credential{Username: testUser, Password: testToken}
-		if got := cred.Explain(err, []byte(out), r.MovedAfterAuthURL).Error(); !strings.Contains(got, "configured Target repo "+r.MovedAfterAuthURL) {
-			t.Errorf("Explain = %q, want it to name the configured Target repo", got)
-		}
-		var sentToDestination bool
-		for _, q := range r.Requests()[before:] {
-			sentToDestination = sentToDestination || (q.HasAuth && strings.HasPrefix(q.Path, "/repo.git/"))
-		}
-		if !sentToDestination {
-			t.Fatalf("git no longer carries the credential across the redirect; revisit the Explain comment: %v", r.Requests()[before:])
-		}
-	})
+	// Through Apply, git must not follow a redirect at all, whether the old path
+	// 301s before it authenticates or after: the destination path never sees the
+	// Authorization header, and Explain names the configured Target repo.
+	for _, c := range []struct{ name, target string }{
+		{"redirect before authentication", r.MovedURL},
+		{"redirect after authentication", r.MovedAfterAuthURL},
+	} {
+		t.Run(c.name+" is not followed and fails naming the Target repo", func(t *testing.T) {
+			before := len(r.Requests())
+			cred := Credential{Username: testUser, Password: testToken}
+			out, err := cred.Apply(Cmd(nil, "ls-remote", c.target), c.target).CombinedOutput()
+			t.Logf("git output: %s", out)
+			if err == nil {
+				t.Fatalf("ls-remote %s succeeded:\n%s", c.target, out)
+			}
+			if got := cred.Explain(err, out, c.target).Error(); !strings.Contains(got, "configured Target repo "+c.target) {
+				t.Errorf("Explain = %q, want it to name the configured Target repo", got)
+			}
+			for _, q := range r.Requests()[before:] {
+				if q.HasAuth && strings.HasPrefix(q.Path, "/repo.git/") {
+					t.Errorf("Authorization reached the redirect destination: %v", r.Requests()[before:])
+				}
+			}
+		})
+	}
 }

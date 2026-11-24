@@ -52,9 +52,11 @@ const (
 // Apply makes cmd's git authenticate with c against repoURL and returns cmd.
 // repoURL is the exact URL git talks to (for a push to origin, origin's URL):
 // the helper is registered as credential.<repoURL>.helper with useHttpPath, so
-// a redirect, an LFS endpoint, or a second repository on the same host is never
-// offered the token. A zero Credential, or a repoURL that is not http(s), makes
-// Apply a no-op: other remotes carry no credential.
+// an LFS endpoint or a second repository on the same host is never offered the
+// token. http.<repoURL>.followRedirects=false stops git carrying an
+// Authorization header it already holds across a redirect. A zero Credential,
+// or a repoURL that is not http(s), makes Apply a no-op: other remotes carry no
+// credential.
 //
 // The secret travels only as an environment value read by an inline credential
 // helper, never in argv, a URL, or on-disk config. Ambient helpers are reset
@@ -90,6 +92,7 @@ func (c Credential) Apply(cmd *exec.Cmd, repoURL string) *exec.Cmd {
 		{"credential.helper", ""}, // reset first so ambient helpers never see the credential
 		{scope + ".helper", envHelper},
 		{scope + ".useHttpPath", "true"},
+		{"http." + repoURL + ".followRedirects", "false"},
 	}
 	for i, e := range entries {
 		idx := strconv.Itoa(n + i)
@@ -127,10 +130,9 @@ func withoutUserinfo(rawURL string) string {
 	return rawURL[:i+3] + rest[at+1:]
 }
 
-// redirectFailure is how git fails once a remote redirects it away from
-// repoURL: a forge that redirects before authenticating leaves git with no
-// helper for the new URL ("could not read Username"); one that authenticates
-// first and then redirects fails git's next POST, which git does not follow.
+// redirectFailure is how git fails once a remote redirects repoURL elsewhere.
+// Apply's followRedirects=false makes git stop at the 30x ("returned error:
+// 301"), whether the forge redirected before or after authenticating.
 var redirectFailure = regexp.MustCompile(`could not read Username|returned error: 30[12378]\b`)
 
 // Explain says why a failed git run reached a URL other than repoURL: the
