@@ -3576,6 +3576,17 @@ The protocol, not the SDK, is the contract between core and a Connector
 This is protocol version **0.3.0**. The host is
 [`connectorhost`](../cmd/launcher/internal/connectorhost/connectorhost.go).
 
+The protocol is also described once as data, in `lib/connector-protocol`.
+`nix run .#regen` renders it into the
+[`connectorprotocol`](../cmd/launcher/internal/connectorprotocol/protocol_gen.go)
+package (the version, capability, method, error-class, limit and event
+constants, and a method table) and into
+[`protocol.schema.json`](../cmd/launcher/internal/connectorprotocol/protocol.schema.json),
+a JSON Schema for a Connector author not writing Go: each method's `params`
+and `result` under `methods`, the shared shapes under `$defs`. The
+`connector-protocol-gen` and `connector-protocol-schema-gen` checks fail when
+either file is stale.
+
 - **Module.** A Connector is a WebAssembly reactor module built with the
   stock Go toolchain (no TinyGo):
   `GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared`. The host runs its

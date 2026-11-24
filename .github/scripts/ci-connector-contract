@@ -16,6 +16,8 @@ cmd/launcher/internal/connectortracker/*
 cmd/launcher/internal/connectorforge/*
 cmd/launcher/internal/driver/driverkit/*
 cmd/launcher/internal/dispatchkind/*
+cmd/launcher/internal/connectorprotocol/*
+lib/connector-protocol/*
 cmd/launcher/internal/hostop/*
 cmd/launcher/internal/forge/forgetest/*
 cmd/launcher/internal/forge/issuetracker.go

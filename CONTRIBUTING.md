@@ -212,10 +212,12 @@ runs, so the row feeds only completions, the man page, and
 `spindrift --help --all`.
 
 The regenerator and the drift-guard checks share one renderer per artifact
-(`lib/renderers.nix`), so they can't drift from each other. It's repo-internal
-dev tooling, not part of the flake-option/env-schema consumer surface. The man
-page rebuilds fresh from the schema on every `nix flake check` (nothing to
-regenerate).
+(`lib/renderers.nix`, or `lib/connector-protocol/render.nix` for the Connector
+protocol, kept out of `lib/renderers.nix` so only the protocol renderer is a
+Connector contract path), so they can't drift from each other. It's
+repo-internal dev tooling, not part of the flake-option/env-schema consumer
+surface. The man page rebuilds fresh from the schema on every `nix flake check`
+(nothing to regenerate).
 `lib/env-schema.nix` is the only hand-edit a new knob requires, unless a
 registry row owns it (today the `knobs` of `lib/backends/<name>.nix`,
 `lib/chores/<name>.nix`, or `lib/runners/<name>.nix`, folded in by
@@ -264,6 +266,11 @@ and in the in-box `box` program; the only bash left is the generated shim that
   `cmd/launcher/internal/dispatchkind/kinds_gen.go` by `renderers.nix`'s
   `renderDispatchKindsGo`, drift-guarded by the `dispatch-kinds-gen` check;
   `mkHarness` and `image.nix` bake each row's `prompts` files),
+  `connector-protocol/default.nix` (the Connector protocol described once as
+  data — methods, capabilities, limits, result checks and JSON types — rendered
+  by its own `render.nix` into `cmd/launcher/internal/connectorprotocol/`'s
+  `protocol_gen.go` and `protocol.schema.json`, drift-guarded by the
+  `connector-protocol-gen` and `connector-protocol-schema-gen` checks),
   `backends/default.nix` (the backend descriptor registry — one row per
   ISSUE_TRACKER/CODE_FORGE backend, each in its own `backends/<name>.nix`
   file; `env-schema.nix`'s tracker/forge choices derive from it),
@@ -289,6 +296,9 @@ and in the in-box `box` program; the only bash left is the generated shim that
   Driver's own behavior lives in a sibling subpackage, e.g. `driver/opencode`),
   `dispatchkind` (the Dispatch kind descriptors; `kinds_gen.go` is generated
   from `lib/dispatch-kinds/default.nix`),
+  `connectorprotocol` (the Connector protocol description; `protocol_gen.go`
+  and `protocol.schema.json` are generated from `lib/connector-protocol/`, and
+  its `schematest` subpackage validates exchanges against the schema),
   `backend` (the Descriptor registry; `registry_gen.go` is generated from
   `lib/backends/default.nix`), `backendkit` (the Backend Strategy type and
   registry every binary builds and validates adapters through),
