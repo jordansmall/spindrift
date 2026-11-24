@@ -123,6 +123,9 @@ func newConnectorHarnessWith(t *testing.T, cloud bool, lc connectortracker.Lifec
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = conn.Close(context.Background()) })
+	if lc.WebHost == "" {
+		lc.WebHost = u.Host
+	}
 	h.tr, err = connectortracker.New(conn, failingWrites{t}, lc,
 		connectortracker.Target{API: h.srv.URL, Repo: connectorProject, Dialect: dialect})
 	if err != nil {

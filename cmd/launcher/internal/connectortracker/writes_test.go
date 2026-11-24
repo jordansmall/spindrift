@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"reflect"
@@ -89,7 +90,7 @@ func issueJSON(status string, labels ...string) string {
 
 var (
 	writeCaps  = []string{CapTransition, CapEditLabels}
-	hybridLC   = Lifecycle{Labels: forge.DispatchLabels{Dispatchable: "ready", InProgress: "wip", Complete: "done", Failed: "bad", Ambiguous: "amb"}}
+	hybridLC   = Lifecycle{Labels: forge.DispatchLabels{Dispatchable: "ready", InProgress: "wip", Complete: "done", Failed: "bad", Ambiguous: "amb"}, WebHost: "tracker.example"}
 	verdictLC  = forge.NewVerdictLabels(forge.VerdictLabel{Verdict: "recommend", Label: "rec"})
 	statusMap  = map[forge.DispatchState]string{forge.InProgress: "In Progress", forge.Complete: "Done", forge.Failed: "Blocked"}
 	resolution = map[forge.DispatchState]string{forge.Complete: "Fixed"}
@@ -539,7 +540,7 @@ func TestCommentGuestErrorPropagates(t *testing.T) {
 }
 
 func TestPostIssueSplitsDedupMarkerAndSendsIssueType(t *testing.T) {
-	g := &writeGuest{fileURL: `{"url":"https://j/browse/P-1"}`}
+	g := &writeGuest{fileURL: `{"url":"https://tracker.example/o/r/issues/7"}`}
 	lc := lifecycle(false)
 	lc.IssueType = "Bug"
 	tr := writeTracker(t, g, lc, newNative(), postCaps(CapFileIssue))
@@ -549,7 +550,7 @@ func TestPostIssueSplitsDedupMarkerAndSendsIssueType(t *testing.T) {
 	}
 	marker := dedupmarker.Build([]string{"a", "b"})
 	url, err := filer.PostIssue("title", dedupmarker.Append("desc", marker), []string{"l1"})
-	if err != nil || url != "https://j/browse/P-1" {
+	if err != nil || url != "https://tracker.example/o/r/issues/7" {
 		t.Fatalf("url, err = %q, %v", url, err)
 	}
 	p := g.last().params
@@ -559,7 +560,7 @@ func TestPostIssueSplitsDedupMarkerAndSendsIssueType(t *testing.T) {
 }
 
 func TestPostIssueNilLabelsSendEmptyList(t *testing.T) {
-	g := &writeGuest{fileURL: `{"url":"u"}`}
+	g := &writeGuest{fileURL: `{"url":"https://tracker.example/o/r/issues/7"}`}
 	tr := writeTracker(t, g, lifecycle(false), newNative(), postCaps(CapFileIssue))
 	filer, _ := forge.As[forge.HostPostedIssueFiler](tr)
 	if _, err := filer.PostIssue("t", "b", nil); err != nil {
@@ -570,12 +571,44 @@ func TestPostIssueNilLabelsSendEmptyList(t *testing.T) {
 	}
 }
 
-func TestPostIssueEmptyURLIsAnswerError(t *testing.T) {
-	g := &writeGuest{fileURL: `{"url":""}`}
+func TestPostIssueRefusesAnUnusableURLAsFiledWithoutRetry(t *testing.T) {
+	for name, url := range map[string]string{
+		"empty":          "",
+		"http scheme":    "http://tracker.example/o/r/issues/7",
+		"other host":     "https://evil.example/o/r/issues/7",
+		"host suffix":    "https://tracker.example.evil.example/o/r/issues/7",
+		"userinfo":       "https://u:p@tracker.example/o/r/issues/7",
+		"no issue id":    "https://tracker.example/o/r/issues",
+		"non-numeric id": "https://tracker.example/o/r/issues/new",
+		"not a url":      "://",
+		"relative":       "/o/r/issues/7",
+		"zero id":        "https://tracker.example/o/r/issues/0",
+		"no path":        "https://tracker.example",
+	} {
+		t.Run(name, func(t *testing.T) {
+			g := &writeGuest{fileURL: fmt.Sprintf(`{"url":%q}`, url)}
+			tr := writeTracker(t, g, lifecycle(false), newNative(), postCaps(CapFileIssue))
+			filer, _ := forge.As[forge.HostPostedIssueFiler](tr)
+			got, err := filer.PostIssue("t", "b", nil)
+			if !errors.Is(err, ErrAnswer) || !errors.Is(err, forge.ErrFiledUnusableURL) {
+				t.Fatalf("err = %v, want ErrAnswer and ErrFiledUnusableURL", err)
+			}
+			if got != "" || !strings.Contains(err.Error(), "filed") || !strings.Contains(err.Error(), "unusable") {
+				t.Errorf("url = %q, err = %v", got, err)
+			}
+			if len(g.calls) != 1 || g.calls[0].method != CapFileIssue {
+				t.Errorf("calls = %+v, want exactly one fileIssue", g.calls)
+			}
+		})
+	}
+}
+
+func TestPostIssueAcceptsTheWebHostCaseInsensitively(t *testing.T) {
+	g := &writeGuest{fileURL: `{"url":"https://Tracker.Example/o/r/issues/7"}`}
 	tr := writeTracker(t, g, lifecycle(false), newNative(), postCaps(CapFileIssue))
 	filer, _ := forge.As[forge.HostPostedIssueFiler](tr)
-	if _, err := filer.PostIssue("t", "b", nil); !errors.Is(err, ErrAnswer) {
-		t.Errorf("err = %v, want ErrAnswer", err)
+	if url, err := filer.PostIssue("t", "b", nil); err != nil || url != "https://Tracker.Example/o/r/issues/7" {
+		t.Errorf("url, err = %q, %v", url, err)
 	}
 }
 

@@ -766,6 +766,9 @@ func newHarnessWith(t *testing.T, targetRepo string, lc connectortracker.Lifecyc
 	conn, routes := loadGithubConnectorAs(t, b.host, connectorRepo, b.Client(), h.audit, authorize)
 	h.conn, h.routes = conn, routes
 	var err error
+	if lc.WebHost == "" {
+		lc.WebHost = b.host
+	}
 	h.tr, err = connectortracker.New(conn, failingWrites{t}, lc, connectortracker.Target{API: b.URL, Repo: connectorRepo})
 	if err != nil {
 		t.Fatal(err)

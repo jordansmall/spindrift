@@ -89,6 +89,7 @@ func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (for
 		Labels:        s.Labels,
 		VerdictLabels: s.VerdictLabels,
 		IssueType:     k.JiraIssueType,
+		WebHost:       connectortracker.HostOf(k.JiraBaseURL),
 		Statuses:      wl.Statuses,
 		Resolutions:   wl.Resolutions,
 		StatusOnly:    wl.StatusOnly,

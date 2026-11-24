@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"slices"
 	"sort"
@@ -57,6 +58,9 @@ type Lifecycle struct {
 	// IssueType is the issue type core files issues as (JIRA_ISSUE_TYPE), which
 	// the createMeta check measures the project against.
 	IssueType string
+	// WebHost is the tracker's web host (host[:port]) a filed issue's URL must
+	// be on; GitHub's differs from its API host. Empty refuses every filed URL.
+	WebHost string
 	// VerdictLabels names the label each research verdict lands as.
 	VerdictLabels forge.VerdictLabels
 	// Resolutions is the resolution a transition into a mapped state sets; a
@@ -1235,4 +1239,14 @@ func knownAssociation(a string) string {
 		return a
 	}
 	return ""
+}
+
+// HostOf is the host[:port] of a tracker's base URL, for Lifecycle.WebHost;
+// "" when the URL does not parse, which refuses every filed URL.
+func HostOf(baseURL string) string {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return ""
+	}
+	return u.Host
 }

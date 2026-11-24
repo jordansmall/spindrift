@@ -200,7 +200,9 @@ type HostPostedCommenter interface {
 // always come from the caller and the destination repo from the tracker
 // instance, never from the Box's payload (issue #1949).
 type HostPostedIssueFiler interface {
-	// PostIssue files a new issue and returns its URL.
+	// PostIssue files a new issue and returns its URL.  An error wrapping
+	// ErrFiledUnusableURL means the issue WAS filed, only its URL was unusable:
+	// the caller must not file it again.
 	PostIssue(title, body string, labels []string) (url string, err error)
 }
 

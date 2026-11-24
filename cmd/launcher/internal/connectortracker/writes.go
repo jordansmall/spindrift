@@ -3,7 +3,9 @@ package connectortracker
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
+	"path"
 	"slices"
 	"strings"
 
@@ -266,10 +268,33 @@ func (l filerLayer) PostIssue(title, body string, labels []string) (string, erro
 	if err := l.r.call(context.Background(), CapFileIssue, p, &res); err != nil {
 		return "", err
 	}
-	if res.URL == "" {
-		return "", fmt.Errorf("%w: tracker.fileIssue answered no url", ErrAnswer)
+	if reason := l.r.unusableFiledURL(res.URL); reason != "" {
+		// Filing is not idempotent: the Connector answered success, so the
+		// error says "filed" and the caller must not refile.
+		return "", fmt.Errorf("%w: %w: tracker.fileIssue returned url %q: %s", ErrAnswer, forge.ErrFiledUnusableURL, res.URL, reason)
 	}
 	return res.URL, nil
+}
+
+// unusableFiledURL names why raw cannot be a filed issue's URL, "" when it can:
+// https, no userinfo, on the tracker's own web host, ending in an issue id.
+func (t *reads) unusableFiledURL(raw string) string {
+	u, err := url.Parse(raw)
+	switch {
+	case raw == "":
+		return "no url"
+	case err != nil:
+		return "not a url"
+	case u.Scheme != "https":
+		return "scheme is not https"
+	case u.User != nil:
+		return "url carries userinfo"
+	case !strings.EqualFold(u.Host, t.lifecycle.WebHost):
+		return fmt.Sprintf("host is not %q", t.lifecycle.WebHost)
+	case !t.ids.valid(path.Base(strings.TrimRight(u.Path, "/"))):
+		return "path does not end in an issue id"
+	}
+	return ""
 }
 
 // closerLayer closes a merged issue through the Connector. It exists only when
