@@ -9,6 +9,48 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.35.0 — 2026-11-24
+
+Cleanup and hardening after the Connector switch: the backend shadow is gone,
+core's git credential is pinned to your repo, and Connector calls get tighter
+limits.
+
+**⚠ Breaking changes** this release: a backend Connector row no longer takes
+`shadow`, `shadowEvery` or `primary`.
+
+- **⚠ Breaking: backend shadow and primary settings removed.** github, jira
+  and forgejo run only through their Connectors now, so there's nothing left
+  to shadow. Delete `shadow`, `shadowEvery` and `primary` from
+  `spindrift.connectors.<name>` (evaluation fails and names the row until
+  you do), and regenerate any run-input document that still carries them.
+  Driver rows are unaffected.
+- **Git credential only goes to your repo.** Core's git token is now offered
+  only for the exact Target repo URL, and git no longer follows a redirect
+  with it. A renamed or transferred repo fails its git operations until you
+  update `REPO_SLUG`; `spindrift doctor` now warns ahead of time when the
+  forge's canonical repo name differs from it.
+- **Tracker calls retry like forge calls.** A transient tracker error is
+  retried instead of failing the operation, and a tracker rate limit makes
+  the daemon hold and resume rather than treat it as a failure.
+- **Tighter limits on Connector calls.** Core caps the error text a
+  Connector hands back, checks the URLs and methods `http_request` accepts,
+  and gives each call five minutes of `http_request` time in total. Signed
+  redirect URLs stay out of error messages, and malformed forge and tracker
+  answers (bad PR file lists, merge commits that aren't hex ids,
+  inconsistent token grants) are refused.
+- **No refiling when a filed issue's URL is unusable.** If the tracker files
+  an issue but hands back a URL spindrift can't use, it's now recorded as
+  filed rather than failed, so neither the run nor the next butler sweep
+  files it again.
+- **Merge guard holds Route baseline edits.** An agent PR that edits
+  `spindrift-connector-routes.json`, which accepts a Connector's wider
+  grant on your behalf, now waits for a human merge by default.
+- **forgejo logs failed Connector calls.** It writes the same per-process
+  `.log` as github and jira, and a Connector whose audit file can't open now
+  refuses to load instead of running without an audit trail.
+
+---
+
 ## 0.34.0 — 2026-11-23
 
 One tracker, many repos: an instance can take just its slice of a shared
