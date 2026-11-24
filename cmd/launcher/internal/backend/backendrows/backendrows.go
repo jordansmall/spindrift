@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"maps"
 	"net/http"
 	"net/url"
@@ -23,6 +22,7 @@ import (
 
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectorsandbox"
+	"spindrift.dev/launcher/internal/primaryrecord"
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
@@ -297,8 +297,6 @@ func All() []Row {
 type Options struct {
 	// Getenv resolves the credential; nil means os.Getenv.
 	Getenv func(string) string
-	// Audit receives one line per request; required.
-	Audit io.Writer
 	// Client is the transport; nil means a default client.
 	Client *http.Client
 }
@@ -307,8 +305,11 @@ type Options struct {
 // table. The credential is read at each request, not at load, and a missing one
 // fails the request before it is sent.
 func Load(ctx context.Context, row Row, o Options) (*connectorhost.Connector, error) {
-	if o.Audit == nil {
-		return nil, fmt.Errorf("backend %q: no audit writer", row.Name)
+	// Opening the audit file is part of loading, before the module is read, so
+	// a Connector never runs unrecorded.
+	audit, err := primaryrecord.AuditFile(row.Name)
+	if err != nil {
+		return nil, fmt.Errorf("backend %q: %w", row.Name, err)
 	}
 	getenv := o.Getenv
 	if getenv == nil {
@@ -338,7 +339,7 @@ func Load(ctx context.Context, row Row, o Options) (*connectorhost.Connector, er
 			return nil
 		},
 		Client: o.Client,
-		Audit:  connectorhost.NewAuditLog(o.Audit),
+		Audit:  connectorhost.NewAuditLog(audit),
 	})
 }
 

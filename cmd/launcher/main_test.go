@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -6586,6 +6585,7 @@ func TestMainRun_InputDocument_AppliesBackendRows(t *testing.T) {
 		return (&net.Dialer{}).DialContext(ctx, network, srv.Listener.Addr().String())
 	}
 	tr.TLSClientConfig.ServerName = "example.com"
+	t.Chdir(t.TempDir()) // the audit file opens under the working directory
 	c, err := backendrows.Load(context.Background(), row, backendrows.Options{
 		Getenv: func(k string) string {
 			if k == "FIXTURE_TOKEN" {
@@ -6593,7 +6593,6 @@ func TestMainRun_InputDocument_AppliesBackendRows(t *testing.T) {
 			}
 			return ""
 		},
-		Audit:  io.Discard,
 		Client: &http.Client{Transport: tr},
 	})
 	if err != nil {

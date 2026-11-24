@@ -1,16 +1,20 @@
 package github
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/hostpaths"
+	"spindrift.dev/launcher/internal/primaryrecord"
 )
 
 // useGithubRow applies a github backend row whose Connector reaches b, as a
@@ -47,9 +51,9 @@ func TestIntrospectViaConnector_ReportsTheGrantAndAuditsTheRequests(t *testing.T
 	b.scopes = &scopes
 	useGithubRow(t, b)
 	calls := countGH(t)
-	var audit bytes.Buffer
+	auditPath := chdirAuditPath(t)
 
-	got, err := introspectViaConnector(githubRow(t), backendrows.Options{Audit: &audit, Client: b.Client()}, "ghp_abc", connectorRepo)
+	got, err := introspectViaConnector(githubRow(t), backendrows.Options{Client: b.Client()}, "ghp_abc", connectorRepo)
 
 	want := backendkit.TokenIntrospection{Introspectable: true, WriteCapable: true, Scopes: []string{"read:org", "repo"}}
 	if err != nil || !reflect.DeepEqual(got, want) {
@@ -61,8 +65,13 @@ func TestIntrospectViaConnector_ReportsTheGrantAndAuditsTheRequests(t *testing.T
 	if len(b.seenAuth) == 0 || b.seenAuth[0] != "Bearer ghp_abc" {
 		t.Errorf("backend saw Authorization %v, want the token under audit", b.seenAuth)
 	}
-	if !strings.Contains(audit.String(), "/graphql") || strings.Contains(audit.String(), "ghp_abc") {
-		t.Errorf("audit = %q, want the /graphql request and never the token", audit.String())
+	raw, rerr := os.ReadFile(auditPath)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	audit := string(raw)
+	if !strings.Contains(audit, "/graphql") || strings.Contains(audit, "ghp_abc") {
+		t.Errorf("audit = %q, want the /graphql request and never the token", audit)
 	}
 }
 
@@ -70,10 +79,11 @@ func TestIntrospectViaConnector_ReportsTheGrantAndAuditsTheRequests(t *testing.T
 // with the token under audit even when the row's env var holds another.
 func TestIntrospectViaConnector_IgnoresTheHostsCredential(t *testing.T) {
 	t.Setenv(tokenCredentialEnv, "ghp_hosts_own")
+	chdirAuditPath(t)
 	b := newTokenBackend(t, "ghp_abc")
 	useGithubRow(t, b)
 
-	if _, err := introspectViaConnector(githubRow(t), backendrows.Options{Audit: &bytes.Buffer{}, Client: b.Client()}, "ghp_abc", connectorRepo); err != nil {
+	if _, err := introspectViaConnector(githubRow(t), backendrows.Options{Client: b.Client()}, "ghp_abc", connectorRepo); err != nil {
 		t.Fatal(err)
 	}
 	for _, a := range b.seenAuth {
@@ -85,10 +95,11 @@ func TestIntrospectViaConnector_IgnoresTheHostsCredential(t *testing.T) {
 
 // A refused read is a failed introspection, not an unsupported one.
 func TestIntrospectViaConnector_RefusedReadIsAnError(t *testing.T) {
+	chdirAuditPath(t)
 	b := newTokenBackend(t, "ghp_abc")
 	b.userStatus = http.StatusUnauthorized
 	useGithubRow(t, b)
-	_, err := introspectViaConnector(githubRow(t), backendrows.Options{Audit: &bytes.Buffer{}, Client: b.Client()}, "ghp_abc", connectorRepo)
+	_, err := introspectViaConnector(githubRow(t), backendrows.Options{Client: b.Client()}, "ghp_abc", connectorRepo)
 	if err == nil || errors.Is(err, backendkit.ErrUnsupported) {
 		t.Fatalf("err = %v, want a non-unsupported error", err)
 	}
@@ -115,3 +126,36 @@ var ghTokenWriteScopes = map[string]bool{
 // notIntrospectableReason is the primary Connector write gate's explanation for
 // a GitHub token whose grants cannot be determined.
 const notIntrospectableReason = "e.g. a fine-grained PAT, whose granted permissions GitHub exposes no endpoint to introspect"
+
+// chdirAuditPath runs the test in a fresh directory, where the Connector load
+// opens its audit file, and returns that file's path.
+func chdirAuditPath(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	t.Chdir(dir)
+	return filepath.Join(hostpaths.LogDir(dir), primaryrecord.Name(backend.GitHub.Name, ".audit.jsonl"))
+}
+
+// A Connector never runs unrecorded: an audit file that will not open fails the
+// load with its path, and nothing reaches the backend.
+func TestIntrospectViaConnector_UnopenableAuditFileFailsTheLoad(t *testing.T) {
+	b := newTokenBackend(t, "ghp_abc")
+	useGithubRow(t, b)
+	auditPath := chdirAuditPath(t)
+	logDir := filepath.Dir(auditPath)
+	if err := os.MkdirAll(filepath.Dir(logDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(logDir, nil, 0o644); err != nil { // a file where the log directory belongs
+		t.Fatal(err)
+	}
+
+	_, err := introspectViaConnector(githubRow(t), backendrows.Options{Client: b.Client()}, "ghp_abc", connectorRepo)
+
+	if err == nil || !strings.Contains(err.Error(), auditPath) {
+		t.Fatalf("err = %v, want one naming %s", err, auditPath)
+	}
+	if len(b.seenAuth) != 0 {
+		t.Errorf("backend saw %d requests, want none", len(b.seenAuth))
+	}
+}

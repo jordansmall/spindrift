@@ -36,11 +36,12 @@ func init() {
 // with the sandbox's.
 func loadViaRow(t *testing.T) error {
 	t.Helper()
+	t.Chdir(t.TempDir()) // the audit file opens under the working directory
 	module := filepath.Join(t.TempDir(), "x.wasm")
 	if err := os.WriteFile(module, []byte("not wasm"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err := backendrows.Load(context.Background(), backendrows.Row{Name: "x", Module: module}, backendrows.Options{Audit: &bytes.Buffer{}})
+	_, err := backendrows.Load(context.Background(), backendrows.Row{Name: "x", Module: module}, backendrows.Options{})
 	return err
 }
 

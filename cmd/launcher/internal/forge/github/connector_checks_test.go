@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -246,6 +245,7 @@ const tokenCredentialEnv = "TOKEN_UNDER_AUDIT"
 // with the token under audit as its credential.
 func loadTokenConnector(t *testing.T, b *tokenBackend, token string) *connectorhost.Connector {
 	t.Helper()
+	chdirAuditPath(t)
 	path, routes := githubConnectorRoutes(t, b.Listener.Addr().String(), connectorRepo)
 	conn, err := backendrows.Load(context.Background(), backendrows.Row{
 		Name: "github", Module: path, Routes: routes, CredentialEnv: tokenCredentialEnv,
@@ -256,7 +256,6 @@ func loadTokenConnector(t *testing.T, b *tokenBackend, token string) *connectorh
 			}
 			return ""
 		},
-		Audit:  io.Discard,
 		Client: b.Client(),
 	})
 	if err != nil {

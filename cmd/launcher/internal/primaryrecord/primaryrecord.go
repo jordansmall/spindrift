@@ -31,23 +31,58 @@ func Name(backend, suffix string) string {
 }
 
 // OpenFile opens the named file in the host's log directory for appending. An
-// unopenable file returns io.Discard and the reason, so a caller whose record
-// must not fail the work can ignore it and one that must report a lost record
-// can use it.
+// unopenable file returns a nil writer and an error naming the file, never a
+// discarding writer: a caller that can live without the record ignores the
+// error, and one that must not run unrecorded fails on it.
 func OpenFile(name string) (io.Writer, func(), error) {
-	pwd, err := os.Getwd()
+	path, err := logPath(name)
 	if err != nil {
-		return io.Discard, func() {}, err
+		return nil, func() {}, err
 	}
-	dir := hostpaths.LogDir(pwd)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return io.Discard, func() {}, err
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, func() {}, fmt.Errorf("open %s: %w", path, err)
 	}
-	f, err := os.OpenFile(filepath.Join(dir, name), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
 	if err != nil {
-		return io.Discard, func() {}, err
+		return nil, func() {}, err
 	}
 	return f, func() { _ = f.Close() }, nil
+}
+
+func logPath(name string) (string, error) {
+	pwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("open %s: %w", name, err)
+	}
+	return filepath.Join(hostpaths.LogDir(pwd), name), nil
+}
+
+var audits = struct {
+	mu    sync.Mutex
+	files map[string]io.Writer
+}{files: map[string]io.Writer{}}
+
+// AuditFile is this process's Connector audit file for backend, opened on
+// first use and held until exit: a Connector may be reloaded and the trackers
+// and forges of one process share it, so no caller owns the handle. It is keyed
+// by path because a test changes directory. A failed open is not remembered.
+func AuditFile(backend string) (io.Writer, error) {
+	name := Name(backend, ".audit.jsonl")
+	path, err := logPath(name)
+	if err != nil {
+		return nil, fmt.Errorf("Connector audit file: %w", err)
+	}
+	audits.mu.Lock()
+	defer audits.mu.Unlock()
+	if w, ok := audits.files[path]; ok {
+		return w, nil
+	}
+	w, _, err := OpenFile(name)
+	if err != nil {
+		return nil, fmt.Errorf("Connector audit file: %w", err)
+	}
+	audits.files[path] = w
+	return w, nil
 }
 
 // Note appends the error a primary-routed operation returned to backend's

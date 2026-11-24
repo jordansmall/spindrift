@@ -51,6 +51,14 @@ let
 
   ecosystemBundleFile = ../cmd/launcher/internal/driver/bundle/ecosystems.go;
 
+  # internal/backend without backendrows: only the host and the backend
+  # adapters load Connector rows, and backendrows imports primaryrecord, which
+  # only backendBundleFiles carries (`go mod vendor` loads every package in the
+  # tree, imported or not).
+  backendRegistryFiles = lib.fileset.difference (lib.fileset.fileFilter (
+    f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+  ) ../cmd/launcher/internal/backend) ../cmd/launcher/internal/backend/backendrows;
+
   # Only the Box links backend adapters: it calls backendkit.ByName at runtime
   # for the clone URL, CLI setup and the recovery PR query (ADR 0068 decision
   # 1). backendBundleFiles is bundle/backends.go, which driverTreeFiles drops,
@@ -194,9 +202,7 @@ let
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/registryprobe)
         forgeTopLevelFiles
-        (lib.fileset.fileFilter (
-          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
-        ) ../cmd/launcher/internal/backend)
+        backendRegistryFiles
       ];
     };
     # Same go.mod/go.sum as launcherBin, but not the same vendorHash: `go mod
@@ -423,9 +429,7 @@ let
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/deltareview)
         forgeTopLevelFiles
-        (lib.fileset.fileFilter (
-          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
-        ) ../cmd/launcher/internal/backend)
+        backendRegistryFiles
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/retry)

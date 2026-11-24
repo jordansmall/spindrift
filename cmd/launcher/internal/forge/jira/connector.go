@@ -4,11 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"slices"
 	"strings"
-	"sync"
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
@@ -78,7 +76,7 @@ func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (for
 	}
 	row.Routes = connectortracker.Routes(row.Routes, k.JiraProjectKey)
 	it, err := connectortracker.NewReloading(func() (*connectorhost.Connector, error) {
-		conn, err := loadRowConnector(context.Background(), row, backendrows.Options{Audit: primaryAudit.writer(), Client: connectorClient})
+		conn, err := loadRowConnector(context.Background(), row, backendrows.Options{Client: connectorClient})
 		if err != nil {
 			return nil, err
 		}
@@ -105,35 +103,6 @@ func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (for
 		return nil, err
 	}
 	return connectorTracker{it}, nil
-}
-
-// primaryAudit (named for the primaryrecord file family) is the process's
-// Connector audit file, opened on first use and held until exit: a tracker is
-// short-lived (completion, readcontext) or one of several daemon kinds sharing
-// the process, so none owns the handle. A record that cannot be written must
-// not fail the tracker, so an unopenable file discards.
-var primaryAudit = &auditFile{}
-
-type auditFile struct {
-	once  sync.Once
-	w     io.Writer
-	close func()
-}
-
-func (a *auditFile) writer() io.Writer {
-	a.once.Do(func() {
-		a.w, a.close, _ = primaryrecord.OpenFile(primaryrecord.Name(backend.Jira.Name, ".audit.jsonl"))
-	})
-	return a.w
-}
-
-// release closes the file if it was opened and stops it opening later. Only
-// the test seam calls it; production holds the handle until exit.
-func (a *auditFile) release() {
-	a.once.Do(func() {})
-	if a.close != nil {
-		a.close()
-	}
 }
 
 // recordPrimaryFailure records a Connector failure in the primaryrecord .log.
