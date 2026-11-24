@@ -12,7 +12,7 @@ import (
 // Under a routed row the Connector merges by rebase only, so another
 // MERGE_METHOD is refused by name before any Connector or gh call rather than
 // silently ignored.
-func TestRoutedRow_MergeMethodOtherThanRebaseIsRefused(t *testing.T) {
+func TestConnectorRow_MergeMethodOtherThanRebaseIsRefused(t *testing.T) {
 	for _, method := range []string{"merge", "squash"} {
 		for _, op := range []struct {
 			name string
@@ -65,7 +65,7 @@ func TestStrategy_RoutedRowRefusesMergeMethodAtBuild(t *testing.T) {
 }
 
 // An explicit rebase is the Connector's own method and passes.
-func TestRoutedRow_MergeMethodRebasePasses(t *testing.T) {
+func TestConnectorRow_MergeMethodRebasePasses(t *testing.T) {
 	h, _, _, _ := routedLogHarness(t, useGithubRowAt)
 	url := h.SeedLandablePR("9")
 	c := NewExecClient(connectorRepo, testLabels, WithMergeMethod("rebase"))

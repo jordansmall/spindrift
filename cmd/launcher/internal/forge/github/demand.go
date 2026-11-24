@@ -22,7 +22,7 @@ func (e *execClient) CountReady(fresh bool) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	return e.countReadyViaConnector(row, fresh)
+	return e.countReady(row, fresh)
 }
 
 // ProbeInterval implements forge.DemandCounter.

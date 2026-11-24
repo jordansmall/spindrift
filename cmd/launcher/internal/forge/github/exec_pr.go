@@ -24,7 +24,7 @@ func (e *execClient) OpenPRForBranch(branch string) (forge.PR, bool, error) {
 	if err != nil {
 		return forge.PR{}, false, err
 	}
-	return e.openPRForBranchViaConnector(row, branch)
+	return e.openPRForBranch(row, branch)
 }
 
 // BranchExists reports whether branch exists on the remote, independent of any
@@ -39,7 +39,7 @@ func (e *execClient) BranchExists(branch string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return e.branchExistsViaConnector(row, branch)
+	return e.branchExists(row, branch)
 }
 
 // BranchProtected reports whether branch has protection, classic rule or
@@ -55,7 +55,7 @@ func (e *execClient) BranchProtected(branch string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return e.branchProtectedViaConnector(row, branch)
+	return e.branchProtected(row, branch)
 }
 
 func (e *execClient) PRForBranch(branch string) (string, bool, error) {
@@ -63,7 +63,7 @@ func (e *execClient) PRForBranch(branch string) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	return e.prForBranchViaConnector(row, branch)
+	return e.prForBranch(row, branch)
 }
 
 func (e *execClient) PRState(url string) (forge.PRState, error) {
@@ -71,7 +71,7 @@ func (e *execClient) PRState(url string) (forge.PRState, error) {
 	if err != nil {
 		return "", err
 	}
-	return e.prStateViaConnector(row, url)
+	return e.prState(row, url)
 }
 
 // MergeCommit returns the oid of the commit the merged PR at url landed as, ""
@@ -81,7 +81,7 @@ func (e *execClient) MergeCommit(url string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return e.mergeCommitViaConnector(row, url)
+	return e.mergeCommit(row, url)
 }
 
 // CheckState returns the aggregate statusCheckRollup state of the PR's head
@@ -91,7 +91,7 @@ func (e *execClient) CheckState(url string) (forge.RollupState, error) {
 	if err != nil {
 		return forge.StateNone, err
 	}
-	return e.checkStateViaConnector(row, url)
+	return e.checkState(row, url)
 }
 
 // CheckRun implements forge.CIRunReporter. The run URL is the first Actions run
@@ -103,7 +103,7 @@ func (e *execClient) CheckRun(url string) (forge.RollupState, string, error) {
 	if err != nil {
 		return forge.StateNone, "", err
 	}
-	return e.checkRunViaConnector(row, url)
+	return e.checkRun(row, url)
 }
 
 // HeadCommitSHA returns the PR's current head commit SHA.
@@ -112,7 +112,7 @@ func (e *execClient) HeadCommitSHA(url string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return e.headCommitSHAViaConnector(row, url)
+	return e.headCommitSHA(row, url)
 }
 
 // Mergeable returns the PR's content-mergeability state: the GraphQL
@@ -124,7 +124,7 @@ func (e *execClient) Mergeable(url string) (forge.MergeableState, error) {
 	if err != nil {
 		return forge.MergeableUnknown, err
 	}
-	return e.mergeableViaConnector(row, url)
+	return e.mergeable(row, url)
 }
 
 // NeedsUpdate reports whether the PR's base branch has commits its head branch
@@ -137,7 +137,7 @@ func (e *execClient) NeedsUpdate(prURL string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return e.needsUpdateViaConnector(row, prURL)
+	return e.needsUpdate(row, prURL)
 }
 
 // ListPRFiles returns every path changed by the PR, added, modified, and
@@ -149,7 +149,7 @@ func (e *execClient) ListPRFiles(url string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return e.listPRFilesViaConnector(row, url)
+	return e.listPRFiles(row, url)
 }
 
 func (e *execClient) Merge(url string) error {
@@ -157,7 +157,7 @@ func (e *execClient) Merge(url string) error {
 	if err != nil {
 		return err
 	}
-	return e.mergeViaConnector(row, url)
+	return e.merge(row, url)
 }
 
 // CanAutoMerge reports whether the repo allows GitHub's native auto-merge.
@@ -166,7 +166,7 @@ func (e *execClient) CanAutoMerge() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return e.canAutoMergeViaConnector(row)
+	return e.canAutoMerge(row)
 }
 
 // EnqueueAutoMerge enqueues GitHub's native auto-merge for the PR, which merges
@@ -176,7 +176,7 @@ func (e *execClient) EnqueueAutoMerge(prURL string) error {
 	if err != nil {
 		return err
 	}
-	return e.enqueueAutoMergeViaConnector(row, prURL)
+	return e.enqueueAutoMerge(row, prURL)
 }
 
 // MarkReady flips the PR out of draft. The caller may call this
@@ -186,7 +186,7 @@ func (e *execClient) MarkReady(prURL string) error {
 	if err != nil {
 		return err
 	}
-	return e.markReadyViaConnector(row, prURL)
+	return e.markReady(row, prURL)
 }
 
 // CommentPR posts a comment on the PR itself.
@@ -195,7 +195,7 @@ func (e *execClient) CommentPR(prURL, body string) error {
 	if err != nil {
 		return err
 	}
-	return e.commentPRViaConnector(row, prURL, body)
+	return e.commentPR(row, prURL, body)
 }
 
 // MarkDraft flips the PR back to draft. Idempotent the same way MarkReady is.
@@ -204,7 +204,7 @@ func (e *execClient) MarkDraft(prURL string) error {
 	if err != nil {
 		return err
 	}
-	return e.markDraftViaConnector(row, prURL)
+	return e.markDraft(row, prURL)
 }
 
 // Probe checks that the credential is accepted and the configured repository is
@@ -217,7 +217,7 @@ func (e *execClient) Probe() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return e.probeViaConnector(row)
+	return e.probe(row)
 }
 
 // ListLabels returns the names of all labels defined in the repository, read
@@ -227,7 +227,7 @@ func (e *execClient) ListLabels() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return e.listLabelsViaConnector(row)
+	return e.listLabels(row)
 }
 
 // CreateLabel creates a label in the repository. color is hex without the
@@ -237,7 +237,7 @@ func (e *execClient) CreateLabel(name, description, color string) error {
 	if err != nil {
 		return err
 	}
-	return e.createLabelViaConnector(row, name, description, color)
+	return e.createLabel(row, name, description, color)
 }
 
 // Rebase syncs the PR's head branch onto its base and force-pushes. With sync
@@ -265,7 +265,7 @@ func (e *execClient) RebasePRHead(prURL, head string) error {
 	if err != nil {
 		return err
 	}
-	return e.rebasePRHeadViaConnector(row, prURL, head)
+	return e.rebasePRHead(row, prURL, head)
 }
 
 // syncBranch is Rebase's git half: clone with clone, sync head onto
@@ -349,7 +349,7 @@ func (e *execClient) SeedMirror(dir string) error {
 	if err != nil {
 		return err
 	}
-	return e.seedMirrorViaConnector(row, dir)
+	return e.seedMirror(row, dir)
 }
 
 // PushBranch creates branch on the target repo from localRef in the git repo
@@ -360,7 +360,7 @@ func (e *execClient) PushBranch(srcDir, localRef, branch, base string) error {
 	if err != nil {
 		return err
 	}
-	return e.pushBranchViaConnector(row, srcDir, localRef, branch, base)
+	return e.pushBranch(row, srcDir, localRef, branch, base)
 }
 
 // DeleteBranch deletes branch from the target repo (issue #4112).
@@ -372,7 +372,7 @@ func (e *execClient) DeleteBranch(branch, base string) error {
 	if err != nil {
 		return err
 	}
-	return e.deleteBranchViaConnector(row, branch, base)
+	return e.deleteBranch(row, branch, base)
 }
 
 // CreateDraftPR opens a draft PR from head onto base. head and base are
@@ -382,7 +382,7 @@ func (e *execClient) CreateDraftPR(title, body, base, head string) (string, bool
 	if err != nil {
 		return "", false, err
 	}
-	return e.createDraftPRViaConnector(row, title, body, base, head)
+	return e.createDraftPR(row, title, body, base, head)
 }
 
 var _ forge.BranchProtectionForge = (*execClient)(nil)

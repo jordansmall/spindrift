@@ -262,7 +262,7 @@ func viaPR[R any](e *execClient, row backendrows.Row, verb string, fn func(forge
 	return v, err
 }
 
-func (e *execClient) probeViaConnector(row backendrows.Row) (string, error) {
+func (e *execClient) probe(row backendrows.Row) (string, error) {
 	slug, err := viaRead(e, row, connectorforge.ErrNoProbe, "resolve the repository", func(conn *connectorhost.Connector, api string) (string, error) {
 		return connectorforge.Probe(conn, connectorforge.Target{API: api, Repo: e.repo})
 	})
@@ -272,25 +272,25 @@ func (e *execClient) probeViaConnector(row backendrows.Row) (string, error) {
 	return slug, nil
 }
 
-func (e *execClient) branchProtectedViaConnector(row backendrows.Row, branch string) (bool, error) {
+func (e *execClient) branchProtected(row backendrows.Row, branch string) (bool, error) {
 	return viaRead(e, row, connectorforge.ErrNoBranchProtection, "read branch protection", func(conn *connectorhost.Connector, api string) (bool, error) {
 		return connectorforge.BranchProtected(conn, connectorforge.Target{API: api, Repo: e.repo}, branch)
 	})
 }
 
-func (e *execClient) canAutoMergeViaConnector(row backendrows.Row) (bool, error) {
+func (e *execClient) canAutoMerge(row backendrows.Row) (bool, error) {
 	return viaRead(e, row, connectorforge.ErrNoAutoMerge, "read the auto-merge setting", func(conn *connectorhost.Connector, api string) (bool, error) {
 		return connectorforge.AutoMergeAllowed(conn, connectorforge.Target{API: api, Repo: e.repo})
 	})
 }
 
-// countReadyViaConnector forwards fresh so the Connector can bypass any
+// countReady forwards fresh so the Connector can bypass any
 // conditional-request cache it keeps.
-func (e *execClient) countReadyViaConnector(row backendrows.Row, fresh bool) (int, error) {
+func (e *execClient) countReady(row backendrows.Row, fresh bool) (int, error) {
 	return viaTrackerCap(e, row, connectortracker.CapCount, "count demand", func(dc forge.DemandCounter) (int, error) { return dc.CountReady(fresh) })
 }
 
-func (e *execClient) priorClaimStateViaConnector(row backendrows.Row, num string) (state forge.DispatchState, found bool, err error) {
+func (e *execClient) priorClaimState(row backendrows.Row, num string) (state forge.DispatchState, found bool, err error) {
 	err = trackerCapOp(e, row, connectortracker.CapRemovedLabels, "read an issue's removed labels", func(pr forge.PriorClaimStateReader) error {
 		var rerr error
 		state, found, rerr = pr.PriorClaimState(num)
@@ -299,19 +299,19 @@ func (e *execClient) priorClaimStateViaConnector(row backendrows.Row, num string
 	return state, found, err
 }
 
-func (e *execClient) listIssuesViaConnector(row backendrows.Row, state forge.DispatchState) ([]forge.Issue, error) {
+func (e *execClient) listIssues(row backendrows.Row, state forge.DispatchState) ([]forge.Issue, error) {
 	return viaTracker(e, row, coreTracker, "list issues", func(tr forge.IssueTracker) ([]forge.Issue, error) { return tr.ListIssues(state) })
 }
 
-func (e *execClient) listOpenIssuesViaConnector(row backendrows.Row) ([]forge.Issue, error) {
+func (e *execClient) listOpenIssues(row backendrows.Row) ([]forge.Issue, error) {
 	return viaTracker(e, row, coreTracker, "list open issues", func(tr forge.IssueTracker) ([]forge.Issue, error) { return tr.ListOpenIssues() })
 }
 
-func (e *execClient) issueViaConnector(row backendrows.Row, num string) (forge.Issue, error) {
+func (e *execClient) issue(row backendrows.Row, num string) (forge.Issue, error) {
 	return viaTracker(e, row, coreTracker, "read an issue", func(tr forge.IssueTracker) (forge.Issue, error) { return tr.Issue(num) })
 }
 
-func (e *execClient) openPRForBranchViaConnector(row backendrows.Row, branch string) (pr forge.PR, found bool, err error) {
+func (e *execClient) openPRForBranch(row backendrows.Row, branch string) (pr forge.PR, found bool, err error) {
 	err = e.prRead(row, "find a branch's open PR", func(pf forge.PRForge) error {
 		var rerr error
 		pr, found, rerr = pf.OpenPRForBranch(branch)
@@ -320,7 +320,7 @@ func (e *execClient) openPRForBranchViaConnector(row backendrows.Row, branch str
 	return pr, found, err
 }
 
-func (e *execClient) prForBranchViaConnector(row backendrows.Row, branch string) (url string, found bool, err error) {
+func (e *execClient) prForBranch(row backendrows.Row, branch string) (url string, found bool, err error) {
 	err = e.prRead(row, "find a branch's PR", func(pf forge.PRForge) error {
 		var rerr error
 		url, found, rerr = pf.PRForBranch(branch)
@@ -329,15 +329,15 @@ func (e *execClient) prForBranchViaConnector(row backendrows.Row, branch string)
 	return url, found, err
 }
 
-func (e *execClient) prStateViaConnector(row backendrows.Row, prURL string) (forge.PRState, error) {
+func (e *execClient) prState(row backendrows.Row, prURL string) (forge.PRState, error) {
 	return viaPR(e, row, "read a PR's state", func(pf forge.PRForge) (forge.PRState, error) { return pf.PRState(prURL) })
 }
 
-func (e *execClient) checkStateViaConnector(row backendrows.Row, prURL string) (forge.RollupState, error) {
+func (e *execClient) checkState(row backendrows.Row, prURL string) (forge.RollupState, error) {
 	return viaPR(e, row, "read a PR's check state", func(pf forge.PRForge) (forge.RollupState, error) { return pf.CheckState(prURL) })
 }
 
-func (e *execClient) failureDetailViaConnector(row backendrows.Row, prURL string) (string, error) {
+func (e *execClient) failureDetail(row backendrows.Row, prURL string) (string, error) {
 	return viaPR(e, row, "read a PR's failing checks", func(pf forge.PRForge) (string, error) { return pf.FailureDetail(prURL) })
 }
 
@@ -345,49 +345,49 @@ func (e *execClient) failureDetailViaConnector(row backendrows.Row, prURL string
 // the primitive behind it; a transition or verdict is the transition layer,
 // which needs the label-edit primitive for its stale-label strip.
 
-func (e *execClient) transitionViaConnector(row backendrows.Row, num string, from, to forge.DispatchState) error {
+func (e *execClient) transition(row backendrows.Row, num string, from, to forge.DispatchState) error {
 	return e.trackerOp(row, connectortracker.CapTransition, "transition an issue", func(tr forge.IssueTracker) error {
 		return tr.TransitionState(num, from, to)
 	}, connectortracker.CapEditLabels)
 }
 
-func (e *execClient) completeVerdictViaConnector(row backendrows.Row, num string, verdict forge.Verdict) error {
+func (e *execClient) completeVerdict(row backendrows.Row, num string, verdict forge.Verdict) error {
 	return e.trackerOp(row, connectortracker.CapTransition, "settle a research verdict", func(tr forge.IssueTracker) error {
 		return tr.CompleteVerdict(num, verdict)
 	}, connectortracker.CapEditLabels)
 }
 
-func (e *execClient) addLabelsViaConnector(row backendrows.Row, num string, labels []string) error {
+func (e *execClient) addLabels(row backendrows.Row, num string, labels []string) error {
 	return trackerCapOp(e, row, connectortracker.CapEditLabels, "add labels to an issue", func(l forge.IssueLabeler) error {
 		return l.AddLabels(num, labels)
 	})
 }
 
-func (e *execClient) commentViaConnector(row backendrows.Row, num, body string) error {
+func (e *execClient) comment(row backendrows.Row, num, body string) error {
 	return trackerCapOp(e, row, connectortracker.CapComment, "comment on an issue", func(c forge.HostPostedCommenter) error {
 		return c.Comment(num, body)
 	})
 }
 
-func (e *execClient) closeMergedIssueViaConnector(row backendrows.Row, num string) error {
+func (e *execClient) closeMergedIssue(row backendrows.Row, num string) error {
 	return trackerCapOp(e, row, connectortracker.CapCloseIssue, "close a merged issue", func(c forge.MergeCloser) error {
 		return c.CloseMergedIssue(num)
 	})
 }
 
-func (e *execClient) fileIssueViaConnector(row backendrows.Row, title, body string, labels []string) (string, error) {
+func (e *execClient) fileIssue(row backendrows.Row, title, body string, labels []string) (string, error) {
 	return viaTrackerCap(e, row, connectortracker.CapFileIssue, "file an issue", func(f forge.HostPostedIssueFiler) (string, error) {
 		return f.PostIssue(title, body, labels)
 	})
 }
 
-func (e *execClient) createLabelViaConnector(row backendrows.Row, name, description, color string) error {
+func (e *execClient) createLabel(row backendrows.Row, name, description, color string) error {
 	return e.trackerOp(row, connectortracker.CapLabels, "create a label", func(tr forge.IssueTracker) error {
 		return tr.CreateLabel(name, description, color)
 	})
 }
 
-func (e *execClient) listLabelsViaConnector(row backendrows.Row) ([]string, error) {
+func (e *execClient) listLabels(row backendrows.Row) ([]string, error) {
 	return viaTracker(e, row, connectortracker.CapLabels, "list labels", func(tr forge.IssueTracker) ([]string, error) { return tr.ListLabels() })
 }
 
@@ -414,15 +414,15 @@ func unsupportedWithout(err error, verb string, missing ...error) error {
 	return err
 }
 
-func (e *execClient) nativeDepsViaConnector(row backendrows.Row, num string) ([]string, error) {
+func (e *execClient) nativeDeps(row backendrows.Row, num string) ([]string, error) {
 	return viaTrackerCap(e, row, connectortracker.CapNativeDeps, "read an issue's native dependencies", func(nr forge.NativeDepsReader) ([]string, error) { return nr.NativeDepsOf(num) })
 }
 
-func (e *execClient) branchExistsViaConnector(row backendrows.Row, branch string) (bool, error) {
+func (e *execClient) branchExists(row backendrows.Row, branch string) (bool, error) {
 	return viaForge(e, row, "check a branch", func(cf forge.CodeForge, _ forge.Capabilities) (bool, error) { return cf.BranchExists(branch) })
 }
 
-func (e *execClient) mergeCommitViaConnector(row backendrows.Row, prURL string) (string, error) {
+func (e *execClient) mergeCommit(row backendrows.Row, prURL string) (string, error) {
 	return viaForge(e, row, "read a PR's merge commit", func(_ forge.CodeForge, caps forge.Capabilities) (string, error) { return mergeCommitFrom(caps, prURL) })
 }
 
@@ -435,26 +435,26 @@ func mergeCommitFrom(caps forge.Capabilities, prURL string) (string, error) {
 	return caps.MergeCommitReader.MergeCommit(prURL)
 }
 
-func (e *execClient) headCommitSHAViaConnector(row backendrows.Row, prURL string) (string, error) {
+func (e *execClient) headCommitSHA(row backendrows.Row, prURL string) (string, error) {
 	return viaPR(e, row, "read a PR's head commit", func(pf forge.PRForge) (string, error) { return pf.HeadCommitSHA(prURL) })
 }
 
-func (e *execClient) mergeableViaConnector(row backendrows.Row, prURL string) (forge.MergeableState, error) {
+func (e *execClient) mergeable(row backendrows.Row, prURL string) (forge.MergeableState, error) {
 	return viaPR(e, row, "read a PR's mergeability", func(pf forge.PRForge) (forge.MergeableState, error) { return pf.Mergeable(prURL) })
 }
 
-func (e *execClient) needsUpdateViaConnector(row backendrows.Row, prURL string) (bool, error) {
+func (e *execClient) needsUpdate(row backendrows.Row, prURL string) (bool, error) {
 	return viaPR(e, row, "read how far a PR is behind", func(pf forge.PRForge) (bool, error) { return pf.NeedsUpdate(prURL) })
 }
 
-func (e *execClient) listPRFilesViaConnector(row backendrows.Row, prURL string) ([]string, error) {
+func (e *execClient) listPRFiles(row backendrows.Row, prURL string) ([]string, error) {
 	return viaPR(e, row, "list a PR's files", func(pf forge.PRForge) ([]string, error) { return pf.ListPRFiles(prURL) })
 }
 
-// checkRunViaConnector reads the rollup state and the in-flight run link in one
+// checkRun reads the rollup state and the in-flight run link in one
 // view; the forge view lacks the optional reporter when the Connector does not
 // declare forge.ciRun.
-func (e *execClient) checkRunViaConnector(row backendrows.Row, prURL string) (state forge.RollupState, run string, err error) {
+func (e *execClient) checkRun(row backendrows.Row, prURL string) (state forge.RollupState, run string, err error) {
 	err = e.forgeRead(row, "read a PR's CI run", func(_ forge.CodeForge, caps forge.Capabilities) error {
 		if caps.CIRunReporter == nil {
 			return fmt.Errorf("%w: CI run read", errNoCapability)
@@ -466,29 +466,29 @@ func (e *execClient) checkRunViaConnector(row backendrows.Row, prURL string) (st
 	return state, run, err
 }
 
-func (e *execClient) blocksOfViaConnector(row backendrows.Row, num string) ([]forge.Dependency, error) {
+func (e *execClient) blocksOf(row backendrows.Row, num string) ([]forge.Dependency, error) {
 	return viaTrackerCap(e, row, connectortracker.CapBlocks, "read the issues an issue blocks", func(bl forge.BlockersLister) ([]forge.Dependency, error) { return bl.BlocksOf(num) })
 }
 
-// matchesRouteViaConnector gates on the route, not the handshake, here: an
+// matchesRoute gates on the route, not the handshake, here: an
 // unrouted client matches every issue even on a Connector that lacks
 // tracker.route, and a routed one is refused by the tracker view itself.
-func (e *execClient) matchesRouteViaConnector(row backendrows.Row, num string) (bool, error) {
+func (e *execClient) matchesRoute(row backendrows.Row, num string) (bool, error) {
 	return viaTrackerCap(e, row, coreTracker, "match an issue against the route", func(rm forge.RouteMatcher) (bool, error) { return rm.MatchesRoute(num) })
 }
 
-func (e *execClient) searchIssuesViaConnector(row backendrows.Row, text string, state forge.IssueState, label string, limit int) ([]forge.Issue, error) {
+func (e *execClient) searchIssues(row backendrows.Row, text string, state forge.IssueState, label string, limit int) ([]forge.Issue, error) {
 	return viaTrackerCap(e, row, connectortracker.CapSearchIssues, "search issues", func(s forge.IssueSearcher) ([]forge.Issue, error) { return s.SearchIssues(text, state, label, limit) })
 }
 
-func (e *execClient) listIssuesWithLabelsViaConnector(row backendrows.Row, state forge.IssueState, labels []string) ([]forge.Issue, error) {
+func (e *execClient) listIssuesWithLabels(row backendrows.Row, state forge.IssueState, labels []string) ([]forge.Issue, error) {
 	return viaTrackerCap(e, row, connectortracker.CapLabeled, "scan labeled issues", func(l forge.LabeledBacklogLister) ([]forge.Issue, error) {
 		return l.ListIssuesWithLabels(state, labels)
 	})
 }
 
-// commentsViaConnector keeps the Connector's attestation that each comment's
+// comments keeps the Connector's attestation that each comment's
 // minimized state is faithful; the tracker view serves no comments without it.
-func (e *execClient) commentsViaConnector(row backendrows.Row, num string) ([]forge.Comment, error) {
+func (e *execClient) comments(row backendrows.Row, num string) ([]forge.Comment, error) {
 	return viaTrackerCap(e, row, connectortracker.CapComments, "read an issue's comments", func(cl forge.CommentLister) ([]forge.Comment, error) { return cl.Comments(num) })
 }

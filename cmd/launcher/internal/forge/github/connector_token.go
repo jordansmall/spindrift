@@ -26,7 +26,7 @@ func introspectToken(token, repoSlug string) (backendkit.TokenIntrospection, err
 	if err != nil {
 		return backendkit.TokenIntrospection{}, err
 	}
-	got, err := introspectViaConnector(row, backendrows.Options{Client: connectorClient}, token, repoSlug)
+	got, err := introspect(row, backendrows.Options{Client: connectorClient}, token, repoSlug)
 	return got, noteRouted("introspect the token", err)
 }
 
@@ -55,11 +55,11 @@ func withConnector(row backendrows.Row, o backendrows.Options, repoSlug string, 
 	return fn(conn, api)
 }
 
-// introspectViaConnector loads row's Connector with token as its credential,
+// introspect loads row's Connector with token as its credential,
 // never the host's own, and reads the grant through it. A Connector that does
 // not declare forge.tokenGrant cannot introspect: the error wraps
 // backendkit.ErrUnsupported.
-func introspectViaConnector(row backendrows.Row, o backendrows.Options, token, repoSlug string) (got backendkit.TokenIntrospection, err error) {
+func introspect(row backendrows.Row, o backendrows.Options, token, repoSlug string) (got backendkit.TokenIntrospection, err error) {
 	o.Getenv = func(k string) string {
 		if k == row.CredentialEnv {
 			return token

@@ -69,7 +69,7 @@ func routedLogHarness(t *testing.T, useRow func(*testing.T, string)) (h *connect
 	return h, c, calls, hostpaths.LogDir(dir)
 }
 
-func routedFiles(t *testing.T, logDir, suffix string) []string {
+func connectorFiles(t *testing.T, logDir, suffix string) []string {
 	t.Helper()
 	m, err := filepath.Glob(filepath.Join(logDir, "connector-github-*"+suffix))
 	if err != nil {
@@ -80,7 +80,7 @@ func routedFiles(t *testing.T, logDir, suffix string) []string {
 
 // Under a routed row every read the Connector declares is answered by the
 // Connector over the API, never by gh.
-func TestRoutedRow_ReadsGoThroughTheConnector(t *testing.T) {
+func TestConnectorRow_ReadsGoThroughTheConnector(t *testing.T) {
 	h, c, calls, logDir := routedLogHarness(t, useGithubRowAt)
 	h.SeedIssue(forge.Issue{Number: "1", Title: "one", Labels: []string{testLabels.Dispatchable}})
 	h.SeedIssue(forge.Issue{Number: "2", Title: "two"})
@@ -150,16 +150,16 @@ func TestRoutedRow_ReadsGoThroughTheConnector(t *testing.T) {
 	if n := calls(); n != 0 {
 		t.Errorf("the Connector reads ran gh %d times", n)
 	}
-	if logs := routedFiles(t, logDir, ".log"); len(logs) != 0 {
+	if logs := connectorFiles(t, logDir, ".log"); len(logs) != 0 {
 		t.Errorf("clean reads wrote Connector error logs %v", logs)
 	}
-	if len(routedFiles(t, logDir, ".audit.jsonl")) != 1 {
-		t.Errorf("want one Connector audit file, got %v", routedFiles(t, logDir, ".audit.jsonl"))
+	if len(connectorFiles(t, logDir, ".audit.jsonl")) != 1 {
+		t.Errorf("want one Connector audit file, got %v", connectorFiles(t, logDir, ".audit.jsonl"))
 	}
 }
 
-// A plain row routes every read through the Connector, never gh.
-func TestPlainRow_ReadsGoThroughTheConnector(t *testing.T) {
+// A Connector row runs gh for none of its reads.
+func TestConnectorRow_NoReadRunsGh(t *testing.T) {
 	for _, tc := range routedReads {
 		t.Run(tc.name, func(t *testing.T) {
 			_, c, calls, _ := routedLogHarness(t, useGithubRowAt)
@@ -167,28 +167,28 @@ func TestPlainRow_ReadsGoThroughTheConnector(t *testing.T) {
 			_ = tc.read(c, "https://github.com/owner/repo/pull/1")
 
 			if n := calls(); n != 0 {
-				t.Errorf("%s under a plain row ran gh %d times", tc.name, n)
+				t.Errorf("%s under a Connector row ran gh %d times", tc.name, n)
 			}
 		})
 	}
 }
 
-// A plain row's Connector audits to the run's Connector record.
-func TestPlainRow_AuditsToTheConnectorRecord(t *testing.T) {
+// A Connector row's Connector audits to the run's Connector record.
+func TestConnectorRow_AuditsToTheConnectorRecord(t *testing.T) {
 	_, c, _, logDir := routedLogHarness(t, useGithubRowAt)
 
 	if _, err := c.ListIssues(forge.Dispatchable); err != nil {
 		t.Fatal(err)
 	}
 
-	if len(routedFiles(t, logDir, ".audit.jsonl")) != 1 {
-		t.Errorf("want one Connector audit file, got %v", routedFiles(t, logDir, ".audit.jsonl"))
+	if len(connectorFiles(t, logDir, ".audit.jsonl")) != 1 {
+		t.Errorf("want one Connector audit file, got %v", connectorFiles(t, logDir, ".audit.jsonl"))
 	}
 }
 
 // A Connector that fails to load fails each routed read with the load error,
 // never reaching gh, and each failure lands in the run's Connector log.
-func TestPlainRow_LoadFailureFailsTheReadAndIsRecorded(t *testing.T) {
+func TestConnectorRow_LoadFailureFailsTheReadAndIsRecorded(t *testing.T) {
 	for _, tc := range routedReads {
 		t.Run(tc.name, func(t *testing.T) {
 			_, c, calls, logDir := routedLogHarness(t, useGithubRowAt)
@@ -207,7 +207,7 @@ func TestPlainRow_LoadFailureFailsTheReadAndIsRecorded(t *testing.T) {
 			if n := calls(); n != 0 {
 				t.Errorf("the failed read ran gh %d times", n)
 			}
-			logs := routedFiles(t, logDir, ".log")
+			logs := connectorFiles(t, logDir, ".log")
 			if len(logs) != 1 {
 				t.Fatalf("Connector logs = %v, want one", logs)
 			}
@@ -228,7 +228,7 @@ func TestPlainRow_LoadFailureFailsTheReadAndIsRecorded(t *testing.T) {
 
 // A request outside the row's Routes is refused by the host: the read fails
 // with that refusal, never falls back to gh, and the Connector audit shows it.
-func TestPlainRow_RefusedRouteFailsTheReadAndIsAudited(t *testing.T) {
+func TestConnectorRow_RefusedRouteFailsTheReadAndIsAudited(t *testing.T) {
 	_, c, calls, logDir := routedLogHarness(t, func(t *testing.T, host string) {
 		applyGithubRow(t, host, func(r *backendrows.Row) {
 			r.Routes = r.Routes[:0:0]
@@ -248,7 +248,7 @@ func TestPlainRow_RefusedRouteFailsTheReadAndIsAudited(t *testing.T) {
 	if n := calls(); n != 0 {
 		t.Errorf("the refused read ran gh %d times", n)
 	}
-	audits := routedFiles(t, logDir, ".audit.jsonl")
+	audits := connectorFiles(t, logDir, ".audit.jsonl")
 	if len(audits) != 1 {
 		t.Fatalf("Connector audit files = %v, want one", audits)
 	}
@@ -259,7 +259,7 @@ func TestPlainRow_RefusedRouteFailsTheReadAndIsAudited(t *testing.T) {
 	if !strings.Contains(string(raw), `"decision":"refused"`) {
 		t.Errorf("Connector audit %q has no refused entry", raw)
 	}
-	logs := routedFiles(t, logDir, ".log")
+	logs := connectorFiles(t, logDir, ".log")
 	if len(logs) != 1 {
 		t.Fatalf("Connector logs = %v, want one", logs)
 	}
@@ -270,7 +270,7 @@ func TestPlainRow_RefusedRouteFailsTheReadAndIsAudited(t *testing.T) {
 
 // A read that kills the shared Connector still fails, and is recorded, but the
 // next read loads a fresh one instead of failing with "connector unusable".
-func TestRoutedRow_FatalCallFailureReloadsTheConnectorForTheNextRead(t *testing.T) {
+func TestConnectorRow_FatalCallFailureReloadsTheConnectorForTheNextRead(t *testing.T) {
 	_, c, calls, logDir := routedLogHarness(t, func(t *testing.T, host string) {
 		applyGithubRow(t, host, func(r *backendrows.Row) {
 			r.Routes = r.Routes[:0:0]
@@ -296,14 +296,14 @@ func TestRoutedRow_FatalCallFailureReloadsTheConnectorForTheNextRead(t *testing.
 	if n := calls(); n != 0 {
 		t.Errorf("the reads ran gh %d times", n)
 	}
-	audits := routedFiles(t, logDir, ".audit.jsonl")
+	audits := connectorFiles(t, logDir, ".audit.jsonl")
 	if len(audits) != 1 {
 		t.Fatalf("Connector audit files = %v, want one", audits)
 	}
 	if raw, _ := os.ReadFile(audits[0]); !strings.Contains(string(raw), `"decision":"refused"`) {
 		t.Errorf("Connector audit %q lost the refused entry", raw)
 	}
-	logs := routedFiles(t, logDir, ".log")
+	logs := connectorFiles(t, logDir, ".log")
 	if len(logs) != 1 {
 		t.Fatalf("Connector logs = %v, want one", logs)
 	}
@@ -323,7 +323,7 @@ func allRoutes(t *testing.T, host string) []connectorhost.Route {
 
 // A Connector lacking the capability a routed read needs fails it as
 // unsupported, never falling back to gh.
-func TestRoutedRow_MissingCapabilityFailsTheReadWithoutGh(t *testing.T) {
+func TestConnectorRow_MissingCapabilityFailsTheReadWithoutGh(t *testing.T) {
 	_, c, calls, _ := routedLogHarness(t, useGithubRowAt)
 	withoutCapability(t, "tracker.nativeDeps")
 
@@ -339,7 +339,7 @@ func TestRoutedRow_MissingCapabilityFailsTheReadWithoutGh(t *testing.T) {
 
 // Every read a row routes records its failure: a
 // Connector that fails to load lands a line in the Connector log for each.
-func TestRoutedRow_RoutedReadsRecordTheirFailures(t *testing.T) {
+func TestConnectorRow_EveryReadRecordsItsFailure(t *testing.T) {
 	for name, read := range map[string]func(c *execClient) error{
 		"CountReady":      func(c *execClient) error { _, err := c.CountReady(true); return err },
 		"Probe":           func(c *execClient) error { _, err := c.Probe(); return err },
@@ -360,7 +360,7 @@ func TestRoutedRow_RoutedReadsRecordTheirFailures(t *testing.T) {
 				t.Fatalf("err = %v, want the load error", err)
 			}
 
-			logs := routedFiles(t, logDir, ".log")
+			logs := connectorFiles(t, logDir, ".log")
 			if len(logs) != 1 {
 				t.Fatalf("Connector logs = %v, want one", logs)
 			}
@@ -374,7 +374,7 @@ func TestRoutedRow_RoutedReadsRecordTheirFailures(t *testing.T) {
 // A request the host admitted but could not send surfaces its host-side reason
 // in the read's error and the Connector log, naming the credential variable and
 // never its value.
-func TestRoutedRow_UnsetCredentialIsNamedInTheReadErrorAndRecord(t *testing.T) {
+func TestConnectorRow_UnsetCredentialIsNamedInTheReadErrorAndRecord(t *testing.T) {
 	_, c, _, logDir := routedLogHarness(t, useGithubRowAt)
 	t.Setenv(tokenCredentialEnv, "")
 
@@ -384,7 +384,7 @@ func TestRoutedRow_UnsetCredentialIsNamedInTheReadErrorAndRecord(t *testing.T) {
 		t.Fatalf("err = %v, want it to name %q", err, want)
 	}
 
-	logs := routedFiles(t, logDir, ".log")
+	logs := connectorFiles(t, logDir, ".log")
 	if len(logs) != 1 {
 		t.Fatalf("Connector logs = %v, want one", logs)
 	}
@@ -398,7 +398,7 @@ func TestRoutedRow_UnsetCredentialIsNamedInTheReadErrorAndRecord(t *testing.T) {
 }
 
 // Under a routed row token introspection audits to the Connector record.
-func TestRoutedRow_TokenIntrospectionAuditsToTheConnectorRecord(t *testing.T) {
+func TestConnectorRow_TokenIntrospectionAuditsToTheConnectorRecord(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 	b := newTokenBackend(t, "ghp_abc")
@@ -413,8 +413,8 @@ func TestRoutedRow_TokenIntrospectionAuditsToTheConnectorRecord(t *testing.T) {
 	}
 
 	logDir := hostpaths.LogDir(dir)
-	if len(routedFiles(t, logDir, ".audit.jsonl")) != 1 {
-		t.Errorf("Connector audit files = %v, want one", routedFiles(t, logDir, ".audit.jsonl"))
+	if len(connectorFiles(t, logDir, ".audit.jsonl")) != 1 {
+		t.Errorf("Connector audit files = %v, want one", connectorFiles(t, logDir, ".audit.jsonl"))
 	}
 }
 
@@ -430,7 +430,7 @@ func TestMergeCommitFrom_WithoutTheReaderIsMissingCapability(t *testing.T) {
 
 // CheckRun is the merge wait's CI poll: under a routed row it reads the state
 // and the in-flight run link from the Connector, never gh.
-func TestRoutedRow_CheckRunComesFromTheConnector(t *testing.T) {
+func TestConnectorRow_CheckRunComesFromTheConnector(t *testing.T) {
 	h, c, calls, _ := routedLogHarness(t, useGithubRowAt)
 	prURL := h.SeedOpenPR("1")
 	h.SeedCheckStates(prURL, []forge.RollupState{forge.StatePending})
@@ -452,7 +452,7 @@ func TestRoutedRow_CheckRunComesFromTheConnector(t *testing.T) {
 }
 
 // A Connector without forge.ciRun is an unsupported read, not a silent gh poll.
-func TestRoutedRow_CheckRunWithoutTheCapabilityFailsWithoutGh(t *testing.T) {
+func TestConnectorRow_CheckRunWithoutTheCapabilityFailsWithoutGh(t *testing.T) {
 	withoutCapability(t, "forge.ciRun")
 	h, c, calls, _ := routedLogHarness(t, useGithubRowAt)
 	prURL := h.SeedOpenPR("1")
@@ -523,7 +523,7 @@ func TestRecordRoutedSandboxTotals_AppendsOneLineToTheAuditFile(t *testing.T) {
 	if lines[1] != want {
 		t.Errorf("totals line = %s, want %s", lines[1], want)
 	}
-	if got := routedFiles(t, filepath.Dir(audit), ".log"); len(got) != 0 {
+	if got := connectorFiles(t, filepath.Dir(audit), ".log"); len(got) != 0 {
 		t.Errorf("recording totals created %v, want no .log", got)
 	}
 
@@ -562,7 +562,7 @@ func TestRecordRoutedSandboxTotals_CreatesNoRecordPair(t *testing.T) {
 
 	RecordRoutedSandboxTotals()
 
-	if got := routedFiles(t, filepath.Dir(audit), ""); len(got) != 0 {
+	if got := connectorFiles(t, filepath.Dir(audit), ""); len(got) != 0 {
 		t.Errorf("recording totals created %v, want no files", got)
 	}
 }
