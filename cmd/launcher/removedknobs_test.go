@@ -265,3 +265,18 @@ func TestRemovedKnobsCheck_RejectsEnvOnlyRow(t *testing.T) {
 		assertRejected(t)
 	})
 }
+
+// The github Connector's own token knob is gone: GH_TOKEN is the credential,
+// so the old env is refused with a message that names its replacement.
+func TestRemovedKnobsCheck_RejectsGithubConnectorToken(t *testing.T) {
+	t.Setenv("SPINDRIFT_GITHUB_CONNECTOR_TOKEN", "ghp_stale")
+	_, err := removedKnobsCheck().Probe()
+	if err == nil {
+		t.Fatal("Probe() err = nil, want a removed-knob rejection")
+	}
+	for _, want := range []string{"SPINDRIFT_GITHUB_CONNECTOR_TOKEN was removed", "GH_TOKEN", "MIGRATING.md"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q, want it to contain %q", err, want)
+		}
+	}
+}

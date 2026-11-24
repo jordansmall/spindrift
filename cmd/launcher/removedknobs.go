@@ -21,6 +21,7 @@ var removedKnobs = []struct{ env, reason string }{
 	{"BOX_FORGEJO_TOKEN", "no Box holds a forge credential (issues #6900 and #6901), so nothing reads it; see MIGRATING.md"},
 	{"BOX_FORGE_CREDENTIAL", "every Box already holds no forge credential (issue #6900), so there is nothing to opt in or out of; see MIGRATING.md"},
 	{"CONNECTOR_SANDBOX", "the Connector sandbox is always on (issue #7022), so there is nothing to switch"},
+	{"SPINDRIFT_GITHUB_CONNECTOR_TOKEN", "the github Connector takes GH_TOKEN as its credential instead (issue #7499; see MIGRATING.md)"},
 }
 
 // removedKnobsCheckName names the removed-knobs row, so validateConfigChecks
