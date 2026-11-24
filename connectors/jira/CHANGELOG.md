@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.0](https://github.com/jordansmall/spindrift/compare/jira-v0.3.0...jira-v0.4.0) (2026-11-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* **launcher:** a run-input document that still carries a backend row's shadow, shadowEvery or primary field fails to load; regenerate it.
+
+### Features
+
+* **connectors/jira:** report error classes on non-2xx and transport ([5bc8a72](https://github.com/jordansmall/spindrift/commit/5bc8a72cc2f3f8630131696e6fc486bcce9b59cf)), closes [#7459](https://github.com/jordansmall/spindrift/issues/7459) [#7367](https://github.com/jordansmall/spindrift/issues/7367)
+* **launcher:** delete the backend read shadow ([c04637b](https://github.com/jordansmall/spindrift/commit/c04637b422e5d9e7cca4e55ca75dbbf516e930c0)), closes [#7456](https://github.com/jordansmall/spindrift/issues/7456) [#7359](https://github.com/jordansmall/spindrift/issues/7359) [#7298](https://github.com/jordansmall/spindrift/issues/7298)
+
+
+### Bug Fixes
+
+* **jira:** report an anonymous comment author as Anonymous ([2ea5aca](https://github.com/jordansmall/spindrift/commit/2ea5aca7fe5ec5daa51bd2274ce9828252390a2d)), closes [#7464](https://github.com/jordansmall/spindrift/issues/7464)
+
 ## [0.3.0](https://github.com/jordansmall/spindrift/compare/jira-v0.2.0...jira-v0.3.0) (2026-11-23)
 
 

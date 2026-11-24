@@ -1,5 +1,89 @@
 # Changelog
 
+## [0.35.0](https://github.com/jordansmall/spindrift/compare/v0.34.0...v0.35.0) (2026-11-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* **launcher:** a run-input document that still carries a backend row's shadow, shadowEvery or primary field fails to load; regenerate it.
+* **flake-module:** a backend row no longer accepts shadow, shadowEvery or primary; delete them from spindrift.connectors.<name>.
+
+### Features
+
+* **connectorforge:** add an optional per-call note hook to Compose ([bc9238c](https://github.com/jordansmall/spindrift/commit/bc9238c4d453c6a785558e9260891664e858969a)), closes [#7461](https://github.com/jordansmall/spindrift/issues/7461)
+* **connectortracker:** retry and classify calls as the forge does ([2c0ce11](https://github.com/jordansmall/spindrift/commit/2c0ce118b2b86a05134f7336b2498e50493f13a0)), closes [#7457](https://github.com/jordansmall/spindrift/issues/7457) [#6957](https://github.com/jordansmall/spindrift/issues/6957)
+* **doctor:** flag a Target repo whose canonical name differs ([0a7d5ef](https://github.com/jordansmall/spindrift/commit/0a7d5efb632760b73c5d32c3c09c303538dc6760)), closes [#7467](https://github.com/jordansmall/spindrift/issues/7467)
+* **driverkit:** add CapLine to cap and sanitise guest text ([09c9749](https://github.com/jordansmall/spindrift/commit/09c974951ab738cdd8742c69b7f2d4a4b4ebc58c)), closes [#7460](https://github.com/jordansmall/spindrift/issues/7460)
+* **flake-module:** refuse shadow and primary on a backend row ([55d3a3e](https://github.com/jordansmall/spindrift/commit/55d3a3eb150d729d4db5dc7050a308be80628826)), closes [#7456](https://github.com/jordansmall/spindrift/issues/7456)
+* **forge/forgejo:** record failed Connector calls in the .log ([69f0f8d](https://github.com/jordansmall/spindrift/commit/69f0f8d92b440ce70ac59cc29a7995483d7101f4)), closes [#7141](https://github.com/jordansmall/spindrift/issues/7141) [#7461](https://github.com/jordansmall/spindrift/issues/7461)
+* **launcher:** delete the backend read shadow ([c04637b](https://github.com/jordansmall/spindrift/commit/c04637b422e5d9e7cca4e55ca75dbbf516e930c0)), closes [#7456](https://github.com/jordansmall/spindrift/issues/7456) [#7359](https://github.com/jordansmall/spindrift/issues/7359) [#7298](https://github.com/jordansmall/spindrift/issues/7298)
+* **merge-guard:** hold first-party Connector declarations in dogfood ([4b71937](https://github.com/jordansmall/spindrift/commit/4b71937aa21171445a1a178052130b5327271f78)), closes [#7465](https://github.com/jordansmall/spindrift/issues/7465)
+* **merge-guard:** hold Route baseline edits for a human by default ([577028e](https://github.com/jordansmall/spindrift/commit/577028e893ffdf4172b9dd3b1a067b39df2fb7fe)), closes [#7465](https://github.com/jordansmall/spindrift/issues/7465)
+
+
+### Bug Fixes
+
+* **connectorforge:** refuse a malformed PR file list ([8425c71](https://github.com/jordansmall/spindrift/commit/8425c71a5df8b45465396703706d839d7de41bec)), closes [#7463](https://github.com/jordansmall/spindrift/issues/7463)
+* **connectorforge:** refuse a merge commit that is not a hex id ([4b928af](https://github.com/jordansmall/spindrift/commit/4b928afefb12baec50683767b523daae6e25de11)), closes [#7463](https://github.com/jordansmall/spindrift/issues/7463)
+* **connectorforge:** refuse an inconsistent token grant ([73d3eb7](https://github.com/jordansmall/spindrift/commit/73d3eb72eafd236633b31dd8fbc0582ef7558fa6)), closes [#7463](https://github.com/jordansmall/spindrift/issues/7463)
+* **forgejo:** build the Ledger URL as the Connector builds its clone URL ([b5dbf6c](https://github.com/jordansmall/spindrift/commit/b5dbf6ce055ec41395ffba54d9b8152dbe22ff71)), closes [#7466](https://github.com/jordansmall/spindrift/issues/7466)
+* **gitexec:** name the configured Target repo when its remote redirects ([6885145](https://github.com/jordansmall/spindrift/commit/6885145deb560bedacdb6b1946d14790fec970a7)), closes [#7466](https://github.com/jordansmall/spindrift/issues/7466)
+* **gitexec:** scope core's git credential to the exact repository URL ([5f99037](https://github.com/jordansmall/spindrift/commit/5f99037b3c4e8385b92bcda43d08e35bd06d6497)), closes [#7466](https://github.com/jordansmall/spindrift/issues/7466)
+* **gitexec:** stop git following a redirect with the credential ([c30dddc](https://github.com/jordansmall/spindrift/commit/c30dddc122accb532e5204594ae35889de35f3c4)), closes [#7466](https://github.com/jordansmall/spindrift/issues/7466)
+* **launcher:** refuse to load a Connector whose audit file cannot open ([3cf2f19](https://github.com/jordansmall/spindrift/commit/3cf2f195bda0b87c8da97c42765ab59ce5525a18)), closes [#7461](https://github.com/jordansmall/spindrift/issues/7461) [#7141](https://github.com/jordansmall/spindrift/issues/7141)
+* **settle:** never refile an intent whose filed URL was unusable ([a8524c9](https://github.com/jordansmall/spindrift/commit/a8524c9c25d7fa3e373457b4deb96431a63a1603)), closes [#7464](https://github.com/jordansmall/spindrift/issues/7464)
+
+
+### Security
+
+* **connectorhost:** cap Connector-supplied error text core receives ([6201a61](https://github.com/jordansmall/spindrift/commit/6201a61eff476e6df294d8995cc7a9e5249cb568)), closes [#7460](https://github.com/jordansmall/spindrift/issues/7460)
+* **connectorhost:** cap http_request URLs and fix the method set ([5f1a840](https://github.com/jordansmall/spindrift/commit/5f1a840981acf1dab704a011a5b37952ba9e43d1)), closes [#7462](https://github.com/jordansmall/spindrift/issues/7462)
+* **connectorhost:** cap the time one call spends in http_request ([44c9212](https://github.com/jordansmall/spindrift/commit/44c92124e2243dc4eb53a5a6242347e69fb1771e)), closes [#7462](https://github.com/jordansmall/spindrift/issues/7462)
+* **connectorhost:** keep signed redirect URLs out of hop errors ([3a85f2c](https://github.com/jordansmall/spindrift/commit/3a85f2cc014a0bf551fdc621218e020a5ffb1cb1)), closes [#7462](https://github.com/jordansmall/spindrift/issues/7462)
+* **connectortracker:** check comment fields and label names ([dcd38a9](https://github.com/jordansmall/spindrift/commit/dcd38a9b13d69e731e16898987095d73ecae1c10)), closes [#7464](https://github.com/jordansmall/spindrift/issues/7464)
+* **connectortracker:** refuse an unusable filed-issue URL ([4fc0d79](https://github.com/jordansmall/spindrift/commit/4fc0d799f3ef3123f1a5165fb0c1132ccafb813f)), closes [#7464](https://github.com/jordansmall/spindrift/issues/7464)
+
+
+### Documentation
+
+* add 0.35.0 release notes ([c0fdc08](https://github.com/jordansmall/spindrift/commit/c0fdc08f2672c0790e95282db7b99c877efaad29))
+* drop the stale native-fallback references ([65d6a73](https://github.com/jordansmall/spindrift/commit/65d6a73c60175490da433e3dc2155a448b1750d6)), closes [#7458](https://github.com/jordansmall/spindrift/issues/7458)
+* **merge-guard:** tell guard-path overriders to add the Route baseline ([bdd0797](https://github.com/jordansmall/spindrift/commit/bdd0797f93c81380f4219725895002fb60bb730f)), closes [#7465](https://github.com/jordansmall/spindrift/issues/7465)
+* record forgejo's shared record pair and the audit-open refusal ([27d7bc2](https://github.com/jordansmall/spindrift/commit/27d7bc26de88da225164017dc668e7b5100eb1c4)), closes [#7461](https://github.com/jordansmall/spindrift/issues/7461) [#7141](https://github.com/jordansmall/spindrift/issues/7141)
+* **reference:** list the repo-name doctor row ([12d89d2](https://github.com/jordansmall/spindrift/commit/12d89d29209f061532dd61bd733066a1a673e6ae)), closes [#7467](https://github.com/jordansmall/spindrift/issues/7467)
+* **reference:** rename the Backend primary mode section ([397c07e](https://github.com/jordansmall/spindrift/commit/397c07edd46b90c3c3b949b179c22c51a8222b4e)), closes [#7468](https://github.com/jordansmall/spindrift/issues/7468)
+* **reference:** say tracker and forge calls share one retry path ([b0727cb](https://github.com/jordansmall/spindrift/commit/b0727cb64d8b49a619c0e56915541bdb692accdd)), closes [#7457](https://github.com/jordansmall/spindrift/issues/7457)
+* retire the backend read shadow from the reference ([fc08c5f](https://github.com/jordansmall/spindrift/commit/fc08c5f0afd56f9529c1924fbe8ea4475e36920e)), closes [#7456](https://github.com/jordansmall/spindrift/issues/7456)
+* say the git credential answers only for the exact repository URL ([edb9438](https://github.com/jordansmall/spindrift/commit/edb9438394afc61af08162704217b07d62c9b132)), closes [#7466](https://github.com/jordansmall/spindrift/issues/7466)
+
+
+### Code Refactoring
+
+* **connectorforge:** delete the shadow-only New constructor ([d775216](https://github.com/jordansmall/spindrift/commit/d7752166de6be6754dcfab92ce7462dfd5e3ffd8)), closes [#7458](https://github.com/jordansmall/spindrift/issues/7458)
+* **connectortracker:** drop the native-fallback parameter ([7475306](https://github.com/jordansmall/spindrift/commit/747530674efd1ed810de248d305939376f483742)), closes [#7458](https://github.com/jordansmall/spindrift/issues/7458)
+* **forge:** delete the unused CapabilityHider ([302f661](https://github.com/jordansmall/spindrift/commit/302f661de7e6f013820b4753cc0440255fe7db5a)), closes [#7458](https://github.com/jordansmall/spindrift/issues/7458)
+* **forge:** keep the association vocabulary beside CommentTrusted ([749a99b](https://github.com/jordansmall/spindrift/commit/749a99bb7e6e246d5b4260c18b8cf4fd5832093f)), closes [#7464](https://github.com/jordansmall/spindrift/issues/7464)
+* **github:** drop the ViaConnector suffix from the forge helpers ([69f0dfb](https://github.com/jordansmall/spindrift/commit/69f0dfb6a03763e21705ebe5dd16ba177a30854d)), closes [#7468](https://github.com/jordansmall/spindrift/issues/7468)
+* **launcher:** drop the remaining backend-row primary wording ([c19a458](https://github.com/jordansmall/spindrift/commit/c19a4589adf8cb483b8907746330c5dec61a2b91)), closes [#7468](https://github.com/jordansmall/spindrift/issues/7468)
+* **launcher:** rename the Connector record package and file prefix ([4752409](https://github.com/jordansmall/spindrift/commit/4752409384deb0d301b87725d982b1ddccb2572e)), closes [#7468](https://github.com/jordansmall/spindrift/issues/7468)
+* **launcher:** rename the github Connector write gate ([ccda3cf](https://github.com/jordansmall/spindrift/commit/ccda3cf0cc9fae223969ffcdeb4f0219c996bbd1)), closes [#7468](https://github.com/jordansmall/spindrift/issues/7468)
+* **launcher:** rename the github write gate's via-Connector local ([dad0e0d](https://github.com/jordansmall/spindrift/commit/dad0e0d5cb8bc73ec63fdb2e824ef739edc0426f)), closes [#7468](https://github.com/jordansmall/spindrift/issues/7468)
+* **launcher:** share Connector call classification in connectorcall ([88c4237](https://github.com/jordansmall/spindrift/commit/88c42375d3e3334308df930ffcf125b745d7a417)), closes [#7457](https://github.com/jordansmall/spindrift/issues/7457)
+* **nix:** drop backend shadow and primary from the rows ([1a73b3a](https://github.com/jordansmall/spindrift/commit/1a73b3ae92e4ed64f8ad128885290102482115c1)), closes [#7456](https://github.com/jordansmall/spindrift/issues/7456)
+
+
+### Tests
+
+* **connectorcall:** cover the shared call path on both axes ([bb70841](https://github.com/jordansmall/spindrift/commit/bb7084110c730eba48c9d6b7815426e9434f7042)), closes [#7457](https://github.com/jordansmall/spindrift/issues/7457)
+* **connectorforge:** authenticate core's git at the real clone URL ([47f1e39](https://github.com/jordansmall/spindrift/commit/47f1e39e2637cb3dfbd3356cd6480b29cc9f3bc4)), closes [#7466](https://github.com/jordansmall/spindrift/issues/7466)
+* **connectorhost:** fuzz http_request decoding, URL and method checks ([70b4be9](https://github.com/jordansmall/spindrift/commit/70b4be9020af5d616f319b05dcbbcc49916fc6b4)), closes [#7462](https://github.com/jordansmall/spindrift/issues/7462)
+* **connectorhost:** give the slow-backend tests guest-work headroom ([a8554a6](https://github.com/jordansmall/spindrift/commit/a8554a6507526828f408cb73fd692fba0000d12a)), closes [#7458](https://github.com/jordansmall/spindrift/issues/7458)
+* **connectortracker:** drive hostile tracker results through a Connector ([b52f960](https://github.com/jordansmall/spindrift/commit/b52f960d873e0a2228ef9742f93a0daf48673037)), closes [#7464](https://github.com/jordansmall/spindrift/issues/7464)
+* **forge/jira:** assert the error class core reads from the Connector ([fb5946a](https://github.com/jordansmall/spindrift/commit/fb5946a669c20a9574b04800b363405184115a09)), closes [#7459](https://github.com/jordansmall/spindrift/issues/7459)
+* **gitexec:** pin a forge that authenticates before it redirects ([cf0d0dc](https://github.com/jordansmall/spindrift/commit/cf0d0dc56535fce97d3202a9ee37a863a797a3a5)), closes [#7466](https://github.com/jordansmall/spindrift/issues/7466)
+* **gitexec:** pin how git matches a path-scoped credential helper ([6df209d](https://github.com/jordansmall/spindrift/commit/6df209d488500656e433c1e6d4e6180b8215d241)), closes [#7466](https://github.com/jordansmall/spindrift/issues/7466)
+* **github:** authenticate the routed row's git at the real clone URL ([2c6e3e3](https://github.com/jordansmall/spindrift/commit/2c6e3e35aa934f38b22f8c1a612926a08783e77e)), closes [#7466](https://github.com/jordansmall/spindrift/issues/7466)
+
 ## [0.34.0](https://github.com/jordansmall/spindrift/compare/v0.33.0...v0.34.0) (2026-11-23)
 
 
