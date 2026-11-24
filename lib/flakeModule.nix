@@ -52,11 +52,12 @@ let
     lib.filterAttrs (_: r: r.driver != null) config.spindrift.connectors
   );
   # The backend rows network Connectors register (ADR 0073, issue #6805), keyed
-  # by Connector name. `credential` names one of the Connector's own `knobs`,
-  # resolved to its env var here; a core knob (ghToken) or a Box-visible one is
-  # refused, since the host attaches it to the Connector's routes and a core
-  # secret would leak to it. The env is read through `envSchema`, whose
-  # collision fold refuses a knob aliasing a core env var. `identity` (the Basic
+  # by Connector name. `credential` names one of the Connector's own `knobs`, or
+  # its own backend's core token (github's ghToken), resolved to its env var
+  # here; any other core knob or a Box-visible one is refused, since the host
+  # attaches it to the Connector's routes and a core secret would leak to it.
+  # The env is read through `envSchema`, whose collision fold refuses a knob
+  # aliasing a core env var. `identity` (the Basic
   # username) follows the same rule but is no secret; `base` (the URL `{base}`
   # route hosts resolve from) is no secret either, so any env-schema knob may
   # carry it.
@@ -598,8 +599,9 @@ in
                     route fails the build naming this Connector), and
                     `credential` the env-schema key of the knob
                     holding its secret: one of this Connector's own `knobs`,
-                    secret and host-only (`boxEnv = false`), so a core knob such
-                    as the forge token is refused. `scheme` is "bearer"
+                    or its own backend's core token (github's `ghToken`),
+                    secret and host-only (`boxEnv = false`); any other core
+                    knob is refused. `scheme` is "bearer"
                     (default) or "basic"; basic needs `identity`, the key of
                     one of the Connector's own host-only knobs holding the
                     username (not necessarily secret), and bearer refuses it.
