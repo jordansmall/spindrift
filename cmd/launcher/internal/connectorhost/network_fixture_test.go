@@ -244,17 +244,22 @@ func TestNetworkFixtureReadsResponseHeadersThroughTheHostCall(t *testing.T) {
 	}
 }
 
+// slowBackendBudget is the call budget the slow-backend tests succeed under:
+// short enough for a backend to outlast, long enough that the call's own guest
+// work still fits on a loaded runner, which ShortCallBudget does not promise.
+const slowBackendBudget = 2 * time.Second
+
 // The call budget measures guest work, so a backend that answers after the
 // budget's length does not cost the call its answer, on every engine.
 func TestNetworkFixtureSlowBackendDoesNotSpendTheCallBudget(t *testing.T) {
 	// Set on the serial parent, before its parallel subtests start, so no
-	// other test runs under the short budget.
-	useShortCallBudget(t)
+	// other test runs under the lowered budget.
+	t.Cleanup(connectorhost.SetCallBudget(slowBackendBudget))
 	for name, ld := range netLoadersFor(t) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			b := newBackend(t, func(w http.ResponseWriter, r *http.Request) {
-				time.Sleep(connectorhost.ShortCallBudget + 500*time.Millisecond)
+				time.Sleep(slowBackendBudget + 500*time.Millisecond)
 				fmt.Fprint(w, "slow "+r.URL.Path)
 			})
 			n := netFor(b, &bytes.Buffer{}, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
@@ -275,11 +280,11 @@ func TestNetworkFixtureSlowBackendDoesNotSpendTheCallBudget(t *testing.T) {
 // wait is under the budget but together they pass it, so only a clock that
 // resumes between requests (or never re-pauses) would spend the call.
 func TestNetworkFixtureSeveralSlowRequestsDoNotSpendTheCallBudget(t *testing.T) {
-	const times, each = 4, 200 * time.Millisecond
-	if times*each <= connectorhost.ShortCallBudget || each >= connectorhost.ShortCallBudget {
-		t.Fatalf("%d x %s must pass the budget %s with each under it", times, each, connectorhost.ShortCallBudget)
+	const times, each = 4, 600 * time.Millisecond
+	if times*each <= slowBackendBudget || each >= slowBackendBudget {
+		t.Fatalf("%d x %s must pass the budget %s with each under it", times, each, slowBackendBudget)
 	}
-	useShortCallBudget(t)
+	t.Cleanup(connectorhost.SetCallBudget(slowBackendBudget))
 	for name, ld := range netLoadersFor(t) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
