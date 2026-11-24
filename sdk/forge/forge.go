@@ -23,59 +23,6 @@ import (
 	"spindrift.dev/sdk/connector"
 )
 
-// Target names the forge repository a call reads from. API is the https base
-// URL without a trailing slash, for example https://api.github.com.
-type Target struct {
-	API  string `json:"api"`
-	Repo string `json:"repo"`
-}
-
-// PR is one pull request. State is "open" or "closed" as the forge reports it;
-// Merged is true for a merged (hence closed) PR. URL is the PR's web URL.
-//
-// The fields after Merged are read by a PR-capable forge (CapPRs); a
-// Reader-only Connector may leave them zero. Head is the head branch name.
-// Mergeable is the raw "MERGEABLE", "CONFLICTING" or "UNKNOWN"; core fails
-// closed on anything else. MergeCommit is the commit a merged PR landed as,
-// "" when none.
-type PR struct {
-	Number      string `json:"number"`
-	URL         string `json:"url"`
-	State       string `json:"state"`
-	Merged      bool   `json:"merged"`
-	Draft       bool   `json:"draft,omitempty"`
-	Head        string `json:"head,omitempty"`
-	HeadSHA     string `json:"headSha,omitempty"`
-	Mergeable   string `json:"mergeable,omitempty"`
-	MergeCommit string `json:"mergeCommit,omitempty"`
-	// CrossRepo is true when the head lives in a different repository than
-	// the base; absent means same-repo.
-	CrossRepo bool `json:"crossRepo,omitempty"`
-}
-
-// Check is one context of a head commit's status-check rollup, in GitHub
-// GraphQL's vocabulary (provisional): Kind is "CheckRun" or "StatusContext";
-// Conclusion is a CheckRun's conclusion or a StatusContext's state; Summary is
-// a CheckRun's summary or a StatusContext's description. Name and Summary are
-// untrusted text.
-type Check struct {
-	Kind       string `json:"kind"`
-	Name       string `json:"name"`
-	Conclusion string `json:"conclusion"`
-	Summary    string `json:"summary"`
-	// JobID names the job whose log JobLog reads; "" when the context has none
-	// (a StatusContext, or a CheckRun that is not a workflow job).
-	JobID string `json:"jobId,omitempty"`
-}
-
-// Rollup is a PR head commit's status-check rollup. State is the aggregate
-// rollup state (for example "SUCCESS", "PENDING" or "FAILURE"), "" when the
-// commit has no checks.
-type Rollup struct {
-	State  string  `json:"state"`
-	Checks []Check `json:"checks"`
-}
-
 // Reader is everything a forge Connector reads.
 type Reader struct {
 	// PRsForBranch returns every PR whose head is branch, any state, newest

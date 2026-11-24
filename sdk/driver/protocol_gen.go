@@ -99,3 +99,9 @@ var passRoles = map[string]string{
 	"land":         ImplementorRole,
 	"review":       ReviewerRole,
 }
+
+// totalsWire maps each TotalsSource to its wire name.
+var totalsWire = map[TotalsSource]string{PerCallTotals: "perCall", SessionTotals: "session"}
+
+// resultWire maps each ResultReader to its wire name.
+var resultWire = map[ResultReader]string{ResultEvents: "events", LastMessage: "lastMessage"}

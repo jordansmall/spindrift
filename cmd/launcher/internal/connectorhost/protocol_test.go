@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"maps"
 	"regexp"
 	"slices"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/connectorprotocol"
+	"spindrift.dev/launcher/internal/connectorprotocol/wiretest"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 )
 
@@ -176,4 +178,23 @@ func TestProtocolDriverAxisAgrees(t *testing.T) {
 			t.Errorf("method %s needs capability %q, which driver.go never checks", name, m.Capability)
 		}
 	}
+}
+
+// TestHTTPRequestAgrees holds the wire form of a guest's http_request to the
+// shape the protocol description gives it, which the SDK's Request is rendered
+// from.
+func TestHTTPRequestAgrees(t *testing.T) {
+	wiretest.Agree(t, "httpRequest", httpRequest{})
+}
+
+func TestProtocolDescribeEnumsAgree(t *testing.T) {
+	agree := func(key string, names []string) {
+		t.Helper()
+		names = slices.DeleteFunc(names, func(n string) bool { return n == "" })
+		if want := connectorprotocol.WireEnums[key]; !slices.Equal(names, want) {
+			t.Errorf("driver.go names %v for %s, the description's enum is %v", names, key, want)
+		}
+	}
+	agree("driver.describe.result.totals", slices.Sorted(maps.Keys(totalsNames)))
+	agree("driver.describe.result.result", slices.Sorted(maps.Keys(resultNames)))
 }

@@ -30,16 +30,6 @@ type Status struct {
 	Category string
 }
 
-// Target names the tracker repository a call reads from. API is the https
-// base URL without a trailing slash, for example https://api.github.com.
-// Dialect names the tracker deployment's API dialect (a Jira Connector takes
-// "cloud" or "server"); it is "" for a tracker with one.
-type Target struct {
-	API     string `json:"api"`
-	Repo    string `json:"repo"`
-	Dialect string `json:"dialect"`
-}
-
 // Query selects the open issues a ListIssues call returns. They are the
 // selectors core resolved from a Dispatch state: a Connector matches an open
 // issue carrying Label OR in Status, ignoring an empty one. Both empty means
@@ -49,13 +39,6 @@ type Query struct {
 	Label  string     `json:"label"`
 	Status string     `json:"status"`
 	Route  []Selector `json:"route,omitempty"`
-}
-
-// Selector is one Route term: Kind names how the tracker matches (a kind the
-// tracker declares it supports) and Value is what it matches against.
-type Selector struct {
-	Kind  string `json:"kind"`
-	Value string `json:"value"`
 }
 
 // RouteLabels is label (when set) followed by every route label: the set an
@@ -100,40 +83,6 @@ func StampRouteLabels(labels []string, route []Selector) ([]string, error) {
 	return out, nil
 }
 
-// Issue is one tracker issue. State is "open" or "closed"; a listIssues answer
-// may leave Body and State empty.
-type Issue struct {
-	Number string   `json:"number"`
-	Title  string   `json:"title"`
-	Body   string   `json:"body"`
-	State  string   `json:"state"`
-	Labels []string `json:"labels"`
-
-	// ClosedAt is RFC3339, "" when the issue is open or the date is unknown.
-	// Core ignores it and ClosedNotPlanned for an open issue.
-	ClosedAt         string `json:"closedAt"`
-	ClosedNotPlanned bool   `json:"closedNotPlanned"`
-	// DedupMarker is the raw dedup marker line from the tracker's side store,
-	// "" when there is none. It is never part of Body.
-	DedupMarker string `json:"dedupMarker"`
-	// Status is the tracker's workflow status name, "" for a tracker without
-	// one.
-	Status string `json:"status"`
-}
-
-// Comment is one issue comment. CreatedAt is RFC3339 as the forge reports it.
-type Comment struct {
-	Author          string `json:"author"`
-	CreatedAt       string `json:"createdAt"`
-	Body            string `json:"body"`
-	Minimized       bool   `json:"minimized"`
-	MinimizedReason string `json:"minimizedReason"`
-	Association     string `json:"association"`
-	// ResearchMarker reports that the comment carries the research marker in
-	// a side store; Body excludes it.
-	ResearchMarker bool `json:"researchMarker"`
-}
-
 // IDGrammar names the shape of the issue ids a Connector returns. Core checks
 // every id against it and refuses any outside.
 type IDGrammar int
@@ -153,14 +102,6 @@ type CreateMeta struct {
 	// Fields are the create fields of the issue type asked for, empty when the
 	// project does not offer it.
 	Fields []CreateField `json:"fields"`
-}
-
-// CreateField is one field of an issue type's create form.
-type CreateField struct {
-	ID              string `json:"fieldId"`
-	Name            string `json:"name"`
-	Required        bool   `json:"required"`
-	HasDefaultValue bool   `json:"hasDefaultValue"`
 }
 
 // Reader is everything a tracker Connector reads.

@@ -54,6 +54,45 @@
       ],
       "type": "object"
     },
+    "commentRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "research": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "body",
+        "research"
+      ],
+      "type": "object"
+    },
+    "createField": {
+      "properties": {
+        "fieldId": {
+          "type": "string"
+        },
+        "hasDefaultValue": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "fieldId",
+        "hasDefaultValue",
+        "name",
+        "required"
+      ],
+      "type": "object"
+    },
     "event": {
       "additionalProperties": false,
       "properties": {
@@ -198,6 +237,31 @@
       },
       "type": "object"
     },
+    "httpRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "method": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "method",
+        "url"
+      ],
+      "type": "object"
+    },
     "issue": {
       "properties": {
         "body": {
@@ -238,6 +302,43 @@
       },
       "required": [
         "number"
+      ],
+      "type": "object"
+    },
+    "issueRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "dedupMarker": {
+          "type": "string"
+        },
+        "issueType": {
+          "type": "string"
+        },
+        "labels": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "route": {
+          "items": {
+            "$ref": "#/$defs/route"
+          },
+          "type": "array"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "body",
+        "dedupMarker",
+        "issueType",
+        "labels",
+        "title"
       ],
       "type": "object"
     },
@@ -317,6 +418,32 @@
       "required": [
         "cloneUrl",
         "webUrl"
+      ],
+      "type": "object"
+    },
+    "rollup": {
+      "properties": {
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/check"
+          },
+          "type": "array"
+        },
+        "state": {
+          "enum": [
+            "",
+            "SUCCESS",
+            "PENDING",
+            "EXPECTED",
+            "FAILURE",
+            "ERROR"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "checks",
+        "state"
       ],
       "type": "object"
     },
@@ -409,6 +536,51 @@
         "api",
         "dialect",
         "repo"
+      ],
+      "type": "object"
+    },
+    "transitionRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "mapping": {
+          "additionalProperties": {
+            "$ref": "#/$defs/statusTarget"
+          },
+          "type": "object"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mapping",
+        "state"
+      ],
+      "type": "object"
+    },
+    "transitionResult": {
+      "properties": {
+        "offered": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "outcome": {
+          "enum": [
+            "moved",
+            "unavailable",
+            "unmapped"
+          ],
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome",
+        "status"
       ],
       "type": "object"
     }
@@ -1010,30 +1182,7 @@
         "type": "object"
       },
       "result": {
-        "properties": {
-          "checks": {
-            "items": {
-              "$ref": "#/$defs/check"
-            },
-            "type": "array"
-          },
-          "state": {
-            "enum": [
-              "",
-              "SUCCESS",
-              "PENDING",
-              "EXPECTED",
-              "FAILURE",
-              "ERROR"
-            ],
-            "type": "string"
-          }
-        },
-        "required": [
-          "checks",
-          "state"
-        ],
-        "type": "object"
+        "$ref": "#/$defs/rollup"
       }
     },
     "forge.ciRun": {
@@ -1659,27 +1808,7 @@
         "properties": {
           "fields": {
             "items": {
-              "properties": {
-                "fieldId": {
-                  "type": "string"
-                },
-                "hasDefaultValue": {
-                  "type": "boolean"
-                },
-                "name": {
-                  "type": "string"
-                },
-                "required": {
-                  "type": "boolean"
-                }
-              },
-              "required": [
-                "fieldId",
-                "hasDefaultValue",
-                "name",
-                "required"
-              ],
-              "type": "object"
+              "$ref": "#/$defs/createField"
             },
             "type": "array"
           },
@@ -2186,30 +2315,7 @@
         "type": "object"
       },
       "result": {
-        "properties": {
-          "offered": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "outcome": {
-            "enum": [
-              "moved",
-              "unavailable",
-              "unmapped"
-            ],
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "outcome",
-          "status"
-        ],
-        "type": "object"
+        "$ref": "#/$defs/transitionResult"
       }
     }
   },

@@ -707,6 +707,16 @@ checkedMerge {
           "connector-protocol-rows (issue #7505): renderSDK must reject ${what}, but it rendered successfully";
       first = builtins.head connectorProtocol.methods;
       axis = builtins.head (splitString "." first.name);
+      targetBinding.forge.structs = [
+        {
+          name = "Target";
+          type = "target";
+          fields = [
+            "api"
+            "repo"
+          ];
+        }
+      ];
     in
     assert assertMsg (render connectorProtocol).success
       "connector-protocol-rows (issue #7504): the real lib/connector-protocol description must render with both renderers, but it failed -- the guard would be vacuous";
@@ -793,6 +803,79 @@ checkedMerge {
         "forge.probe" = "CapProbe";
       };
     };
+    # A bound struct's field set is the description's: the controls differ from
+    # this accepted binding in one field only.
+    assert assertMsg
+      (builtins.tryEval (
+        builtins.deepSeq (connectorProtocolRender.renderSDK connectorProtocol targetBinding) true
+      )).success
+      "connector-protocol-rows (issue #7505): renderSDK must render a struct bound to every field of its shape, but it failed -- the struct controls would be vacuous";
+    assert rejectsBinding "an SDK struct with a field its description shape lacks" {
+      forge.structs = [
+        (
+          builtins.head targetBinding.forge.structs
+          // {
+            fields = [
+              "api"
+              "repo"
+              "nonesuch"
+            ];
+          }
+        )
+      ];
+    };
+    assert rejectsBinding "an SDK struct that leaves out a field of its description shape" {
+      forge.structs = [ ((builtins.head targetBinding.forge.structs) // { fields = [ "api" ]; }) ];
+    };
+    assert rejectsBinding "an SDK struct bound to a type the description lacks" {
+      forge.structs = [ ((builtins.head targetBinding.forge.structs) // { type = "nonesuch"; }) ];
+    };
+    assert rejectsBinding "an SDK struct bound to a method that is not in the description" {
+      forge.structs = [
+        (
+          (removeAttrs (builtins.head targetBinding.forge.structs) [ "type" ])
+          // {
+            params = "forge.nonesuch";
+          }
+        )
+      ];
+    };
+    # An enum binding's value set is the description's: each control differs
+    # from the committed binding (which the render above accepts) in one place.
+    assert
+      let
+        totals = builtins.head sdkBinding.driver.enums;
+        enumBinding = e: { driver.enums = [ (totals // e) ]; };
+      in
+      rejectsBinding "an SDK enum binding that names no Go value for an enum value" (enumBinding {
+        names = removeAttrs totals.names [ "session" ];
+      })
+      && rejectsBinding "an SDK enum binding with a value the description's enum lacks" (enumBinding {
+        names = totals.names // {
+          nonesuch = "NoneSuch";
+        };
+      })
+      && rejectsBinding "an SDK enum binding at a path that names no enum" (enumBinding {
+        path = "driver.describe.result.name";
+      });
+    # No wire enum may sit in a list or map item: WireEnums does not reach it.
+    # The control renders the same enum outside one, so the negatives are not vacuous.
+    assert
+      let
+        t = import ../../lib/connector-protocol/t.nix;
+        mode = t.enum [ "a" ];
+        withType =
+          ty:
+          connectorProtocol
+          // {
+            types = connectorProtocol.types // {
+              probe = t.object { mode = ty; };
+            };
+          };
+      in
+      assertMsg (render (withType mode)).success "connector-protocol-rows (issue #7505): a description with a plain enum field must render, but it failed -- the list and map controls would be vacuous"
+      && rejects "an enum inside a list item" (withType (t.list mode))
+      && rejects "an enum inside a map item" (withType (t.map mode));
     pkgs.runCommand "connector-protocol-rows" { } "touch $out";
 
   # A family row carries its own run-document keys (ADR 0069 decision 7), so a

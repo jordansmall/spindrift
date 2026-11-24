@@ -11,17 +11,6 @@ import (
 // no host to serve the call.
 var ErrNoHost = errors.New("connector: no host to serve http_request outside wasip1")
 
-// Request is one outbound HTTP request. The host admits it only if a declared
-// route matches, and attaches the credential itself; the Connector never holds
-// it, and a header the Connector sets cannot override it. It mirrors the host's
-// httpRequest wire shape; parity_test.go pins the two.
-type Request struct {
-	Method  string            `json:"method"`
-	URL     string            `json:"url"`
-	Headers map[string]string `json:"headers,omitempty"`
-	Body    string            `json:"body,omitempty"`
-}
-
 // Response is the answer to a Request that came back from the server.
 type Response struct {
 	Status int

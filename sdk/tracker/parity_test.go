@@ -156,13 +156,7 @@ func handlerParams(t *testing.T, path string) map[string][]string {
 }
 
 func TestWireShapesMatchCore(t *testing.T) {
-	mine := structLines(t, "tracker.go")
-	for name, lines := range structLines(t, "writes.go") {
-		if _, dup := mine[name]; dup {
-			t.Fatalf("type %s declared in both tracker.go and writes.go", name)
-		}
-		mine[name] = lines
-	}
+	mine := structLines(t, "protocol_gen.go")
 	core := structLines(t, coreFile)
 	for sdk, name := range pairs {
 		want, ok := mine[sdk]
@@ -241,8 +235,15 @@ func TestWriteCapabilitiesMatchCore(t *testing.T) {
 // against the structs the sdk's handlers decode them into, which are anonymous
 // and so cannot be paired by name.
 func TestWriteParamsMatchCore(t *testing.T) {
-	sdk := handlerParams(t, "writes.go")
-	own := structLines(t, "writes.go")
+	sdk := map[string][]string{}
+	own := structLines(t, "protocol_gen.go")
+	for method, name := range map[string]string{
+		"tracker.transition": "transitionParams", "tracker.editLabels": "editLabelsParams",
+		"tracker.createLabel": "createLabelParams", "tracker.comment": "commentParams",
+		"tracker.fileIssue": "fileIssueParams", "tracker.closeIssue": "closeIssueParams",
+	} {
+		sdk[method] = own[name]
+	}
 	core := structLines(t, coreFile)
 	for method, name := range map[string]string{
 		"tracker.transition":  "transitionParams",

@@ -16,19 +16,6 @@ type NewPR struct {
 	Draft bool   `json:"draft"`
 }
 
-// Grant is what a token may do on a repository, in core's canonical terms. A
-// Connector whose forge cannot say sets Introspectable false and gives Reason,
-// the operator-facing explanation. WriteCapable is meaningful only when
-// Introspectable is true.
-type Grant struct {
-	Introspectable bool   `json:"introspectable"`
-	WriteCapable   bool   `json:"writeCapable"`
-	Reason         string `json:"reason,omitempty"`
-	// Scopes are the OAuth scopes the forge reports for the token, nil when it
-	// reports none.
-	Scopes []string `json:"scopes,omitempty"`
-}
-
 // PRs is everything a Connector-backed Code Forge needs of the forge itself
 // for pull requests; core derives the rest. Reading a PR stays on Reader.
 type PRs struct {

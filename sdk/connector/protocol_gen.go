@@ -21,7 +21,7 @@ const (
 	NotFound Class = "not-found"
 	// Auth: The credential was refused or lacks standing.
 	Auth Class = "auth"
-	// NotMergeable: A forge refused a merge because the PR is not mergeable as it stands.
+	// NotMergeable: A forge refused a merge because the PR is not mergeable as it stands: a conflict, a missing required check or review, or a draft, closed, or merged state. Core re-reads the PR on this class only.
 	NotMergeable Class = "not-mergeable"
 	// Permanent: Every other failure, and any answer naming no class or one core does not know.
 	Permanent Class = "permanent"
@@ -31,3 +31,14 @@ const (
 	// MaxHTTPResponse: Bytes of response body http_request hands a guest.
 	MaxHTTPResponse = 4194304
 )
+
+// Request is one outbound HTTP request. The host admits it only if a declared
+// route matches, and attaches the credential itself; the Connector never holds
+// it, and a header the Connector sets cannot override it. It is the host's
+// httpRequest wire shape, rendered from the same description.
+type Request struct {
+	Method  string            `json:"method"`
+	URL     string            `json:"url"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Body    string            `json:"body,omitempty"`
+}
