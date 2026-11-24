@@ -33,7 +33,6 @@ const (
 	connectorRoutesEnv = "SPINDRIFT_BACKEND_CONNECTOR_ROUTES"
 	connectorToken     = "connector-test-token"
 	connectorRepo      = "owner/repo"
-	gitSecret          = "git-secret"
 )
 
 // connectorHarness drives the compiled forgejo Connector, through the
@@ -114,7 +113,7 @@ func declaredRoutes(t *testing.T) (string, []connectorhost.Route) {
 
 func composeForge(conn *connectorhost.Connector, api string) (forge.CodeForge, forge.Capabilities, error) {
 	return connectorforge.Compose(conn, connectorforge.Target{API: api, Repo: connectorRepo}, connectorforge.Git{
-		Credential: gitexec.Credential{Username: "bot", Password: gitSecret},
+		Credential: gitexec.Credential{Username: "oauth2", Password: connectorToken},
 		Plumbing: func(u string, cred gitexec.Credential) forge.CodeForge {
 			return git.NewGitClient(u, "main", "Test Bot", "bot@example.com", git.WithCredential(cred))
 		},
@@ -346,7 +345,7 @@ func (h *composedHostMediationHarness) RefSHA(ref string) string {
 // UnseedableCodeForge's backend is closed, and its clone URL has no insteadOf
 // rewrite to a local repository, so the clone fails.
 func (h *composedHostMediationHarness) UnseedableCodeForge() (forge.CodeForge, string) {
-	return h.closedBackendForge(), gitSecret
+	return h.closedBackendForge(), connectorToken
 }
 
 // routeCoverage accumulates, across the harnesses of one test, which of the

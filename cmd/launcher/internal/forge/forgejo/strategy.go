@@ -52,7 +52,7 @@ var Strategy = backendkit.Strategy{
 		if err != nil {
 			return backendkit.LedgerSite{}, err
 		}
-		return backendkit.LedgerSite{URL: GitRemoteURL(k.ForgejoBaseURL, s.RepoSlug), Credential: gitexec.StaticCredential(GitCredential(k.ForgejoToken))}, nil
+		return backendkit.LedgerSite{URL: GitRemoteURL(k.ForgejoBaseURL, s.RepoSlug), Credential: gitexec.StaticCredential(gitCredential)}, nil
 	},
 	WebURL: func(s backendkit.Shared, l backendkit.Lookup) string {
 		base := identityBase(l)

@@ -376,7 +376,7 @@ func TestQuickstartScopeAudit_GoesThroughTheConnectorWithThePastedToken(t *testi
 	}, "\n") + "\n")
 
 	env := fakeEnvironment{runtimes: map[string]bool{"podman": true}}
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 

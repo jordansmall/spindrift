@@ -263,7 +263,7 @@ func TestConnectorTracker_IssueRouteNarrowsReadsAndFilesWithItsLabel(t *testing.
 	tr, err := forgejo.Strategy.NewIssueTracker(backendkit.Shared{
 		RepoSlug: connectorRepo, Labels: testLabels, VerdictLabels: forge.ResearchVerdictLabels(),
 		Route: forge.Route{{Kind: "label", Value: routeLabel}},
-	}, mapLookup(map[string]string{forgejo.ForgejoBaseURLEnv: w.srv.URL, forgejo.ForgejoTokenEnv: gitSecret}))
+	}, mapLookup(map[string]string{forgejo.ForgejoBaseURLEnv: w.srv.URL, forgejo.ForgejoTokenEnv: connectorToken}))
 	if err != nil {
 		t.Fatal(err)
 	}

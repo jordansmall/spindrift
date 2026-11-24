@@ -291,6 +291,15 @@ func knobLookup(knobs, secrets map[string]string) backendkit.Lookup {
 	}
 }
 
+// exportToken puts a backend's token in the process environment, where the gh
+// CLI and a Connector row read it.
+func exportToken(tokenEnv, token string) error {
+	if err := os.Setenv(tokenEnv, token); err != nil {
+		return fmt.Errorf("set %s: %w", tokenEnv, err)
+	}
+	return nil
+}
+
 // backupSuffixDigits is the zero-padded width of the .bak.NNNNNN suffix used
 // when a backup name is taken (issue #2563), wide enough that lexical sort
 // order still matches numeric order past any realistic number of reruns.
@@ -502,6 +511,13 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 					if deferChecks && backendkit.TrackerReadsThroughConnector(row.Name) {
 						return connectorsandbox.ErrNoConnectorSandbox
 					}
+					// A Connector row authorizes from the process environment,
+					// which the wizard's token has yet to reach. Every row is
+					// exported; a knob-read row (jira) also gets it from the
+					// lookup below, so the export is harmless there.
+					if err := exportToken(tokenEnv, token); err != nil {
+						return err
+					}
 					// The row is built as both axes so the probe needs nothing
 					// the other chosen row has yet to collect.
 					it, _, err := forgeBuilder(row, row, shared, knobLookup(knobs, map[string]string{tokenEnv: token}))
@@ -582,15 +598,16 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 		written = append(written, f.path)
 	}
 
-	// The gh CLI reads auth from GH_TOKEN in the process environment. Keyed
-	// off the descriptor rather than the backend name so a third backend's
-	// credential is never exported under GitHub's env var name.
+	// The gh CLI and a Connector row's requests read their credential from the
+	// process environment. Keyed off the descriptor so each chosen backend's
+	// token is exported under its own env var name.
 	for _, c := range a.chosen() {
-		if harnessEnvTokenEnvVar(c.name) != "GH_TOKEN" {
+		tokenEnv := harnessEnvTokenEnvVar(c.name)
+		if tokenEnv == "" {
 			continue
 		}
-		if err := os.Setenv("GH_TOKEN", tokens[c.name]); err != nil {
-			return fmt.Errorf("set GH_TOKEN: %w", err)
+		if err := exportToken(tokenEnv, tokens[c.name]); err != nil {
+			return err
 		}
 	}
 	insideGitWorkTree := env.InsideGitWorkTree(dir)

@@ -125,7 +125,7 @@ func TestRunQuickstart_WiresLauncherChecksIntoDoctorOutput(t *testing.T) {
 	}, "\n") + "\n")
 	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
 
-	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
+	err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
 	if err != nil {
 		t.Fatalf("runQuickstart: %v", err) // launcherchecks rows are informational-only, never fail Run
 	}

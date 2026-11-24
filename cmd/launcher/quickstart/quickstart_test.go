@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -78,7 +79,7 @@ func TestRunQuickstart_RepoSlugDetected_ShownAsDefault_AcceptedWithEnter(t *test
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -110,7 +111,7 @@ func TestRunQuickstart_RepoSlugDetected_CanBeOverridden(t *testing.T) {
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -143,7 +144,7 @@ func TestRunQuickstart_RepoSlugInvalid_RejectedAndReprompted(t *testing.T) {
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -165,7 +166,7 @@ func TestRunQuickstart_RepoSlugInvalidAtEOF_ReturnsErrorInsteadOfHanging(t *test
 	env := withPodman()
 	stdin := strings.NewReader("\n\nnotaslug\n")
 
-	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
+	err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
 	if err == nil {
 		t.Fatal("expected an error when stdin runs out on invalid input, got nil")
 	}
@@ -195,7 +196,7 @@ func TestRunQuickstart_RuntimeInvalid_RejectedAndReprompted(t *testing.T) {
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -227,7 +228,7 @@ func TestRunQuickstart_RuntimeChosen_AbsentFromPATH_WarnsAndAsksConfirmation(t *
 		"n",
 	}, "\n") + "\n")
 
-	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
+	err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
 	if err == nil {
 		t.Fatal("expected an error when the operator declines to proceed with an uninstalled runtime, got nil")
 	}
@@ -269,7 +270,7 @@ func TestRunQuickstart_RuntimeChosen_AbsentFromPATH_ConfirmedProceeds(t *testing
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -302,7 +303,7 @@ func TestRunQuickstart_RancherSelected_WarningNamesNerdctl(t *testing.T) {
 		"n",
 	}, "\n") + "\n")
 
-	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
+	err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
 	if err == nil {
 		t.Fatal("expected an error when the operator declines to proceed with an uninstalled runtime, got nil")
 	}
@@ -348,7 +349,7 @@ func TestRunQuickstart_GitIdentityDetected_ShownAsDefault_AcceptedWithEnter(t *t
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -385,7 +386,7 @@ func TestRunQuickstart_GitIdentityDetected_CanBeOverridden(t *testing.T) {
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -417,7 +418,7 @@ func TestRunQuickstart_RuntimeDefault_FallsBackToDockerThenBwrap(t *testing.T) {
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -442,7 +443,7 @@ func TestRunQuickstart_RuntimeDefault_BwrapWhenOnlyOneAvailable(t *testing.T) {
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -467,7 +468,7 @@ func TestRunQuickstart_RuntimeDefault_NerdctlDetected_OffersRancher(t *testing.T
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -499,7 +500,7 @@ func TestRunQuickstart_RuntimeDefault_DockerPreferredOverNerdctl(t *testing.T) {
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -513,7 +514,7 @@ func TestRunQuickstart_NoRuntimeDetected_ReturnsActionableError(t *testing.T) {
 	var out bytes.Buffer
 	env := fakeEnvironment{}
 
-	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, strings.NewReader(""), true, false)
+	err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, strings.NewReader(""), true, false)
 	if err == nil {
 		t.Fatal("expected an error when no supported runtime is detected, got nil")
 	}
@@ -536,7 +537,7 @@ func TestRunQuickstart_NoRuntimeDetected_ForceDoesNotBackUpExistingFiles(t *test
 	var out bytes.Buffer
 	env := fakeEnvironment{}
 
-	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, strings.NewReader(""), true, true)
+	err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, strings.NewReader(""), true, true)
 	if err == nil {
 		t.Fatal("expected an error when no supported runtime is detected, got nil")
 	}
@@ -571,7 +572,7 @@ func TestRunQuickstart_DeclineRuntimeConfirmation_ForceDoesNotBackUpExistingFile
 		"n",
 	}, "\n") + "\n")
 
-	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, true)
+	err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, true)
 	if err == nil {
 		t.Fatal("expected an error when the operator declines the runtime-not-on-PATH confirmation, got nil")
 	}
@@ -604,7 +605,7 @@ func TestRunQuickstart_RuntimeDefault_PrefersPodmanOverDockerAndBwrap(t *testing
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -639,7 +640,7 @@ func TestRunQuickstart_NonTTY_ExitsWithError(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
 
-	err := runQuickstart(dir, fakeEnvironment{}, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, strings.NewReader(""), false, false)
+	err := runQuickstartT(t, dir, fakeEnvironment{}, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, strings.NewReader(""), false, false)
 	if err == nil {
 		t.Fatal("expected an error for non-TTY stdin, got nil")
 	}
@@ -659,7 +660,7 @@ func TestRunQuickstart_ExistingFlakeNix_RefusesWithoutForce(t *testing.T) {
 	}
 	var out bytes.Buffer
 
-	err := runQuickstart(dir, fakeEnvironment{}, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, strings.NewReader(""), true, false)
+	err := runQuickstartT(t, dir, fakeEnvironment{}, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, strings.NewReader(""), true, false)
 	if err == nil {
 		t.Fatal("expected an error refusing to clobber an existing flake.nix, got nil")
 	}
@@ -689,7 +690,7 @@ func TestRunQuickstart_ExistingFlakeNixAndHarnessEnv_RefusesWithProseList(t *tes
 	}
 	var out bytes.Buffer
 
-	err := runQuickstart(dir, fakeEnvironment{}, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, strings.NewReader(""), true, false)
+	err := runQuickstartT(t, dir, fakeEnvironment{}, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, strings.NewReader(""), true, false)
 	if err == nil {
 		t.Fatal("expected an error refusing to clobber existing flake.nix and harness.env, got nil")
 	}
@@ -716,7 +717,7 @@ func TestRunQuickstart_HappyPath_WritesFiles(t *testing.T) {
 	}, "\n") + "\n")
 	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
 
-	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
+	err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
 	if err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
@@ -798,7 +799,7 @@ func TestRunQuickstart_InsideGitWorkTree_FinishLineRemindsGitAdd(t *testing.T) {
 		insideGitWorkTreeDir: &probedDir,
 	}
 
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -850,7 +851,7 @@ func TestRunQuickstart_NotInsideGitWorkTree_FinishLineOmitsGitAddReminder(t *tes
 		insideGitWorkTree: false,
 	}
 
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -874,7 +875,7 @@ func TestRunQuickstart_DefaultTracker_WritesGithubIssueTracker(t *testing.T) {
 	}, "\n") + "\n")
 	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
 
-	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
+	err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
 	if err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
@@ -914,7 +915,7 @@ func TestRunQuickstart_AmbientGHToken_SkipsPrompt(t *testing.T) {
 	}, "\n") + "\n")
 
 	env := fakeEnvironment{env: map[string]string{"GH_TOKEN": "ghp_ambienttoken"}, runtimes: map[string]bool{"podman": true}}
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -944,7 +945,7 @@ func TestRunQuickstart_FineGrainedToken_PrintsRequiredPermissions(t *testing.T) 
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
-	if err := runQuickstart(dir, fakeEnvironment{runtimes: map[string]bool{"podman": true}}, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, fakeEnvironment{runtimes: map[string]bool{"podman": true}}, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -983,7 +984,7 @@ func TestRunQuickstart_ClassicTokenNarrowScope_AcceptedWithoutGate(t *testing.T)
 
 	ghScopes(t, narrowTokenScopes)
 	env := fakeEnvironment{runtimes: map[string]bool{"podman": true}}
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -1019,7 +1020,7 @@ func TestRunQuickstart_ClassicTokenBroadScope_AcceptWritesToken(t *testing.T) {
 
 	ghScopes(t, []string{"repo", "gist"})
 	env := fakeEnvironment{runtimes: map[string]bool{"podman": true}}
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -1052,7 +1053,7 @@ func TestRunQuickstart_ClassicTokenBroadScope_DeclineAbortsWithoutWriting(t *tes
 
 	ghScopes(t, []string{"repo"})
 	env := fakeEnvironment{runtimes: map[string]bool{"podman": true}}
-	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
+	err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
 	if err == nil {
 		t.Fatal("expected declining the ACCEPT gate to abort, got nil error")
 	}
@@ -1078,7 +1079,7 @@ func TestRunQuickstart_NoAmbientToken_PrintsGuidedPATInstructions(t *testing.T) 
 
 	ghScopes(t, narrowTokenScopes)
 	env := fakeEnvironment{runtimes: map[string]bool{"podman": true}}
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -1106,7 +1107,7 @@ func TestRunQuickstart_BlankTokenInput_FallsBackToGHAuthToken(t *testing.T) {
 
 	ghScopes(t, narrowTokenScopes)
 	env := fakeEnvironment{ghAuthToken: "gho_fallbacktoken", runtimes: map[string]bool{"podman": true}}
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -1137,7 +1138,7 @@ func TestRunQuickstart_GHAuthTokenFallbackFails_AbortsWithoutWriting(t *testing.
 	}, "\n") + "\n")
 
 	env := fakeEnvironment{ghAuthTokenErr: errors.New("gh: not logged in"), runtimes: map[string]bool{"podman": true}}
-	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
+	err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
 	if err == nil {
 		t.Fatal("expected a failed gh auth token fallback to abort, got nil error")
 	}
@@ -1162,7 +1163,7 @@ func TestRunQuickstart_TokenScopesReadError_AbortsWithoutWriting(t *testing.T) {
 
 	ghFailing(t)
 	env := fakeEnvironment{runtimes: map[string]bool{"podman": true}}
-	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
+	err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
 	if err == nil {
 		t.Fatal("expected a failed scope read to abort, got nil error")
 	}
@@ -1186,7 +1187,7 @@ func TestRunQuickstart_UnknownTokenPrefix_AcceptedWithoutAudit(t *testing.T) {
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
-	if err := runQuickstart(dir, fakeEnvironment{runtimes: map[string]bool{"podman": true}}, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, fakeEnvironment{runtimes: map[string]bool{"podman": true}}, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -1223,7 +1224,7 @@ func TestRunQuickstart_AmbientTokenBroadScope_StillRequiresACCEPT(t *testing.T) 
 		env:      map[string]string{"GH_TOKEN": "ghp_ambientbroadtoken"},
 		runtimes: map[string]bool{"podman": true},
 	}
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -1254,7 +1255,7 @@ func TestRunQuickstart_GHAuthTokenEmpty_AbortsWithoutWriting(t *testing.T) {
 	}, "\n") + "\n")
 
 	env := fakeEnvironment{ghAuthToken: "", runtimes: map[string]bool{"podman": true}}
-	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
+	err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
 	if err == nil {
 		t.Fatal("expected an empty gh auth token result to abort, got nil error")
 	}
@@ -1285,7 +1286,7 @@ func TestRunQuickstart_Force_BacksUpExistingFiles(t *testing.T) {
 	}, "\n") + "\n")
 	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
 
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, true); err != nil {
+	if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, true); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -1414,7 +1415,7 @@ func TestRunQuickstart_Force_BackupReserveNonIsExistErr_ReturnsErrorInsteadOfHan
 	stdin := defaultQuickstartStdin()
 	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
 
-	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, true)
+	err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, true)
 	if err == nil {
 		t.Fatalf("expected runQuickstart to return an error, got nil")
 	}
@@ -1443,7 +1444,7 @@ func TestRunQuickstart_Force_BackupRenameErr_CleansUpReservedBakFile(t *testing.
 	stdin := defaultQuickstartStdin()
 	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
 
-	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, true)
+	err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, true)
 	if err == nil {
 		t.Fatalf("expected runQuickstart to return an error, got nil")
 	}
@@ -1476,7 +1477,7 @@ func TestRunQuickstart_Force_BackupRenameErr_RollsBackEarlierBackups(t *testing.
 	stdin := defaultQuickstartStdin()
 	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
 
-	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, true)
+	err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, true)
 	if err == nil {
 		t.Fatalf("expected runQuickstart to return an error, got nil")
 	}
@@ -1607,7 +1608,7 @@ func TestRunQuickstart_Force_SecondRun_PreservesBothBackups(t *testing.T) {
 		var out bytes.Buffer
 		stdin := defaultQuickstartStdin()
 		env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
-		if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, true); err != nil {
+		if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, true); err != nil {
 			t.Fatalf("runQuickstart: %v", err)
 		}
 		return &out
@@ -1707,7 +1708,7 @@ func TestRunQuickstart_DeclineSetupToken_PromptsForAPIKey(t *testing.T) {
 	}, "\n") + "\n")
 	runner := &fakeCommandRunner{}
 
-	if err := runQuickstart(dir, fakeEnvironment{runtimes: map[string]bool{"podman": true}}, runner, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, fakeEnvironment{runtimes: map[string]bool{"podman": true}}, runner, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -1743,7 +1744,7 @@ func TestRunQuickstart_AcceptSetupToken_EmptyPaste_Errors(t *testing.T) {
 	}, "\n") + "\n")
 	runner := &fakeCommandRunner{}
 
-	err := runQuickstart(dir, fakeEnvironment{runtimes: map[string]bool{"podman": true}}, runner, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
+	err := runQuickstartT(t, dir, fakeEnvironment{runtimes: map[string]bool{"podman": true}}, runner, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
 	if err == nil {
 		t.Fatal("expected an error for an empty pasted token, got nil")
 	}
@@ -1773,7 +1774,7 @@ func TestRunQuickstart_AcceptSetupToken_RunsItAndPastesToken(t *testing.T) {
 	}, "\n") + "\n")
 	runner := &fakeCommandRunner{}
 
-	if err := runQuickstart(dir, fakeEnvironment{runtimes: map[string]bool{"podman": true}}, runner, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, fakeEnvironment{runtimes: map[string]bool{"podman": true}}, runner, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -1808,7 +1809,7 @@ func TestRunQuickstart_AmbientClaudeOAuthToken_ReusedWithoutPrompt(t *testing.T)
 	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "ambient-oauth-token"}, runtimes: map[string]bool{"podman": true}}
 	runner := &fakeCommandRunner{}
 
-	if err := runQuickstart(dir, env, runner, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, runner, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -1846,7 +1847,7 @@ func TestRunQuickstart_BothAmbientCredentials_OAuthTokenTakesPrecedence(t *testi
 	}, runtimes: map[string]bool{"podman": true}}
 	runner := &fakeCommandRunner{}
 
-	if err := runQuickstart(dir, env, runner, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, runner, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -1878,7 +1879,7 @@ func TestRunQuickstart_AmbientAnthropicAPIKey_ReusedWithoutPrompt(t *testing.T) 
 	env := fakeEnvironment{env: map[string]string{"ANTHROPIC_API_KEY": "ambient-api-key"}, runtimes: map[string]bool{"podman": true}}
 	runner := &fakeCommandRunner{}
 
-	if err := runQuickstart(dir, env, runner, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, runner, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -1947,7 +1948,7 @@ func TestRunQuickstart_FinishLine_ProbesForgeThenCreatesLabelsThenBuilds(t *test
 	}
 	runner := &fakeCommandRunner{}
 
-	if err := runQuickstart(dir, env, runner, fakeForgeBuilder(f), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, runner, fakeForgeBuilder(f), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -2046,7 +2047,7 @@ func TestRunQuickstart_FailsAfterWrite_NamesWrittenFilesAndRerunCommand(t *testi
 			}
 			runner := &fakeCommandRunner{runErr: tc.runErr}
 
-			err := runQuickstart(dir, env, runner, fakeForgeBuilder(tc.forge), &out, stdin, true, false)
+			err := runQuickstartT(t, dir, env, runner, fakeForgeBuilder(tc.forge), &out, stdin, true, false)
 			if err == nil {
 				t.Fatalf("expected runQuickstart to return an error when the %s step fails", tc.name)
 			}
@@ -3057,7 +3058,7 @@ func TestRunQuickstart_CodebergRemote_UsesForgejoBackend(t *testing.T) {
 		"forgejo-faketoken", // Forgejo token
 	}, "\n") + "\n")
 
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -3118,7 +3119,7 @@ func TestRunQuickstart_SelfHostedForgejo_AsksBackendAndEmitsBaseURL(t *testing.T
 		"forgejo-faketoken", // Forgejo token
 	}, "\n") + "\n")
 
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -3314,7 +3315,7 @@ func TestRunQuickstart_FlakeNix_NoDeprecatedPathSpellings(t *testing.T) {
 		}, "\n") + "\n")
 		env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
 
-		if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+		if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 			t.Fatalf("runQuickstart: %v", err)
 		}
 
@@ -3339,7 +3340,7 @@ func TestRunQuickstart_FlakeNix_NoDeprecatedPathSpellings(t *testing.T) {
 			"forgejo-faketoken", // Forgejo token
 		}, "\n") + "\n")
 
-		if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+		if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 			t.Fatalf("runQuickstart: %v", err)
 		}
 
@@ -3377,7 +3378,7 @@ func TestRunQuickstart_NewBackend_TokenAcquisitionNeedsNoRunQuickstartEdit(t *te
 		"gitlab-faketoken", // GitLab token
 	}, "\n") + "\n")
 
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -3420,7 +3421,7 @@ func TestRunQuickstart_UnclaimedHost_PromptsOverOfferedRows(t *testing.T) {
 		"ada@example.com", // git user email
 	}, "\n") + "\n")
 
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -3445,7 +3446,7 @@ func TestRunQuickstart_GithubRemote_PreselectsGithubOnBothAxes(t *testing.T) {
 	}
 	stdin := strings.NewReader("\n\n\n\nAda Lovelace\nada@example.com\n")
 
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -3472,7 +3473,7 @@ func TestRunQuickstart_GHHostOverride_GithubComRemoteFallsToBackendPrompt(t *tes
 	}
 	stdin := strings.NewReader("\n\n\n\nAda Lovelace\nada@example.com\n")
 
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -3498,7 +3499,7 @@ func TestRunQuickstart_UnclaimedHost_SlugDefaultParsedFromRemote(t *testing.T) {
 	}
 	stdin := strings.NewReader("github\ngithub\n\n\nAda Lovelace\nada@example.com\n")
 
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -3588,7 +3589,7 @@ func TestRunQuickstart_ForgejoTokenAcquisitionFailures_AbortWithActionableGuidan
 			f := forge.NewFake()
 			f.ProbeErr = tc.probeErr
 
-			err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(f), &out, stdin, true, false)
+			err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(f), &out, stdin, true, false)
 			if err == nil {
 				t.Fatalf("expected runQuickstart to return an error")
 			}
@@ -3626,7 +3627,7 @@ func runQuickstartSeeded(t *testing.T, seed map[string]string, force bool) (stri
 		"jordansmall/spindrift", "podman", "Ada Lovelace", "ada@example.com", "ghp_faketoken",
 	}, "\n") + "\n")
 	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, force); err != nil {
+	if err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, force); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 	return dir, out.String()
@@ -3731,7 +3732,7 @@ func TestRunQuickstart_GitignoreUnreadable_Errors(t *testing.T) {
 		"jordansmall/spindrift", "podman", "Ada Lovelace", "ada@example.com", "ghp_faketoken",
 	}, "\n") + "\n")
 	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
-	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
+	err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
 	if err == nil || !strings.Contains(err.Error(), ".gitignore") {
 		t.Fatalf("expected an error naming .gitignore, got: %v", err)
 	}
@@ -3814,7 +3815,7 @@ func TestRunQuickstart_OpencodeDriver_PrintsRemedyAndRunsNoCommand(t *testing.T)
 	runner := &fakeCommandRunner{}
 	env := fakeEnvironment{runtimes: map[string]bool{"podman": true}, env: map[string]string{"DRIVER": "opencode"}}
 
-	if err := runQuickstart(dir, env, runner, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, runner, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
@@ -3838,7 +3839,7 @@ func TestRunQuickstart_UnknownDriver_FailsBeforeWriting(t *testing.T) {
 	var out bytes.Buffer
 	env := fakeEnvironment{runtimes: map[string]bool{"podman": true}, env: map[string]string{"DRIVER": "nope"}}
 
-	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, strings.NewReader(""), true, false)
+	err := runQuickstartT(t, dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, strings.NewReader(""), true, false)
 	if err == nil || !strings.Contains(err.Error(), `unknown DRIVER "nope"`) {
 		t.Fatalf("expected an unknown DRIVER error, got: %v", err)
 	}
@@ -4034,7 +4035,7 @@ func TestRunQuickstart_FinishLine_NoConnectorSandboxDefersDoctor(t *testing.T) {
 	f.ProbeErr = fmt.Errorf("probe: %w", connectorsandbox.ErrNoConnectorSandbox)
 	runner := &fakeCommandRunner{}
 
-	if err := runQuickstart(dir, env, runner, fakeForgeBuilder(f), &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, runner, fakeForgeBuilder(f), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 	if !strings.Contains(out.String(), "finish-line checks need the Connector sandbox") || !strings.Contains(out.String(), "`spindrift doctor`") {
@@ -4081,7 +4082,7 @@ func TestRunQuickstart_FinishLine_NoConnectorSandboxDefersForgejoWithoutBuilding
 		return nil, nil, connectorsandbox.ErrNoConnectorSandbox
 	}
 
-	if err := runQuickstart(dir, env, runner, builder, &out, stdin, true, false); err != nil {
+	if err := runQuickstartT(t, dir, env, runner, builder, &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 	if !strings.Contains(out.String(), "the token check needs the Connector sandbox") {
@@ -4136,7 +4137,7 @@ func quickstartRun(t *testing.T, env fakeEnvironment, builder ForgeBuilder, line
 	dir = t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join(lines, "\n") + "\n")
-	err = runQuickstart(dir, env, &fakeCommandRunner{}, builder, &out, stdin, true, false)
+	err = runQuickstartT(t, dir, env, &fakeCommandRunner{}, builder, &out, stdin, true, false)
 	return dir, out.String(), err
 }
 
@@ -4385,4 +4386,17 @@ func TestRunQuickstart_SplitPairing_UnparseableTrackerRepoURLReprompts(t *testin
 	if want := `issues.forgejo.baseURL = "https://forgejo.example.org";`; !strings.Contains(readScaffold(t, dir, "flake.nix"), want) {
 		t.Errorf("flake.nix missing %q", want)
 	}
+}
+
+// runQuickstartT drives runQuickstart with every backend's token env var
+// registered for restore, since the finish line exports each chosen token to
+// the process environment and a later test must not inherit it.
+func runQuickstartT(t *testing.T, dir string, env Environment, cmdRunner CommandRunner, forgeBuilder ForgeBuilder, w io.Writer, stdin io.Reader, interactive, force bool) error {
+	t.Helper()
+	for _, d := range backend.Registry {
+		if d.TokenEnvVar != "" {
+			t.Setenv(d.TokenEnvVar, os.Getenv(d.TokenEnvVar))
+		}
+	}
+	return runQuickstart(dir, env, cmdRunner, forgeBuilder, w, stdin, interactive, force)
 }
