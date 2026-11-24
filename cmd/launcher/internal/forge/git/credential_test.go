@@ -1,6 +1,7 @@
 package git
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,7 +40,12 @@ func authFixture(t *testing.T) (cleanURL, userinfoURL string) {
 	testutil.GitRun(t, work, "add", "later.txt")
 	testutil.GitRun(t, work, "commit", "-m", "later")
 	testutil.GitRun(t, work, "push", "origin", "main")
-	return cleanURL, strings.Replace(cleanURL, "http://", "http://"+authUser+":"+authToken+"@", 1)
+	return cleanURL, withUserinfo(cleanURL)
+}
+
+// withUserinfo embeds the fixture credential in an http URL.
+func withUserinfo(u string) string {
+	return strings.Replace(u, "http://", "http://"+authUser+":"+authToken+"@", 1)
 }
 
 // traceGit records every git argv (subprocesses included) for the rest of the
@@ -165,6 +171,7 @@ func TestGitClient_TokenAsUsernameRemote_AttachesCredentialOutOfBand(t *testing.
 	assertNoUserinfoInTrace(t, trace())
 }
 
+// SeedMirror presents the credential embedded in its URL to the exact remote.
 func TestSeedMirror_UserinfoRemote_AuthenticatesAgainstTheExactURL(t *testing.T) {
 	_, remote := authFixture(t)
 	dir := filepath.Join(t.TempDir(), "mirror.git")
@@ -174,13 +181,14 @@ func TestSeedMirror_UserinfoRemote_AuthenticatesAgainstTheExactURL(t *testing.T)
 	testutil.GitRun(t, dir, "rev-parse", "--verify", "refs/heads/agent/issue-1")
 }
 
+// RelayBundle's clone and push both authenticate with the embedded credential.
 func TestRelayBundle_UserinfoRemote_AuthenticatesCloneAndPush(t *testing.T) {
 	t.Setenv("GIT_AUTHOR_NAME", "Test Bot")
 	t.Setenv("GIT_AUTHOR_EMAIL", "bot@example.com")
 	t.Setenv("GIT_COMMITTER_NAME", "Test Bot")
 	t.Setenv("GIT_COMMITTER_EMAIL", "bot@example.com")
 	clean, bare := gitexectest.AuthRemote(t, authUser, authToken)
-	remote := strings.Replace(clean, "http://", "http://"+authUser+":"+authToken+"@", 1)
+	remote := withUserinfo(clean)
 	outbox := t.TempDir()
 	want := forgetest.SeedRelayBundle(t, bare, "main", outbox, "agent/issue-2")
 
@@ -189,5 +197,46 @@ func TestRelayBundle_UserinfoRemote_AuthenticatesCloneAndPush(t *testing.T) {
 	}
 	if got := forgetest.RevParse(t, bare, "refs/heads/agent/issue-2"); got != want {
 		t.Fatalf("relayed branch = %s, want %s", got, want)
+	}
+}
+
+// A Target repo that was renamed or transferred redirects to its new path,
+// where the path-scoped credential no longer matches: the clone and the mirror
+// seed, the probe and the branch lookup name the configured repo instead of
+// git's host-only prompt failure.
+func TestRedirectedRemote_ErrorNamesTheConfiguredTargetRepo(t *testing.T) {
+	r := gitexectest.NewAuthRemote(t, authUser, authToken)
+	cred := gitexec.Credential{Username: authUser, Password: authToken}
+	for name, run := range map[string]func() error{
+		"clone": func() error { return cloneInto(r.MovedURL, cred, t.TempDir(), time.Minute) },
+		"seed mirror": func() error {
+			return SeedMirror(withUserinfo(r.MovedURL), "main", t.TempDir())
+		},
+		"probe": func() error {
+			_, err := NewGitClient(withUserinfo(r.MovedURL), "main", "Test Bot", "bot@example.com").Probe()
+			if !errors.Is(err, forge.ErrRepoNotFound) {
+				t.Errorf("Probe error %v does not wrap forge.ErrRepoNotFound", err)
+			}
+			return err
+		},
+		"branch exists": func() error {
+			_, err := NewGitClient(withUserinfo(r.MovedURL), "main", "Test Bot", "bot@example.com").BranchExists("main")
+			return err
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := run()
+			if err == nil {
+				t.Fatal("redirected remote succeeded")
+			}
+			for _, want := range []string{r.MovedURL, "configured Target repo", "update"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q missing %q", err, want)
+				}
+			}
+			if strings.Contains(err.Error(), authToken) {
+				t.Errorf("error leaks the token: %v", err)
+			}
+		})
 	}
 }

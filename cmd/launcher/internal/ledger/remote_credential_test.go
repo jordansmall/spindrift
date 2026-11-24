@@ -97,3 +97,19 @@ func TestRemoteWrongCredentialErrorOmitsToken(t *testing.T) {
 		}
 	}
 }
+
+// A renamed or transferred Ledger repository redirects to its new path, where
+// the path-scoped credential no longer matches: the error names the configured
+// repo rather than git's host-only prompt failure.
+func TestNewRemote_RedirectedRepoNamesTheConfiguredTargetRepo(t *testing.T) {
+	r := gitexectest.NewAuthRemote(t, "oauth2", remoteToken)
+	_, err := ledger.NewRemote(t.TempDir(), r.MovedURL, gitexec.Credential{Username: "oauth2", Password: remoteToken})
+	if err == nil {
+		t.Fatal("NewRemote against a redirected repo succeeded")
+	}
+	for _, want := range []string{r.MovedURL, "configured Target repo", "update"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err, want)
+		}
+	}
+}

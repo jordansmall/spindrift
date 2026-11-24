@@ -31,7 +31,7 @@ func SeedMirror(remoteURL, baseBranch, dir string) error {
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				return fmt.Errorf("%s: timed out after %s: %w", step, defaultCloneTimeout, ctx.Err())
 			}
-			return fmt.Errorf("%s: %w: %s", step, err, strings.TrimSpace(string(out)))
+			return fmt.Errorf("%s: %w: %s", step, cred.Explain(err, out, redacted), strings.TrimSpace(string(out)))
 		}
 		return nil
 	}

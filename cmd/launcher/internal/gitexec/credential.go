@@ -1,9 +1,12 @@
 package gitexec
 
 import (
+	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -65,6 +68,9 @@ func (c Credential) Apply(cmd *exec.Cmd, repoURL string) *exec.Cmd {
 	if u, err := url.Parse(repoURL); c == (Credential{}) || err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return cmd
 	}
+	// git matches a config URL without a username against any username, and the
+	// secret must not land in a config key.
+	repoURL = withoutUserinfo(repoURL)
 	env := cmd.Env
 	if env == nil {
 		env = os.Environ()
@@ -94,6 +100,51 @@ func (c Credential) Apply(cmd *exec.Cmd, repoURL string) *exec.Cmd {
 		usernameEnv+"="+c.Username,
 		passwordEnv+"="+c.Password,
 		"GIT_TERMINAL_PROMPT=0",
+		// Explain matches git's English stderr.
+		"LC_ALL=C",
 	)
 	return cmd
+}
+
+// withoutUserinfo drops any userinfo from rawURL by string surgery, so it also
+// works on a URL url.Parse rejects and leaves the rest byte-for-byte.
+func withoutUserinfo(rawURL string) string {
+	i := strings.Index(rawURL, "://")
+	if i < 0 {
+		return rawURL
+	}
+	rest := rawURL[i+3:]
+	authority := rest
+	// Only "/" ends it: an unescaped password may hold "?" or "#", and
+	// forge.RedactURLCredentials ends the authority the same way.
+	if j := strings.IndexByte(rest, '/'); j >= 0 {
+		authority = rest[:j]
+	}
+	at := strings.LastIndex(authority, "@")
+	if at < 0 {
+		return rawURL
+	}
+	return rawURL[:i+3] + rest[at+1:]
+}
+
+// redirectFailure is how git fails once a remote redirects it away from
+// repoURL: a forge that redirects before authenticating leaves git with no
+// helper for the new URL ("could not read Username"); one that authenticates
+// first and then redirects fails git's next POST, which git does not follow.
+var redirectFailure = regexp.MustCompile(`could not read Username|returned error: 30[12378]\b`)
+
+// Explain says why a failed git run reached a URL other than repoURL: the
+// remote redirected (a renamed or transferred repository). git's own message
+// names only the host, so Explain wraps err naming repoURL minus any userinfo.
+// out is the run's output; a *exec.ExitError's captured Stderr is read too.
+// Any other failure, and a zero Credential, come back unchanged.
+func (c Credential) Explain(err error, out []byte, repoURL string) error {
+	if err == nil || c == (Credential{}) {
+		return err
+	}
+	var exit *exec.ExitError
+	if !redirectFailure.Match(out) && !(errors.As(err, &exit) && redirectFailure.Match(exit.Stderr)) {
+		return err
+	}
+	return fmt.Errorf("git reached a URL other than the configured Target repo %s; it most likely redirected (renamed or transferred?), so update the configured Target repo: %w", withoutUserinfo(repoURL), err)
 }
