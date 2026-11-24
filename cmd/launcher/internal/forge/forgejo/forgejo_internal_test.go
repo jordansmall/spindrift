@@ -58,3 +58,23 @@ func TestMergeStyle(t *testing.T) {
 		}
 	}
 }
+
+// The Ledger site and the clone site must name one repository URL, because the
+// git credential is scoped to that URL's path and git matches whole segments.
+// GitRemoteURL therefore mirrors the Connector's CloneURL: it keeps a base
+// subpath and drops userinfo, query and fragment.
+func TestForgejoGitRemoteURL_MatchesConnectorCloneURL(t *testing.T) {
+	for name, tc := range map[string]struct{ base, want string }{
+		"subpath":        {"https://host/forgejo", "https://host/forgejo/owner/repo.git"},
+		"trailing slash": {"https://host/forgejo/", "https://host/forgejo/owner/repo.git"},
+		"root slash":     {"https://host/", "https://host/owner/repo.git"},
+		"query":          {"https://host/forgejo?x=1#f", "https://host/forgejo/owner/repo.git"},
+		"userinfo":       {"https://u:p@host/forgejo", "https://host/forgejo/owner/repo.git"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := GitRemoteURL(tc.base, "owner/repo"); got != tc.want {
+				t.Fatalf("GitRemoteURL(%q) = %q, want %q", tc.base, got, tc.want)
+			}
+		})
+	}
+}
