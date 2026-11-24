@@ -426,3 +426,17 @@ func TestMarkdownBullets_BackslashBracketLinkEscaped(t *testing.T) {
 		})
 	}
 }
+
+// A filed-but-unusable intent exists on the tracker, so its bullet must say so
+// and must not invite a refile the way a plain failure does.
+func TestBuildFiledIssuesSection_UnusableSaysFiledAndNotToRefile(t *testing.T) {
+	got := buildFiledIssuesSection([]filedIntent{{Title: "fix(x): bug", Body: "repro\nmore", Unusable: true}})
+
+	want := "- **fix(x): bug** (filed, but the tracker returned an unusable URL — do not refile; find it on the tracker) — repro"
+	if !strings.Contains(got, want) {
+		t.Errorf("section = %q, want it to contain %q", got, want)
+	}
+	if strings.Contains(got, "filing failed") {
+		t.Errorf("section = %q, must not say \"filing failed\"", got)
+	}
+}

@@ -1,6 +1,7 @@
 package settle
 
 import (
+	"fmt"
 	"slices"
 	"testing"
 
@@ -141,3 +142,19 @@ func TestFileButlerFindings_CatalogRowWritesItsChoreTerm(t *testing.T) {
 // testButlerFindingLabel is the label the settle tests file findings under; it is
 // passed in explicitly because settle never derives it from a kind name.
 const testButlerFindingLabel = "agent-butler-finding"
+
+// A filed-but-unusable-URL finding exists on the tracker: it is counted apart,
+// neither Failed (an all-failed sweep would re-find and refile it) nor Filed
+// (no usable URL to record).
+func TestFileButlerFindings_CountsUnusableApartFromFailed(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
+	fc.PostIssueErrForTitle = map[string]error{"two": fmt.Errorf("%w: url %q", forge.ErrFiledUnusableURL, "elsewhere")}
+	plan := func([]Finding) func(Finding) Decoration { return func(Finding) Decoration { return Decoration{} } }
+
+	filing := FileButlerFindings(StdoutProgress{}, fc.AsIssueFiler(), "1", twoIntents(), 0, testButlerFindingLabel, DedupPolicy{}, plan)
+
+	if len(filing.Filed) != 1 || filing.Unusable != 1 || filing.Failed != 0 {
+		t.Errorf("filed=%v unusable=%d failed=%d, want 1 filed, 1 unusable, 0 failed", filing.Filed, filing.Unusable, filing.Failed)
+	}
+}

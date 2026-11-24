@@ -7263,15 +7263,17 @@ Every settle that reaches the filing step prints one tally line on the run's
 own status output, work path and research path alike:
 
 ```
-    #1234  filed=ok:2,failed:1,skipped:1
+    #1234  filed=ok:2,failed:1,skipped:1,unusable:0
 ```
 
 `ok` counts the issues actually filed; `failed` counts the filing attempts
 that errored, so a run that tried and failed does not read as a quiet run;
 `skipped` counts an intent the Launcher's own dedup index caught before it
 ever reached the tracker (issue #3609) — a duplicate that never became an
-API call, so it belongs in neither of the other two. The line prints even
-when nothing was filed (`filed=ok:0,failed:0,skipped:0`), which is what
+API call, so it belongs in neither of the other two; `unusable` counts an issue the
+tracker filed but whose returned URL failed core's check, so it exists and is
+never refiled, and is not a failure. The line prints even
+when nothing was filed (`filed=ok:0,failed:0,skipped:0,unusable:0`), which is what
 makes "reached filing, filed nothing" distinguishable from a run that never
 got that far and prints no tally line at all. That makes the
 findings-per-run rate readable straight off a dogfood log or a dispatch
@@ -9120,7 +9122,13 @@ non-zero, so the next invocation's staleness check is the only recovery path
 to file (typically a missing provenance label) counts as such a crash: the run
 is marked failed, writes no Done commit, leaves the cursor and claim where they
 were so the next run re-finds the findings, and exits non-zero so the daemon's
-breaker counts it. The daemon surfaces it as a `settled` event with
+breaker counts it. A finding the tracker reports filed but with an unusable
+URL never counts toward this: the issue exists, so the sweep finishes, logs a
+`status=filed-unusable-url` line, and does not refile it. Such a finding still
+counts as filed and spends its promotion or patch slot (it wears those labels),
+recorded in the Ledger as a placeholder entry; a patch finding opens no PR, as
+there is no issue number to open it against. The daemon surfaces
+the all-failed sweep as a `settled` event with
 `state=failed` and a note starting `all N finding(s) failed to file` (see
 [Daemon](#daemon)); watch for that event. Because the claim stays live for
 `BUTLER_CLAIM_TIMEOUT`, the breaker sees at most one such failure per Chore

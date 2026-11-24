@@ -575,6 +575,55 @@ func TestFileIssueIntentsDetailed_ReturnsSuccessAndFailureEntries(t *testing.T) 
 	})
 }
 
+// An unusable-URL error means the tracker did file the issue, so its dedup
+// keys are indexed like a success: a second same-keyed intent in the run is
+// skipped, not filed again. The first is Unusable, not Failed: it exists on
+// the tracker, so a human must not be invited to refile it.
+func TestFileIssueIntentsDetailed_UnusableFiledURLIndexesKeysAndRefusesRefiling(t *testing.T) {
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"first bug","body":"first body","dedupTerms":["site-a"]}`,
+			`{"title":"second bug","body":"second body","dedupTerms":["site-a"]}`,
+		},
+	}
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueErr = fmt.Errorf("%w: url %q", forge.ErrFiledUnusableURL, "http://elsewhere/1")
+
+	detailed := fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("PostIssueCalls = %+v, want exactly one: the issue was filed", fc.PostIssueCalls)
+	}
+	if len(detailed) != 2 || !detailed[0].Unusable || detailed[0].Failed || detailed[0].URL != "" || !detailed[1].Skipped {
+		t.Errorf("detailed = %+v, want [unusable no url, skipped]", detailed)
+	}
+}
+
+// An unusable-URL filing exists on the tracker wearing its extra labels, so
+// onFiled still runs, with an empty URL, to commit the callback's spend.
+func TestFileIssueIntentsDetailedFunc_UnusableFilingCallsOnFiledWithEmptyURL(t *testing.T) {
+	result := dispatch.Result{
+		IssueIntentsFound: true,
+		IssueIntents:      []string{`{"title":"first bug","body":"first body"}`},
+	}
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueErr = fmt.Errorf("%w: url %q", forge.ErrFiledUnusableURL, "http://elsewhere/1")
+
+	var urls []string
+	decorate := func(issueIntent) (string, []string, func(string)) {
+		return "", nil, func(url string) { urls = append(urls, url) }
+	}
+	detailed := fileIssueIntentsDetailedFunc(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", DedupPolicy{}, decorate)
+
+	if len(detailed) != 1 || !detailed[0].Unusable {
+		t.Fatalf("detailed = %+v, want one unusable", detailed)
+	}
+	if len(urls) != 1 || urls[0] != "" {
+		t.Errorf("onFiled urls = %q, want exactly one empty url", urls)
+	}
+}
+
 // A non-empty bodyBacklink is appended to the posted issue's body, for example
 // a research-settle caller (issue #2590) attributing a filed issue back to the
 // research run that found it. The Body reported on failure stays the intent's
@@ -1029,13 +1078,13 @@ func TestSettle_ReportsFiledTally_NoIntents(t *testing.T) {
 		s.Settle(dispatch.NewFake(), issNum, 0, result)
 	})
 
-	if !strings.Contains(stdout, "    #3608  filed=ok:0,failed:0,skipped:0\n") {
+	if !strings.Contains(stdout, "    #3608  filed=ok:0,failed:0,skipped:0,unusable:0\n") {
 		t.Errorf("stdout = %q, want it to contain the zero filed= tally", stdout)
 	}
 }
 
 // The work path's filed= tally line counts two successfully filed intents as
-// ok:2,failed:0,skipped:0 (issue #3608).
+// ok:2,failed:0,skipped:0,unusable:0 (issue #3608).
 func TestSettle_ReportsFiledTally_AllOK(t *testing.T) {
 	const issNum = "3608"
 	const prURL = "https://github.com/owner/repo/pull/3608"
@@ -1061,7 +1110,7 @@ func TestSettle_ReportsFiledTally_AllOK(t *testing.T) {
 		s.Settle(dispatch.NewFake(), issNum, 0, result)
 	})
 
-	if !strings.Contains(stdout, "    #3608  filed=ok:2,failed:0,skipped:0\n") {
+	if !strings.Contains(stdout, "    #3608  filed=ok:2,failed:0,skipped:0,unusable:0\n") {
 		t.Errorf("stdout = %q, want it to contain the all-ok filed= tally", stdout)
 	}
 }
@@ -1148,7 +1197,7 @@ func TestSettle_WorkPath_AllFiledPostsNoSkippedComment(t *testing.T) {
 }
 
 // The work path's filed= tally line counts two failed PostIssue calls as
-// ok:0,failed:2,skipped:0 (issue #3608): a run that tried and failed to file must not
+// ok:0,failed:2,skipped:0,unusable:0 (issue #3608): a run that tried and failed to file must not
 // read as a quiet run.
 func TestSettle_ReportsFiledTally_AllFailed(t *testing.T) {
 	const issNum = "3608"
@@ -1175,7 +1224,7 @@ func TestSettle_ReportsFiledTally_AllFailed(t *testing.T) {
 		s.Settle(dispatch.NewFake(), issNum, 0, result)
 	})
 
-	if !strings.Contains(stdout, "    #3608  filed=ok:0,failed:2,skipped:0\n") {
+	if !strings.Contains(stdout, "    #3608  filed=ok:0,failed:2,skipped:0,unusable:0\n") {
 		t.Errorf("stdout = %q, want it to contain the all-failed filed= tally", stdout)
 	}
 }
@@ -1188,8 +1237,8 @@ func TestTallyFiled_Zero(t *testing.T) {
 	if got != (filedTally{}) {
 		t.Errorf("tallyFiled(nil) = %+v, want zero value", got)
 	}
-	if got.String() != "ok:0,failed:0,skipped:0" {
-		t.Errorf("String() = %q, want %q", got.String(), "ok:0,failed:0,skipped:0")
+	if got.String() != "ok:0,failed:0,skipped:0,unusable:0" {
+		t.Errorf("String() = %q, want %q", got.String(), "ok:0,failed:0,skipped:0,unusable:0")
 	}
 }
 
@@ -1200,8 +1249,8 @@ func TestTallyFiled_AllOK(t *testing.T) {
 		{Title: "b", URL: "https://example/2"},
 	}
 	got := tallyFiled(filed)
-	if got.String() != "ok:2,failed:0,skipped:0" {
-		t.Errorf("String() = %q, want %q", got.String(), "ok:2,failed:0,skipped:0")
+	if got.String() != "ok:2,failed:0,skipped:0,unusable:0" {
+		t.Errorf("String() = %q, want %q", got.String(), "ok:2,failed:0,skipped:0,unusable:0")
 	}
 }
 
@@ -1212,8 +1261,16 @@ func TestTallyFiled_AllFailed(t *testing.T) {
 		{Title: "b", Failed: true, Body: "body b"},
 	}
 	got := tallyFiled(filed)
-	if got.String() != "ok:0,failed:2,skipped:0" {
-		t.Errorf("String() = %q, want %q", got.String(), "ok:0,failed:2,skipped:0")
+	if got.String() != "ok:0,failed:2,skipped:0,unusable:0" {
+		t.Errorf("String() = %q, want %q", got.String(), "ok:0,failed:2,skipped:0,unusable:0")
+	}
+}
+
+// An Unusable filing exists on the tracker, so it tallies apart from failed.
+func TestTallyFiled_UnusableCountsApartFromFailed(t *testing.T) {
+	got := tallyFiled([]filedIntent{{Title: "a", Unusable: true, Body: "body a"}})
+	if got.String() != "ok:0,failed:0,skipped:0,unusable:1" {
+		t.Errorf("String() = %q, want %q", got.String(), "ok:0,failed:0,skipped:0,unusable:1")
 	}
 }
 
@@ -1225,8 +1282,8 @@ func TestTallyFiled_Mixed(t *testing.T) {
 		{Title: "c", URL: "https://example/3"},
 	}
 	got := tallyFiled(filed)
-	if got.String() != "ok:2,failed:1,skipped:0" {
-		t.Errorf("String() = %q, want %q", got.String(), "ok:2,failed:1,skipped:0")
+	if got.String() != "ok:2,failed:1,skipped:0,unusable:0" {
+		t.Errorf("String() = %q, want %q", got.String(), "ok:2,failed:1,skipped:0,unusable:0")
 	}
 }
 
@@ -1237,7 +1294,7 @@ func TestReportFiled_ZeroTallyStillPrints(t *testing.T) {
 	stdout := captureStdout(t, func() {
 		reportFiled(StdoutProgress{}, "42", nil)
 	})
-	want := "    #42  filed=ok:0,failed:0,skipped:0\n"
+	want := "    #42  filed=ok:0,failed:0,skipped:0,unusable:0\n"
 	if stdout != want {
 		t.Errorf("stdout = %q, want %q", stdout, want)
 	}
@@ -1254,7 +1311,7 @@ func TestReportFiled_MixedTally(t *testing.T) {
 	stdout := captureStdout(t, func() {
 		reportFiled(StdoutProgress{}, "7", filed)
 	})
-	want := "    #7  filed=ok:1,failed:1,skipped:0\n"
+	want := "    #7  filed=ok:1,failed:1,skipped:0,unusable:0\n"
 	if stdout != want {
 		t.Errorf("stdout = %q, want %q", stdout, want)
 	}
@@ -1284,8 +1341,8 @@ func TestFileIssueIntentsDetailed_Dedup_SameSiteDifferentProseWithinRun(t *testi
 	if len(fc.PostIssueCalls) != 1 {
 		t.Fatalf("PostIssueCalls = %+v, want exactly 1 (the second is a dedup skip)", fc.PostIssueCalls)
 	}
-	if got := tallyFiled(filed).String(); got != "ok:1,failed:0,skipped:1" {
-		t.Errorf("tallyFiled = %q, want %q", got, "ok:1,failed:0,skipped:1")
+	if got := tallyFiled(filed).String(); got != "ok:1,failed:0,skipped:1,unusable:0" {
+		t.Errorf("tallyFiled = %q, want %q", got, "ok:1,failed:0,skipped:1,unusable:0")
 	}
 	if !strings.Contains(stdout, `skipped duplicate issue-intent: "second phrasing of the same bug"`) {
 		t.Errorf("stdout = %q, want a skip line naming the second intent", stdout)
@@ -1400,8 +1457,8 @@ func TestFileIssueIntentsDetailed_Dedup_LineOverlapWithinRun(t *testing.T) {
 	if len(fc.PostIssueCalls) != 1 {
 		t.Fatalf("PostIssueCalls = %+v, want exactly 1 (the second overlaps the first's line range)", fc.PostIssueCalls)
 	}
-	if got := tallyFiled(filed).String(); got != "ok:1,failed:0,skipped:1" {
-		t.Errorf("tallyFiled = %q, want %q", got, "ok:1,failed:0,skipped:1")
+	if got := tallyFiled(filed).String(); got != "ok:1,failed:0,skipped:1,unusable:0" {
+		t.Errorf("tallyFiled = %q, want %q", got, "ok:1,failed:0,skipped:1,unusable:0")
 	}
 	if len(filed) != 2 {
 		t.Fatalf("filed = %+v, want 2 entries", filed)
@@ -1441,8 +1498,8 @@ func TestFileIssueIntentsDetailed_Dedup_LineOverlapChainsAcrossRun(t *testing.T)
 	if len(fc.PostIssueCalls) != 1 {
 		t.Fatalf("PostIssueCalls = %+v, want exactly 1 (the second and third both alias the first)", fc.PostIssueCalls)
 	}
-	if got := tallyFiled(filed).String(); got != "ok:1,failed:0,skipped:2" {
-		t.Errorf("tallyFiled = %q, want %q", got, "ok:1,failed:0,skipped:2")
+	if got := tallyFiled(filed).String(); got != "ok:1,failed:0,skipped:2,unusable:0" {
+		t.Errorf("tallyFiled = %q, want %q", got, "ok:1,failed:0,skipped:2,unusable:0")
 	}
 	for i, f := range filed[1:] {
 		if want := `this run's "finding at line 80 alone"`; !f.Skipped || f.DupRef != want {
@@ -1473,8 +1530,8 @@ func TestFileIssueIntentsDetailed_Dedup_LineOverlapPartialWithinRunStillFiles(t 
 	if len(fc.PostIssueCalls) != 2 {
 		t.Fatalf("PostIssueCalls = %+v, want 2 (partial overlap still files)", fc.PostIssueCalls)
 	}
-	if got := tallyFiled(filed).String(); got != "ok:2,failed:0,skipped:0" {
-		t.Errorf("tallyFiled = %q, want %q", got, "ok:2,failed:0,skipped:0")
+	if got := tallyFiled(filed).String(); got != "ok:2,failed:0,skipped:0,unusable:0" {
+		t.Errorf("tallyFiled = %q, want %q", got, "ok:2,failed:0,skipped:0,unusable:0")
 	}
 }
 
@@ -1501,8 +1558,8 @@ func TestFileIssueIntentsDetailed_Dedup_NonOverlappingLinesBothFile(t *testing.T
 	if len(fc.PostIssueCalls) != 2 {
 		t.Fatalf("PostIssueCalls = %+v, want 2 (non-overlapping line ranges are distinct sites)", fc.PostIssueCalls)
 	}
-	if got := tallyFiled(filed).String(); got != "ok:2,failed:0,skipped:0" {
-		t.Errorf("tallyFiled = %q, want %q", got, "ok:2,failed:0,skipped:0")
+	if got := tallyFiled(filed).String(); got != "ok:2,failed:0,skipped:0,unusable:0" {
+		t.Errorf("tallyFiled = %q, want %q", got, "ok:2,failed:0,skipped:0,unusable:0")
 	}
 }
 
@@ -1528,8 +1585,8 @@ func TestFileIssueIntentsDetailed_Dedup_SameLinesDifferentFilesBothFile(t *testi
 	if len(fc.PostIssueCalls) != 2 {
 		t.Fatalf("PostIssueCalls = %+v, want 2 (different files, never aliased)", fc.PostIssueCalls)
 	}
-	if got := tallyFiled(filed).String(); got != "ok:2,failed:0,skipped:0" {
-		t.Errorf("tallyFiled = %q, want %q", got, "ok:2,failed:0,skipped:0")
+	if got := tallyFiled(filed).String(); got != "ok:2,failed:0,skipped:0,unusable:0" {
+		t.Errorf("tallyFiled = %q, want %q", got, "ok:2,failed:0,skipped:0,unusable:0")
 	}
 }
 
@@ -1562,8 +1619,8 @@ func TestFileIssueIntentsDetailed_Dedup_LineOverlapExcludesBacklog(t *testing.T)
 	if len(fc.PostIssueCalls) != 1 {
 		t.Fatalf("PostIssueCalls = %+v, want exactly 1 (backlog overlap must not suppress the filing)", fc.PostIssueCalls)
 	}
-	if got := tallyFiled(filed).String(); got != "ok:1,failed:0,skipped:0" {
-		t.Errorf("tallyFiled = %q, want %q", got, "ok:1,failed:0,skipped:0")
+	if got := tallyFiled(filed).String(); got != "ok:1,failed:0,skipped:0,unusable:0" {
+		t.Errorf("tallyFiled = %q, want %q", got, "ok:1,failed:0,skipped:0,unusable:0")
 	}
 }
 
@@ -1662,8 +1719,8 @@ func TestFileIssueIntentsDetailed_Dedup_DistinctFindingsBothFile(t *testing.T) {
 	if len(fc.PostIssueCalls) != 2 {
 		t.Fatalf("PostIssueCalls = %+v, want 2", fc.PostIssueCalls)
 	}
-	if got := tallyFiled(filed).String(); got != "ok:2,failed:0,skipped:0" {
-		t.Errorf("tallyFiled = %q, want %q", got, "ok:2,failed:0,skipped:0")
+	if got := tallyFiled(filed).String(); got != "ok:2,failed:0,skipped:0,unusable:0" {
+		t.Errorf("tallyFiled = %q, want %q", got, "ok:2,failed:0,skipped:0,unusable:0")
 	}
 }
 
@@ -1802,8 +1859,8 @@ func TestFileIssueIntentsDetailed_Dedup_PartialOverlapNamesEveryCoveringIssue(t 
 	if len(fc.PostIssueCalls) != 1 {
 		t.Fatalf("PostIssueCalls = %+v, want exactly 1 (site c is tracked nowhere)", fc.PostIssueCalls)
 	}
-	if got := tallyFiled(filed).String(); got != "ok:1,failed:0,skipped:0" {
-		t.Errorf("tallyFiled = %q, want %q", got, "ok:1,failed:0,skipped:0")
+	if got := tallyFiled(filed).String(); got != "ok:1,failed:0,skipped:0,unusable:0" {
+		t.Errorf("tallyFiled = %q, want %q", got, "ok:1,failed:0,skipped:0,unusable:0")
 	}
 	line := lineContaining(t, stdout, "partial dedup overlap")
 	if !strings.Contains(line, "already tracked: [site a, site b] via #501, #502") {
@@ -1873,8 +1930,8 @@ func TestFileIssueIntentsDetailed_Dedup_FullOverlapAcrossAllSitesSkips(t *testin
 	if len(fc.PostIssueCalls) != 0 {
 		t.Fatalf("PostIssueCalls = %+v, want none (both sites already tracked)", fc.PostIssueCalls)
 	}
-	if got := tallyFiled(filed).String(); got != "ok:0,failed:0,skipped:1" {
-		t.Errorf("tallyFiled = %q, want %q", got, "ok:0,failed:0,skipped:1")
+	if got := tallyFiled(filed).String(); got != "ok:0,failed:0,skipped:1,unusable:0" {
+		t.Errorf("tallyFiled = %q, want %q", got, "ok:0,failed:0,skipped:1,unusable:0")
 	}
 	line := lineContaining(t, stdout, "skipped duplicate issue-intent")
 	if !strings.Contains(line, "already tracked: #501, #502") {
@@ -1909,8 +1966,8 @@ func TestFileIssueIntentsDetailed_Dedup_FullOverlapBySingleIssueSkips(t *testing
 	if len(fc.PostIssueCalls) != 0 {
 		t.Fatalf("PostIssueCalls = %+v, want none (both sites already tracked)", fc.PostIssueCalls)
 	}
-	if got := tallyFiled(filed).String(); got != "ok:0,failed:0,skipped:1" {
-		t.Errorf("tallyFiled = %q, want %q", got, "ok:0,failed:0,skipped:1")
+	if got := tallyFiled(filed).String(); got != "ok:0,failed:0,skipped:1,unusable:0" {
+		t.Errorf("tallyFiled = %q, want %q", got, "ok:0,failed:0,skipped:1,unusable:0")
 	}
 	line := lineContaining(t, stdout, "skipped duplicate issue-intent")
 	if !strings.Contains(line, "already tracked: #501") {

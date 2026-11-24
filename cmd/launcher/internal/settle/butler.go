@@ -35,10 +35,11 @@ func (in issueIntent) finding() Finding {
 
 // Decoration is what a plan's per-finding callback adds to one finding's
 // filing: host-authored Backlink text appended to its body, ExtraLabels
-// beyond the provenance label, and OnFiled, run with the filed URL only after
-// PostIssue succeeds, never on a failed or skipped intent (see
+// beyond the provenance label, and OnFiled, run once the issue exists on the
+// tracker, never on a failed or skipped intent (see
 // fileIssueIntentsDetailedFunc), so a callback spending shared state (like
-// promotion room) commits the spend only once the filing is real.
+// promotion room) commits the spend only once the filing is real. url is ""
+// when the tracker filed the issue but returned an unusable URL.
 type Decoration struct {
 	Backlink    string
 	ExtraLabels []string
@@ -46,11 +47,13 @@ type Decoration struct {
 }
 
 // ButlerFiling is FileButlerFindings's tally: the URLs of the findings that
-// filed in payload order, plus how many the per-sweep cap dropped and how many
-// failed to post.
+// filed in payload order, plus how many the per-sweep cap dropped, how many
+// failed to post, and how many the tracker filed but reported an unusable URL
+// for (Unusable: on the tracker, so neither Failed nor Filed).
 type ButlerFiling struct {
 	Filed           []string
 	Dropped, Failed int
+	Unusable        int
 }
 
 // FileButlerFindings caps result's issue-intent findings at maxPerSweep (0 is
@@ -88,7 +91,10 @@ func FileButlerFindings(progress Progress, it forge.IssueTracker, num string, re
 		if f.Failed {
 			out.Failed++
 		}
-		if f.Failed || f.Skipped {
+		if f.Unusable {
+			out.Unusable++
+		}
+		if f.Failed || f.Unusable || f.Skipped {
 			continue
 		}
 		out.Filed = append(out.Filed, f.URL)

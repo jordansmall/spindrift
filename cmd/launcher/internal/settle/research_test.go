@@ -26,7 +26,7 @@ func newResearchFake(num string) *forge.Fake {
 
 // A verdict causes no other transition (ADR 0022's one-shot settle). Also the
 // research path's no-intents tally fixture (issue #3608): a run that filed
-// nothing still prints "filed=ok:0,failed:0,skipped:0".
+// nothing still prints "filed=ok:0,failed:0,skipped:0,unusable:0".
 func TestResearchSettle_Recommend(t *testing.T) {
 	fc := newResearchFake("42")
 	result := dispatch.Result{
@@ -51,7 +51,7 @@ func TestResearchSettle_Recommend(t *testing.T) {
 	if len(fc.TransitionStateCalls) != 0 {
 		t.Errorf("verdict path must not call TransitionState; got %+v", fc.TransitionStateCalls)
 	}
-	if !strings.Contains(stdout, "    #42  filed=ok:0,failed:0,skipped:0\n") {
+	if !strings.Contains(stdout, "    #42  filed=ok:0,failed:0,skipped:0,unusable:0\n") {
 		t.Errorf("stdout = %q, want it to contain the zero filed= tally", stdout)
 	}
 }
@@ -649,7 +649,7 @@ func TestResearchSettle_CustomVerdictSet_DefaultTokenNotRecognized(t *testing.T)
 }
 
 // The research path's filed= tally line counts two successfully filed
-// intents as ok:2,failed:0,skipped:0 (issue #3608), same shape as the work path's
+// intents as ok:2,failed:0,skipped:0,unusable:0 (issue #3608), same shape as the work path's
 // tally.
 func TestResearchSettle_ReportsFiledTally_TwoOK(t *testing.T) {
 	fc := newResearchFake("42")
@@ -673,13 +673,13 @@ func TestResearchSettle_ReportsFiledTally_TwoOK(t *testing.T) {
 		s.Settle(dispatch.NewFake(), "42", 0, result)
 	})
 
-	if !strings.Contains(stdout, "    #42  filed=ok:2,failed:0,skipped:0\n") {
+	if !strings.Contains(stdout, "    #42  filed=ok:2,failed:0,skipped:0,unusable:0\n") {
 		t.Errorf("stdout = %q, want it to contain the all-ok filed= tally", stdout)
 	}
 }
 
 // The research path's filed= tally line counts two failed PostIssue calls as
-// ok:0,failed:2,skipped:0 (issue #3608): the tally must print even though both
+// ok:0,failed:2,skipped:0,unusable:0 (issue #3608): the tally must print even though both
 // filings failed and the run still goes on to post the comment and apply
 // the verdict label.
 func TestResearchSettle_ReportsFiledTally_TwoFailed(t *testing.T) {
@@ -704,7 +704,7 @@ func TestResearchSettle_ReportsFiledTally_TwoFailed(t *testing.T) {
 		s.Settle(dispatch.NewFake(), "42", 0, result)
 	})
 
-	if !strings.Contains(stdout, "    #42  filed=ok:0,failed:2,skipped:0\n") {
+	if !strings.Contains(stdout, "    #42  filed=ok:0,failed:2,skipped:0,unusable:0\n") {
 		t.Errorf("stdout = %q, want it to contain the all-failed filed= tally", stdout)
 	}
 }
@@ -855,7 +855,7 @@ func TestResearchSettle_WithProgress_RecordsInsteadOfPrinting(t *testing.T) {
 	}
 	landing := "https://github.com/owner/repo/issues/42#issuecomment-1"
 	want := []Step{
-		{Key: "42", Detail: "filed=ok:0,failed:0,skipped:0"},
+		{Key: "42", Detail: "filed=ok:0,failed:0,skipped:0,unusable:0"},
 		{Key: "42", Landing: landing, Status: "recommend", Detail: "note="},
 	}
 	if steps := rec.Steps(); !reflect.DeepEqual(steps, want) {
