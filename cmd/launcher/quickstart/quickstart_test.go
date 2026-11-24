@@ -2225,7 +2225,7 @@ func TestRenderHarnessEnv_WritesConnectorCredentialForEveryRow(t *testing.T) {
 		env := stanza.Credential
 		t.Run(name, func(t *testing.T) {
 			out := harnessEnvFor(name, "faketoken", nil)
-			for _, want := range []string{env + "=faketoken\n", env + "_CMD=", "docs/reference.md#backend-primary-mode"} {
+			for _, want := range []string{env + "=faketoken\n", env + "_CMD=", "docs/reference.md#backend-connectors"} {
 				if !strings.Contains(out, want) {
 					t.Errorf("harnessEnvFor(%q, ...) does not contain %q, got:\n%s", name, want, out)
 				}

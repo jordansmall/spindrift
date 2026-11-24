@@ -876,7 +876,7 @@ A real dogfood run reports the same costs (`sandbox_start_ns`,
 file (#7116). (Superseded by the issue #7022 amendment below: `in_process_loads`
 is removed.) Since #6998 made github primary, dogfood writes no read shadow
 `shadow_summary`, which carries the same keys for a shadow row. See [the
-reference](../reference.md#backend-primary-mode).
+reference](../reference.md#backend-connectors).
 
 ## Amendment (issue #7074): the sandboxes do not slow Decode
 

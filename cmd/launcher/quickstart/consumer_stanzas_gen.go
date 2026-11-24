@@ -41,7 +41,7 @@ const backendHeaderFormat = "# %[1]s backend (%[2]s)\n"
 const harnessEnvPreamble = "# Preferred: source each secret below from a vault via its <NAME>_CMD\n# form rather than the plaintext value — harness.env then holds\n# fetch recipes, not live credentials.\n# One vault, uniform naming? SECRET_CMD sets a single templated fetch\n# command (e.g. \"rbw get spindrift-{name}\") for any secret without a\n# <NAME>_CMD, but note the plaintext value below still wins over it\n# too, so remove that value (or add <NAME>_CMD) for SECRET_CMD to apply.\n\n"
 
 // connectorCredentialNote precedes the Connector credential stanza.
-const connectorCredentialNote = "# The Connector authorizes its reads and writes with this token. A separate,\n# least-privilege token may replace it: see docs/reference.md#backend-primary-mode.\n"
+const connectorCredentialNote = "# The Connector authorizes its reads and writes with this token. A separate,\n# least-privilege token may replace it: see docs/reference.md#backend-connectors.\n"
 
 // consumerStanzas maps a backend name to its Consumer stanza.
 var consumerStanzas = map[string]consumerStanza{
