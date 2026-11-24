@@ -394,27 +394,17 @@ type commentsLayer struct {
 
 func (l commentsLayer) Unwrap() forge.IssueTracker { return l.IssueTracker }
 
-// Comments returns the comments oldest first. A comment with an empty or
-// control-character author, or an unparseable createdAt, fails the read; an
-// association outside forge.KnownAssociation's vocabulary is blanked.
+// Comments returns the comments oldest first.
 func (l commentsLayer) Comments(num string) ([]forge.Comment, error) {
-	var res struct {
-		Comments []wireComment `json:"comments"`
-	}
+	var res wireComments
 	if err := l.r.call(context.Background(), CapComments, numberedParams{l.r.target, num}, &res); err != nil {
 		return nil, err
 	}
 	comments := make([]forge.Comment, len(res.Comments))
 	for i, c := range res.Comments {
-		if !cleanText(c.Author) {
-			return nil, fmt.Errorf("%w: comment %d has an empty or control-character author", ErrAnswer, i)
-		}
-		if _, err := time.Parse(time.RFC3339, c.CreatedAt); err != nil {
-			return nil, fmt.Errorf("%w: comment %d has an unparseable createdAt %q", ErrAnswer, i, c.CreatedAt)
-		}
 		comments[i] = forge.Comment{
 			Author: c.Author, CreatedAt: c.CreatedAt, Body: c.Body,
-			Minimized: c.Minimized, MinimizedReason: c.MinimizedReason, Association: forge.KnownAssociation(c.Association),
+			Minimized: c.Minimized, MinimizedReason: c.MinimizedReason, Association: c.Association,
 		}
 		if c.ResearchMarker {
 			comments[i].Body = forge.ResearchMarker + "\n" + c.Body
@@ -455,27 +445,13 @@ func (l blocksLayer) BlocksOf(num string) ([]forge.Dependency, error) {
 	return forge.WithSource(ids, forge.DepSourceNative), nil
 }
 
-// idList calls an {ids} method for num. An id outside the Connector's id
-// grammar fails closed, as in issue().
+// idList calls an {ids} method for num.
 func (t *reads) idList(method, num string) ([]string, error) {
-	var res struct {
-		IDs []string `json:"ids"`
-	}
+	res := wireIDs{method: method}
 	if err := t.call(context.Background(), method, numberedParams{t.target, num}, &res); err != nil {
 		return nil, err
 	}
-	var ids []string
-	seen := map[string]bool{}
-	for _, id := range res.IDs {
-		if !t.ids.valid(id) {
-			return nil, fmt.Errorf("%w: %s id %q is not %s", ErrAnswer, method, id, t.ids.name)
-		}
-		if !seen[id] {
-			seen[id] = true
-			ids = append(ids, id)
-		}
-	}
-	return ids, nil
+	return res.IDs, nil
 }
 
 // probeLayer serves Probe from the Connector's one authenticated read.
@@ -489,20 +465,14 @@ func (l probeLayer) Unwrap() forge.IssueTracker { return l.IssueTracker }
 // Probe maps the read's HTTP status as the native adapters map theirs: auth
 // failures stay distinguishable, anything else means the repo is unreachable.
 func (l probeLayer) Probe() (string, error) {
-	var res struct {
-		Status int `json:"status"`
-	}
+	var res wireProbeStatus
 	if err := l.r.call(context.Background(), CapProbe, targetParams{l.r.target}, &res); err != nil {
+		if errors.As(err, new(probeStatusError)) {
+			return "", err
+		}
 		return "", fmt.Errorf("%w: %w", forge.ErrRepoNotFound, err)
 	}
-	switch {
-	case res.Status >= 200 && res.Status < 300:
-		return l.r.target.Repo, nil
-	case res.Status == 401 || res.Status == 403:
-		return "", fmt.Errorf("%w: probe of %s answered %d", forge.ErrAuthFailure, l.r.target.Repo, res.Status)
-	default:
-		return "", fmt.Errorf("%w: probe of %s answered %d", forge.ErrRepoNotFound, l.r.target.Repo, res.Status)
-	}
+	return l.r.target.Repo, nil
 }
 
 // statusesLayer serves forge.StatusMappingChecker and
@@ -581,9 +551,6 @@ func (l createMetaLayer) CheckIssueType() ([]string, error) {
 	if err := l.r.call(context.Background(), CapCreateMeta, createMetaParams{l.r.target, issueType}, &res); err != nil {
 		return nil, err
 	}
-	if err := forge.IssueTypeNotOffered(l.r.target.Repo, issueType, res.IssueTypes); err != nil {
-		return nil, err
-	}
 	fields := make([]forge.CreateField, len(res.Fields))
 	for i, f := range res.Fields {
 		fields[i] = forge.CreateField{ID: f.ID, Name: f.Name, Required: f.Required, HasDefault: f.HasDefaultValue}
@@ -616,16 +583,11 @@ func (l countLayer) CountReady(fresh bool) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	var res struct {
-		Count int `json:"count"`
-	}
+	var res wireCount
 	if err := l.r.call(context.Background(), CapCount, countParams{Target: l.r.target, Label: label, Status: status, Limit: forge.ResultPageLimit, Fresh: fresh, Route: route}, &res); err != nil {
 		return 0, err
 	}
-	if res.Count < 0 {
-		return 0, fmt.Errorf("%w: tracker.count answered %d", ErrAnswer, res.Count)
-	}
-	return min(res.Count, forge.ResultPageLimit), nil
+	return res.Count, nil
 }
 
 // maxCountInterval bounds the cadence a Connector may ask for.
@@ -666,14 +628,9 @@ func (l priorClaimLayer) PriorClaimState(num string) (forge.DispatchState, bool,
 // past maxCountInterval is an implausible answer (and would overflow a
 // time.Duration).
 func readCountInterval(call guestCall) (time.Duration, error) {
-	var res struct {
-		Seconds int `json:"seconds"`
-	}
+	var res wireInterval
 	if err := call(context.Background(), CapCountInterval, struct{}{}, &res); err != nil {
 		return 0, err
-	}
-	if res.Seconds < 1 || res.Seconds > int(maxCountInterval/time.Second) {
-		return 0, fmt.Errorf("%w: %s answered %d seconds, want 1 to %d", ErrAnswer, CapCountInterval, res.Seconds, int(maxCountInterval/time.Second))
 	}
 	return time.Duration(res.Seconds) * time.Second, nil
 }
@@ -689,29 +646,16 @@ func (l searchLayer) Unwrap() forge.IssueTracker { return l.IssueTracker }
 
 // SearchIssues returns the guest's matches in its order, at most limit: the
 // guest is asked for limit but is not trusted to honour it, nor the state and
-// label filters (hits outside them are dropped). A bad number or
-// state fails closed, as in issue().
+// label filters.
 func (l searchLayer) SearchIssues(text string, state forge.IssueState, label string, limit int) ([]forge.Issue, error) {
-	var res struct {
-		Issues []wireIssue `json:"issues"`
-	}
+	var res wireIssues
 	p := searchIssuesParams{Target: l.r.target, Text: text, State: state.Wire(), Label: label, Limit: limit}
 	if err := l.r.call(context.Background(), CapSearchIssues, p, &res); err != nil {
 		return nil, err
 	}
-	res.Issues = res.Issues[:min(len(res.Issues), max(limit, 0))]
 	var issues []forge.Issue
 	for _, w := range res.Issues {
-		iss, err := w.issue(l.r.ids, singleRead)
-		if err != nil {
-			return nil, err
-		}
-		// The guest is not trusted to filter: a hit outside the requested state
-		// or label would count as a suppressing match.
-		if iss.State != state || (label != "" && !slices.Contains(iss.Labels, label)) {
-			continue
-		}
-		issues = append(issues, iss)
+		issues = append(issues, w.issue())
 	}
 	return issues, nil
 }
@@ -768,8 +712,7 @@ func (l labeledLayer) ListIssuesWithLabels(state forge.IssueState, labels []stri
 // that predates paging gets one call. A page is kept whole whatever the limit.
 // A repeated cursor, or a page of only already-read issues, fails the label
 // closed rather than loop; passing the page or byte bound keeps what was read
-// and warns, as an error would drop the whole label. A bad number or state
-// fails closed, as in issue().
+// and warns, as an error would drop the whole label.
 func (l labeledLayer) walkLabeled(state forge.IssueState, source, label string) ([]forge.Issue, error) {
 	route, err := l.r.routeParam()
 	if err != nil {
@@ -793,10 +736,7 @@ func (l labeledLayer) walkLabeled(state forge.IssueState, source, label string) 
 		// The page and byte bounds still stop a guest that loops on them.
 		fresh := len(ans.Issues) == 0
 		for _, w := range ans.Issues {
-			iss, err := w.issue(l.r.ids, singleRead)
-			if err != nil {
-				return nil, err
-			}
+			iss := w.issue()
 			fresh = fresh || !seen[iss.Number]
 			seen[iss.Number] = true
 			issues = append(issues, iss)
@@ -985,7 +925,8 @@ func newTracker(call guestCall, lifecycle Lifecycle, target Target, caps []strin
 	if slices.Contains(caps, CapProjectKeyIDs) {
 		ids = projectKeyIDs
 	}
-	r := &reads{call: call, lifecycle: lifecycle, target: target, ids: ids, v02: v02, routes: slices.Contains(caps, CapRoute), route: wireRoute(lifecycle.Route)}
+	r := &reads{lifecycle: lifecycle, target: target, ids: ids, v02: v02, routes: slices.Contains(caps, CapRoute), route: wireRoute(lifecycle.Route)}
+	r.call = connectorcall.Checked(call, trackerChecks(r))
 	var it forge.IssueTracker = r
 	if slices.Contains(caps, CapComments) {
 		it = commentsLayer{it, r}
@@ -1006,7 +947,7 @@ func newTracker(call guestCall, lifecycle Lifecycle, target Target, caps []strin
 		it = createMetaLayer{it, r}
 	}
 	if slices.Contains(caps, CapCount) {
-		interval, err := readCountInterval(call)
+		interval, err := readCountInterval(r.call)
 		if err != nil {
 			return nil, err
 		}
@@ -1068,21 +1009,16 @@ func (t *reads) ListOpenIssues() ([]forge.Issue, error) {
 }
 
 func (t *reads) list(label, status string, route []Selector) ([]forge.Issue, error) {
-	var res struct {
-		Issues []wireIssue `json:"issues"`
-	}
+	var res wireIssues
 	p := listIssuesParams{Target: t.target, Label: label, Status: status, Limit: forge.ResultPageLimit, Route: route}
 	if err := t.call(context.Background(), "tracker.listIssues", p, &res); err != nil {
 		return nil, err
 	}
 	issues := make([]forge.Issue, len(res.Issues))
 	for i, w := range res.Issues {
-		var err error
-		if issues[i], err = w.issue(t.ids, listRead); err != nil {
-			return nil, err
-		}
+		issues[i] = w.issue()
 	}
-	// Numbers were validated by issue().
+	// The check validated the numbers.
 	sort.Slice(issues, func(i, j int) bool { return t.ids.less(issues[i].Number, issues[j].Number) })
 	// The guest is asked for Limit but is not trusted to honour it.
 	issues = issues[:min(len(issues), forge.ResultPageLimit)]
@@ -1101,14 +1037,7 @@ func (t *reads) readIssue(num string) (forge.Issue, string, error) {
 	if err := t.call(context.Background(), "tracker.issue", numberedParams{t.target, num}, &w); err != nil {
 		return forge.Issue{}, "", err
 	}
-	got, err := w.issue(t.ids, singleRead)
-	if err != nil {
-		return forge.Issue{}, "", err
-	}
-	if got.Number != num {
-		return forge.Issue{}, "", fmt.Errorf("%w: asked for issue %s, got %s", ErrAnswer, num, got.Number)
-	}
-	return got, w.Status, nil
+	return w.issue(), w.Status, nil
 }
 
 // idGrammar is the shape of every id a Connector returns. Ids become branch
@@ -1166,25 +1095,29 @@ const (
 	listRead
 )
 
-// issue converts a wire issue, failing closed on a state it does not know or a
-// number outside the id grammar (numbers become branch names).
-func (w wireIssue) issue(g idGrammar, read readKind) (forge.Issue, error) {
+// check fails closed on a state it does not know or a number outside the id
+// grammar (numbers become branch names).
+func (w wireIssue) check(g idGrammar, read readKind) error {
 	if !g.valid(w.Number) {
-		return forge.Issue{}, fmt.Errorf("%w: issue number %q is not %s", ErrAnswer, w.Number, g.name)
+		return fmt.Errorf("%w: issue number %q is not %s", ErrAnswer, w.Number, g.name)
 	}
+	if w.State != "open" && w.State != "closed" && (w.State != "" || read != listRead) {
+		return fmt.Errorf("%w: issue %s has unknown state %q", ErrAnswer, w.Number, w.State)
+	}
+	if err := checkLabels(w.Labels); err != nil {
+		return fmt.Errorf("issue %s: %w", w.Number, err)
+	}
+	return nil
+}
+
+// issue converts a wire issue its check accepted.
+func (w wireIssue) issue() forge.Issue {
 	var state forge.IssueState
 	switch w.State {
 	case "open":
 		state = forge.IssueOpen
 	case "closed":
 		state = forge.IssueClosed
-	default:
-		if w.State != "" || read != listRead {
-			return forge.Issue{}, fmt.Errorf("%w: issue %s has unknown state %q", ErrAnswer, w.Number, w.State)
-		}
-	}
-	if err := checkLabels(w.Labels); err != nil {
-		return forge.Issue{}, fmt.Errorf("issue %s: %w", w.Number, err)
 	}
 	iss := forge.Issue{
 		Number:   w.Number,
@@ -1199,7 +1132,7 @@ func (w wireIssue) issue(g idGrammar, read readKind) (forge.Issue, error) {
 		iss.ClosedAt, _ = time.Parse(time.RFC3339, w.ClosedAt)
 		iss.ClosedNotPlanned = w.ClosedNotPlanned
 	}
-	return iss, nil
+	return iss
 }
 
 // cleanText reports whether s is non-empty and free of control characters, so

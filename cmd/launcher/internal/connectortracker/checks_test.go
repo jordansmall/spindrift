@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/connectorcall"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorprotocol"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -408,5 +410,13 @@ func TestProbeClassifiedErrorsMatchNotFoundAndTheirSentinels(t *testing.T) {
 				t.Fatalf("Probe err = %v, want both ErrRepoNotFound and %v", err, tc.want)
 			}
 		})
+	}
+}
+
+// The tracker axis's check bodies are registered by the names the method table
+// gives them: a method without a body, or a body no method names, fails here.
+func TestTrackerChecksAgreeWithTheMethodTable(t *testing.T) {
+	if err := connectorcall.Unregistered(connectorprotocol.AxisTracker, trackerChecks(&reads{})); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -96,8 +96,6 @@ func (l transitionLayer) TransitionState(num string, from, to forge.DispatchStat
 		if lc.StatusOnly {
 			return l.refuse(num, &forge.TransitionRefusedError{Issue: num, State: to.String()})
 		}
-	default:
-		return fmt.Errorf("%w: tracker.transition answered outcome %q", ErrAnswer, res.Outcome)
 	}
 	toLabel := lc.Labels.Label(to)
 	if toLabel == "" {
@@ -197,13 +195,8 @@ type labelsLayer struct {
 func (l labelsLayer) Unwrap() forge.IssueTracker { return l.IssueTracker }
 
 func (l labelsLayer) ListLabels() ([]string, error) {
-	var res struct {
-		Labels []string `json:"labels"`
-	}
+	var res wireLabels
 	if err := l.r.call(context.Background(), CapListLabels, targetParams{l.r.target}, &res); err != nil {
-		return nil, err
-	}
-	if err := checkLabels(res.Labels); err != nil {
 		return nil, err
 	}
 	return res.Labels, nil
@@ -261,16 +254,9 @@ func (l filerLayer) PostIssue(title, body string, labels []string) (string, erro
 		Title: title, Body: desc, Labels: append([]string{}, labels...),
 		DedupMarker: marker, IssueType: l.r.lifecycle.IssueType, Route: route,
 	}}
-	var res struct {
-		URL string `json:"url"`
-	}
+	var res wireFiled
 	if err := l.r.call(context.Background(), CapFileIssue, p, &res); err != nil {
 		return "", err
-	}
-	if reason := l.r.unusableFiledURL(res.URL); reason != "" {
-		// Filing is not idempotent: the Connector answered success, so the
-		// error says "filed" and the caller must not refile.
-		return "", fmt.Errorf("%w: %w: tracker.fileIssue returned url %q: %s", ErrAnswer, forge.ErrFiledUnusableURL, res.URL, reason)
 	}
 	return res.URL, nil
 }
