@@ -1405,3 +1405,55 @@ func TestRun_RuntimeLine_UsesRuntimeProbe(t *testing.T) {
 		t.Errorf("a nil RuntimeProbe must default to the runtime prerequisite's, got:\n%s", out)
 	}
 }
+
+// The repo-name row compares REPO_SLUG with the PR forge's canonical name and
+// is Advisory: the daemon preflight reads doctor's exit code, so a rename must
+// warn, never fail.
+func TestRun_RepoNameRow(t *testing.T) {
+	cases := []struct {
+		name     string
+		slug     string
+		canon    string
+		pushOnly bool
+		want     []string
+		wantNot  string
+	}{
+		{name: "match passes", slug: "owner/repo", canon: "owner/repo",
+			want: []string{"ok: repository name owner/repo matches the code forge's canonical name"}},
+		{name: "renamed warns naming both", slug: "owner/old", canon: "owner/new",
+			want: []string{"advisory:", "owner/old", "owner/new", "REPO_SLUG / --repo-slug / forge.repoSlug"}},
+		{name: "case-only difference warns", slug: "Owner/Repo", canon: "owner/repo",
+			want: []string{"advisory:", "Owner/Repo", "owner/repo"}},
+		{name: "push-only forge skips the row", slug: "owner/old", canon: "owner/new", pushOnly: true,
+			wantNot: "canonical name"},
+		{name: "empty slug skips the row", slug: "", canon: "owner/new",
+			wantNot: "canonical name"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := forge.NewFake()
+			f.ProbeRepo = tc.canon
+			f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+			var cf forge.CodeForge = f
+			if tc.pushOnly {
+				cf = f.AsPushOnly()
+			}
+			cfg := defaultDoctorConfig()
+			cfg.RepoSlug = tc.slug
+
+			var buf bytes.Buffer
+			if err := Run(f, cf, cfg, NewReporter(&buf, true), bufio.NewScanner(strings.NewReader("")), false, nil); err != nil {
+				t.Fatalf("Run must not fail on a repo-name mismatch: %v", err)
+			}
+			out := buf.String()
+			for _, w := range tc.want {
+				if !strings.Contains(out, w) {
+					t.Errorf("output missing %q, got:\n%s", w, out)
+				}
+			}
+			if tc.wantNot != "" && strings.Contains(out, tc.wantNot) {
+				t.Errorf("output must not contain %q, got:\n%s", tc.wantNot, out)
+			}
+		})
+	}
+}
