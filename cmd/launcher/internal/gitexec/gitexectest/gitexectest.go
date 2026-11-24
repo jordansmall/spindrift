@@ -31,9 +31,10 @@ func AuthRemote(t testing.TB, user, pass string) (cleanURL, bareDir string) {
 type Remote struct {
 	// URL and OtherURL are credential-free clone URLs of two repositories on
 	// the same host. MovedURL redirects every request to the same suffix under
-	// URL's path.
-	URL, OtherURL, MovedURL string
-	BareDir                 string
+	// URL's path before the auth gate; MovedAfterAuthURL does so only for a
+	// request that authenticated.
+	URL, OtherURL, MovedURL, MovedAfterAuthURL string
+	BareDir                                    string
 
 	handler *AuthHandler
 }
@@ -48,9 +49,10 @@ type Request struct {
 func (r *Remote) Requests() []Request { return r.handler.Requests() }
 
 // NewAuthRemote is AuthRemote with a second repository (other.git), a
-// redirecting path (moved.git -> repo.git), and a record of which requests
-// carried an Authorization header. The redirect answers before the auth gate,
-// as a forge's rename redirect does.
+// redirecting path (moved.git -> repo.git), a second one that redirects only
+// after authenticating (renamed.git -> repo.git), and a record of which
+// requests carried an Authorization header. The first redirect answers before
+// the auth gate, as a forge's rename redirect may.
 func NewAuthRemote(t testing.TB, user, pass string) *Remote {
 	t.Helper()
 	root := t.TempDir()
@@ -72,11 +74,13 @@ func NewAuthRemote(t testing.TB, user, pass string) *Remote {
 
 	h := NewAuthHandler(t, root, user, pass)
 	h.Redirects = map[string]string{"/moved.git": "/repo.git"}
+	h.AuthedRedirects = map[string]string{"/renamed.git": "/repo.git"}
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 	return &Remote{
 		URL: srv.URL + "/repo.git", OtherURL: srv.URL + "/other.git", MovedURL: srv.URL + "/moved.git",
-		BareDir: bareDir, handler: h,
+		MovedAfterAuthURL: srv.URL + "/renamed.git",
+		BareDir:           bareDir, handler: h,
 	}
 }
 
@@ -88,6 +92,10 @@ type AuthHandler struct {
 	// request is answered 301 before the auth gate, as a forge's rename
 	// redirect does.
 	Redirects map[string]string
+	// AuthedRedirects is Redirects for a forge that authenticates the old path
+	// first: a request without valid credentials gets 401, one with them gets
+	// the 301.
+	AuthedRedirects map[string]string
 
 	user, pass string
 	backend    *cgi.Handler
@@ -140,15 +148,8 @@ func (h *AuthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	h.reqs = append(h.reqs, Request{Path: r.URL.Path, HasAuth: r.Header.Get("Authorization") != ""})
 	h.mu.Unlock()
-	for from, to := range h.Redirects {
-		if rest, ok := strings.CutPrefix(r.URL.Path, from); ok {
-			target := to + rest
-			if r.URL.RawQuery != "" {
-				target += "?" + r.URL.RawQuery
-			}
-			http.Redirect(w, r, target, http.StatusMovedPermanently)
-			return
-		}
+	if redirect(w, r, h.Redirects) {
+		return
 	}
 	u, p, ok := r.BasicAuth()
 	if !ok || subtle.ConstantTimeCompare([]byte(u), []byte(h.user)) != 1 ||
@@ -157,7 +158,26 @@ func (h *AuthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	if redirect(w, r, h.AuthedRedirects) {
+		return
+	}
 	h.backend.ServeHTTP(w, r)
+}
+
+// redirect answers 301 and reports true when r's path starts with a key of
+// moves.
+func redirect(w http.ResponseWriter, r *http.Request, moves map[string]string) bool {
+	for from, to := range moves {
+		if rest, ok := strings.CutPrefix(r.URL.Path, from); ok {
+			target := to + rest
+			if r.URL.RawQuery != "" {
+				target += "?" + r.URL.RawQuery
+			}
+			http.Redirect(w, r, target, http.StatusMovedPermanently)
+			return true
+		}
+	}
+	return false
 }
 
 func git(t testing.TB, dir string, args ...string) string {
