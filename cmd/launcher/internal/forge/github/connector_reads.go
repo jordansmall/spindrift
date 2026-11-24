@@ -145,13 +145,8 @@ func routeRow() (backendrows.Row, error) {
 }
 
 // noteRouted records the error a routed read or write returned and returns
-// it unchanged. A lost claim race records nothing: forge.ErrAlreadyClaimed is
-// core policy, not a Connector fault, and an empty log is what marks a clean
-// run.
+// it unchanged.
 func noteRouted(op string, err error) error {
-	if errors.Is(err, forge.ErrAlreadyClaimed) {
-		return err
-	}
 	return primaryrecord.Note(backend.GitHub.Name, op, err)
 }
 
