@@ -7,9 +7,9 @@
 # moduleImport; credential; }`, where `settings` is the row's own `flakeOption`
 # knobs, `secrets` is the row's `tokenEnvVar` schema entry (when it has one)
 # followed by the Connector knobs its `consumerStanza.connectorKnobs` lists, and
-# `credential` is the env of the knob its row's `backend.credential` names, a
-# Connector knob or the row's own core token (null when the backend has no
-# Connector). Forcing
+# `credential` is the env of the knob its row's `backend.credential` names: a
+# Connector knob, or the row's own backend's core token (flakeModule, not this
+# file, validates the name; null when the backend has no Connector). Forcing
 # `stanzas` throws when `errors` is non-empty; `errors` is also exposed so a
 # check can read the messages, which builtins.tryEval cannot.
 {

@@ -1,5 +1,32 @@
 # Migration Guide
 
+## The github Connector takes `GH_TOKEN` as its only credential (issue #7499)
+
+A github run now takes one credential, `GH_TOKEN`. The github Connector no
+longer has a token of its own: it and every core git op (push, bundle relay,
+rebase, merge, mirror seed, Ledger push) read `GH_TOKEN` at the moment of use.
+`SPINDRIFT_GITHUB_CONNECTOR_TOKEN` is removed, and setting it fails evaluation
+and the launch with a message naming `GH_TOKEN` and this file.
+
+What to do:
+
+- **Delete `SPINDRIFT_GITHUB_CONNECTOR_TOKEN`** wherever you set it:
+  `harness.env`, your CI secret and the `env:` entry that passed it to the
+  launcher, a `SPINDRIFT_GITHUB_CONNECTOR_TOKEN_CMD` line, and the `SECRET_CMD`
+  template's use of it.
+- **Keep `GH_TOKEN`, and make it write-capable.** The Connector's writes now run
+  on it, so it needs what the old Connector token needed: a fine-grained token
+  with Issues, Pull requests and Contents read and write, plus Checks and Commit
+  statuses read, or a classic token with `repo` (`public_repo` for a public
+  repository). See the permission table in [Backend
+  Connectors](docs/reference.md#backend-connectors). A read-only `GH_TOKEN` no
+  longer suffices for a github run.
+- **A GitHub App installation token now covers the Connector too.** A token
+  rotated through `--gh-token-refresh-file` (`GH_TOKEN_REFRESH_FILE`) reaches the
+  next Connector request, where the old Connector token never followed it.
+  `GH_TOKEN_CMD` and the `SECRET_CMD` template supply `GH_TOKEN` as before; the
+  daemon re-runs the command every 30 minutes.
+
 ## The Connector record files are renamed from `primary-*` to `connector-*` (issue #7468)
 
 Every launcher process that routes through a Connector writes a record pair
@@ -322,9 +349,11 @@ native routing.
 
 What changed for a github Consumer:
 
-- **Set `SPINDRIFT_GITHUB_CONNECTOR_TOKEN`.** Every run whose `CODE_FORGE` or
-  `ISSUE_TRACKER` is `github` needs it, where it used to be needed only under
-  `shadow` or `primary`. It must be write-capable: see the permission table in
+- **Set `SPINDRIFT_GITHUB_CONNECTOR_TOKEN`** (superseded: issue #7499 removed it
+  in favour of `GH_TOKEN`, see the first entry above). Every run whose
+  `CODE_FORGE` or `ISSUE_TRACKER` is `github` needs it, where it used to be
+  needed only under `shadow` or `primary`. It must be write-capable: see the
+  permission table in
   [Backend Connectors](docs/reference.md#backend-connectors). Without
   it the run fails.
 - **`MERGE_METHOD=merge` and `squash` are refused at launch.** The Connector

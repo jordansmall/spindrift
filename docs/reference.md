@@ -2912,9 +2912,7 @@ running the shadowed Driver replays anything, and the Box rows file carries the
 flag to `driver-exec`. Only a Driver row can shadow: a backend row (github,
 jira or forgejo) is Connector-only, and evaluation refuses `shadow`,
 `shadowEvery` and `primary` on it (issue #7456; see [Backend
-Connectors](#backend-connectors)). The github Connector's row and its
-`githubConnectorToken` knob (the host-only `SPINDRIFT_GITHUB_CONNECTOR_TOKEN`)
-are registered for every Consumer of the root `spindrift.flakeModules.default`
+Connectors](#backend-connectors)). The github Connector's row is registered for every Consumer of the root `spindrift.flakeModules.default`
 (issue #7139, which reverses #6912's conditional row). A flake with no github
 row, one importing core's module directly, carries no github backend row, fails
 github reads with `ErrNoRoute`, has no such variable, and doctor prints no
@@ -3246,23 +3244,22 @@ read loads a fresh one (issue #7096), in the Connector sandbox, where the dead
 one's session is released. A failed load is retried by the next
 read until three loads have failed in a row, then at most once a minute.
 
-The github Connector reads the credential from the host-only
-`SPINDRIFT_GITHUB_CONNECTOR_TOKEN` (knob `githubConnectorToken`), a static
-token: the Connector host's backend path reads it from the environment per
-request and does not follow `GH_TOKEN_REFRESH_FILE`, so use a token that
-outlives the run (the daemon's own probe re-resolves the command form instead,
-see [Daemon](#daemon)). It can come from a vault like any core secret, through
-`SPINDRIFT_GITHUB_CONNECTOR_TOKEN_CMD` or the `SECRET_CMD` template (see
-[Runtime configuration](#runtime-configuration)); the template applies only
-while github is the active `CODE_FORGE` or `ISSUE_TRACKER`. On dogfood CI, pass
-it to the launcher from the `SPINDRIFT_GITHUB_CONNECTOR_TOKEN` repository secret
-with an `env:` entry on the dispatch step of `agent-dispatch.yml` and the
-research step of `agent-research.yml`; a maintainer adds those entries by hand,
-since an agent's push credential cannot edit workflow files.
+A github run takes one credential, `GH_TOKEN` (issue #7499): the row names
+core's `ghToken` knob as its credential, and the Connector host's backend path
+reads `GH_TOKEN` from the environment at each request. A token that
+`--gh-token-refresh-file` (`GH_TOKEN_REFRESH_FILE`) rotates therefore reaches
+the next Connector request and the next core git op alike (see [GitHub App
+installation token](#github-app-installation-token-recommended)). It can come
+from a vault like any core secret, through `GH_TOKEN_CMD` or the `SECRET_CMD`
+template (see [Runtime configuration](#runtime-configuration)); the template
+applies only while github is the active `CODE_FORGE` or `ISSUE_TRACKER`. The
+launcher resolves the command once; the daemon re-runs it every 30 minutes (see
+[Daemon](#daemon)). `SPINDRIFT_GITHUB_CONNECTOR_TOKEN` was removed, and setting
+it fails evaluation and launch ([MIGRATING.md](../MIGRATING.md)).
 
-The credential must write, so every github run needs it set: issues, PRs and
-branches through the Connector, and core's own git (push, relay, rebase, mirror
-seed and Ledger push) presents it too. Use a fine-grained personal access
+`GH_TOKEN` must write, so every github run needs it write-capable: issues, PRs
+and branches through the Connector, and core's own git (push, relay, rebase,
+mirror seed and Ledger push) presents it too. Use a fine-grained personal access
 token scoped to the one repository with these repository permissions:
 
 | Permission | Access | Why |
@@ -3288,7 +3285,7 @@ The `connector-write-github` gate checks the credential at startup when
 it is advisory for most credentials. It refuses (config invalid, for launch,
 `doctor` and the daemon's
 doctor preflight) a classic token (`ghp_`, `gho_`) whose scopes lack `repo` or
-`public_repo`, naming `SPINDRIFT_GITHUB_CONNECTOR_TOKEN` and the write the
+`public_repo`, naming `GH_TOKEN` and the write the
 Connector needs, and, as a connectivity failure, a token whose introspection
 itself fails outright. It only warns for the recommended fine-grained PAT,
 which cannot be introspected; for an App installation token (`ghs_`), whose
@@ -3877,11 +3874,12 @@ either file is stale.
   most `outCap` bytes are written at `outPtr`, so a short buffer asks again.
   `Set-Cookie` is never served, and a refused, failed or oversized request
   leaves every name absent. A credential taken from
-  `GH_TOKEN_REFRESH_FILE` through `tokenrefresh.Follow` is re-read on every
-  request, so the first request after a rotation carries the new token and none
-  is dropped; every rotation must replace the file by rename, as
-  `gh-token-refresher` does. No CLI flag wires `LoadNetwork`'s credential to
-  that file yet. A backend Connector row declares its Route table under
+  `GH_TOKEN_REFRESH_FILE` reaches a request through `GH_TOKEN`: the launcher
+  and the daemon poll the file (`tokenrefresh.WatchGHToken`) and the github row
+  reads `GH_TOKEN` on every request, so the first request after a rotation
+  carries the new token and none is dropped; every rotation must replace the
+  file by rename, as `gh-token-refresher` does. A backend Connector row
+  declares its Route table under
   `backend` ([Backend rows on a Connector](#backend-rows-on-a-connector)),
   checked at evaluation with the same path rules; a tracker or forge Connector
   declares its own with the `routes` option (see **Route table** under
@@ -4493,15 +4491,16 @@ the command string itself (which reveals a vault item name, not the
 secret) may appear in host-side logs. The plaintext direct-value and
 `--<secret>-file` forms remain fully supported and are not deprecated;
 with this in place, `harness.env` is expected to hold fetch recipes
-rather than live credentials. A Connector backend row's host-only
-credential (`SPINDRIFT_GITHUB_CONNECTOR_TOKEN`,
-`SPINDRIFT_FORGEJO_CONNECTOR_TOKEN`, `SPINDRIFT_JIRA_CONNECTOR_TOKEN`) resolves
+rather than live credentials. The github row's credential is core's `GH_TOKEN`
+and resolves through `GH_TOKEN_CMD` (`--gh-token-cmd`) as any core secret does.
+A forgejo or jira Connector row's host-only credential
+(`SPINDRIFT_FORGEJO_CONNECTOR_TOKEN`, `SPINDRIFT_JIRA_CONNECTOR_TOKEN`) resolves
 the same way: `<ENV>_CMD`, then
 the plain env var, then the `SECRET_CMD` template. The template applies
 only to a row this run reads through: its backend is the active
 `CODE_FORGE` or `ISSUE_TRACKER`. An explicit `<ENV>_CMD` runs regardless. The
 jira row's paired identity env, `SPINDRIFT_JIRA_CONNECTOR_EMAIL`, gets no `_CMD` or
-template resolution. The token has no `--<secret>-cmd` or `--<secret>-file`
+template resolution. Those two tokens have no `--<secret>-cmd` or `--<secret>-file`
 flag, and a failing command or template fails startup naming the env var,
 not the command. See `spindrift --help --all` for the full
 `--<secret>-cmd`/`--<secret>-file` flag list. When the launcher's own stdin
@@ -4565,7 +4564,7 @@ When a vault's naming isn't uniform, fall back to the per-secret
 | ------------------------- | ---------------------- | ---------------------------------------- |
 | `REPO_SLUG`               | — (required unless `CODE_FORGE` and `ISSUE_TRACKER` are both `local` and no `ISSUE_ROUTE` is set; baked via `forge.repoSlug`) | target repo, `owner/repo` |
 | `GH_TOKEN`                | — (required unless `CODE_FORGE` is `local` or `forgejo`, and `ISSUE_TRACKER` is not `github`) | GitHub token the Launcher uses on the host; never reaches the Box (secret; env only) |
-| `GH_TOKEN_REFRESH_FILE`   | — (baked via `forge.ghTokenRefreshFile`) | path the launcher polls to keep `GH_TOKEN` current past an installation token's ~1h lifetime; a Connector host credential built with `tokenrefresh.Follow` re-reads it per request, though no CLI flag wires that yet ([Network Connectors](#connector-protocol)) — see [GitHub App installation token](#github-app-installation-token-recommended) |
+| `GH_TOKEN_REFRESH_FILE`   | — (baked via `forge.ghTokenRefreshFile`) | path the launcher polls to keep `GH_TOKEN` current past an installation token's ~1h lifetime; the github row reads `GH_TOKEN` per request, so a rotation reaches Connector requests ([Network Connectors](#connector-protocol)) — see [GitHub App installation token](#github-app-installation-token-recommended) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | — (one auth required)  | from `claude setup-token` (secret; env only) |
 | `ANTHROPIC_API_KEY`       | —                      | alternative to the OAuth token (secret; env only) |
 | `GIT_USER_NAME`           | host `git config`; baked via `git.user.name` | commit author name (applied repo-locally inside the Box — see [Hermetic git config](#hermetic-git-config); the `github` Code Forge's host-side Rebase also pins it on its throwaway clone) |
@@ -8579,13 +8578,16 @@ memory and a runner-temp file removed when the job ends; only the resulting
 The launcher's `--gh-token-refresh-file` flag (`GH_TOKEN_REFRESH_FILE` knob)
 points at that file: once set, `bootstrap` starts a background poll
 (`cmd/launcher/internal/tokenrefresh`) that re-reads it every 60s for the rest
-of the process and swaps any new value into `GH_TOKEN`, so the terminal gh
-calls (merge, label edits, the final comment) draw on whatever the refresher
-most recently minted rather than the token captured at job start. The knob is
+of the process (`tokenrefresh.WatchGHToken`) and swaps any new value into
+`GH_TOKEN`. The Connector reads `GH_TOKEN` at each request and core reads it at
+each git op (push, relay, rebase, merge, mirror seed, Ledger push), so all of
+them, and the terminal gh calls (merge, label edits, the final comment), draw on
+whatever the refresher most recently minted rather than the token captured at
+job start. The knob is
 optional and off by default — an unset `GH_TOKEN_REFRESH_FILE` leaves `GH_TOKEN`
 static for the whole run, as before (the fine-grained-PAT path, and any
 deployment that doesn't wire up a refresher, are unaffected). Only the
-launcher polls the file: `agent-setup` freezes the initial token into
+launcher and the daemon poll the file: `agent-setup` freezes the initial token into
 `GH_TOKEN` for every later step, so the workflows' own shell `gh` steps after
 the launcher (the dispatch blocked-release, the recover park) re-read
 `$GH_APP_TOKEN_FILE` before calling `gh` (issue #5259).
@@ -11870,12 +11872,12 @@ count a child has already consumed, a probe that counted work followed by a chil
 exiting 2 makes the next probe of that kind skip the cache and read fresh.
 
 When `ISSUE_TRACKER` is a Connector-routed backend (github today), the
-probe reads through that Connector, so the daemon
-resolves the row's host-only credential
-(`SPINDRIFT_GITHUB_CONNECTOR_TOKEN`) at start-up into its own environment,
-`<ENV>_CMD` ahead of the plain variable, and the `SECRET_CMD` template (read
-from the daemon's environment) when neither is set, as in the launcher. It
-does so only when an enabled kind probes the tracker; a row for another
+probe reads through that Connector, so the daemon resolves the row's
+credential at start-up into its own environment, `<ENV>_CMD` ahead of the plain
+variable, and the `SECRET_CMD` template (read from the daemon's environment)
+when neither is set, as in the launcher. For github the credential is
+`GH_TOKEN` (`GH_TOKEN_CMD`), the one the `gh` probe above already uses. It does
+so only when an enabled kind probes the tracker; a row for another
 backend never runs its command. With no source set, or a command
 that fails, the daemon refuses to start, naming the variable, its `_CMD` form,
 and `SECRET_CMD`. A command-sourced credential is re-resolved every 30
@@ -11883,8 +11885,11 @@ minutes, and a failed refresh keeps the previous value and logs a line naming
 the variable. That keeps a GitHub App installation token inside its hour only
 if the command mints a fresh token per call: a command that reads a cached
 token, such as a file a refresher rewrites every 45 minutes, can hand over one
-already 45 minutes old. A plain variable is read per request and never
-refreshed, so the operator owns its lifetime.
+already 45 minutes old; `GH_TOKEN_REFRESH_FILE` is the better source for
+github. Configure one source: a daemon given both `GH_TOKEN_CMD` and
+`GH_TOKEN_REFRESH_FILE` has two independent writers of `GH_TOKEN`, and
+whichever wrote last wins. A plain variable is read per request and never
+refreshed (bar the github `GH_TOKEN` refresh file), so the operator owns its lifetime.
 
 The Jira probe reads a count without fetching any issue, and its mode
 follows `JIRA_EMAIL`. With an email set (Basic auth, Jira Cloud) it is one

@@ -614,10 +614,11 @@ pushes back, and the summary says so, which makes the run not clean. The
 credential is a static token, `SPINDRIFT_GITHUB_CONNECTOR_TOKEN`, for now: the
 backend row's `Authorize` reads the environment at each request, and nothing
 yet wires a `GH_TOKEN_REFRESH_FILE` follower into `backendrows.Load` (the
-network host can follow one, and `network_rotate_test.go` covers it). The
-cut-over bar is the same 20 consecutive clean runs, counted over the
-`shadow-github-*.log` records; the reference's Shadow mode section has the
-recipe and what counts as clean.
+network host can follow one, and `network_rotate_test.go` covers it).
+(Amended by issue #7499, see the amendment below: github reads `GH_TOKEN`,
+which the refresh file reaches.) The cut-over bar is the same 20 consecutive
+clean runs, counted over the `shadow-github-*.log` records; the reference's
+Shadow mode section has the recipe and what counts as clean.
 
 ## Amendment (issue #6893): a Route may follow one redirect
 
@@ -1295,9 +1296,10 @@ a `GH_HOST` other than `github.com` the row is dropped, because the
 Connector's Routes pin `api.github.com`; quickstart applies the same rule.
 
 Every run whose `CODE_FORGE` or `ISSUE_TRACKER` is github now needs
-`SPINDRIFT_GITHUB_CONNECTOR_TOKEN`, write-capable under the #7209 amendment,
-and a non-shadow github row refuses `MERGE_METHOD=merge` and `squash` at
-launch, since the Connector merges by rebase only.
+`SPINDRIFT_GITHUB_CONNECTOR_TOKEN` (amended by issue #7499, see the amendment
+below: `GH_TOKEN`), write-capable under the #7209 amendment, and a non-shadow
+github row refuses `MERGE_METHOD=merge` and `squash` at launch, since the
+Connector merges by rebase only.
 
 ## Amendment (issue #6811): the native github read path is deleted
 
@@ -1473,8 +1475,9 @@ path still held those. No native path is left, the Connector never holds the
 credential, and core's git already presents the same one. Each backend takes
 one credential named after the backend (`GH_TOKEN`, `FORGEJO_TOKEN`, and plain
 jira names), read at the moment of use so a refreshed token is never captured
-stale. The old names are removed knobs. This supersedes the #6868 and #7122
-amendments' two-token wording and makes "App refresh is honoured" true.
+stale. The old names are removed knobs (github's landed under #7499, below).
+This supersedes the #6868 and #7122 amendments' two-token wording and makes
+"App refresh is honoured" true.
 
 **The backend name is the Connector.** When a Consumer can select a third-party
 Connector (#7424), `ISSUE_TRACKER=<name>` names that Connector; a first-party
@@ -1537,3 +1540,16 @@ that also owns the rows, sandboxes and credentials and replaces the
 process-wide registries in stages. The SDK gains small helpers and a fake host
 that applies the admit rule; a general-purpose client was rejected as a
 published surface too large to keep stable.
+
+## Amendment (issue #7499): github's credential is core's `GH_TOKEN`
+
+The github row names core's `GH_TOKEN` knob (`ghToken`) as its credential, and
+the github Connector module declares no knob of its own. A backend row may name
+only its own backend's core token this way (`lib/connector-names.nix`); any
+other core knob is still refused. The host reads `GH_TOKEN` at each Connector
+request and core at each git op, so a token refreshed through
+`GH_TOKEN_REFRESH_FILE` reaches both. `SPINDRIFT_GITHUB_CONNECTOR_TOKEN` is
+removed: setting it fails evaluation and launch. This supersedes the github
+parts of the earlier wording above that names that variable and calls the
+credential static. See [the
+reference](../reference.md#the-github-connector).
