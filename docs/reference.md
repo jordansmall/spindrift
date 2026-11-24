@@ -65,6 +65,15 @@ sandbox](#connector-sandbox)); the sweep never changes its verdict.
   offer below still run (issue #2798).
 - `recoverable-issues`, required: counts the issues wearing the recoverable
   state label and names `spindrift recover <issue>` as the way to land each.
+- `repo-name`, advisory: warns when the code forge's canonical repository
+  name (GitHub `nameWithOwner`, Forgejo `full_name`) differs from
+  `REPO_SLUG`, such as after a rename. The comparison is case-sensitive, as
+  git's path match is, so a case-only difference warns. The remedy names
+  `REPO_SLUG` / `--repo-slug` / `forge.repoSlug`. The code forge is the
+  source because the scoped git credential belongs to it; a tracker probe
+  may echo the configured name, and Jira has no slug. Skipped for push-only
+  forges (`CODE_FORGE=git`, `local`), whose probe answers no repo slug
+  (issue #7467).
 - `recover kind`, always ok: reports whether the daemon's recover kind is on
   (`CODE_FORGE` github or forgejo with a read-only Box, which relays the
   outbox bundle) or off, and when off, the `CODE_FORGE` and
