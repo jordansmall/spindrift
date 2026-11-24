@@ -505,8 +505,14 @@ func comments(t tracker.Target, key string) ([]tracker.Comment, error) {
 	}
 	out := make([]tracker.Comment, len(payload.Comments))
 	for i, c := range payload.Comments {
+		author := c.Author.DisplayName
+		if author == "" {
+			// Server/Data Center allows anonymous comments; core refuses an
+			// empty author, and "Anonymous" is what Jira's own UI shows.
+			author = "Anonymous"
+		}
 		out[i] = tracker.Comment{
-			Author:    c.Author.DisplayName,
+			Author:    author,
 			CreatedAt: rfc3339(c.Created),
 			Body:      c.Body,
 			ResearchMarker: slices.ContainsFunc(c.Properties, func(p property) bool {
