@@ -16,6 +16,7 @@ import (
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
+	"spindrift.dev/launcher/internal/gitexec/gitexectest"
 	"spindrift.dev/launcher/internal/ledger"
 )
 
@@ -495,4 +496,38 @@ func TestRoutedRow_PlainRebaseIsRefused(t *testing.T) {
 	if n := calls(); n != 0 {
 		t.Errorf("gh ran %d times", n)
 	}
+}
+
+// Core's git reaches the repository at the exact clone URL over HTTPS with no
+// insteadOf rewrite, so the credential must be scoped to that URL to be sent.
+func TestRoutedRow_SeedMirrorAuthenticatesAtTheCloneURL(t *testing.T) {
+	h, _, _, _ := routedLogHarness(t, useGithubRowAt)
+	git := h.backend.serveGitOverHTTPS(t)
+	dir := filepath.Join(t.TempDir(), "mirror")
+
+	if err := routedGitClient().SeedMirror(dir); err != nil {
+		t.Fatalf("SeedMirror: %v", err)
+	}
+
+	if got, want := forgetest.RevParse(t, dir, "main"), forgetest.RevParse(t, h.backend.repo.Bare, "main"); got != want {
+		t.Errorf("mirror main = %s, want %s", got, want)
+	}
+	gitexectest.RequireAuthOnlyUnder(t, git.Requests(), "/"+connectorRepo+".git/")
+}
+
+func TestRoutedRow_RebasePRHeadAuthenticatesAtTheCloneURL(t *testing.T) {
+	h, _, _, _ := routedLogHarness(t, useGithubRowAt)
+	git := h.backend.serveGitOverHTTPS(t)
+	url := h.SeedLandablePR("21")
+	h.backend.repo.AdvanceBase()
+	branch := forge.AgentBranchName(h.BranchPrefix(), "21")
+
+	if err := routedGitClient().RebasePRHead(url, branch); err != nil {
+		t.Fatalf("RebasePRHead: %v", err)
+	}
+
+	if !h.backend.repo.Rebased(branch) {
+		t.Error("the PR branch does not contain the advanced base")
+	}
+	gitexectest.RequireAuthOnlyUnder(t, git.Requests(), "/"+connectorRepo+".git/")
 }

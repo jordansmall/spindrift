@@ -27,6 +27,7 @@ import (
 	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/forge/git"
 	"spindrift.dev/launcher/internal/gitexec"
+	"spindrift.dev/launcher/internal/gitexec/gitexectest"
 	"spindrift.dev/launcher/internal/retry"
 )
 
@@ -144,6 +145,9 @@ type restBackend struct {
 	// clock stamps restIssue.updated; lists records each issues-list read.
 	clock int
 	lists []listRead
+	// gitHandler, when set, answers the repository's clone URL path ahead of the
+	// connector-token gate: git authenticates with core's own credential.
+	gitHandler http.Handler
 }
 
 // listRead is one issues-list request: its query, the If-None-Match it
@@ -186,6 +190,13 @@ func (b *restBackend) hitCount() int {
 }
 
 func (b *restBackend) serve(w http.ResponseWriter, r *http.Request) {
+	b.mu.Lock()
+	git := b.gitHandler
+	b.mu.Unlock()
+	if git != nil && strings.HasPrefix(r.URL.Path, "/"+connectorRepo+".git/") {
+		git.ServeHTTP(w, r)
+		return
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.hits++
@@ -1184,4 +1195,18 @@ func (b *restBackend) commentsQuery(w http.ResponseWriter, repo string, num int,
 
 func (h *connectorHarness) SeedComments(num string, comments []forge.Comment) {
 	h.mutate(num, func(i *restIssue) { i.thread = slices.Clone(comments) })
+}
+
+// serveGitOverHTTPS serves the bare repo's git from the backend's own TLS server
+// at the exact clone URL, gated on core's credential, and drops the insteadOf
+// rewrite. Core's git then authenticates the way it does against a real forge,
+// so a credential scoped to any URL but the one git uses fails.
+func (b *restBackend) serveGitOverHTTPS(t *testing.T) *gitexectest.AuthHandler {
+	t.Helper()
+	h := gitexectest.ServeTLS(t, b.Server, connectorRepo+".git", b.repo.Bare, "x-access-token", connectorToken)
+	b.mu.Lock()
+	b.gitHandler = h
+	b.mu.Unlock()
+	t.Setenv("GIT_CONFIG_COUNT", "0")
+	return h
 }
