@@ -59,7 +59,7 @@ func TestInstallConnectorSandbox_DemandTrackerLoadGoesToTheSandbox(t *testing.T)
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal([]backendrows.Row{{
-		Name: "github", Module: module, CredentialEnv: connectorTokenEnv,
+		Name: "github", Module: module, CredentialEnv: ghTokenEnv,
 		Routes: []connectorhost.Route{{Method: "GET", Host: "api.github.com", Path: "/repos/{repo}/issues"}},
 	}})
 	if err != nil {
@@ -69,7 +69,7 @@ func TestInstallConnectorSandbox_DemandTrackerLoadGoesToTheSandbox(t *testing.T)
 		t.Fatal(err)
 	}
 	doc := refusingDocT(t, map[string]string{"ISSUE_TRACKER": "github", "REPO_SLUG": "o/r", "LABEL": "ready-for-agent"})
-	t.Setenv(connectorTokenEnv, "tok")
+	t.Setenv(ghTokenEnv, "tok")
 
 	defer installConnectorSandbox(doc, t.TempDir())()
 	sources, missing := buildDemandSources(doc, workKinds)

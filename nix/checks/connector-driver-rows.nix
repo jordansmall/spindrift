@@ -559,7 +559,7 @@ in
         ${fixtures.runInputDocOf (githubProgramWith [ ])}
         jq -e --slurpfile b ${../../spindrift-connector-routes.json} '
           .backends | length == 1 and (.[0]
-          | .credentialKnob == "githubConnectorToken"
+          | .credentialKnob == "ghToken"
             and (has("primary") | not) and (has("shadow") | not)
             and (.routes | length) > 0
             and .acceptedRoutes == $b[0].github)' "$doc"

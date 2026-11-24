@@ -1013,7 +1013,9 @@ func renderHarnessEnv(a answers) string {
 		out += backendHeader("", c.name) + "\n"
 		tokenEnv := harnessEnvTokenEnvVar(c.name)
 		for _, s := range stanza.Secrets {
-			if s.Env == stanza.Credential {
+			// A credential that is the backend's own token has no separate
+			// token to swap in, so the note would mislead.
+			if own := ownCredential(c.name, stanza); own != "" && s.Env == own {
 				out += connectorCredentialNote
 			}
 			value := ""
@@ -1042,6 +1044,16 @@ func harnessEnvTokenEnvVar(backendName string) string {
 		return desc.TokenEnvVar
 	}
 	return ""
+}
+
+// ownCredential is the Connector credential env var that backend name's stanza
+// names as a secret of its own, or "" when the backend has none or its
+// credential is the backend's core token.
+func ownCredential(name string, stanza consumerStanza) string {
+	if stanza.Credential == harnessEnvTokenEnvVar(name) {
+		return ""
+	}
+	return stanza.Credential
 }
 
 // harnessEnvSecretLine renders one secret's stanza: the <NAME>_CMD

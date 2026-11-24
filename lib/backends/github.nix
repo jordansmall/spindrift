@@ -13,7 +13,7 @@
   connectorOnly = true;
   tokenEnvVar = "GH_TOKEN";
   consumerStanza = {
-    connectorKnobs = [ "githubConnectorToken" ];
+    connectorKnobs = [ ];
     flakeInput = null;
     moduleImport = null;
   };

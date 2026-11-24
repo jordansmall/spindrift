@@ -153,19 +153,16 @@ in
       ]
     ) "consumer-stanzas: only the core backends without a token (git, local) may list no secret";
     assert assertMsg (
-      secretEnvs (builtins.head real) == [
-        "GH_TOKEN"
-        "SPINDRIFT_GITHUB_CONNECTOR_TOKEN"
-      ]
-    ) "consumer-stanzas: github lists its row token, then its Connector's credential";
+      secretEnvs (builtins.head real) == [ "GH_TOKEN" ]
+    ) "consumer-stanzas: github lists its row token alone, which is its Connector's credential";
     assert assertMsg
       (
-        (builtins.head real).credential == "SPINDRIFT_GITHUB_CONNECTOR_TOKEN"
+        (builtins.head real).credential == "GH_TOKEN"
         && builtins.all (p: (p.fst.credential == null) == (p.snd.core or false)) (
           pkgs.lib.zipLists real registry
         )
       )
-      "consumer-stanzas: github's credential is its Connector token, and only a core backend (no Connector) has none";
+      "consumer-stanzas: github's credential is its core token, and only a core backend (no Connector) has none";
     assert assertMsg (builtins.all (
       s: builtins.all (k: k.flakeOption or false) (builtins.attrValues s.settings)
     ) real) "consumer-stanzas: settings must hold only flakeOption knobs";
@@ -200,7 +197,6 @@ in
         pairingOwned == [
           "GH_TOKEN"
           "JIRA_TOKEN"
-          "SPINDRIFT_GITHUB_CONNECTOR_TOKEN"
           "SPINDRIFT_JIRA_CONNECTOR_EMAIL"
           "SPINDRIFT_JIRA_CONNECTOR_TOKEN"
         ]

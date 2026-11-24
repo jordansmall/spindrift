@@ -14,15 +14,16 @@ import (
 	"spindrift.dev/launcher/internal/exitcode"
 )
 
-const connectorWriteTokenEnv = "SPINDRIFT_GITHUB_CONNECTOR_TOKEN"
+// ghTokenEnv is the github row's one credential: core's own GH_TOKEN.
+const ghTokenEnv = "GH_TOKEN"
 
 // useGithubConnectorRow applies a github row
-// with the connector token set, and swaps the github token hook for f.
+// with GH_TOKEN set, and swaps the github token hook for f.
 func useGithubConnectorRow(t *testing.T, f backendkit.TokenIntrospector) {
 	t.Helper()
-	row := backendrows.Row{Name: "github", Module: "/x/github.wasm", CredentialEnv: connectorWriteTokenEnv, Routes: []connectorhost.Route{fixtureGetRepos}}
+	row := backendrows.Row{Name: "github", Module: "/x/github.wasm", CredentialEnv: ghTokenEnv, Routes: []connectorhost.Route{fixtureGetRepos}}
 	useConnectorRows(t, row)
-	t.Setenv(connectorWriteTokenEnv, "connector-token")
+	t.Setenv(ghTokenEnv, "connector-token")
 	swapIntrospector(t, "github", f)
 }
 
@@ -50,7 +51,7 @@ func TestConnectorWriteGate_RefusesAReadOnlyCredential(t *testing.T) {
 	if !errors.Is(err, errLaunchGateConfigInvalid) {
 		t.Fatalf("err = %v, want errLaunchGateConfigInvalid", err)
 	}
-	for _, want := range []string{connectorWriteTokenEnv, "owner/repo", "Issues", "Pull requests", "Contents"} {
+	for _, want := range []string{ghTokenEnv, "owner/repo", "Issues", "Pull requests", "Contents"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("err = %q, want it to name %q", err, want)
 		}
@@ -105,7 +106,7 @@ func TestConnectorWriteGate_OneSideRefusesAReadOnlyCredential(t *testing.T) {
 			if !errors.Is(err, errLaunchGateConfigInvalid) {
 				t.Fatalf("err = %v, want errLaunchGateConfigInvalid", err)
 			}
-			for _, want := range append([]string{connectorWriteTokenEnv}, tc.want...) {
+			for _, want := range append([]string{ghTokenEnv}, tc.want...) {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("err = %q, want it to name %q", err, want)
 				}
@@ -139,7 +140,7 @@ func TestConnectorWriteGate_PRSideOnlyInstallationTokenWarns(t *testing.T) {
 		t.Error("introspector called for an installation token, want it skipped")
 		return backendkit.TokenIntrospection{}, nil
 	})
-	t.Setenv(connectorWriteTokenEnv, "ghs_installationtoken")
+	t.Setenv(ghTokenEnv, "ghs_installationtoken")
 	out, err := walkConnectorWriteGate(prSideOnlyConfig(), walkEnforce)
 	if err != nil {
 		t.Fatalf("err = %v, want nil", err)
@@ -167,7 +168,7 @@ func TestConnectorWriteGate_UndeterminableWarns(t *testing.T) {
 			if err != nil {
 				t.Fatalf("err = %v, want nil: undeterminable scopes warn", err)
 			}
-			for _, want := range []string{"WARNING:", connectorWriteTokenEnv, tc.want} {
+			for _, want := range []string{"WARNING:", ghTokenEnv, tc.want} {
 				if !strings.Contains(out, want) {
 					t.Errorf("output = %q, want %q", out, want)
 				}
@@ -194,8 +195,8 @@ func TestConnectorWriteGate_IntrospectionFailureIsConnectivity(t *testing.T) {
 		return backendkit.TokenIntrospection{}, errors.New("boom")
 	})
 	_, err := walkConnectorWriteGate(minimalValidConfig(), walkEnforce)
-	if !errors.Is(err, doctor.ErrConnectivity) || !strings.Contains(err.Error(), connectorWriteTokenEnv) {
-		t.Fatalf("err = %v, want a connectivity error naming %s", err, connectorWriteTokenEnv)
+	if !errors.Is(err, doctor.ErrConnectivity) || !strings.Contains(err.Error(), ghTokenEnv) {
+		t.Fatalf("err = %v, want a connectivity error naming %s", err, ghTokenEnv)
 	}
 }
 
@@ -239,7 +240,7 @@ func TestConnectorWriteGate_InstallationTokenWarnsWithoutIntrospecting(t *testin
 		called = true
 		return backendkit.TokenIntrospection{Introspectable: true, WriteCapable: false}, nil
 	})
-	t.Setenv(connectorWriteTokenEnv, "ghs_installationtoken")
+	t.Setenv(ghTokenEnv, "ghs_installationtoken")
 	out, err := walkConnectorWriteGate(minimalValidConfig(), walkEnforce)
 	if err != nil {
 		t.Fatalf("err = %v, want nil: an installation token's Issues permission is undeterminable", err)
@@ -247,7 +248,7 @@ func TestConnectorWriteGate_InstallationTokenWarnsWithoutIntrospecting(t *testin
 	if called {
 		t.Error("introspector called for an installation token, want it skipped")
 	}
-	for _, want := range []string{"WARNING:", connectorWriteTokenEnv, "Contents", "Issues", "Pull requests"} {
+	for _, want := range []string{"WARNING:", ghTokenEnv, "Contents", "Issues", "Pull requests"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output = %q, want %q", out, want)
 		}
@@ -260,12 +261,12 @@ func TestConnectorWriteGate_UnsetCredentialWarns(t *testing.T) {
 		called = true
 		return backendkit.TokenIntrospection{}, nil
 	})
-	t.Setenv(connectorWriteTokenEnv, "")
+	t.Setenv(ghTokenEnv, "")
 	out, err := walkConnectorWriteGate(minimalValidConfig(), walkEnforce)
 	if err != nil || called {
 		t.Fatalf("err = %v, called = %v, want a warning only", err, called)
 	}
-	for _, want := range []string{"WARNING:", connectorWriteTokenEnv, "not set", "Issues", "Pull requests", "Contents", "Checks", "Commit statuses"} {
+	for _, want := range []string{"WARNING:", ghTokenEnv, "not set", "Issues", "Pull requests", "Contents", "Checks", "Commit statuses"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output = %q, want %q", out, want)
 		}
@@ -305,7 +306,7 @@ func TestConnectorWriteGate_DoctorReportsWriteCapability(t *testing.T) {
 // Routes pin api.github.com), so the write gate does not apply and the
 // connector credential is not needed this run.
 func TestConnectorWriteGate_GitHubEnterpriseHostAppliesNoRow(t *testing.T) {
-	row := backendrows.Row{Name: "github", Module: "/x/github.wasm", CredentialEnv: connectorWriteTokenEnv, Routes: []connectorhost.Route{fixtureGetRepos}}
+	row := backendrows.Row{Name: "github", Module: "/x/github.wasm", CredentialEnv: ghTokenEnv, Routes: []connectorhost.Route{fixtureGetRepos}}
 	ghe := func(k string) string {
 		if k == "GH_HOST" {
 			return "ghe.example.com"

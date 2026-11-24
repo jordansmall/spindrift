@@ -133,8 +133,8 @@ let
     backendRows.github = {
       module = p: "${githubConnector.package p}/github.wasm";
       inherit (githubConnector) routes;
-      credentialEnv = "SPINDRIFT_GITHUB_CONNECTOR_TOKEN";
-      credentialKnob = "githubConnectorToken";
+      credentialEnv = "GH_TOKEN";
+      credentialKnob = "ghToken";
       acceptedRoutes = (builtins.fromJSON (builtins.readFile ../spindrift-connector-routes.json)).github;
     };
     # The Connector is the tracker and Code Forge.

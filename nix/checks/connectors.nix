@@ -174,16 +174,17 @@ in
     ) "the github Connector's row must carry the Route table in connectors/github/routes.nix";
     pkgs.runCommand "connectors-github-contributes-routes" { } "touch $out";
 
-  # Issue #7139: the github Connector registers its row and token knob
-  # unconditionally, so every Consumer that imports it has them.
+  # Issue #7139: the github Connector registers its row unconditionally, so
+  # every Consumer that imports it has the row, whose credential is core's
+  # GH_TOKEN knob; the Connector declares no token knob of its own.
   connectors-github-row-unconditional =
     assert assertMsg (
-      (configOf withGithub).envSchema ? githubConnectorToken
-    ) "the env schema must carry githubConnectorToken";
+      (configOf withGithub).connectors.github.backend.credential == "ghToken"
+    ) "the github row must carry its backend, naming core's ghToken as its credential";
     assert assertMsg (
-      (configOf withGithub).connectors.github.knobs ? githubConnectorToken
-      && (configOf withGithub).connectors.github.backend != null
-    ) "the github row must carry the githubConnectorToken knob and its backend";
+      !((configOf withGithub).envSchema ? githubConnectorToken)
+      && !((configOf withGithub).connectors.github.knobs ? githubConnectorToken)
+    ) "the github Connector must declare no token knob of its own";
     pkgs.runCommand "connectors-github-row-unconditional" { } "touch $out";
 
   # Issue #7456: github, jira and forgejo are Connector-only, so a backend row
