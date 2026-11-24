@@ -81,7 +81,13 @@ func classedCall(c *connectorhost.Connector, clock retry.Clock) guestCall {
 // runs in core's own plumbing against the Connector's clone URL.
 type pushOnly struct {
 	conn hostPolicy
+	// raw is the guest call after retries and classification, which Git.Note
+	// wraps; call is raw followed by the method's result check.
+	raw  guestCall
 	call guestCall
+	// rd is the PR reads' state, which the result checks of prShape and its
+	// kin read; composePR pins its web host.
+	rd *reads
 	// clock paces the recheck of a conflicting merge.
 	clock  retry.Clock
 	target Target
@@ -122,8 +128,8 @@ func Compose(c *connectorhost.Connector, target Target, g Git) (forge.CodeForge,
 		return nil, forge.Capabilities{}, err
 	}
 	if g.Note != nil {
-		raw := p.call
-		p.call = func(ctx context.Context, method string, params, result any) error {
+		raw := p.raw
+		p.raw = func(ctx context.Context, method string, params, result any) error {
 			err := raw(ctx, method, params, result)
 			if err != nil {
 				g.Note(method, err)
@@ -153,11 +159,6 @@ func (p *pushOnly) remote() (wireRemote, error) {
 	}{p.target}
 	if err := p.call(context.Background(), "forge.remote", params, &r); err != nil {
 		return wireRemote{}, err
-	}
-	for _, field := range []struct{ name, raw string }{{"clone URL", r.CloneURL}, {"web URL", r.WebURL}} {
-		if err := p.checkURL(field.name, field.raw); err != nil {
-			return wireRemote{}, p.conn.AuditRefusal("forge.remote", err)
-		}
 	}
 	return r, nil
 }
@@ -252,7 +253,18 @@ func (p *pushOnly) pushBranch(srcDir, localRef, branch, base string) error {
 // newPushOnly builds a pushOnly whose clock, a zero one included, sleeps.
 func newPushOnly(c *connectorhost.Connector, target Target, clock retry.Clock) *pushOnly {
 	clock = connectorcall.RealIfZero(clock)
-	return &pushOnly{conn: c, call: classedCall(c, clock), clock: clock, target: target}
+	return pushOnlyOver(c, classedCall(c, clock), clock, target)
+}
+
+// pushOnlyOver is newPushOnly over a given raw guest call. Each of its calls,
+// and its reads', then runs forgeChecks.
+func pushOnlyOver(conn hostPolicy, raw guestCall, clock retry.Clock, target Target) *pushOnly {
+	p := &pushOnly{conn: conn, raw: raw, clock: clock, target: target, rd: &reads{target: target}}
+	p.call = connectorcall.Checked(func(ctx context.Context, method string, params, result any) error {
+		return p.raw(ctx, method, params, result)
+	}, forgeChecks(p))
+	p.rd.call = p.call
+	return p
 }
 
 // hostPolicy is the part of *connectorhost.Connector core's own refusals read:

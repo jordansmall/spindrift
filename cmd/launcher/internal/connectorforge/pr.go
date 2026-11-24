@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode"
 
+	"spindrift.dev/launcher/internal/connectorcall"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/bundlerelay"
@@ -32,8 +33,9 @@ type prForge struct {
 // advertising caps, pinning PR URLs to webHost. It adds no relay layer: Compose
 // does, since NewReader's forge has no clone to relay into.
 func composePR(p *pushOnly, caps []string, webHost string) forge.CodeForge {
+	p.rd.webHost = webHost
 	f := &prForge{
-		reads:     &reads{call: p.call, target: p.target, webHost: webHost},
+		reads:     p.rd,
 		push:      p,
 		autoMerge: slices.Contains(caps, capAutoMerge),
 		hasProbe:  slices.Contains(caps, capProbe),
@@ -115,13 +117,11 @@ func (f *prForge) checkRun(prURL string) (forge.RollupState, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	var res struct {
-		URL string `json:"url"`
-	}
+	var res wireRunLink
 	if err := f.numbered("forge.ciRun", prURL, &res); err != nil {
 		return "", "", err
 	}
-	return state, f.ownRunLink(res.URL), nil
+	return state, res.URL, nil
 }
 
 func (f *prForge) branchProtected(branch string) (bool, error) {
@@ -184,14 +184,9 @@ func (f *prForge) MergeCommit(prURL string) (string, error) {
 var fullHexCommit = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
 
 func (f *prForge) NeedsUpdate(prURL string) (bool, error) {
-	var res struct {
-		BehindBy int `json:"behindBy"`
-	}
+	var res wireBehind
 	if err := f.numbered("forge.behind", prURL, &res); err != nil {
 		return false, err
-	}
-	if res.BehindBy < 0 {
-		return false, fmt.Errorf("%w: behindBy %d is negative", ErrAnswer, res.BehindBy)
 	}
 	return res.BehindBy > 0, nil
 }
@@ -201,27 +196,11 @@ func (f *prForge) ListPRFiles(prURL string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	var res struct {
-		Files *[]string `json:"files"`
-	}
+	var res wireFiles
 	if err := f.call(context.Background(), "forge.prFiles", numberedParams{f.target, n}, &res); err != nil {
 		return nil, err
 	}
-	// The merge guard reads this list, so an absent, empty or malformed one must
-	// not decode to "no guarded path touched": every PR changes at least a file.
-	if res.Files == nil {
-		return nil, fmt.Errorf("%w: PR %s file list is missing", ErrAnswer, n)
-	}
-	files := *res.Files
-	if len(files) == 0 {
-		return nil, fmt.Errorf("%w: PR %s file list has no entries", ErrAnswer, n)
-	}
-	for _, p := range files {
-		if !cleanRepoPath(p) {
-			return nil, fmt.Errorf("%w: PR %s file list entry %q is not a clean repository-relative path", ErrAnswer, n, p)
-		}
-	}
-	return files, nil
+	return *res.Files, nil
 }
 
 // cleanRepoPath reports whether p is a non-empty, relative path in path.Clean
@@ -389,7 +368,9 @@ func (f *prForge) RebasePRHead(prURL, head string) error {
 
 // createDraftPR opens a draft PR. The Connector has no duplicate class, so when
 // the create fails and head already has an open PR, that one is adopted
-// (created false): a retried hand-off must not fail on its own earlier PR.
+// (created false): a retried hand-off must not fail on its own earlier PR. A
+// refused answer (ErrAnswer) or core bug (connectorcall.ErrCoreBug) is
+// returned, never adopted.
 func (f *prForge) createDraftPR(title, body, base, head string) (string, bool, error) {
 	p := struct {
 		Target Target `json:"target"`
@@ -405,9 +386,9 @@ func (f *prForge) createDraftPR(title, body, base, head string) (string, bool, e
 	var w wirePR
 	err := f.call(context.Background(), "forge.openPR", p, &w)
 	if err == nil {
-		if _, err = f.check(w); err == nil {
-			return w.URL, true, nil
-		}
+		return w.URL, true, nil
+	}
+	if errors.Is(err, ErrAnswer) || errors.Is(err, connectorcall.ErrCoreBug) {
 		return "", false, err
 	}
 	if pr, ok, lookup := f.OpenPRForBranch(head); lookup == nil && ok {

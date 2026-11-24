@@ -33,25 +33,17 @@ func tokenPrefix(token string) string {
 // the token's prefix. It returns ErrNoTokenGrant when c does not declare
 // "forge.tokenGrant".
 func IntrospectToken(c *connectorhost.Connector, t Target, token string) (backendkit.TokenIntrospection, error) {
-	return introspectToken(classedCall(c, retry.Clock{}), c.Capabilities, t, token)
+	return introspectToken(newPushOnly(c, t, retry.Clock{}).call, c.Capabilities, t, token)
 }
 
 func introspectToken(call guestCall, caps []string, t Target, token string) (backendkit.TokenIntrospection, error) {
 	if !slices.Contains(caps, capTokenGrant) {
 		return backendkit.TokenIntrospection{}, ErrNoTokenGrant
 	}
-	p := struct {
-		Target      Target `json:"target"`
-		TokenPrefix string `json:"tokenPrefix"`
-	}{t, tokenPrefix(token)}
 	var g wireGrant
-	if err := call(context.Background(), "forge.tokenGrant", p, &g); err != nil {
+	if err := call(context.Background(), "forge.tokenGrant", tokenGrantParams{t, tokenPrefix(token)}, &g); err != nil {
 		return backendkit.TokenIntrospection{}, err
 	}
-	if err := checkGrant(g); err != nil {
-		return backendkit.TokenIntrospection{}, err
-	}
-	g.Reason = cleanReason(g.Reason)
 	return backendkit.TokenIntrospection(g), nil
 }
 
