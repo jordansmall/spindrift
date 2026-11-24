@@ -196,6 +196,7 @@ in
           ${../../.github/actions/forgejo-issue-close/close-issue.sh} \
           ${../../.github/scripts/ci-changes.sh} \
           ${../../.github/scripts/ci-ok.sh} \
+          ${../../.github/scripts/ci-partition-checks.sh} \
           ${../../.github/scripts/eval-stats-render.sh} \
           ${../../.github/scripts/eval-probe.sh} \
           ${../../nix/gate.sh} \
