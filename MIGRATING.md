@@ -5,13 +5,15 @@
 **A third-party Driver Connector must declare its session flag names on its
 row and answer `SessionFlags` with a `SessionFlag`.** The answer used to be one
 string that driver-exec split on whitespace and appended to the agent's argv.
-It is now `{flag, value}`.
+It is now `{flag, value}`, and core refuses any flag name the row does not
+declare and any value beginning with `-`.
 
 - **Declare `argvShape.sessionFlags`** on the `spindrift.connectors.<name>.driver`
   row: the list of flag names the answer may carry, `[ ]` for none. A row
   without it fails evaluation.
 - **Return `driver.SessionFlag{Flag, Value}`** from the SDK's
-  `Strategy.SessionFlags` instead of a string. The zero value renders nothing.
+  `Strategy.SessionFlags` instead of a string. The zero value renders nothing;
+  a `Value` with no `Flag` is refused.
 
 ```go
 // before

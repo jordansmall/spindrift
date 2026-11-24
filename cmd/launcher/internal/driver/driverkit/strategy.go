@@ -57,7 +57,7 @@ type Strategy struct {
 	// ResultEvent encodes text as one newline-terminated NDJSON event in the
 	// CLI's own grammar, such that Result reads it back.
 	ResultEvent func(text string) ([]byte, error)
-	// SessionFlags renders the CLI's session flags for mode; see
+	// SessionFlags renders the CLI's session flag for mode; see
 	// driver.Driver.SessionFlags, including its error contract.
 	SessionFlags func(mode, repoSlug, issue, home string) (SessionFlag, error)
 	// NewStreamFilter wraps the writer a Pass log is teed to with a filter over the
@@ -68,7 +68,7 @@ type Strategy struct {
 // SessionFlag is the CLI flag that pins or resumes a session and its value.
 // Both are absent when the mode renders nothing, and Value is absent for a
 // bare flag. The two reach the CLI as separate argv words: nothing splits a
-// value on whitespace.
+// value on whitespace. driver.SessionArgs states which answers core refuses.
 type SessionFlag struct {
 	Flag  string `json:"flag,omitempty"`
 	Value string `json:"value,omitempty"`

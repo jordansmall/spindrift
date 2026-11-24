@@ -548,8 +548,12 @@ func (r *boxRun) pass(handoff, driverName, prompt, sessionMode string) (int, err
 	if err != nil {
 		return 0, phaseErr("driver", err)
 	}
+	argv, err := driver.SessionArgs(d.Name(), flags)
+	if err != nil {
+		return 0, phaseErr("driver", err)
+	}
 	sessionArgs := ""
-	if argv := flags.Args(); len(argv) > 0 {
+	if len(argv) > 0 {
 		// A JSON array, not a joined string: driver-exec appends each word as
 		// one argv element, so a value with spaces survives.
 		b, err := json.Marshal(argv)

@@ -11,6 +11,7 @@ import (
 	"maps"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 
 	"spindrift.dev/launcher/internal/driver/driverkit"
@@ -89,12 +90,13 @@ type Driver interface {
 	// to an empty PassLog.
 	Decode(logPath string) (driverkit.PassLog, error)
 
-	// SessionFlags renders the CLI's session flag and its value for mode. "initial" pins the
-	// session, "resume" resumes it (rendering the zero flag when the Driver's session
-	// store lacks it and its CLI cannot create one), and any other mode renders
-	// the zero flag. home is the Box's HOME; a Driver whose store path comes from
-	// elsewhere ignores it. An error means the flags could not be rendered; the
-	// caller must not start the session without them.
+	// SessionFlags renders the CLI's session flag and its value for mode.
+	// "initial" pins the session, "resume" resumes it (rendering the zero
+	// flag when the Driver's session store lacks it and its CLI cannot create
+	// one), and any other mode renders the zero flag. home is the Box's HOME;
+	// a Driver whose store path comes from elsewhere ignores it. An error
+	// means the flag could not be rendered; the caller must not start the
+	// session without it.
 	SessionFlags(mode, repoSlug, issue, home string) (driverkit.SessionFlag, error)
 }
 
@@ -319,9 +321,29 @@ func Names() []string {
 	return names
 }
 
-// SessionFlagDeclared reports whether the named Driver's row declares flag as
-// one its session answer may carry; unknown Drivers declare none.
-func SessionFlagDeclared(name, flag string) bool {
+// SessionArgs renders a Driver's session answer as argv words, refusing any
+// answer its row does not allow: a Value with no Flag, a Flag outside the
+// row's argvShape.sessionFlags, or a Value starting with "-", which the CLI
+// would read as another flag rather than this one's value. The zero answer
+// renders nothing. The Box calls it before starting a session, so a Connector
+// cannot smuggle an arbitrary CLI flag into the agent's argv through the
+// session slot.
+func SessionArgs(name string, f driverkit.SessionFlag) ([]string, error) {
+	if f == (driverkit.SessionFlag{}) {
+		return nil, nil
+	}
+	if f.Flag == "" {
+		return nil, fmt.Errorf("driver %q answered session value %q with no flag", name, f.Value)
+	}
 	d, ok := descriptor(name)
-	return ok && slices.Contains(d.SessionFlags, flag)
+	if !ok {
+		return nil, fmt.Errorf("driver %q has no row declaring session flags; refusing session flag %q", name, f.Flag)
+	}
+	if !slices.Contains(d.SessionFlags, f.Flag) {
+		return nil, fmt.Errorf("driver %q answered session flag %q, which its row's argvShape.sessionFlags does not declare", name, f.Flag)
+	}
+	if strings.HasPrefix(f.Value, "-") {
+		return nil, fmt.Errorf("driver %q answered session flag %q with value %q, which the CLI would read as a flag", name, f.Flag, f.Value)
+	}
+	return f.Args(), nil
 }

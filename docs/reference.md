@@ -1701,8 +1701,10 @@ contract:
   CLI's grammar, such that `Result` reads it back.
 - `SessionFlags` — answers the CLI's session flag and its value for a mode as
   a `SessionFlag{Flag, Value}` (the zero value renders nothing). `Flag` must be
-  a name the row's `argvShape.sessionFlags` declares; the host rejects any
-  other, and passes `Flag` and `Value` to the CLI as two argv words.
+  a name the row's `argvShape.sessionFlags` declares, and `Value` must not
+  begin with `-`; the host rejects any other answer, and passes `Flag` and
+  `Value` to the CLI as two argv words. An error means the flag could not be
+  rendered; the caller must not start the session without it.
 
 Two rules are shared rather than per Driver: a non-empty transcript ends
 with a newline, and per-model usage rows sort by the rank `Family` returns,
@@ -3782,7 +3784,7 @@ description and a regen.
   | `driver.decode` | `{decoder, line}` | an array of canonical events |
   | `driver.freeDecoder` | `{decoder}` | `null` |
   | `driver.resultEvent` | `{text}` | `{event}`, one log line |
-  | `driver.sessionFlags` | `{mode, repoSlug, issue, home}` | `{flag, value}`, each optional; `flag` must be one of the row's `argvShape.sessionFlags` |
+  | `driver.sessionFlags` | `{mode, repoSlug, issue, home}` | `{flag, value}`, each optional; `flag` must be one of the row's `argvShape.sessionFlags`; a `value` beginning with `-` is refused |
   | `driver.resolveExit` (optional) | `{log, exitCode}` | `{exitCode}` |
   | `driver.toolPhase` (optional) | `{tool, input}`, `input` the call's raw JSON | `{phase}` |
   | `driver.toolKind` (optional) | `{tool}` | `{kind}` |

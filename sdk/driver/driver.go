@@ -33,7 +33,8 @@ type StreamFilter interface {
 type Decoder func(line string) []event.Event
 
 // SessionFlag is the CLI flag that pins or resumes a session and its value.
-// Either may be empty: no Flag renders nothing, no Value renders a bare flag.
+// Value may be empty (a bare flag), and the zero SessionFlag renders nothing.
+// Core refuses an answer the Driver's row does not allow.
 type SessionFlag struct {
 	Flag  string `json:"flag,omitempty"`
 	Value string `json:"value,omitempty"`

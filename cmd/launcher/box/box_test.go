@@ -2441,3 +2441,45 @@ func TestRun_SessionFlagsErrorIsDriverPhaseError(t *testing.T) {
 		t.Errorf("orchestrator ran %d times after a SessionFlags failure", orchestrated)
 	}
 }
+
+// The row, not the Connector, decides which flags reach the agent's argv: an
+// answer the row does not declare stops the pass before any session starts.
+func TestRun_RefusedSessionAnswerIsDriverPhaseErrorAndNeverOrchestrates(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		row    *driver.Descriptor
+		answer driverkit.SessionFlag
+		want   string
+	}{
+		{"flag its row does not declare", &driver.Descriptor{Name: "badflag", SessionFlags: []string{"--title"}},
+			driverkit.SessionFlag{Flag: "--settings", Value: "x.json"}, `answered session flag "--settings", which its row's argvShape.sessionFlags does not declare`},
+		{"Driver with no row", nil,
+			driverkit.SessionFlag{Flag: "--settings", Value: "x.json"}, `has no row declaring session flags; refusing session flag "--settings"`},
+		{"value with no flag", nil, driverkit.SessionFlag{Value: "--settings"}, `session value "--settings" with no flag`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			defer driver.Snapshot()()
+			if c.row != nil {
+				driver.UseDescriptor(*c.row)
+			}
+			driver.Register(driverkit.Strategy{
+				Name: "badflag",
+				SessionFlags: func(string, string, string, string) (driverkit.SessionFlag, error) {
+					return c.answer, nil
+				},
+			})
+			f := newFixture(t)
+			f.useDriver("badflag")
+			orchestrated := 0
+			f.d.Orchestrate = func([]string) int { orchestrated++; return 0 }
+			_, err := run(f.in, f.env, f.d)
+			var pe *phaseError
+			if !errors.As(err, &pe) || pe.phase != "driver" || !strings.Contains(err.Error(), `driver "badflag"`) || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("run() error = %v; want a driver phaseError naming badflag and %q", err, c.want)
+			}
+			if orchestrated != 0 {
+				t.Errorf("orchestrator ran %d times after a refused session answer", orchestrated)
+			}
+		})
+	}
+}
