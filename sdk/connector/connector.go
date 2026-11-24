@@ -15,10 +15,6 @@ import (
 	"strconv"
 )
 
-// protocolVersion is a var, not a const, so a test fixture can override it
-// with -ldflags=-X spindrift.dev/sdk/connector.protocolVersion=0.4.0.
-var protocolVersion = "0.3.0"
-
 var capabilities []string
 
 // Register declares capabilities the Connector offers. Call it from init().

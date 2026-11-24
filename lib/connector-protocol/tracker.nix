@@ -8,7 +8,7 @@
 # as the policy's own comment says, though docs/reference.md does not list them
 # among the writes called once. The policy has no OnRetryFailure, so no row has a
 # doneOn.
-{ t }:
+{ t, outcomes }:
 let
   retryable = {
     safe = true;
@@ -164,11 +164,7 @@ in
       mapping = t.map (t.ref "statusTarget");
     })
     (t.open {
-      outcome = t.enum [
-        "moved"
-        "unavailable"
-        "unmapped"
-      ];
+      outcome = t.enum outcomes;
       status = t.string;
       offered = t.optional (t.list t.string);
     })

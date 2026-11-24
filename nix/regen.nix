@@ -41,6 +41,9 @@ let
   connectorProtocolRender = import ../lib/connector-protocol/render.nix;
   connectorProtocolGoFile = connectorProtocolRender.renderGo connectorProtocol;
   connectorProtocolSchemaFile = connectorProtocolRender.renderSchema connectorProtocol;
+  sdkProtocolFiles = connectorProtocolRender.renderSDK connectorProtocol (
+    import ../lib/connector-protocol/sdk.nix
+  );
   choreCatalog = import ../lib/chore-catalog.nix;
   choreBuiltinsFile = renderers.renderChoreBuiltinsGo choreCatalog;
   agentPaths = import ../lib/agent-paths.nix;
@@ -197,6 +200,9 @@ pkgs.writeShellApplication {
     ${writeGenerated "cmd/launcher/internal/connectorprotocol/protocol_gen.go" connectorProtocolGoFile}
     gofmt -w "$root/cmd/launcher/internal/connectorprotocol/protocol_gen.go"
     ${writeGenerated "cmd/launcher/internal/connectorprotocol/protocol.schema.json" connectorProtocolSchemaFile}
+    ${pkgs.lib.concatMapStrings (
+      path: writeGenerated path sdkProtocolFiles.${path} + "\n    gofmt -w \"$root/${path}\"\n"
+    ) (builtins.attrNames sdkProtocolFiles)}
     ${writeGenerated "cmd/launcher/internal/chore/builtins_gen.go" choreBuiltinsFile}
     ${writeGenerated "cmd/launcher/internal/agentpaths/agentpaths_gen.go" agentPathsFile}
     ${writeGenerated "cmd/launcher/internal/runner/families_gen.go" runnerFamiliesFile}

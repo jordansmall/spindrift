@@ -4,28 +4,6 @@ import (
 	"strings"
 )
 
-// The attribution roles core stamps on events. A Driver's decoder uses them to
-// attribute the events it emits.
-const (
-	// ImplementorRole attributes a top-level event in an implement, fix or
-	// land pass.
-	ImplementorRole = "implementor"
-	// ReviewerRole attributes a top-level event in a review or delta-review
-	// pass.
-	ReviewerRole = "reviewer"
-	// DefaultRole attributes an event whose subagent parent is unknown.
-	DefaultRole = "subagent"
-)
-
-// passRoles mirrors core's pass-to-role table; parity_test.go pins it.
-var passRoles = map[string]string{
-	"review":       ReviewerRole,
-	"delta-review": ReviewerRole,
-	"implement":    ImplementorRole,
-	"fix":          ImplementorRole,
-	"land":         ImplementorRole,
-}
-
 // HostLine reports whether line is a host-written spindrift_op line, and, for a
 // pass_start op, the attribution role the pass starts ("" for any other op or
 // a pass with no role). The host passes these lines to a Decoder so its state
@@ -56,7 +34,7 @@ func HostLineOf(v Value) (passRole string, ok bool) {
 			if !m.DecodeString(&typ) {
 				return "", false
 			}
-		case KeyMatches(k, "spindrift_op"):
+		case KeyMatches(k, hostLineType):
 			switch m.Kind() {
 			case Null:
 				hasOp, op, role = false, "", ""
@@ -79,10 +57,10 @@ func HostLineOf(v Value) (passRole string, ok bool) {
 			}
 		}
 	}
-	if typ != "spindrift_op" || !hasOp {
+	if typ != hostLineType || !hasOp {
 		return "", false
 	}
-	if op != "pass_start" {
+	if op != hostLineOpPassStart {
 		return "", true
 	}
 	return passRoles[role], true

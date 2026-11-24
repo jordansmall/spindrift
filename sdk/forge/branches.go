@@ -6,13 +6,6 @@ import (
 	"spindrift.dev/sdk/connector"
 )
 
-// The capability names a forge Connector advertises in its handshake. Core
-// keeps its own copies; a parity test pins them.
-const (
-	CapBranches = "forge.branches"
-	CapPushOnly = "forge.pushOnly"
-)
-
 // Remote is a repository's git identity. CloneURL is what core's git plumbing
 // pushes to and WebURL is the repository's web page. Neither may carry
 // credentials: core refuses one that does, and one naming a host outside the
@@ -70,7 +63,7 @@ func branchHandlers(b Branches) ([]string, map[string]method) {
 		return p.Target, p.Branch, err
 	}
 	m := map[string]method{
-		"forge.remote": func(params json.RawMessage) (any, error) {
+		methodRemote: func(params json.RawMessage) (any, error) {
 			var p struct {
 				Target Target `json:"target"`
 			}
@@ -79,7 +72,7 @@ func branchHandlers(b Branches) ([]string, map[string]method) {
 			}
 			return b.Remote(p.Target)
 		},
-		"forge.branchExists": func(params json.RawMessage) (any, error) {
+		methodBranchExists: func(params json.RawMessage) (any, error) {
 			t, branch, err := branched(params)
 			if err != nil {
 				return nil, err
@@ -92,7 +85,7 @@ func branchHandlers(b Branches) ([]string, map[string]method) {
 				Exists bool `json:"exists"`
 			}{exists}, nil
 		},
-		"forge.deleteBranch": func(params json.RawMessage) (any, error) {
+		methodDeleteBranch: func(params json.RawMessage) (any, error) {
 			t, branch, err := branched(params)
 			if err != nil {
 				return nil, err

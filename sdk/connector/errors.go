@@ -2,31 +2,6 @@ package connector
 
 import "fmt"
 
-// Class is the canonical error class a Connector reports with a failure. Core
-// decides on retries from the class alone, so it must describe the failure and
-// not the primitive that raised it.
-type Class string
-
-const (
-	// Transient is a failure a retry may clear: a timeout, a 5xx, a dropped
-	// connection.
-	Transient Class = "transient"
-	// RateLimited is a refusal for sending too much; core holds on its own
-	// schedule rather than retrying at once.
-	RateLimited Class = "rate-limited"
-	// NotFound is a subject that does not exist.
-	NotFound Class = "not-found"
-	// Auth is a credential the remote refused or that lacks standing.
-	Auth Class = "auth"
-	// NotMergeable is a merge the forge refused because the pull request is not
-	// mergeable as it stands: a conflict, a missing required check or review, or
-	// a draft, closed, or merged state. Core re-reads the PR on this class only.
-	NotMergeable Class = "not-mergeable"
-	// Permanent is every other failure; a retry cannot help. It is the class
-	// of an error that carries none.
-	Permanent Class = "permanent"
-)
-
 // Error is a handler error that carries its Class. Return one, or wrap one
 // with %w, and the response reports its class.
 type Error struct {

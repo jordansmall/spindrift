@@ -6,20 +6,6 @@ import (
 	"spindrift.dev/sdk/connector"
 )
 
-// The capability names of the PR primitives. CapPRs is declared by every
-// PR-capable Connector; the rest are optional and declared only when the
-// Connector sets the funcs behind them. Core keeps its own copies; a parity
-// test pins them.
-const (
-	CapPRs              = "forge.prs"
-	CapAutoMerge        = "forge.autoMerge"
-	CapCIRun            = "forge.ciRun"
-	CapBranchProtection = "forge.branchProtection"
-	CapProbe            = "forge.probe"
-	CapDraftPRs         = "forge.draftPRs"
-	CapTokenGrant       = "forge.tokenGrant"
-)
-
 // NewPR is the pull request a Connector opens. Base is the branch it merges
 // into and Head the branch it merges from.
 type NewPR struct {
@@ -138,7 +124,7 @@ func prHandlers(p PRs) ([]string, map[string]method) {
 		return struct{}{}, nil
 	}
 	m := map[string]method{
-		"forge.behind": func(params json.RawMessage) (any, error) {
+		methodBehind: func(params json.RawMessage) (any, error) {
 			t, n, err := numbered(params)
 			if err != nil {
 				return nil, err
@@ -151,7 +137,7 @@ func prHandlers(p PRs) ([]string, map[string]method) {
 				BehindBy int `json:"behindBy"`
 			}{by}, nil
 		},
-		"forge.prFiles": func(params json.RawMessage) (any, error) {
+		methodPrFiles: func(params json.RawMessage) (any, error) {
 			t, n, err := numbered(params)
 			if err != nil {
 				return nil, err
@@ -167,7 +153,7 @@ func prHandlers(p PRs) ([]string, map[string]method) {
 				Files []string `json:"files"`
 			}{files}, nil
 		},
-		"forge.setDraft": func(params json.RawMessage) (any, error) {
+		methodSetDraft: func(params json.RawMessage) (any, error) {
 			var q struct {
 				Target Target `json:"target"`
 				Number string `json:"number"`
@@ -178,7 +164,7 @@ func prHandlers(p PRs) ([]string, map[string]method) {
 			}
 			return done(p.SetDraft(q.Target, q.Number, q.Draft))
 		},
-		"forge.comment": func(params json.RawMessage) (any, error) {
+		methodComment: func(params json.RawMessage) (any, error) {
 			var q struct {
 				Target Target `json:"target"`
 				Number string `json:"number"`
@@ -189,7 +175,7 @@ func prHandlers(p PRs) ([]string, map[string]method) {
 			}
 			return done(p.Comment(q.Target, q.Number, q.Body))
 		},
-		"forge.merge": func(params json.RawMessage) (any, error) {
+		methodMerge: func(params json.RawMessage) (any, error) {
 			t, n, err := numbered(params)
 			if err != nil {
 				return nil, err
@@ -200,7 +186,7 @@ func prHandlers(p PRs) ([]string, map[string]method) {
 	caps := []string{CapPRs}
 
 	if p.Open != nil {
-		m["forge.openPR"] = func(params json.RawMessage) (any, error) {
+		m[methodOpenPR] = func(params json.RawMessage) (any, error) {
 			var q struct {
 				Target Target `json:"target"`
 				PR     NewPR  `json:"pr"`
@@ -213,7 +199,7 @@ func prHandlers(p PRs) ([]string, map[string]method) {
 		caps = append(caps, CapDraftPRs)
 	}
 	if p.AutoMergeAllowed != nil {
-		m["forge.autoMergeAllowed"] = func(params json.RawMessage) (any, error) {
+		m[methodAutoMergeAllowed] = func(params json.RawMessage) (any, error) {
 			t, err := targeted(params)
 			if err != nil {
 				return nil, err
@@ -226,7 +212,7 @@ func prHandlers(p PRs) ([]string, map[string]method) {
 				Allowed bool `json:"allowed"`
 			}{allowed}, nil
 		}
-		m["forge.enqueueAutoMerge"] = func(params json.RawMessage) (any, error) {
+		m[methodEnqueueAutoMerge] = func(params json.RawMessage) (any, error) {
 			t, n, err := numbered(params)
 			if err != nil {
 				return nil, err
@@ -236,7 +222,7 @@ func prHandlers(p PRs) ([]string, map[string]method) {
 		caps = append(caps, CapAutoMerge)
 	}
 	if p.CIRun != nil {
-		m["forge.ciRun"] = func(params json.RawMessage) (any, error) {
+		m[methodCiRun] = func(params json.RawMessage) (any, error) {
 			t, n, err := numbered(params)
 			if err != nil {
 				return nil, err
@@ -252,7 +238,7 @@ func prHandlers(p PRs) ([]string, map[string]method) {
 		caps = append(caps, CapCIRun)
 	}
 	if p.BranchProtected != nil {
-		m["forge.branchProtected"] = func(params json.RawMessage) (any, error) {
+		m[methodBranchProtected] = func(params json.RawMessage) (any, error) {
 			var q struct {
 				Target Target `json:"target"`
 				Branch string `json:"branch"`
@@ -271,7 +257,7 @@ func prHandlers(p PRs) ([]string, map[string]method) {
 		caps = append(caps, CapBranchProtection)
 	}
 	if p.Probe != nil {
-		m["forge.probe"] = func(params json.RawMessage) (any, error) {
+		m[methodProbe] = func(params json.RawMessage) (any, error) {
 			t, err := targeted(params)
 			if err != nil {
 				return nil, err
@@ -287,7 +273,7 @@ func prHandlers(p PRs) ([]string, map[string]method) {
 		caps = append(caps, CapProbe)
 	}
 	if p.TokenGrant != nil {
-		m["forge.tokenGrant"] = func(params json.RawMessage) (any, error) {
+		m[methodTokenGrant] = func(params json.RawMessage) (any, error) {
 			var q struct {
 				Target      Target `json:"target"`
 				TokenPrefix string `json:"tokenPrefix"`

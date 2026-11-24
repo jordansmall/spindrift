@@ -145,7 +145,7 @@ func classConsts(t *testing.T, path string) map[string]string {
 }
 
 func TestClassesMatchHost(t *testing.T) {
-	mine := classConsts(t, "errors.go")
+	mine := classConsts(t, "protocol_gen.go")
 	if len(mine) == 0 {
 		t.Fatal("sdk declares no Class consts: parser is vacuous")
 	}

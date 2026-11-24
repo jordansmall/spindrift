@@ -1,6 +1,7 @@
 # The Connector protocol, described once as data (issue #7504). `nix run .#regen`
 # renders it through render.nix into cmd/launcher/internal/connectorprotocol:
-# protocol_gen.go (constants and the method table) and protocol.schema.json.
+# protocol_gen.go (constants and the method table) and protocol.schema.json, and,
+# through the binding in sdk.nix, into the SDK's sdk/<pkg>/protocol_gen.go.
 #
 # It describes protocol 0.3.0 as it is today; it adds nothing to the wire. Core's
 # own hand-written constants stay as they are, because the SDK's parity tests
@@ -188,58 +189,102 @@ let
       {
         name = "start";
         guest = true;
-        doc = "A model call (turn) begins.";
+        doc = "A model call (turn) begins. Fills Timestamp and MessageID. The classifier counts it as agent progress. A CLI with no per-call start record (claude) emits one per assistant or user turn as its progress marker, even for a line with no decodable content.";
       }
       {
         name = "text";
         guest = true;
-        doc = "Assistant prose.";
+        doc = "Assistant prose. Fills Text (as the CLI wrote it, not trimmed), MessageID, Timestamp, Role. The result reader, transcript renderer and heartbeat writer consume it; the classifier counts it as agent progress.";
       }
       {
         name = "reasoning";
         guest = true;
-        doc = "Assistant reasoning; never narration or result text.";
+        doc = "Assistant reasoning or thinking; never narration, transcript or result text, so decode a CLI's thinking output to this kind, never to text, or it would surface in the verdict scan and heartbeat. It counts as agent progress for the classifier. Fills Text, MessageID, Timestamp, Role.";
       }
       {
         name = "tool_call";
         guest = true;
-        doc = "The agent invoking a tool.";
+        doc = "The agent invoking a tool. Fills ToolID, ToolName, ToolInput, ToolTarget, MessageID, Timestamp, Role. The transcript renderer shows it; it counts as agent progress.";
       }
       {
         name = "tool_result";
         guest = true;
-        doc = "A tool's output coming back.";
+        doc = "A tool's output coming back. Fills ToolID, ToolName, ToolTarget, ToolOutput, IsError (the tool failed), Subagent (a spawn tool's report), MessageID, Timestamp, Role; Text stays empty. The transcript renderer shows it; it counts as agent progress. A CLI that reports call and result in one record emits both kinds from it, call first, the result repeating the call's ToolInput and ToolTarget.";
       }
       {
         name = "usage";
         guest = true;
-        doc = "One model call's token tally.";
+        doc = "One model call's token tally. Fills Tokens, Model, Effort (when known), MessageID, Timestamp, Role. The usage reader sums every usage event for the run totals (so a decoder emits one per call, not a running total) and dedups the per-model breakdown by non-empty MessageID. It is not agent progress.";
       }
       {
         name = "model";
         guest = true;
-        doc = "The model in force changed.";
+        doc = "The model in force changed: a model id observed. Fills Model, MessageID, Timestamp, Role, and Effort when known. The heartbeat writer reports a change of Model and, when Effort is set, shows model:effort in the role header.";
       }
       {
         name = "error";
         guest = true;
-        doc = "An error the CLI reported.";
+        doc = "An error the CLI reported inside its grammar. Text keeps the error's raw text, because the classifier matches transient markers on it; ResetAt carries a rate-limit reset the payload names. The latest one not followed by agent progress decides the classification, or the first with ClassifyOptions.FirstMatch. A CLI that reports failures as plain text (claude) decodes every non-content line to this kind.";
       }
       {
         name = "unparsed";
         guest = true;
-        doc = "A line outside the CLI's grammar.";
+        doc = "A line outside the CLI's grammar: stderr shares the Pass log, so a Driver sees the CLI's own diagnostics here. Text is the trimmed line. The classifier reads it only for terminal markers; nothing else consumes it.";
       }
       {
         name = "result";
         guest = true;
-        doc = "The session's final result and totals.";
+        doc = "The CLI's final result text, for a CLI that reports one as its own event. Fills Text, and may carry totals in Tokens, DurationMs, DurationAPIMs and NumTurns, and name the session's Models. The result reader lets it replace the text gathered so far. A CLI whose result is its last message's prose emits no result event.";
       }
       {
         name = "host_op";
         guest = false;
-        doc = "Core's own spindrift_op line; a guest never emits it.";
+        doc = "Spindrift's own host-written spindrift_op line, which rides the Pass log in every Driver's stream; a guest never emits it. Fills HostOp and Timestamp. The heartbeat writer renders it via FormatSpindriftOp.";
       }
+    ];
+
+    # The Reason a driver Pattern carries (driverkit.AllReasons, in its order).
+    reasons = [
+      (entry "rateLimit" "API rate limit.")
+      (entry "overloaded" "API overload or capacity error.")
+      (entry "network" "Transient network failure.")
+      (entry "taskFailed" "The agent ran but produced no valid result.")
+      (entry "unsupportedFlag" "The driver rejected a CLI option core passed (version skew).")
+    ];
+
+    # The host-line grammar a Driver's decoder follows: the host writes
+    # {"type":"spindrift_op","spindrift_op":{"op":"pass_start","role":<pass>}}
+    # into the Pass log, and a decoder reads the role the pass starts. The roles
+    # are the attribution roles core stamps on events; passRoles maps a pass
+    # name to the role it starts (any other pass starts none). `type` also names
+    # the event's payload member key, which the SDK's HostLineOf matches.
+    hostLine = {
+      type = "spindrift_op";
+      opPassStart = "pass_start";
+      roles = [
+        (entry "implementor" "Attributes a top-level event in an implement, fix or land pass.")
+        (entry "reviewer" "Attributes a top-level event in a review or delta-review pass.")
+        (entry "subagent" "Attributes an event whose subagent parent is unknown.")
+      ];
+      passRoles = {
+        review = "reviewer";
+        delta-review = "reviewer";
+        implement = "implementor";
+        fix = "implementor";
+        land = "implementor";
+      };
+    };
+
+    # The categories of a tracker.statuses entry that core reads.
+    statusCategories = [
+      (entry "done" "The category of a terminal workflow status.")
+    ];
+
+    # The outcomes of tracker.transition that are not an error.
+    transitionOutcomes = [
+      (entry "moved" "The issue now sits in the requested status.")
+      (entry "unavailable" "The issue's workflow offers no transition to the resolved status; offered names the statuses it does offer.")
+      (entry "unmapped" "The mapping holds no non-empty status for the state.")
     ];
 
     # What core checks of a method's result beyond decoding it, named for the Go
@@ -423,7 +468,10 @@ let
     methods =
       import ./driver.nix { inherit t; }
       ++ import ./forge.nix { inherit t; }
-      ++ import ./tracker.nix { inherit t; };
+      ++ import ./tracker.nix {
+        inherit t;
+        outcomes = map (o: o.name) self.transitionOutcomes;
+      };
   };
 in
 self
