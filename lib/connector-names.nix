@@ -20,8 +20,9 @@ rec {
   # `coreEntry` the merged env schema's `${key}`, each null when absent. A core
   # knob is no backend knob, except that a credential may name the token knob
   # of the core backend of the row's own name, matched by the `tokenEnvVar` its
-  # descriptor declares in `backends` (the core registry); that entry is then
-  # checked as an own knob is.
+  # descriptor declares in `backends` (the core registry), and an identity its
+  # `identityEnvVar` knob (issue #7501); that entry is then checked as an own
+  # knob is.
   backendKnobError =
     {
       backends,
@@ -34,15 +35,21 @@ rec {
     }:
     let
       fail = why: "Connector '${name}': backend ${field} '${key}' ${why}";
-      ownCoreToken =
-        field == "credential"
-        && coreEntry != null
+      ownCoreKnob =
+        coreEntry != null
         && (coreEntry.env or null) != null
-        && builtins.any (b: b.name == name && (b.tokenEnvVar or null) == coreEntry.env) backends;
+        && builtins.any (
+          b:
+          b.name == name
+          && (
+            (field == "credential" && (b.tokenEnvVar or null) == coreEntry.env)
+            || (field == "identity" && (b.identityEnvVar or null) == coreEntry.env)
+          )
+        ) backends;
       knob =
         if ownKnob != null then
           ownKnob
-        else if ownCoreToken then
+        else if ownCoreKnob then
           coreEntry
         else
           null;

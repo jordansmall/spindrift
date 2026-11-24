@@ -1279,7 +1279,8 @@ rec {
       # folded into the env schema by lib/row-knobs.nix, validateKnobs is read
       # by lib/mkHarness.nix, core, goTestRepoFiles and goTestBuildsOn are read
       # by nix/checks/go.nix, and trackerScopeKnob and bareRefClosesIssues by
-      # lib/mkHarness.nix, not rendered here.
+      # lib/mkHarness.nix, and identityEnvVar by lib/connector-names.nix, not
+      # rendered here.
       knownFields = [
         "goVar"
         "trackerScopeKnob"
@@ -1290,6 +1291,7 @@ rec {
         "goTestBuildsOn"
         "core"
         "consumerStanza"
+        "identityEnvVar"
       ]
       ++ map (f: f.attr) rowFields;
       quickstartAxes = [

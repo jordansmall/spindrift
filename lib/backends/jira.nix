@@ -8,6 +8,8 @@
   validAsTracker = true;
   connectorOnly = true;
   tokenEnvVar = "JIRA_TOKEN";
+  # The core knob a jira Connector row names as its Basic identity (issue #7501).
+  identityEnvVar = "JIRA_EMAIL";
   consumerStanza = {
     connectorKnobs = [
       "jiraConnectorToken"

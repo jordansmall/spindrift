@@ -103,6 +103,12 @@
 # generated Descriptor carries it too: the Bundle's no-native-network-adapter
 # check reads it (issue #6888).
 
+# identityEnvVar (optional string) is the env of the core knob a Connector row
+# of this backend's name may name as its Basic `identity`, as its tokenEnvVar
+# knob is the only core knob its `credential` may name (jira, issues #7498,
+# #7501); lib/connector-names.nix reads it. The generated Descriptor ignores
+# the field.
+
 # consumerStanza (required) declares what a Consumer of the backend
 # configures (issue #7415): `connectorKnobs`, the names of its Connector's
 # credential knobs (connectors/<name>/module.nix), each a secret stanza beside
