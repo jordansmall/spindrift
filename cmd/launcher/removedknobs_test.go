@@ -240,3 +240,28 @@ func TestRemovedKnobsCheck_RejectsConnectorSandbox(t *testing.T) {
 		assertRejected(t)
 	})
 }
+
+// A row needs only env and reason: an env-only knob (one a Connector module
+// declared, with no flake option) is caught here from the environment or the
+// input document; mkHarness's `defaults` key also rejects it.
+func TestRemovedKnobsCheck_RejectsEnvOnlyRow(t *testing.T) {
+	old := removedKnobs
+	removedKnobs = append(slices.Clone(old), struct{ env, reason string }{"FIXTURE_ENV_ONLY", "a fixture knob with no flake option"})
+	t.Cleanup(func() { removedKnobs = old })
+	want := "FIXTURE_ENV_ONLY was removed: a fixture knob with no flake option; delete the setting"
+	assertRejected := func(t *testing.T) {
+		t.Helper()
+		if _, err := removedKnobsCheck().Probe(); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("Probe() err = %v, want it to contain %q", err, want)
+		}
+	}
+
+	t.Run("env", func(t *testing.T) {
+		t.Setenv("FIXTURE_ENV_ONLY", "")
+		assertRejected(t)
+	})
+	t.Run("document", func(t *testing.T) {
+		useDoc(t, &inputdoc.Document{Settings: map[string]string{"FIXTURE_ENV_ONLY": "x"}})
+		assertRejected(t)
+	})
+}

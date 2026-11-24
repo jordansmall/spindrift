@@ -2,9 +2,13 @@
 # instead of vanishing into "option does not exist" or an ignored key. Keyed by
 # the schema key mkHarness's `defaults` used. lib/flakeModule.nix declares each
 # flakePath and legacySection option as a never-set null and throws if a
-# Consumer sets it; lib/mkHarness.nix throws on the key in `defaults`. The
-# launcher's own env/settings-document check is the hand-kept table in
-# cmd/launcher/removedknobs.go, pinned to `env` by nix/checks/equivalence.nix.
+# Consumer sets it; lib/mkHarness.nix throws on the key in `defaults`. A row for
+# an env-only knob (a Connector module declared it, with no flake option) omits
+# flakePath and legacySection: the launcher's env/input-document check and the
+# `defaults` key catch it, and `defaults` was the only Nix-side setting path
+# such a knob had. The launcher's own env/settings-document check is the
+# hand-kept table in cmd/launcher/removedknobs.go, pinned to `env` by
+# nix/checks/equivalence.nix.
 {
   orchestratorEnabled = {
     env = "ORCHESTRATOR_ENABLED";

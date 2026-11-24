@@ -13,7 +13,8 @@ import (
 
 // removedKnobs lists the env knobs lib/env-schema.nix no longer declares and
 // whose old setting would otherwise silently do nothing. lib/removed-knobs.nix
-// holds the Nix-side counterpart (flake option and mkHarness defaults key).
+// holds the Nix-side counterpart (a flake option, unless the knob was env-only,
+// and the mkHarness defaults key).
 var removedKnobs = []struct{ env, reason string }{
 	{"ORCHESTRATOR_ENABLED", "the orchestrator is now the only Box path (issue #4291), so there is nothing to switch"},
 	{"BOX_GH_TOKEN", "no Box holds a forge credential (issues #6900 and #6901), so nothing reads it; see MIGRATING.md"},

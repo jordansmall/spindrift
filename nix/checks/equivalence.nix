@@ -787,7 +787,7 @@ in
         assert assertMsg
           (reason != null && pkgs.lib.hasInfix (builtins.toJSON (builtins.head reason)) goTable)
           "cmd/launcher/removedknobs.go's reason for ${row.env} differs from the one in lib/removed-knobs.nix's message";
-        assert assertMsg (declares row.flakePath)
+        assert assertMsg (!(row ? flakePath) || declares row.flakePath)
           "lib/flakeModule.nix must declare the hidden removed-knob option perSystem.spindrift.${pathOf row}, or setting it fails with a generic \"option does not exist\"";
         assert assertMsg
           (
@@ -806,7 +806,7 @@ in
           consumerWith { }
         )) "control: a consumer with ${key} unset must evaluate";
         assert assertMsg (
-          !(evaluates (consumerWith nested))
+          !(row ? flakePath) || !(evaluates (consumerWith nested))
         ) "setting perSystem.spindrift.${pathOf row} must fail eval (${key} was removed)";
         assert assertMsg (!hasLegacy || !(evaluates (consumerWith legacy)))
           "setting perSystem.spindrift.settings.${row.legacySection}.${key} must fail eval (${key} was removed)";
@@ -825,6 +825,43 @@ in
     assert assertMsg (removedKnobs != { }) "lib/removed-knobs.nix must not be empty";
     assert assertMsg (defaultsKeyError { } == null) "control: no defaults keys must raise no error";
     assert builtins.all (k: perKnob k removedKnobs.${k}) (builtins.attrNames removedKnobs);
+    # An env-only row (a Connector-declared knob with no flake option) omits
+    # flakePath; a real row stripped of it must still pass every other check.
+    assert (
+      let
+        k = builtins.head (builtins.attrNames removedKnobs);
+      in
+      perKnob k (
+        builtins.removeAttrs removedKnobs.${k} [
+          "flakePath"
+          "legacySection"
+        ]
+      )
+    );
+    # The flake module reads the table through this function, so a fixture
+    # env-only row exercises its `flakePath` guards; the real table has no such
+    # row yet, and an unguarded read would break every Consumer eval.
+    assert
+      let
+        fixture = removedKnobs // {
+          fixtureEnvOnly = {
+            env = "FIXTURE_ENV_ONLY";
+            message = "FIXTURE_ENV_ONLY was removed: a fixture; delete the setting";
+          };
+        };
+        flake = import ../../lib/removed-knob-hits.nix { inherit (pkgs) lib; } fixture;
+        flakeRows = pkgs.lib.filterAttrs (_: row: row ? flakePath) removedKnobs;
+        k = builtins.head (builtins.attrNames flakeRows);
+        row = flakeRows.${k};
+        tree = flake.treeEntries null;
+      in
+      assertMsg (
+        builtins.length tree == builtins.length (builtins.attrNames removedKnobs)
+      ) "an env-only row must add no removed-knob option tree entry"
+      && assertMsg (flake.hits { } == [ ]) "an env-only row must not hit on an empty Consumer config"
+      && assertMsg (
+        map (h: h.message) (flake.hits (pkgs.lib.setAttrByPath row.flakePath true)) == [ row.message ]
+      ) "a set flakePath must still hit its own row alongside an env-only row";
     pkgs.runCommand "removed-knob-rejected" { } "touch $out";
 
   # Issue #4401: the registry (lib/removed-fragment-vars.nix, which holds the
