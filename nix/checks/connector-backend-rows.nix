@@ -449,6 +449,21 @@ in
             };
           }
         ];
+      # A basic row of core backend `rowName` with its own credential, naming
+      # core knob `knob` as its identity.
+      probeIdentityRow =
+        rowName: knob:
+        consumerWith [
+          {
+            spindrift.connectors.${rowName} = {
+              knobs.probeBase = baseKnob;
+              knobs.probeToken = secretKnob;
+              backend = basicBackend // {
+                identity = knob;
+              };
+            };
+          }
+        ];
       programOf = c: c.apps.${system}.default.program;
       builds = c: (builtins.tryEval (builtins.seq (programOf c) true)).success;
     in
@@ -485,34 +500,57 @@ in
     assert assertMsg (
       !(builds (probeRow "github" "issueTracker"))
     ) "a github row naming a non-token core knob must fail evaluation";
+    # A basic row's identity may name its own backend's `identityEnvVar` knob
+    # (issue #7501), and no other core knob.
+    assert assertMsg (builds (
+      probeIdentityRow "jira" "jiraEmail"
+    )) "a jira row naming its own email as identity must evaluate";
+    assert assertMsg (
+      !(builds (probeIdentityRow "github" "ghToken"))
+    ) "a github row naming a core knob as identity must fail evaluation";
+    assert assertMsg (
+      !(builds (probeIdentityRow "jira" "jiraToken"))
+    ) "a jira row naming its token as identity must fail evaluation";
+    assert assertMsg (
+      !(builds (probeRow "jira" "jiraEmail"))
+    ) "a jira row naming its email as credential must fail evaluation";
     # `builds` cannot see why a row was refused, so the refusal text is pinned
     # on the pure decision, against the real core entries.
     assert assertMsg
       (
         let
           core = (import ../../lib/row-knobs.nix).fold (import ../../lib/connector-knobs.nix [ ]);
-          err =
-            name: key:
+          errAs =
+            field: secret: name: key:
             names.backendKnobError {
               backends = coreBackends;
-              inherit name key;
-              field = "credential";
-              secret = true;
+              inherit
+                name
+                key
+                field
+                secret
+                ;
               ownKnob = null;
               coreEntry = core.${key} or null;
             };
+          err = errAs "credential" true;
+          errId = errAs "identity" false;
           notOwn =
-            name: key:
-            "Connector '${name}': backend credential '${key}' is not in this Connector's `knobs` (a core knob cannot be a backend credential)";
+            field: name: key:
+            "Connector '${name}': backend ${field} '${key}' is not in this Connector's `knobs` (a core knob cannot be a backend ${field})";
         in
         err "github" "ghToken" == null
         && err "forgejo" "forgejoToken" == null
         && err "jira" "jiraToken" == null
-        && err "github" "forgejoToken" == notOwn "github" "forgejoToken"
-        && err "github" "issueTracker" == notOwn "github" "issueTracker"
-        && err "probe" "ghToken" == notOwn "probe" "ghToken"
+        && err "github" "forgejoToken" == notOwn "credential" "github" "forgejoToken"
+        && err "github" "issueTracker" == notOwn "credential" "github" "issueTracker"
+        && err "probe" "ghToken" == notOwn "credential" "probe" "ghToken"
+        && errId "jira" "jiraEmail" == null
+        && errId "jira" "jiraToken" == notOwn "identity" "jira" "jiraToken"
+        && errId "github" "ghToken" == notOwn "identity" "github" "ghToken"
+        && err "jira" "jiraEmail" == notOwn "credential" "jira" "jiraEmail"
       )
-      "only a core backend's own token knob may be named by its row, and every other core knob is refused as such";
+      "only a core backend's own token knob (credential) or identity knob (identity) may be named by its row, and every other core knob is refused as such";
     assert assertMsg (
       !(builds (probe {
         knobs.probeToken = secretKnob // {
