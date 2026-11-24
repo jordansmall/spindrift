@@ -299,35 +299,39 @@ let
       (entry "unmapped" "The mapping holds no non-empty status for the state.")
     ];
 
-    # What core checks of a method's result beyond decoding it, named for the Go
-    # function that does it. A method row names one.
+    # What core checks of a method's result beyond decoding it. A method row
+    # names one. A forge or tracker check is the body connectorforge's
+    # forgeChecks or connectortracker's trackerChecks registers under that name,
+    # which connectorcall.Unregistered pins (each axis's
+    # Test*ChecksAgreeWithTheMethodTable runs it); a driver check is named for the
+    # Go function that does it.
     resultChecks = {
       decode = "Core decodes the result into its Go type and checks nothing more (ErrMalformedOutput otherwise).";
       describe = "connectorhost.DriverStrategy refuses an unknown pattern reason, totals or result name.";
       guestEvents = "connectorhost.guestEvents decodes strictly: an unknown field, an unknown kind or a host_op rejects the answer.";
       batchEvents = "connectorhost.batchEvents requires one element per line, each checked as guestEvents; a bad element fails only its line.";
       resolveExitGuard = "connectorhost.DriverStrategy refuses an answer that resolves a non-zero exit to 0.";
-      prShape = "connectorforge reads.check refuses a PR whose number is not a canonical positive integer, whose URL is not a plain https URL on the forge's web host naming the target repository and that same number, or whose state and merged pair is impossible (anything but open and unmerged, closed and merged, or closed and unmerged).";
-      prAnswer = "connectorforge reads.pr applies prShape and refuses a PR other than the one asked for; the callers go on to refuse a mergeable value outside MERGEABLE, CONFLICTING and UNKNOWN (Mergeable), a merge commit that is not a full lowercase hex id (MergeCommit), an empty head commit (HeadCommitSHA), and, before a rebase, a head other than the agent branch core derived (RebasePRHead).";
-      rollupState = "connectorforge reads.CheckState fails closed on a rollup state outside SUCCESS, PENDING, EXPECTED, FAILURE and ERROR; an empty state reads as no checks.";
-      remoteURLs = "connectorforge pushOnly.checkURL refuses a clone or web URL that is not https with a host, carries userinfo, or names a host outside core's web host (Git.WebHost) or, without one, the Connector's declared routes; a refusal is audited.";
-      behindCount = "connectorforge prForge.NeedsUpdate refuses a negative behindBy.";
-      prFiles = "connectorforge prForge.ListPRFiles refuses a missing or empty list, and an entry that is not a clean repository-relative path (cleanRepoPath), because the merge guard reads it.";
-      runLink = "connectorforge reads.ownRunLink drops, rather than fails on, a URL that is not a plain https URL on the web host under the target repository's path; a backslash is refused.";
-      probeRepo = "connectorforge probeRepo refuses an empty repo.";
-      tokenGrant = "connectorforge.checkGrant refuses writeCapable or scopes without introspectable and a scope that is not a well-formed token (wellFormedScope); cleanReason then sanitises the reason and caps it at maxReasonLen; a scope is capped at maxScopeLen.";
-      issueShape = "connectortracker wireIssue.issue refuses an issue whose number is outside the Connector's id grammar (a positive integer, or a project key and number under tracker.ids.projectKey), whose state is not open or closed (a listIssues answer may leave it empty), or that has an empty or control-character label name (checkLabels); a hit tracker.searchIssues returns outside the state or label asked for is dropped, not refused.";
-      issueAnswer = "connectortracker reads.readIssue applies issueShape, then refuses an issue other than the one asked for.";
-      commentShape = "connectortracker commentsLayer.Comments refuses a comment whose author is empty or holds a control character, or whose createdAt is not RFC3339; an association outside forge.KnownAssociation's vocabulary is blanked, not refused.";
-      idList = "connectortracker reads.idList refuses an id outside the Connector's id grammar and drops a repeated one.";
-      labeledPaging = "connectortracker labeledLayer.walkLabeled applies issueShape to each issue, and fails the label closed on a next cursor already returned or a page of only issues already read; a walk past labeledMaxPages or labeledMaxBytes keeps what it read and warns.";
-      probeStatus = "connectortracker probeLayer.Probe reads the status: 2xx proves the repository, 401 and 403 are an auth failure, any other status means the repository is unreachable.";
-      createMetaIssueType = "connectortracker createMetaLayer.CheckIssueType refuses an answer whose issueTypes omit the issue type core files as (forge.IssueTypeNotOffered).";
-      countClamp = "connectortracker countLayer.CountReady refuses a negative count and clamps the rest to resultPageLimit.";
-      countInterval = "connectortracker readCountInterval refuses seconds outside 1 to maxCountIntervalSeconds.";
-      transitionOutcome = "connectortracker transitionLayer.TransitionState refuses an outcome other than moved, unavailable and unmapped.";
-      labelNames = "connectortracker labelsLayer.ListLabels refuses an empty or control-character label name (checkLabels).";
-      filedURL = "connectortracker reads.unusableFiledURL refuses a url that is empty, not https, carrying userinfo, off the tracker's web host (Lifecycle.WebHost) or not ending in an issue id; the issue was filed, so the error says so and core must not refile.";
+      prShape = "connectorforge's body refuses a PR whose number is not a canonical positive integer, whose URL is not a plain https URL on the forge's web host naming the target repository and that same number, or whose state and merged pair is impossible (anything but open and unmerged, closed and merged, or closed and unmerged).";
+      prAnswer = "connectorforge's body applies prShape and refuses a PR other than the one asked for; the callers go on to refuse a mergeable value outside MERGEABLE, CONFLICTING and UNKNOWN (Mergeable), a merge commit that is not a full lowercase hex id (MergeCommit), an empty head commit (HeadCommitSHA), and, before a rebase, a head other than the agent branch core derived (RebasePRHead).";
+      rollupState = "connectorforge's body, which runs on every forge.checks answer (CheckState and FailureDetail both read it), fails closed on a rollup state outside SUCCESS, PENDING, EXPECTED, FAILURE and ERROR; an empty state reads as no checks.";
+      remoteURLs = "connectorforge's body refuses a clone or web URL that is not https with a host, carries userinfo, or names a host outside core's web host (Git.WebHost) or, without one, the Connector's declared routes (checkURL); a refusal is audited.";
+      behindCount = "connectorforge's body refuses a negative behindBy.";
+      prFiles = "connectorforge's body refuses a missing or empty list, and an entry that is not a clean repository-relative path (cleanRepoPath), because the merge guard reads it.";
+      runLink = "connectorforge's body drops, rather than fails on, a URL that is not a plain https URL on the web host under the target repository's path; a backslash is refused.";
+      probeRepo = "connectorforge's body refuses an empty repo.";
+      tokenGrant = "connectorforge's body refuses writeCapable or scopes without introspectable and a scope that is not a well-formed token (wellFormedScope); cleanReason then sanitises the reason and caps it at maxReasonLen; a scope is capped at maxScopeLen.";
+      issueShape = "connectortracker's body refuses an issue whose number is outside the Connector's id grammar (a positive integer, or a project key and number under tracker.ids.projectKey), whose state is not open or closed (a listIssues answer may leave it empty), or that has an empty or control-character label name (checkLabels); a hit tracker.searchIssues returns outside the state or label asked for is dropped, not refused.";
+      issueAnswer = "connectortracker's body applies issueShape, then refuses an issue other than the one asked for.";
+      commentShape = "connectortracker's body refuses a comment whose author is empty or holds a control character, or whose createdAt is not RFC3339; an association outside forge.KnownAssociation's vocabulary is blanked, not refused.";
+      idList = "connectortracker's body refuses an id outside the Connector's id grammar and drops a repeated one.";
+      labeledPaging = "connectortracker's body applies issueShape to each issue of a page; the cross-page part lives in walkLabeled, which fails the label closed on a next cursor already returned or a page of only issues already read, and on a walk past labeledMaxPages or labeledMaxBytes keeps what it read and warns.";
+      probeStatus = "connectortracker's body reads the status: 2xx proves the repository, 401 and 403 are an auth failure, any other status means the repository is unreachable.";
+      createMetaIssueType = "connectortracker's body refuses an answer whose issueTypes omit the issue type core files as (forge.IssueTypeNotOffered).";
+      countClamp = "connectortracker's body refuses a negative count and clamps the rest to forge.ResultPageLimit.";
+      countInterval = "connectortracker's body refuses seconds outside 1 to maxCountInterval (24 hours).";
+      transitionOutcome = "connectortracker's body refuses an outcome other than moved, unavailable and unmapped.";
+      labelNames = "connectortracker's body refuses an empty or control-character label name (checkLabels).";
+      filedURL = "connectortracker's body refuses a url that is empty, not https, carrying userinfo, off the tracker's web host (Lifecycle.WebHost) or not ending in an issue id (unusableFiledURL); the issue was filed, so the error says so and core must not refile.";
     };
 
     # Shared JSON types, rendered as the schema's $defs. A result field is
