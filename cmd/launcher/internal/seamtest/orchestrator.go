@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/driver/driverkit"
 )
 
 // OrchestratorConfig is the orchestrator fake's JSON config.
@@ -48,7 +50,7 @@ func execClaude(argv []string, stdout, stderr io.Writer) int {
 
 // orchestratorFake stands in for the in-box orchestrator on one pass. It
 // records its argv, reads only --prompt-file, --session-file and --log-path,
-// and runs the Driver as `<session file fields> -p <prompt>`, the shape the
+// and runs the Driver as `<session file words> -p <prompt>`, the shape the
 // claude Driver's CLI gets. The Driver's stdout is teed to --log-path and the
 // fake's own stdout; the Driver's exit code is the fake's.
 func orchestratorFake(args []string, stdout, stderr io.Writer, drive driverRunner) int {
@@ -106,7 +108,12 @@ func orchestratorFake(args []string, stdout, stderr io.Writer, drive driverRunne
 	}
 	defer log.Close()
 
-	argv := append(strings.Fields(string(session)), "-p", string(prompt))
+	sessionArgs, err := driverkit.DecodeSessionArgs(session)
+	if err != nil {
+		fmt.Fprintf(stderr, "orchestrator fake: %v\n", err)
+		return 2
+	}
+	argv := append(sessionArgs, "-p", string(prompt))
 	return drive(argv, io.MultiWriter(log, stdout), stderr)
 }
 

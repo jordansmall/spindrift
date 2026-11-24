@@ -149,6 +149,20 @@ func TestStreamFilterParity(t *testing.T) {
 	}
 }
 
+// TestSessionFlagParity fails when the SDK's SessionFlag drifts from
+// driverkit's: the host decodes a Connector's driver.sessionFlags answer
+// straight into driverkit's type, so a renamed field or JSON tag drops the
+// session pin silently.
+func TestSessionFlagParity(t *testing.T) {
+	core := typeSource(t, coreDir, "SessionFlag")
+	if core == "" {
+		t.Fatal("core has no type SessionFlag")
+	}
+	if sdk := typeSource(t, ".", "SessionFlag"); sdk != core {
+		t.Errorf("SDK SessionFlag differs from core's:\nSDK:  %s\ncore: %s", sdk, core)
+	}
+}
+
 // TestLineFramerParity fails when the SDK's LineFramer drifts from
 // driverkit's: pi's stream filter crosses the Connector protocol, so its
 // framing must match core's. The struct type and each method are compared on

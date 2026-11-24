@@ -50,7 +50,7 @@ func TestOrchestratorRegistered(t *testing.T) {
 func TestOrchestratorInvokesDriverWithSessionFlagsThenPrompt(t *testing.T) {
 	rec := filepath.Join(t.TempDir(), "rec")
 	prompt := writeFile(t, "finish up\nplease")
-	session := writeFile(t, "--resume abc-123\n")
+	session := writeFile(t, `["--resume","abc-123"]`)
 	logPath := filepath.Join(t.TempDir(), "log")
 	args := []string{"--handoff-file", "/h.json", "--prompt-file", prompt, "--session-file", session, "--log-path", logPath, "--manifest-path", "/o/manifest.json"}
 
@@ -106,7 +106,7 @@ func TestOrchestratorSnapshotsEachInvocation(t *testing.T) {
 	snap := filepath.Join(t.TempDir(), "snap")
 	cfg := OrchestratorConfig{Record: filepath.Join(t.TempDir(), "rec"), Snapshot: snap}
 	t.Setenv("SEAMTEST_SNAPSHOT_PROBE", "probe")
-	for i, content := range []struct{ prompt, session string }{{"one", "--session-id a"}, {"two", ""}} {
+	for i, content := range []struct{ prompt, session string }{{"one", `["--session-id","a"]`}, {"two", ""}} {
 		args := []string{"--handoff-file", "/h", "--prompt-file", writeFile(t, content.prompt),
 			"--session-file", writeFile(t, content.session), "--log-path", filepath.Join(t.TempDir(), "log")}
 		runOrchestrator(t, cfg, driverCall{}, args...)

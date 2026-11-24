@@ -160,8 +160,8 @@ func TestDriverResultEventAndSessionFlags(t *testing.T) {
 	if err != nil || string(b) != "result done\n" {
 		t.Errorf("ResultEvent = %q, %v", b, err)
 	}
-	if got, err := s.SessionFlags("implement", "o/r", "7", "/home/x"); err != nil || got != "implement|o/r|7|/home/x" {
-		t.Errorf("SessionFlags = %q, %v", got, err)
+	if got, err := s.SessionFlags("implement", "o/r", "7", "/home/x"); err != nil || got != (driverkit.SessionFlag{Flag: "--session-id", Value: "implement|o/r|7|/home/x"}) {
+		t.Errorf("SessionFlags = %+v, %v", got, err)
 	}
 }
 
@@ -262,8 +262,8 @@ func TestDriverSessionFlagsErrorsWhenConnectorClosed(t *testing.T) {
 	}
 	_ = c.Close(t.Context())
 	flags, err := s.SessionFlags("implement", "o/r", "7", "/home/x")
-	if flags != "" || !errors.Is(err, connectorhost.ErrCall) {
-		t.Errorf("SessionFlags = %q, %v; want empty flags and an ErrCall error", flags, err)
+	if flags != (driverkit.SessionFlag{}) || !errors.Is(err, connectorhost.ErrCall) {
+		t.Errorf("SessionFlags = %+v, %v; want zero flag and an ErrCall error", flags, err)
 	}
 }
 
@@ -279,8 +279,8 @@ func TestDriverSessionFlagsErrorsWhenConnectorPoisoned(t *testing.T) {
 		t.Fatalf("poisoning call err = %v, want ErrCall", err)
 	}
 	flags, err := s.SessionFlags("implement", "o/r", "7", "/home/x")
-	if flags != "" || !errors.Is(err, connectorhost.ErrCall) || !errors.Is(err, connectorhost.ErrUnusable) {
-		t.Errorf("SessionFlags = %q, %v; want empty flags and ErrCall+ErrUnusable", flags, err)
+	if flags != (driverkit.SessionFlag{}) || !errors.Is(err, connectorhost.ErrCall) || !errors.Is(err, connectorhost.ErrUnusable) {
+		t.Errorf("SessionFlags = %+v, %v; want zero flag and ErrCall+ErrUnusable", flags, err)
 	}
 }
 

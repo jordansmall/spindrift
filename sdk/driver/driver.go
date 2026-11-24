@@ -32,6 +32,13 @@ type StreamFilter interface {
 // Decoder turns one Pass log line into the canonical events it carries.
 type Decoder func(line string) []event.Event
 
+// SessionFlag is the CLI flag that pins or resumes a session and its value.
+// Either may be empty: no Flag renders nothing, no Value renders a bare flag.
+type SessionFlag struct {
+	Flag  string `json:"flag,omitempty"`
+	Value string `json:"value,omitempty"`
+}
+
 // Pattern maps a log substring to the Reason it signals.
 type Pattern struct {
 	Substr string
@@ -63,9 +70,11 @@ type Strategy struct {
 	// CLI's own grammar.
 	ResultEvent func(text string) ([]byte, error)
 
-	// SessionFlags returns the CLI flags that start a session for the given
-	// mode, repo, issue and home directory.
-	SessionFlags func(mode, repoSlug, issue, home string) string
+	// SessionFlags returns the CLI flag and its value that pin or resume a
+	// session for the given mode, repo, issue and home directory. The zero
+	// SessionFlag renders nothing; the host passes Flag and Value to the CLI
+	// as two argv words, so Value may hold spaces.
+	SessionFlags func(mode, repoSlug, issue, home string) SessionFlag
 
 	// ResolveExit is optional and may rewrite the CLI's exit code. It takes
 	// the Pass log's content, not a path: a Connector has no filesystem.
@@ -365,9 +374,7 @@ func handlers(s Strategy) ([]string, map[string]method) {
 			if err := unmarshal(params, &p); err != nil {
 				return nil, err
 			}
-			return struct {
-				Flags string `json:"flags"`
-			}{s.SessionFlags(p.Mode, p.RepoSlug, p.Issue, p.Home)}, nil
+			return s.SessionFlags(p.Mode, p.RepoSlug, p.Issue, p.Home), nil
 		},
 	}
 	// The payload is "<decoder id>\n" then each line terminated by '\n', so a

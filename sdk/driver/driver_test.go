@@ -31,8 +31,8 @@ func countingStrategy() Strategy {
 		TerminalPatterns:  []Pattern{{Substr: "bad flag", Reason: UnsupportedFlag}},
 		WriteTool:         "write_file",
 		ResultEvent:       func(text string) ([]byte, error) { return []byte("R:" + text), nil },
-		SessionFlags: func(mode, repoSlug, issue, home string) string {
-			return strings.Join([]string{mode, repoSlug, issue, home}, "|")
+		SessionFlags: func(mode, repoSlug, issue, home string) SessionFlag {
+			return SessionFlag{Flag: "--" + mode, Value: strings.Join([]string{repoSlug, issue, home}, " ")}
 		},
 	}
 }
@@ -214,8 +214,17 @@ func TestResultEvent(t *testing.T) {
 func TestSessionFlags(t *testing.T) {
 	_, m := handlers(countingStrategy())
 	got := marshal(t, call(t, m, "driver.sessionFlags", `{"mode":"m","repoSlug":"o/r","issue":"7","home":"/h"}`))
-	if got != `{"flags":"m|o/r|7|/h"}` {
+	if got != `{"flag":"--m","value":"o/r 7 /h"}` {
 		t.Fatalf("sessionFlags = %s", got)
+	}
+}
+
+func TestSessionFlagsZeroAnswersEmptyObject(t *testing.T) {
+	s := countingStrategy()
+	s.SessionFlags = func(string, string, string, string) SessionFlag { return SessionFlag{} }
+	_, m := handlers(s)
+	if got := marshal(t, call(t, m, "driver.sessionFlags", `{"mode":"m","repoSlug":"o/r","issue":"7","home":"/h"}`)); got != `{}` {
+		t.Fatalf("sessionFlags = %s, want {}", got)
 	}
 }
 

@@ -204,15 +204,15 @@ func TestSessionFlags(t *testing.T) {
 	// A fresh HOME holds no pi session store: --session-id opens an existing
 	// session or creates it, so resume still renders.
 	home := t.TempDir()
-	want := "--session-id " + driverkit.SessionUUID("owner/repo", "42")
+	want := driverkit.SessionFlag{Flag: "--session-id", Value: driverkit.SessionUUID("owner/repo", "42")}
 	for _, mode := range []string{"initial", "resume"} {
 		if got := sessionFlags(t, newDriver(), mode, "owner/repo", "42", home); got != want {
-			t.Errorf("SessionFlags(%q) = %q, want %q", mode, got, want)
+			t.Errorf("SessionFlags(%q) = %+v, want %+v", mode, got, want)
 		}
 	}
 	for _, mode := range []string{"", "bogus"} {
-		if got := sessionFlags(t, newDriver(), mode, "owner/repo", "42", home); got != "" {
-			t.Errorf("SessionFlags(%q) = %q, want empty", mode, got)
+		if got := sessionFlags(t, newDriver(), mode, "owner/repo", "42", home); got != (driverkit.SessionFlag{}) {
+			t.Errorf("SessionFlags(%q) = %+v, want zero", mode, got)
 		}
 	}
 }

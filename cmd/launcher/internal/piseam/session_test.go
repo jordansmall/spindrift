@@ -18,7 +18,7 @@ const sessionSlug, sessionIssue = "owner/repo", "5481"
 // sessionArgs are the pi args that run the stub model under the Driver's own
 // session flags for mode.
 func sessionArgs(mode string) []string {
-	return append([]string{"--model", stubModelRef}, strings.Fields(pi.SessionFlags(mode, sessionSlug, sessionIssue, ""))...)
+	return append([]string{"--model", stubModelRef}, pi.SessionFlags(mode, sessionSlug, sessionIssue, "").Args()...)
 }
 
 // assertOneSession fails unless agentDir holds exactly one session file, named

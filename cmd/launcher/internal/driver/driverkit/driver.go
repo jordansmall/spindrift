@@ -124,6 +124,6 @@ func (d Driver) SessionBaselinesAfter(logPath string, base SessionBaselines) (Se
 	return p.SessionBaselinesAfter(base), nil
 }
 
-func (d Driver) SessionFlags(mode, repoSlug, issue, home string) (string, error) {
+func (d Driver) SessionFlags(mode, repoSlug, issue, home string) (SessionFlag, error) {
 	return d.s.SessionFlags(mode, repoSlug, issue, home)
 }

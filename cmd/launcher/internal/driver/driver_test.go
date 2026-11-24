@@ -197,14 +197,16 @@ func TestRegisterPrimaryReplacesNativeInNew(t *testing.T) {
 	t.Cleanup(Snapshot())
 	Register(driverkit.Strategy{Name: "prim"})
 	RegisterPrimary("prim", func() (driverkit.Strategy, error) {
-		return driverkit.Strategy{Name: "prim", SessionFlags: func(mode, _, _, _ string) (string, error) { return "from-connector:" + mode, nil }}, nil
+		return driverkit.Strategy{Name: "prim", SessionFlags: func(mode, _, _, _ string) (driverkit.SessionFlag, error) {
+			return driverkit.SessionFlag{Flag: "--from-connector", Value: mode}, nil
+		}}, nil
 	})
 	d, err := New("prim")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, err := d.SessionFlags("initial", "", "", ""); err != nil || got != "from-connector:initial" {
-		t.Errorf("SessionFlags = %q, %v; want the Connector's", got, err)
+	if got, err := d.SessionFlags("initial", "", "", ""); err != nil || got != (driverkit.SessionFlag{Flag: "--from-connector", Value: "initial"}) {
+		t.Errorf("SessionFlags = %+v, %v; want the Connector's", got, err)
 	}
 	if !HasNative("prim") {
 		t.Error("HasNative(prim) = false, want the linked-in Strategy kept")

@@ -1,6 +1,11 @@
 package driverkit
 
-import "io"
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+)
 
 // ResultReader names how a Driver's final-message text is read from its log.
 type ResultReader int
@@ -54,16 +59,37 @@ type Strategy struct {
 	ResultEvent func(text string) ([]byte, error)
 	// SessionFlags renders the CLI's session flags for mode; see
 	// driver.Driver.SessionFlags, including its error contract.
-	SessionFlags func(mode, repoSlug, issue, home string) (string, error)
+	SessionFlags func(mode, repoSlug, issue, home string) (SessionFlag, error)
 	// NewStreamFilter wraps the writer a Pass log is teed to with a filter over the
 	// CLI's stdout; nil is the identity, bytes passing through untouched.
 	NewStreamFilter func(w io.Writer) StreamFilter
 }
 
+// SessionFlag is the CLI flag that pins or resumes a session and its value.
+// Both are absent when the mode renders nothing, and Value is absent for a
+// bare flag. The two reach the CLI as separate argv words: nothing splits a
+// value on whitespace.
+type SessionFlag struct {
+	Flag  string `json:"flag,omitempty"`
+	Value string `json:"value,omitempty"`
+}
+
+// Args returns the argv words the flag contributes: none without a Flag, the
+// Flag alone without a Value, else both.
+func (s SessionFlag) Args() []string {
+	switch {
+	case s.Flag == "":
+		return nil
+	case s.Value == "":
+		return []string{s.Flag}
+	}
+	return []string{s.Flag, s.Value}
+}
+
 // InfallibleSessionFlags adapts a session-flags func that cannot fail to
 // Strategy.SessionFlags.
-func InfallibleSessionFlags(f func(mode, repoSlug, issue, home string) string) func(mode, repoSlug, issue, home string) (string, error) {
-	return func(mode, repoSlug, issue, home string) (string, error) {
+func InfallibleSessionFlags(f func(mode, repoSlug, issue, home string) SessionFlag) func(mode, repoSlug, issue, home string) (SessionFlag, error) {
+	return func(mode, repoSlug, issue, home string) (SessionFlag, error) {
 		return f(mode, repoSlug, issue, home), nil
 	}
 }
@@ -99,4 +125,17 @@ func (s Strategy) resultOf(l *Log) string {
 		return l.lastMessageText()
 	}
 	return l.resultText()
+}
+
+// DecodeSessionArgs reads the session file the Box writes: a JSON array of
+// argv words, or an empty file for a session with no flag.
+func DecodeSessionArgs(b []byte) ([]string, error) {
+	if len(bytes.TrimSpace(b)) == 0 {
+		return nil, nil
+	}
+	var args []string
+	if err := json.Unmarshal(b, &args); err != nil {
+		return nil, fmt.Errorf("session file is not a JSON array of strings: %w", err)
+	}
+	return args, nil
 }

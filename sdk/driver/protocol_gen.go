@@ -34,7 +34,7 @@ const (
 	methodFreeDecoder = "driver.freeDecoder"
 	// methodResultEvent: Renders a result text as the one Pass-log line the CLI would have written.
 	methodResultEvent = "driver.resultEvent"
-	// methodSessionFlags: The CLI flags that pin or resume a session.
+	// methodSessionFlags: The CLI flag, and its value, that pins or resumes a session; both are absent when the mode renders nothing.
 	methodSessionFlags = "driver.sessionFlags"
 	// methodResolveExit: Resolves the CLI's exit code from the Pass log's content (the newest whole lines that fit the request cap).
 	methodResolveExit = "driver.resolveExit"

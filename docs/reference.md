@@ -1699,9 +1699,10 @@ contract:
   keeps the exit code unchanged.
 - `ResultEvent` — encodes text as one newline-terminated NDJSON event in the
   CLI's grammar, such that `Result` reads it back.
-- `SessionFlags` — renders the CLI's session flags for a mode, or an error
-  when they cannot be rendered; the caller must not start the session without
-  them.
+- `SessionFlags` — answers the CLI's session flag and its value for a mode as
+  a `SessionFlag{Flag, Value}` (the zero value renders nothing). `Flag` must be
+  a name the row's `argvShape.sessionFlags` declares; the host rejects any
+  other, and passes `Flag` and `Value` to the CLI as two argv words.
 
 Two rules are shared rather than per Driver: a non-empty transcript ends
 with a newline, and per-model usage rows sort by the rank `Family` returns,
@@ -3565,7 +3566,7 @@ layout follows `connectors/opencode`.
 
 **Implement.** `main.go` registers a `driver.Strategy` with `driver.Register`:
 `NewDecoder` turns each output line into events, `ResultEvent` renders the
-final result, `SessionFlags` returns the CLI's session flags, and `Result`
+final result, `SessionFlags` returns the CLI's session flag and value, and `Result`
 picks the answer text (`driver.LastMessage` by default). The stub decodes every
 line as text; decode the CLI's own stream instead. `row.nix` is the whole
 Driver row, since no core row names it: the CLI `package`, its `bin`, the
@@ -3781,7 +3782,7 @@ description and a regen.
   | `driver.decode` | `{decoder, line}` | an array of canonical events |
   | `driver.freeDecoder` | `{decoder}` | `null` |
   | `driver.resultEvent` | `{text}` | `{event}`, one log line |
-  | `driver.sessionFlags` | `{mode, repoSlug, issue, home}` | `{flags}` |
+  | `driver.sessionFlags` | `{mode, repoSlug, issue, home}` | `{flag, value}`, each optional; `flag` must be one of the row's `argvShape.sessionFlags` |
   | `driver.resolveExit` (optional) | `{log, exitCode}` | `{exitCode}` |
   | `driver.toolPhase` (optional) | `{tool, input}`, `input` the call's raw JSON | `{phase}` |
   | `driver.toolKind` (optional) | `{tool}` | `{kind}` |
@@ -4196,9 +4197,13 @@ description and a regen.
   giving `tracker.listIssues`, `tracker.count`, `tracker.labeled` and
   `tracker.fileIssue` an optional `route` behind `tracker.route`, adding
   `tracker.matchesRoute` behind `tracker.route`, giving a
-  PR an optional `crossRepo`, or adding the `not-mergeable` error class
+  PR an optional `crossRepo`, changing the `driver.sessionFlags` result from
+  `{flags}` to `{flag, value}`, or adding the `not-mergeable` error class
   within 0.3 takes no bump. An older Connector ignores `cursor` and sends no
-  `next`, so core reads its one page as before. An older Connector
+  `next`, so core reads its one page as before. A 0.3 Driver Connector built
+  before the `driver.sessionFlags` change still answers `{flags}`, which
+  decodes to the zero answer, so core pins no session and raises no error
+  until the 0.4.0 handshake refuses a 0.3 Driver Connector. An older Connector
   advertises no `tracker.route`, so core refuses a route rather than send
   it. An older Connector that reports a real not-mergeable refusal as
   `permanent` now fails the merge at once instead of polling for checks,
