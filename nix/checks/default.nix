@@ -91,6 +91,7 @@ let
     // (import ./issue-route.nix common)
     // (import ./network-mode.nix common)
     // (import ./nix-store-writable.nix common)
+    // (import ./image-compression.nix common)
     // (import ./row-knobs.nix common)
     // (import ./consumer-stanzas.nix common)
     // (import ./runner-names-guard.nix common)
