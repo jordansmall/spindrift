@@ -34,8 +34,8 @@ func TestLabeledLayerScansEachLabelAndMapsClosedFields(t *testing.T) {
 	if !got[0].ClosedNotPlanned || !got[0].ClosedAt.Equal(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)) || got[0].Body != "b" {
 		t.Errorf("issue 9 = %+v; want ClosedAt, ClosedNotPlanned and Body carried", got[0])
 	}
-	if len(*calls) != 2 || (*calls)[0].method != CapLabeled || (*calls)[0].params["label"] != "agent-review-finding" ||
-		(*calls)[0].params["state"] != "closed" || (*calls)[0].params["limit"] != float64(forge.DedupScanLimit) || (*calls)[1].params["label"] != "other" {
+	if len(*calls) != 2 || (*calls)[0].Method != CapLabeled || (*calls)[0].Params["label"] != "agent-review-finding" ||
+		(*calls)[0].Params["state"] != "closed" || (*calls)[0].Params["limit"] != float64(forge.DedupScanLimit) || (*calls)[1].Params["label"] != "other" {
 		t.Errorf("calls = %v; want one tracker.labeled read per label at the dedup scan limit", *calls)
 	}
 }
@@ -72,7 +72,7 @@ func pagedGuest(t *testing.T, page func(cursor string) string) (func(context.Con
 		if err := json.Unmarshal(raw, &p); err != nil {
 			t.Fatal(err)
 		}
-		calls = append(calls, recordedCall{method, p})
+		calls = append(calls, recordedCall{Method: method, Params: p})
 		cursor, _ := p["cursor"].(string)
 		return json.Unmarshal([]byte(page(cursor)), result)
 	}, &calls
@@ -131,7 +131,7 @@ func labeledLister(t *testing.T, call func(context.Context, string, any, any) er
 func cursorsSent(calls []recordedCall) []string {
 	var out []string
 	for _, c := range calls {
-		s, _ := c.params["cursor"].(string)
+		s, _ := c.Params["cursor"].(string)
 		out = append(out, s)
 	}
 	return out
@@ -161,8 +161,8 @@ func TestLabeledLayerWalksEveryCursorPage(t *testing.T) {
 	if want := []string{"", "c1", "c2", "c3"}; !slices.Equal(cursorsSent(*calls), want) {
 		t.Errorf("cursors sent = %q; want %q", cursorsSent(*calls), want)
 	}
-	if (*calls)[0].params["limit"] != float64(forge.DedupScanLimit) {
-		t.Errorf("limit = %v; want every page asked at the dedup scan limit", (*calls)[0].params["limit"])
+	if (*calls)[0].Params["limit"] != float64(forge.DedupScanLimit) {
+		t.Errorf("limit = %v; want every page asked at the dedup scan limit", (*calls)[0].Params["limit"])
 	}
 }
 

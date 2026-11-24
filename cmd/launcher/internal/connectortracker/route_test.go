@@ -61,10 +61,10 @@ func TestRouteNarrowsQueuesCountBacklogAndFilingButNotOpenList(t *testing.T) {
 			t.Fatalf("step %d (%s): %v", i, s.method, err)
 		}
 		c := (*calls)[len(*calls)-1]
-		if c.method != s.method {
-			t.Fatalf("step %d: last call %s, want %s", i, c.method, s.method)
+		if c.Method != s.method {
+			t.Fatalf("step %d: last call %s, want %s", i, c.Method, s.method)
 		}
-		if got := c.params["route"]; !reflect.DeepEqual(got, s.want) {
+		if got := c.Params["route"]; !reflect.DeepEqual(got, s.want) {
 			t.Errorf("step %d (%s): route = %v, want %v", i, s.method, got, s.want)
 		}
 	}
@@ -89,8 +89,8 @@ func TestNoRouteLeavesTheParamsWithoutARouteKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range *calls {
-		if _, ok := c.params["route"]; ok {
-			t.Errorf("%s carried a route key with no route set: %v", c.method, c.params)
+		if _, ok := c.Params["route"]; ok {
+			t.Errorf("%s carried a route key with no route set: %v", c.Method, c.Params)
 		}
 	}
 }
@@ -147,7 +147,7 @@ func TestMatchesRouteAsksTheConnectorWithTheRoute(t *testing.T) {
 	if err != nil || got {
 		t.Fatalf("MatchesRoute = %v, %v, want false", got, err)
 	}
-	want := recordedCall{"tracker.matchesRoute", map[string]any{
+	want := recordedCall{Method: "tracker.matchesRoute", Params: map[string]any{
 		"target": map[string]any{"api": testTarget.API, "repo": testTarget.Repo, "dialect": ""},
 		"number": "7",
 		"route":  wantRouteWire,

@@ -45,7 +45,7 @@ func TestDriverStrategyRefusesNonDriver(t *testing.T) {
 }
 
 func TestDriverStrategyDescribe(t *testing.T) {
-	s := strategy(t, "driver.wasm")
+	s := conformingStrategy(t, "driver.wasm")
 	if s.Name != "fixture" || s.WriteTool != "Put" {
 		t.Errorf("Name, WriteTool = %q, %q", s.Name, s.WriteTool)
 	}
@@ -97,7 +97,7 @@ func TestDriverOneShotDecoderOutlivesItsCall(t *testing.T) {
 }
 
 func TestDriverDecoderKeepsStatePerInstance(t *testing.T) {
-	s := strategy(t, "driver.wasm")
+	s := conformingStrategy(t, "driver.wasm")
 	a, b := s.NewDecoder(), s.NewDecoder()
 	text := func(d driverkit.Decoder, line string) string {
 		evs := d(line)
@@ -155,7 +155,7 @@ func TestDriverDecoderFailsClosedWhenConnectorClosed(t *testing.T) {
 }
 
 func TestDriverResultEventAndSessionFlags(t *testing.T) {
-	s := strategy(t, "driver.wasm")
+	s := conformingStrategy(t, "driver.wasm")
 	b, err := s.ResultEvent("done")
 	if err != nil || string(b) != "result done\n" {
 		t.Errorf("ResultEvent = %q, %v", b, err)
@@ -166,7 +166,7 @@ func TestDriverResultEventAndSessionFlags(t *testing.T) {
 }
 
 func TestDriverResolveExitReadsLog(t *testing.T) {
-	s := strategy(t, "driver.wasm")
+	s := conformingStrategy(t, "driver.wasm")
 	if s.ResolveExit == nil {
 		t.Fatal("ResolveExit is nil, want it wired from the capability")
 	}

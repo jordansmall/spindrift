@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
+	"sync"
 	"time"
 
 	"spindrift.dev/launcher/internal/driver/driverkit"
@@ -261,3 +263,38 @@ const MaxEchoLen = maxEchoLen
 // HTTPTimeCapCause returns the cause the budget cancels a request with when
 // the call's http_request time cap runs out.
 func HTTPTimeCapCause(d time.Duration) error { return httpTimeCapError{d} }
+
+// Exchange is one request core sent a Connector's module and the response it
+// got back, as raw wire bytes.
+type Exchange struct{ Request, Response []byte }
+
+// tapEngine records every call through the engine it wraps.
+type tapEngine struct {
+	engine
+	mu        sync.Mutex
+	exchanges []Exchange
+}
+
+func (e *tapEngine) call(ctx context.Context, req []byte) ([]byte, error) {
+	resp, err := e.engine.call(ctx, req)
+	if err == nil {
+		e.mu.Lock()
+		e.exchanges = append(e.exchanges, Exchange{bytes.Clone(req), bytes.Clone(resp)})
+		e.mu.Unlock()
+	}
+	return resp, err
+}
+
+// TapExchanges records each call c's engine completes from now on, and returns
+// a func reading them. Call it before the first call that matters.
+func TapExchanges(c *Connector) func() []Exchange {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	tap := &tapEngine{engine: c.engine}
+	c.engine = tap
+	return func() []Exchange {
+		tap.mu.Lock()
+		defer tap.mu.Unlock()
+		return slices.Clone(tap.exchanges)
+	}
+}

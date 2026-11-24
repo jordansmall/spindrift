@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorprotocol/schematest"
 	"spindrift.dev/launcher/internal/dedupmarker"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/retry"
@@ -23,10 +24,7 @@ var testLifecycle = Lifecycle{Labels: testLabels, WebHost: "tracker.example"}
 
 var testTarget = Target{API: "https://api.example", Repo: "o/r"}
 
-type recordedCall struct {
-	method string
-	params map[string]any
-}
+type recordedCall = schematest.Call
 
 // stubGuest answers each method with the JSON in replies and records the calls.
 func stubGuest(t *testing.T, replies map[string]string) (func(context.Context, string, any, any) error, *[]recordedCall) {
@@ -48,7 +46,7 @@ func stubGuestErrs(t *testing.T, replies map[string]string, errs map[string][]er
 		if err := json.Unmarshal(raw, &p); err != nil {
 			t.Fatal(err)
 		}
-		calls = append(calls, recordedCall{method, p})
+		calls = append(calls, recordedCall{Method: method, Params: p})
 		if q := errs[method]; len(q) > 0 {
 			errs[method] = q[1:]
 			return q[0]
@@ -75,10 +73,12 @@ func TestNewRequiresCapability(t *testing.T) {
 	}
 }
 
+var listIssuesReplies = map[string]string{"tracker.listIssues": `{"issues":[
+	{"number":"10","title":"b","state":"open","labels":["priority:high"]},
+	{"number":"9","title":"a","state":"open","labels":[]}]}`}
+
 func TestTrackerListIssuesSortsAndResolves(t *testing.T) {
-	call, calls := stubGuest(t, map[string]string{"tracker.listIssues": `{"issues":[
-		{"number":"10","title":"b","state":"open","labels":["priority:high"]},
-		{"number":"9","title":"a","state":"open","labels":[]}]}`})
+	call, calls := stubGuest(t, listIssuesReplies)
 	tr := mustTracker(t, call, testLifecycle, testTarget, nil, true)
 
 	got, err := tr.ListIssues(forge.Dispatchable)
@@ -91,13 +91,14 @@ func TestTrackerListIssuesSortsAndResolves(t *testing.T) {
 	if got[1].Priority != forge.ResolvePriority([]string{"priority:high"}) || got[1].State != forge.IssueOpen {
 		t.Errorf("issue 10 = %+v, want resolved priority and open state", got[1])
 	}
-	want := recordedCall{"tracker.listIssues", map[string]any{
+	want := recordedCall{Method: "tracker.listIssues", Params: map[string]any{
 		"target": map[string]any{"api": "https://api.example", "repo": "o/r", "dialect": ""},
 		"label":  "ready-for-agent", "status": "", "limit": float64(forge.ResultPageLimit),
 	}}
 	if !reflect.DeepEqual((*calls)[0], want) {
 		t.Errorf("call = %+v, want %+v", (*calls)[0], want)
 	}
+	schematest.RequireConforms(t, *calls, listIssuesReplies)
 }
 
 func TestTrackerListOpenIssuesSendsNoSelector(t *testing.T) {
@@ -107,7 +108,7 @@ func TestTrackerListOpenIssuesSendsNoSelector(t *testing.T) {
 	if _, err := tr.ListOpenIssues(); err != nil {
 		t.Fatal(err)
 	}
-	p := (*calls)[0].params
+	p := (*calls)[0].Params
 	if p["label"] != "" || p["status"] != "" {
 		t.Errorf("label = %v, status = %v; want both empty", p["label"], p["status"])
 	}
@@ -120,7 +121,7 @@ func TestTrackerListIssuesSendsLabelAndStatus(t *testing.T) {
 	if _, err := tr.ListIssues(forge.Dispatchable); err != nil {
 		t.Fatal(err)
 	}
-	p := (*calls)[0].params
+	p := (*calls)[0].Params
 	if p["label"] != "ready-for-agent" || p["status"] != "Ready for Agent" {
 		t.Errorf("label = %v, status = %v; want both selectors", p["label"], p["status"])
 	}
@@ -133,7 +134,7 @@ func TestTrackerListIssuesStatusOnlyState(t *testing.T) {
 	if _, err := tr.ListIssues(forge.Dispatchable); err != nil {
 		t.Fatal(err)
 	}
-	p := (*calls)[0].params
+	p := (*calls)[0].Params
 	if p["label"] != "" || p["status"] != "Ready" {
 		t.Errorf("label = %v, status = %v; want status only", p["label"], p["status"])
 	}
@@ -157,7 +158,7 @@ func TestTrackerTargetCarriesDialect(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]any{"api": "https://j.example", "repo": "ENG", "dialect": "server"}
-	if got := (*calls)[0].params["target"]; !reflect.DeepEqual(got, want) {
+	if got := (*calls)[0].Params["target"]; !reflect.DeepEqual(got, want) {
 		t.Errorf("target = %v, want %v", got, want)
 	}
 }
@@ -326,8 +327,8 @@ func TestTrackerCommentsCapabilityServesFromConnectorAndDropsMinimized(t *testin
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("comments = %+v, want %+v", got, want)
 	}
-	if (*calls)[0].method != "tracker.comments" {
-		t.Errorf("first guest call = %v, want tracker.comments", (*calls)[0].method)
+	if (*calls)[0].Method != "tracker.comments" {
+		t.Errorf("first guest call = %v, want tracker.comments", (*calls)[0].Method)
 	}
 
 	var warn strings.Builder
@@ -362,8 +363,10 @@ func TestTrackerNativeDepsFollowsCapability(t *testing.T) {
 	}
 }
 
+var blocksReplies = map[string]string{"tracker.blocks": `{"ids":["3","5","3"]}`}
+
 func TestTrackerBlocksFollowsCapability(t *testing.T) {
-	call, calls := stubGuest(t, map[string]string{"tracker.blocks": `{"ids":["3","5","3"]}`})
+	call, calls := stubGuest(t, blocksReplies)
 
 	without := mustTracker(t, call, testLifecycle, testTarget, nil, true)
 	if _, ok := forge.As[forge.BlockersLister](without); ok {
@@ -382,9 +385,10 @@ func TestTrackerBlocksFollowsCapability(t *testing.T) {
 	if want := forge.WithSource([]string{"3", "5"}, forge.DepSourceNative); !reflect.DeepEqual(deps, want) {
 		t.Errorf("deps = %v, want %v (the Connector's, deduped in order, native-sourced)", deps, want)
 	}
-	if (*calls)[0].method != "tracker.blocks" {
-		t.Errorf("method = %q, want tracker.blocks", (*calls)[0].method)
+	if (*calls)[0].Method != "tracker.blocks" {
+		t.Errorf("method = %q, want tracker.blocks", (*calls)[0].Method)
 	}
+	schematest.RequireConforms(t, *calls, blocksReplies)
 }
 
 func TestBlocksRefusesIDsOutsideGrammar(t *testing.T) {
@@ -576,7 +580,7 @@ func TestLegacyConnectorNeverReceivesStatus(t *testing.T) {
 	if _, err := both.ListIssues(forge.Dispatchable); err != nil {
 		t.Fatal(err)
 	}
-	if p := (*calls)[0].params; p["label"] != "ready-for-agent" || p["status"] != "" {
+	if p := (*calls)[0].Params; p["label"] != "ready-for-agent" || p["status"] != "" {
 		t.Errorf("label = %v, status = %v; want the label alone", p["label"], p["status"])
 	}
 
