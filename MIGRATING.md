@@ -25,6 +25,16 @@ done
 The recipe's marker comment is now `# connector=github`, where it was
 `# primary=github`; copy the recipe afresh rather than patching a saved one.
 
+## The github Connector write gate is renamed (issue #7468)
+
+The launch gate that checks the github Connector's write credential is now
+`connector-write-github`, not `primary-connector-write-github`. The id appears
+only in `spindrift doctor` and launch output (`ok:`, `MISSING:` and warning
+lines); no setting takes it. The gate's warning, error and refusal lines
+likewise say `the github Connector` where they said `the primary github
+Connector`. Change any log grep, alert or script that matches the old id or
+text. Nothing to do otherwise.
+
 ## The Route baseline is merge-guarded by default (issue #7465)
 
 The shipped `MERGE_GUARD_PATHS` default now ends in
