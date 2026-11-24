@@ -24,7 +24,7 @@ func TestSplitCredential(t *testing.T) {
 		name, in, wantURL string
 		want              Credential
 	}{
-		{"https user and password", "https://u:p%40ss@forge.example/o/r.git", "https://forge.example/o/r.git", Credential{"u", "p@ss"}},
+		{"https user and password", "https://u:p%40ss@forge.example/o/r.git", "https://forge.example/o/r.git", Credential{Username: "u", Password: "p@ss"}},
 		{"http user only", "http://tok@forge.example:3000/o/r.git", "http://forge.example:3000/o/r.git", Credential{Username: "tok"}},
 		{"https no userinfo", "https://forge.example/o/r.git", "https://forge.example/o/r.git", Credential{}},
 		{"local path", "/srv/git/r.git", "/srv/git/r.git", Credential{}},
@@ -148,7 +148,7 @@ func TestCredentialZeroApplyIsNoOp(t *testing.T) {
 }
 
 func TestCredentialDoesNotFormatPassword(t *testing.T) {
-	c := Credential{testUser, testToken}
+	c := Credential{Username: testUser, Password: testToken}
 	for _, s := range []string{fmt.Sprintf("%v", c), fmt.Sprintf("%+v", c), fmt.Sprintf("%#v", c), fmt.Sprint(&c)} {
 		if strings.Contains(s, testToken) {
 			t.Fatalf("formatted Credential leaks the password: %s", s)
@@ -159,7 +159,7 @@ func TestCredentialDoesNotFormatPassword(t *testing.T) {
 func TestCredentialApplyExtendsGitConfigCount(t *testing.T) {
 	cmd := exec.Command("git", "status")
 	cmd.Env = []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=ambient.key", "GIT_CONFIG_VALUE_0=ambient"}
-	Credential{testUser, testToken}.Apply(cmd, testRepoURL)
+	Credential{Username: testUser, Password: testToken}.Apply(cmd, testRepoURL)
 
 	env := lastEnv(cmd.Env)
 	if env["GIT_CONFIG_COUNT"] != "5" {
@@ -188,7 +188,7 @@ func TestCredentialApplyExtendsGitConfigCount(t *testing.T) {
 func TestCredentialApplyAmbientCountSurvivesRealGit(t *testing.T) {
 	cmd := exec.Command("git", "config", "--get", "ambient.key")
 	cmd.Env = append(os.Environ(), "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=ambient.key", "GIT_CONFIG_VALUE_0=kept")
-	Credential{testUser, testToken}.Apply(cmd, testRepoURL)
+	Credential{Username: testUser, Password: testToken}.Apply(cmd, testRepoURL)
 	out, err := cmd.Output()
 	if err != nil || strings.TrimSpace(string(out)) != "kept" {
 		t.Fatalf("ambient config lost: %q %v", out, err)
@@ -197,7 +197,7 @@ func TestCredentialApplyAmbientCountSurvivesRealGit(t *testing.T) {
 
 func TestCredentialAuthenticatesGit(t *testing.T) {
 	url, bare := gitexectest.AuthRemote(t, testUser, testToken)
-	cred := Credential{testUser, testToken}
+	cred := Credential{Username: testUser, Password: testToken}
 	gitArgs := []string{"-c", "user.name=t", "-c", "user.email=t@example.invalid"}
 
 	run := func(c Credential, dir string, args ...string) (string, error) {
@@ -211,7 +211,7 @@ func TestCredentialAuthenticatesGit(t *testing.T) {
 		if out, err := run(Credential{}, "", "ls-remote", url); err == nil {
 			t.Fatalf("ls-remote without credential succeeded: %s", out)
 		}
-		if out, err := run(Credential{testUser, "wrong"}, "", "ls-remote", url); err == nil {
+		if out, err := run(Credential{Username: testUser, Password: "wrong"}, "", "ls-remote", url); err == nil {
 			t.Fatalf("ls-remote with wrong password succeeded: %s", out)
 		}
 	})
@@ -288,7 +288,7 @@ func lastEnv(env []string) map[string]string {
 func TestCredentialApplyIsScopedToTheExactURL(t *testing.T) {
 	r := gitexectest.NewAuthRemote(t, testUser, testToken)
 	elsewhere := gitexectest.NewAuthRemote(t, testUser, testToken)
-	cred := Credential{testUser, testToken}
+	cred := Credential{Username: testUser, Password: testToken}
 	lsRemote := func(scope, target string) (string, error) {
 		out, err := cred.Apply(Cmd(nil, "ls-remote", target), scope).CombinedOutput()
 		return string(out), err
@@ -320,7 +320,7 @@ func TestCredentialApplyIsNoOpForNonHTTPRemotes(t *testing.T) {
 	for _, repoURL := range []string{"/srv/git/r.git", "file:///srv/git/r.git", "ssh://git@forge.example/o/r.git", "git@forge.example:o/r.git"} {
 		cmd := exec.Command("git", "status")
 		cmd.Env = []string{"A=1"}
-		Credential{testUser, testToken}.Apply(cmd, repoURL)
+		Credential{Username: testUser, Password: testToken}.Apply(cmd, repoURL)
 		if len(cmd.Env) != 1 {
 			t.Fatalf("%s: Apply changed the environment: %v", repoURL, cmd.Env)
 		}
@@ -373,7 +373,7 @@ func TestExplainNamesTheConfiguredRepoOnARedirect(t *testing.T) {
 // secret, and Apply pins git's locale so Explain can match its stderr.
 func TestApplyAndExplainStripUserinfo(t *testing.T) {
 	const withInfo = "https://" + testUser + ":" + testToken + "@forge.example/o/r.git"
-	cred := Credential{testUser, testToken}
+	cred := Credential{Username: testUser, Password: testToken}
 
 	cmd := cred.Apply(exec.Command("git", "status"), withInfo)
 	env := strings.Join(cmd.Env, "\n")
@@ -406,7 +406,7 @@ func TestApplyAndExplainStripUserinfo(t *testing.T) {
 func TestApplyAndExplainStripUserinfoWithQueryCharsInPassword(t *testing.T) {
 	const secret = "pa?ss#w0rd-do-not-leak"
 	const withInfo = "https://" + testUser + ":" + secret + "@forge.example/o/r.git"
-	cred := Credential{testUser, secret}
+	cred := Credential{Username: testUser, Password: secret}
 
 	cmd := cred.Apply(exec.Command("git", "status"), withInfo)
 	for _, e := range cmd.Env {
@@ -422,5 +422,66 @@ func TestApplyAndExplainStripUserinfoWithQueryCharsInPassword(t *testing.T) {
 	}
 	if !strings.Contains(got.Error(), testRepoURL) {
 		t.Errorf("Explain = %v, want the credential-free URL %s", got, testRepoURL)
+	}
+}
+
+// An env-backed credential reads its token at each Apply, so a rotated token
+// reaches the next git call without rebuilding whatever holds the credential.
+func TestEnvCredentialReadsTokenAtEachUse(t *testing.T) {
+	const env = "GITEXEC_TEST_TOKEN"
+	cred := EnvCredential(testUser, env)
+	password := func() string {
+		cmd := cred.Apply(exec.Command("git", "status"), testRepoURL)
+		return lastEnv(cmd.Env)[passwordEnv]
+	}
+
+	t.Setenv(env, "first")
+	if got := password(); got != "first" {
+		t.Fatalf("Apply password = %q, want first", got)
+	}
+	t.Setenv(env, "second")
+	if got := password(); got != "second" {
+		t.Fatalf("Apply after rotation = %q, want second", got)
+	}
+	cmd := cred.Apply(exec.Command("git", "status"), testRepoURL)
+	if got := lastEnv(cmd.Env)[usernameEnv]; got != testUser {
+		t.Errorf("Apply username = %q, want %q", got, testUser)
+	}
+}
+
+func TestEnvCredentialWithEmptyEnvIsNoOp(t *testing.T) {
+	const env = "GITEXEC_TEST_TOKEN"
+	t.Setenv(env, "")
+	cred := EnvCredential(testUser, env)
+	cmd := exec.Command("git", "status")
+	cmd.Env = []string{"A=1"}
+	if got := cred.Apply(cmd, testRepoURL); got != cmd || len(cmd.Env) != 1 {
+		t.Fatalf("empty-env credential changed the command: env=%v", cmd.Env)
+	}
+	plain, redirect := errors.New("exit status 128"), []byte("fatal: could not read Username")
+	if got := cred.Explain(plain, redirect, testRepoURL); got != plain {
+		t.Errorf("Explain = %v, want unchanged", got)
+	}
+}
+
+func TestEnvCredentialExplainFollowsTheLiveToken(t *testing.T) {
+	const env = "GITEXEC_TEST_TOKEN"
+	cred := EnvCredential(testUser, env)
+	plain, redirect := errors.New("exit status 128"), []byte("fatal: could not read Username")
+
+	t.Setenv(env, testToken)
+	got := cred.Explain(plain, redirect, testRepoURL)
+	if !strings.Contains(got.Error(), "configured Target repo") || strings.Contains(got.Error(), testToken) {
+		t.Errorf("Explain = %v, want the redirect explanation without the token", got)
+	}
+}
+
+func TestEnvCredentialDoesNotFormatPassword(t *testing.T) {
+	t.Setenv("GITEXEC_TEST_TOKEN", testToken)
+	c := EnvCredential(testUser, "GITEXEC_TEST_TOKEN")
+	for _, s := range []string{fmt.Sprintf("%v", c), fmt.Sprintf("%+v", c), fmt.Sprintf("%#v", c)} {
+		if strings.Contains(s, testToken) {
+			t.Fatalf("formatted Credential leaks the password: %s", s)
+		}
 	}
 }
