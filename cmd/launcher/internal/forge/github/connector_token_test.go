@@ -13,8 +13,8 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/connectorrecord"
 	"spindrift.dev/launcher/internal/hostpaths"
-	"spindrift.dev/launcher/internal/primaryrecord"
 )
 
 // useGithubRow applies a github backend row whose Connector reaches b, as a
@@ -123,7 +123,7 @@ var ghTokenWriteScopes = map[string]bool{
 	"public_repo": true,
 }
 
-// notIntrospectableReason is the primary Connector write gate's explanation for
+// notIntrospectableReason is the Connector write gate's explanation for
 // a GitHub token whose grants cannot be determined.
 const notIntrospectableReason = "e.g. a fine-grained PAT, whose granted permissions GitHub exposes no endpoint to introspect"
 
@@ -133,7 +133,7 @@ func chdirAuditPath(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	t.Chdir(dir)
-	return filepath.Join(hostpaths.LogDir(dir), primaryrecord.Name(backend.GitHub.Name, ".audit.jsonl"))
+	return filepath.Join(hostpaths.LogDir(dir), connectorrecord.Name(backend.GitHub.Name, ".audit.jsonl"))
 }
 
 // A Connector never runs unrecorded: an audit file that will not open fails the

@@ -20,7 +20,7 @@ var connectorClient *http.Client
 // introspectToken is the Strategy's IntrospectToken. The github backend row's
 // Connector answers, so the host needs no gh; without a routed row it fails
 // with ErrNoRoute, as every read does. A Connector load is short-lived,
-// with its audit record in the run's primary record.
+// with its audit record in the run's Connector record.
 func introspectToken(token, repoSlug string) (backendkit.TokenIntrospection, error) {
 	row, err := routeRow()
 	if err != nil {

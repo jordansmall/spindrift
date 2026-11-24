@@ -227,7 +227,7 @@ func checkRoutedMergeMethod(method string) error {
 // --delete-branch does. The delete is best effort: the PR has landed by then,
 // and failing the merge would turn it into a failed settle. A head already gone
 // (a repository that deletes merged heads itself) is done, not a fault, so it
-// stays out of the primary log; any other failure is recorded there and warned.
+// stays out of the Connector log; any other failure is recorded there and warned.
 func (e *execClient) mergeViaConnector(row backendrows.Row, prURL string) error {
 	if err := e.checkRoutedMergeMethod(); err != nil {
 		return err

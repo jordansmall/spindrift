@@ -21,11 +21,11 @@ import (
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorrecord"
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/connectorsandbox/sandbox"
 	"spindrift.dev/launcher/internal/fixturebuild"
 	"spindrift.dev/launcher/internal/hostpaths"
-	"spindrift.dev/launcher/internal/primaryrecord"
 	"spindrift.dev/launcher/internal/runner"
 )
 
@@ -369,7 +369,7 @@ func RouteRefusal(t *testing.T, r runner.Runner) {
 	if err := c.Call(ctx, "fetch", params, new(struct{})); !errors.Is(err, connectorhost.ErrRouteRefused) {
 		t.Fatalf("fetch err = %v, want ErrRouteRefused", err)
 	}
-	audit, err := os.ReadFile(filepath.Join(hostpaths.LogDir(cwd), primaryrecord.Name(name, ".audit.jsonl")))
+	audit, err := os.ReadFile(filepath.Join(hostpaths.LogDir(cwd), connectorrecord.Name(name, ".audit.jsonl")))
 	if err != nil {
 		t.Fatal(err)
 	}

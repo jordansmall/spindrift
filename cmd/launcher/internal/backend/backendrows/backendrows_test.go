@@ -16,10 +16,10 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorrecord"
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
 	"spindrift.dev/launcher/internal/hostpaths"
-	"spindrift.dev/launcher/internal/primaryrecord"
 )
 
 const fixturesEnv = "SPINDRIFT_CONNECTOR_FIXTURES_DIR"
@@ -670,7 +670,7 @@ func auditInTempDir(t *testing.T, name string) func() string {
 	dir := t.TempDir()
 	t.Chdir(dir)
 	return func() string {
-		raw, err := os.ReadFile(filepath.Join(hostpaths.LogDir(dir), primaryrecord.Name(name, ".audit.jsonl")))
+		raw, err := os.ReadFile(filepath.Join(hostpaths.LogDir(dir), connectorrecord.Name(name, ".audit.jsonl")))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -696,7 +696,7 @@ func TestLoadFailsWhenTheAuditFileWillNotOpen(t *testing.T) {
 	r.Module = filepath.Join(dir, "absent.wasm")
 
 	_, err := backendrows.Load(context.Background(), r, backendrows.Options{})
-	want := filepath.Join(logDir, primaryrecord.Name("gone", ".audit.jsonl"))
+	want := filepath.Join(logDir, connectorrecord.Name("gone", ".audit.jsonl"))
 	if err == nil || !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), "read module") {
 		t.Fatalf("err = %v, want the audit open failure naming %s, not the module read", err, want)
 	}

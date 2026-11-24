@@ -21,8 +21,8 @@ import (
 	"sync"
 
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorrecord"
 	"spindrift.dev/launcher/internal/connectorsandbox"
-	"spindrift.dev/launcher/internal/primaryrecord"
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
@@ -307,7 +307,7 @@ type Options struct {
 func Load(ctx context.Context, row Row, o Options) (*connectorhost.Connector, error) {
 	// Opening the audit file is part of loading, before the module is read, so
 	// a Connector never runs unrecorded.
-	audit, err := primaryrecord.AuditFile(row.Name)
+	audit, err := connectorrecord.AuditFile(row.Name)
 	if err != nil {
 		return nil, fmt.Errorf("backend %q: %w", row.Name, err)
 	}

@@ -12,11 +12,11 @@ import (
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorforge"
+	"spindrift.dev/launcher/internal/connectorrecord"
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/git"
 	"spindrift.dev/launcher/internal/gitexec"
-	"spindrift.dev/launcher/internal/primaryrecord"
 )
 
 // ErrMergeMethod is why a forgejo row refuses a MERGE_METHOD
@@ -55,7 +55,7 @@ func connectorRow() (backendrows.Row, error) {
 // native adapter. The Connector authorizes with the row's credential; git
 // keeps the native token. The Connector and its audit file live for the
 // process. A failed load or compose, and each failed Connector call of the
-// built forge, is recorded in the primaryrecord .log.
+// built forge, is recorded in the connectorrecord .log.
 func newConnectorCodeForge(row backendrows.Row, s backendkit.Shared, k Knobs) (forge.CodeForge, error) {
 	if MergeStyle(s.MergeMethod) != "rebase" {
 		return nil, fmt.Errorf("%w (got %q)", ErrMergeMethod, s.MergeMethod)
@@ -93,7 +93,7 @@ func credentialGetenv(row backendrows.Row, k Knobs) func(string) string {
 	}
 }
 
-// recordFailure records a Connector failure in the primaryrecord .log.
+// recordFailure records a Connector failure in the connectorrecord .log.
 func recordFailure(op string, err error) {
-	_ = primaryrecord.Note(backend.Forgejo.Name, op, err)
+	_ = connectorrecord.Note(backend.Forgejo.Name, op, err)
 }

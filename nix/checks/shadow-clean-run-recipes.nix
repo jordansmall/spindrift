@@ -3,7 +3,7 @@
 # drift.
 #
 # Cases pin: an in-flight run is skipped, not dirty (opencode: an unended Pass
-# whose primary `issue-<n>.log` lacks `dispatch_settled`; primary record: a
+# whose primary `issue-<n>.log` lacks `dispatch_settled`; Connector record: a
 # live file-name pid); a finished run missing a summary is dirty, a killed `-fix-N`
 # satellite included; a stamp-less log never sorts ahead of stamped ones (the
 # opencode cases run under en_US.UTF-8, whose collation ignores the leading
@@ -13,7 +13,7 @@
 #
 # The shadow recipe also reads each log's `shadow-replay` sidecar (issue
 # #6872): a run counts once whichever set holds its summaries, and each
-# non-empty set must be clean on its own. The primary-mode recipe (issue
+# non-empty set must be clean on its own. The Connector-record recipe (issue
 # #6998) needs an audit file with at least one decision entry (the sandbox
 # totals line is not one), no refusal, and an empty or absent `.log`.
 { pkgs, ... }:
@@ -37,10 +37,10 @@
             inb { body = body $0 "\n" }' "$docs"
         }
         extract driver=opencode > opencode.sh
-        extract primary=github > primary.sh
+        extract connector=github > connector.sh
         sed 's/^driver=opencode$/driver=pi/' opencode.sh > pi.sh
         fail=0
-        for r in opencode.sh pi.sh primary.sh; do
+        for r in opencode.sh pi.sh connector.sh; do
           if ! grep -q '^logs=\.spindrift/logs$' "$r"; then
             echo "FAIL: $r has no logs= line: no recipe extracted into it from docs/reference.md (pi.sh is sed-derived from opencode.sh)" >&2
             exit 1
@@ -301,86 +301,86 @@
         run pi-filter-diverged-flag-alone-ends-streak pi.sh 1 case-f6
 
         dead_pid=999999999 # above Linux's pid_max (4194304), so never a live process
-        # primary record pair: <dir> <stamp> <pid> then the audit lines
-        pstem() { echo "$1/primary-github-$2-$3"; }
-        p_audit() { # <stem> <decision>...
+        # Connector record pair: <dir> <stamp> <pid> then the audit lines
+        conn_stem() { echo "$1/connector-github-$2-$3"; }
+        conn_audit() { # <stem> <decision>...
           s=$1; shift
           : > "$s.audit.jsonl"
           for dec in "$@"; do
             printf '{"route":"GET /repos","method":"GET","status":200,"decision":"%s"}\n' "$dec" >> "$s.audit.jsonl"
           done
         }
-        p_clean() { p_audit "$(pstem "$1" "$2" "$3")" allowed allowed; }
+        conn_clean() { conn_audit "$(conn_stem "$1" "$2" "$3")" allowed allowed; }
         # The sandbox totals line a process appends at exit: no decision key.
-        p_totals() {
-          echo '{"sandbox_start_ns":1,"sandbox_calls":2,"sandbox_host_calls":3,"sandbox_hop_ns":4}' >> "$(pstem "$1" "$2" "$3").audit.jsonl"
+        conn_totals() {
+          echo '{"sandbox_start_ns":1,"sandbox_calls":2,"sandbox_host_calls":3,"sandbox_hop_ns":4}' >> "$(conn_stem "$1" "$2" "$3").audit.jsonl"
         }
         crun() { run "$1" "$2" "$3" "$4" cut-over; }
 
-        d=$(mkcase p1)
-        p_clean "$d" 20261114T090000Z $dead_pid
-        p_clean "$d" 20261114T100000Z $dead_pid
-        : > "$(pstem "$d" 20261114T100000Z $dead_pid).log" # an empty log is clean
-        p_clean "$d" 20261114T110000Z $dead_pid
-        crun primary-all-clean primary.sh 3 case-p1
+        d=$(mkcase conn1)
+        conn_clean "$d" 20261114T090000Z $dead_pid
+        conn_clean "$d" 20261114T100000Z $dead_pid
+        : > "$(conn_stem "$d" 20261114T100000Z $dead_pid).log" # an empty log is clean
+        conn_clean "$d" 20261114T110000Z $dead_pid
+        crun connector-all-clean connector.sh 3 case-conn1
 
-        d=$(mkcase p2)
-        p_clean "$d" 20261114T090000Z $dead_pid
-        p_audit "$(pstem "$d" 20261114T100000Z $dead_pid)" allowed refused
-        p_clean "$d" 20261114T110000Z $dead_pid
-        p_clean "$d" 20261114T120000Z $dead_pid
-        crun primary-refusal-ends-streak primary.sh 2 case-p2
+        d=$(mkcase conn2)
+        conn_clean "$d" 20261114T090000Z $dead_pid
+        conn_audit "$(conn_stem "$d" 20261114T100000Z $dead_pid)" allowed refused
+        conn_clean "$d" 20261114T110000Z $dead_pid
+        conn_clean "$d" 20261114T120000Z $dead_pid
+        crun connector-refusal-ends-streak connector.sh 2 case-conn2
 
-        d=$(mkcase p3)
-        p_clean "$d" 20261114T090000Z $dead_pid
-        p_clean "$d" 20261114T100000Z $dead_pid
-        echo '{"op":"Issue","error":"boom"}' > "$(pstem "$d" 20261114T100000Z $dead_pid).log"
-        p_clean "$d" 20261114T110000Z $dead_pid
-        crun primary-read-error-ends-streak primary.sh 1 case-p3
+        d=$(mkcase conn3)
+        conn_clean "$d" 20261114T090000Z $dead_pid
+        conn_clean "$d" 20261114T100000Z $dead_pid
+        echo '{"op":"Issue","error":"boom"}' > "$(conn_stem "$d" 20261114T100000Z $dead_pid).log"
+        conn_clean "$d" 20261114T110000Z $dead_pid
+        crun connector-read-error-ends-streak connector.sh 1 case-conn3
 
         # A process that made no Connector request proves nothing.
-        d=$(mkcase p4)
-        p_clean "$d" 20261114T090000Z $dead_pid
-        p_audit "$(pstem "$d" 20261114T100000Z $dead_pid)"
-        p_clean "$d" 20261114T110000Z $dead_pid
-        crun primary-empty-audit-ends-streak primary.sh 1 case-p4
+        d=$(mkcase conn4)
+        conn_clean "$d" 20261114T090000Z $dead_pid
+        conn_audit "$(conn_stem "$d" 20261114T100000Z $dead_pid)"
+        conn_clean "$d" 20261114T110000Z $dead_pid
+        crun connector-empty-audit-ends-streak connector.sh 1 case-conn4
 
         # The sandbox totals line is not an entry: alone it proves nothing,
         # and after real entries it leaves the run clean.
-        d=$(mkcase p4t)
-        p_clean "$d" 20261114T090000Z $dead_pid
-        p_audit "$(pstem "$d" 20261114T100000Z $dead_pid)"
-        p_totals "$d" 20261114T100000Z $dead_pid
-        p_clean "$d" 20261114T110000Z $dead_pid
-        p_totals "$d" 20261114T110000Z $dead_pid
-        crun primary-totals-only-audit-ends-streak primary.sh 1 case-p4t
-        d=$(mkcase p4c)
-        p_clean "$d" 20261114T090000Z $dead_pid
-        p_totals "$d" 20261114T090000Z $dead_pid
-        p_clean "$d" 20261114T100000Z $dead_pid
-        p_totals "$d" 20261114T100000Z $dead_pid
-        crun primary-totals-after-entries-counts primary.sh 2 case-p4c
+        d=$(mkcase conn4t)
+        conn_clean "$d" 20261114T090000Z $dead_pid
+        conn_audit "$(conn_stem "$d" 20261114T100000Z $dead_pid)"
+        conn_totals "$d" 20261114T100000Z $dead_pid
+        conn_clean "$d" 20261114T110000Z $dead_pid
+        conn_totals "$d" 20261114T110000Z $dead_pid
+        crun connector-totals-only-audit-ends-streak connector.sh 1 case-conn4t
+        d=$(mkcase conn4c)
+        conn_clean "$d" 20261114T090000Z $dead_pid
+        conn_totals "$d" 20261114T090000Z $dead_pid
+        conn_clean "$d" 20261114T100000Z $dead_pid
+        conn_totals "$d" 20261114T100000Z $dead_pid
+        crun connector-totals-after-entries-counts connector.sh 2 case-conn4c
 
         # A load failure leaves an error line and no audit file.
-        d=$(mkcase p5)
-        p_clean "$d" 20261114T090000Z $dead_pid
-        echo '{"op":"Issue","error":"load"}' > "$(pstem "$d" 20261114T100000Z $dead_pid).log"
-        p_clean "$d" 20261114T110000Z $dead_pid
-        crun primary-log-without-audit-ends-streak primary.sh 1 case-p5
+        d=$(mkcase conn5)
+        conn_clean "$d" 20261114T090000Z $dead_pid
+        echo '{"op":"Issue","error":"load"}' > "$(conn_stem "$d" 20261114T100000Z $dead_pid).log"
+        conn_clean "$d" 20261114T110000Z $dead_pid
+        crun connector-log-without-audit-ends-streak connector.sh 1 case-conn5
 
         # A live pid is in flight on a live host, but counts by content when
         # the logs are fetched (finished=1).
-        d=$(mkcase p6)
-        p_clean "$d" 20261114T090000Z $dead_pid
-        p_clean "$d" 20261114T100000Z $dead_pid
-        p_audit "$(pstem "$d" 20261114T110000Z $$)" allowed refused
-        crun primary-in-flight-newest primary.sh 2 case-p6
-        crun primary-finished-refusal-dirty primary-finished.sh 0 case-p6
+        d=$(mkcase conn6)
+        conn_clean "$d" 20261114T090000Z $dead_pid
+        conn_clean "$d" 20261114T100000Z $dead_pid
+        conn_audit "$(conn_stem "$d" 20261114T110000Z $$)" allowed refused
+        crun connector-in-flight-newest connector.sh 2 case-conn6
+        crun connector-finished-refusal-dirty connector-finished.sh 0 case-conn6
 
-        d=$(mkcase p7)
-        p_clean "$d" 20261114T090000Z $dead_pid
-        p_clean "$d" 20261114T100000Z $$
-        crun primary-finished-clean-counts primary-finished.sh 2 case-p7
+        d=$(mkcase conn7)
+        conn_clean "$d" 20261114T090000Z $dead_pid
+        conn_clean "$d" 20261114T100000Z $$
+        crun connector-finished-clean-counts connector-finished.sh 2 case-conn7
 
         [ "$fail" = 0 ] || exit 1
         touch "$out"

@@ -50,7 +50,7 @@ func newRoutedContractEnv(t *testing.T) *routedContractEnv {
 
 // assertSplit is the run's proof that the contract stayed on the Connector: gh
 // never ran, the Connector sent each wanted read and none was refused, the
-// backend saw nothing outside its API, and the primary log holds exactly the
+// backend saw nothing outside its API, and the Connector log holds exactly the
 // wantFailed failures the contract injected.
 func (e *routedContractEnv) assertSplit(t *testing.T, wantFailed int, wantReads []string) {
 	t.Helper()
@@ -60,7 +60,7 @@ func (e *routedContractEnv) assertSplit(t *testing.T, wantFailed int, wantReads 
 
 	audits := routedFiles(t, e.logDir, ".audit.jsonl")
 	if len(audits) != 1 {
-		t.Fatalf("primary audit files = %v, want one", audits)
+		t.Fatalf("Connector audit files = %v, want one", audits)
 	}
 	raw, err := os.ReadFile(audits[0])
 	if err != nil {
@@ -88,7 +88,7 @@ func (e *routedContractEnv) assertSplit(t *testing.T, wantFailed int, wantReads 
 		failed += strings.Count(string(raw), "\n")
 	}
 	if failed != wantFailed {
-		t.Errorf("primary log holds %d failed reads, want %d", failed, wantFailed)
+		t.Errorf("Connector log holds %d failed reads, want %d", failed, wantFailed)
 	}
 	e.h.backend.mu.Lock()
 	unexpected := slices.Clone(e.h.backend.unexpected)

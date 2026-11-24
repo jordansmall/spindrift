@@ -9,13 +9,13 @@ import (
 	"path/filepath"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/connectorrecord"
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/hostpaths"
-	"spindrift.dev/launcher/internal/primaryrecord"
 )
 
 // RecordRoutedSandboxTotals appends the run's Connector sandbox cost to this
-// process's primary audit file, the only home a routed run has for it: a
+// process's Connector audit file, the only home a routed run has for it: a
 // routed row writes no shadow summary. Call it once, after the sandbox
 // closed, so the totals are final. It writes nothing unless the audit file
 // already exists, since a pair for a process that never read through its
@@ -30,10 +30,10 @@ func RecordRoutedSandboxTotals() {
 	}
 	pwd, err := os.Getwd()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "primary sandbox totals were not recorded: %v\n", err)
+		fmt.Fprintf(os.Stderr, "sandbox totals were not recorded: %v\n", err)
 		return
 	}
-	path := filepath.Join(hostpaths.LogDir(pwd), primaryrecord.Name(backend.GitHub.Name, ".audit.jsonl"))
+	path := filepath.Join(hostpaths.LogDir(pwd), connectorrecord.Name(backend.GitHub.Name, ".audit.jsonl"))
 	// Every field is an int64, so Marshal cannot fail.
 	line, _ := json.Marshal(struct {
 		StartNs   int64 `json:"sandbox_start_ns"`
@@ -53,6 +53,6 @@ func RecordRoutedSandboxTotals() {
 		}
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "primary sandbox totals were not recorded: %v\n", err)
+		fmt.Fprintf(os.Stderr, "sandbox totals were not recorded: %v\n", err)
 	}
 }

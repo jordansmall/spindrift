@@ -2868,7 +2868,7 @@ evaluates unchanged.
   load, or a request its Route table refuses, fails the operation with the
   Connector's own error, and the native adapter never answers instead. The
   Connector writes the same per-process record pair as github and jira
-  (`primary-forgejo-<stamp>-<pid>`, see [Backend primary
+  (`connector-forgejo-<stamp>-<pid>`, see [Backend primary
   mode](#backend-primary-mode)): its audit lines and its failed calls.
 - Every tracker operation goes through the Connector: reads,
   the claim and every transition, label edits and creation, comments (the
@@ -3301,8 +3301,8 @@ carries that header verbatim. A 429 that is not primary counts as secondary,
 with or without those signals.
 
 Each launcher process writes its own record pair under `.spindrift/logs/`, the
-directory CI uploads, once it makes its first primary read (a daemon writes one
-pair for its whole life). The stem is `primary-<backend>-<UTC stamp>-<pid>`,
+directory CI uploads, once it makes its first Connector read (a daemon writes one
+pair for its whole life). The stem is `connector-<backend>-<UTC stamp>-<pid>`,
 with the stamp as `20060102T150405Z`. Opening `<stem>.audit.jsonl` is part of
 loading the Connector: a file that cannot be opened, in an unwritable log
 directory say, fails the load with an error naming its path, before the
@@ -3353,15 +3353,15 @@ deleted the native github read path) after 20 consecutive clean dogfood runs.
 The recipe counts them from the newest record back, ordering by the stamp:
 
 ```sh
-# primary=github
+# connector=github
 logs=.spindrift/logs
 row=github
 finished=
-for f in "$logs"/primary-"$row"-*; do
+for f in "$logs"/connector-"$row"-*; do
   case $f in *.audit.jsonl | *.log) ;; *) continue ;; esac
   stem=${f%.audit.jsonl}; echo "${stem%.log}"
 done | sort -u | while read -r stem; do
-  name=${stem##*/primary-"$row"-}; stamp=${name%%-*}; pid=${name##*-}
+  name=${stem##*/connector-"$row"-}; stamp=${name%%-*}; pid=${name##*-}
   live=
   [ -n "$finished" ] || { kill -0 "$pid" 2>/dev/null && live=1; }
   if [ -n "$live" ]; then verdict=skip
@@ -3438,7 +3438,7 @@ before. The row always authorizes with Basic, so a Server/Data Center site needs
 a username and password or token in those two variables, not a Bearer PAT. The
 API dialect follows `JIRA_EMAIL`: Jira Cloud when it is set, Server/Data Center
 otherwise. Each process appends the Connector's audit lines to
-`.spindrift/logs/primary-jira-<stamp>-<pid>.audit.jsonl` and every failed load or
+`.spindrift/logs/connector-jira-<stamp>-<pid>.audit.jsonl` and every failed load or
 call to the matching `.log`. The jira row is not on dogfood's
 `nix/dogfood-primary.nix`, so no streak recipe counts its runs.
 

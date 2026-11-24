@@ -19,6 +19,7 @@ import (
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorrecord"
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/dedupmarker"
 	"spindrift.dev/launcher/internal/dispatchkind"
@@ -26,7 +27,6 @@ import (
 	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/forge/jira"
 	"spindrift.dev/launcher/internal/hostpaths"
-	"spindrift.dev/launcher/internal/primaryrecord"
 	"spindrift.dev/launcher/internal/retry"
 )
 
@@ -183,7 +183,7 @@ func newProductionHarness(t *testing.T, cloud bool, tr dispatchkind.Tracker, map
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.auditPath = filepath.Join(hostpaths.LogDir(pwd), primaryrecord.Name("jira", ".audit.jsonl"))
+	h.auditPath = filepath.Join(hostpaths.LogDir(pwd), connectorrecord.Name("jira", ".audit.jsonl"))
 
 	t.Setenv("SPINDRIFT_JIRA_CONNECTOR_TOKEN", connectorToken)
 	t.Setenv("SPINDRIFT_JIRA_CONNECTOR_EMAIL", connectorEmail)

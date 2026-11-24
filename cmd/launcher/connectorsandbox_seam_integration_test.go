@@ -287,9 +287,9 @@ func runSandboxExit(t *testing.T, runtime string, x sandboxExit) {
 		t.Errorf("output lacks %q:\n%s", x.wantOut, out)
 	}
 	assertSandboxSurvivedSettle(t, "output", out)
-	primary, _ := filepath.Glob(filepath.Join(hostpaths.LogDir(rig.workDir), "primary-github-*"))
+	primary, _ := filepath.Glob(filepath.Join(hostpaths.LogDir(rig.workDir), "connector-github-*"))
 	if x.mode == sandboxTracker && len(primary) == 0 {
-		t.Errorf("no primary-github record in %s", hostpaths.LogDir(rig.workDir))
+		t.Errorf("no connector-github record in %s", hostpaths.LogDir(rig.workDir))
 	}
 	for _, record := range primary {
 		b, _ := os.ReadFile(record)
@@ -577,7 +577,7 @@ func TestSeamConnectorSandboxPrimaryTotals(t *testing.T) {
 	}
 
 	logDir := hostpaths.LogDir(rig.workDir)
-	audits, _ := filepath.Glob(filepath.Join(logDir, "primary-github-*.audit.jsonl"))
+	audits, _ := filepath.Glob(filepath.Join(logDir, "connector-github-*.audit.jsonl"))
 	if len(audits) != 1 {
 		t.Fatalf("primary audit files = %v, want one\nstderr:\n%s", audits, res.Stderr)
 	}
@@ -613,7 +613,7 @@ func TestSeamConnectorSandboxPrimaryTotals(t *testing.T) {
 		t.Errorf("totals line has keys %v, want the four totals", slices.Sorted(maps.Keys(totals)))
 	}
 
-	logs, _ := filepath.Glob(filepath.Join(logDir, "primary-github-*.log"))
+	logs, _ := filepath.Glob(filepath.Join(logDir, "connector-github-*.log"))
 	if len(logs) != 1 {
 		t.Fatalf("primary logs = %v, want one", logs)
 	}
