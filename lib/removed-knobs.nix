@@ -75,4 +75,12 @@
     env = "SPINDRIFT_JIRA_CONNECTOR_EMAIL";
     message = "SPINDRIFT_JIRA_CONNECTOR_EMAIL was removed: the jira Connector takes its Basic identity from JIRA_EMAIL instead (issue #7501); see MIGRATING.md; delete the setting";
   };
+  forgejoConnectorToken = {
+    env = "SPINDRIFT_FORGEJO_CONNECTOR_TOKEN";
+    message = "SPINDRIFT_FORGEJO_CONNECTOR_TOKEN was removed: FORGEJO_TOKEN now authorizes forgejo Connector requests and git alike (issue #7500); set FORGEJO_TOKEN instead; see MIGRATING.md; delete the setting";
+  };
+  forgejoConnectorTokenCmd = {
+    env = "SPINDRIFT_FORGEJO_CONNECTOR_TOKEN_CMD";
+    message = "SPINDRIFT_FORGEJO_CONNECTOR_TOKEN_CMD was removed: FORGEJO_TOKEN_CMD now supplies forgejo's one credential (issue #7500); set FORGEJO_TOKEN_CMD instead; see MIGRATING.md; delete the setting";
+  };
 }

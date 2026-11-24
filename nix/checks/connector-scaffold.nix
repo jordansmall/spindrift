@@ -246,7 +246,7 @@ let
       routeAttrs = d: unique (concatMap attrNames (load d "routes.nix"));
     in
     # A first-party reference may name its own backend's core credential and
-    # declare no knobs (issue #7501); a third-party row cannot name a core
+    # declare no knobs (issues #7500 and #7501); a third-party row cannot name a core
     # knob, so the template always declares its own credential knob.
     sameNames "module.nix row attrs" (subtractLists [ "knobs" ] (attrNames rows.ref)) (
       subtractLists [ "knobs" ] (attrNames rows.tmpl)

@@ -2201,13 +2201,16 @@ func TestRender_ForgejoCodeberg_ConfiguresBothSeamsOmitsDefaultBaseURL(t *testin
 	if strings.Contains(harnessEnv.content, "GH_TOKEN=") {
 		t.Errorf("expected harness.env to omit GH_TOKEN when the tracker is forgejo, got:\n%s", harnessEnv.content)
 	}
-	for _, want := range []string{
-		"SPINDRIFT_FORGEJO_CONNECTOR_TOKEN_CMD=",
-		"SPINDRIFT_FORGEJO_CONNECTOR_TOKEN=forgejo-faketoken\n",
-	} {
-		if !strings.Contains(harnessEnv.content, want) {
-			t.Errorf("expected harness.env to contain %q, got:\n%s", want, harnessEnv.content)
-		}
+	// A forgejo backend takes one credential: FORGEJO_TOKEN authorizes the
+	// Connector's requests and git alike (issue #7500).
+	if n := strings.Count(harnessEnv.content, "\nFORGEJO_TOKEN="); n != 1 {
+		t.Errorf("expected harness.env to carry one FORGEJO_TOKEN line, got %d:\n%s", n, harnessEnv.content)
+	}
+	if !strings.Contains(harnessEnv.content, "FORGEJO_TOKEN_CMD=") {
+		t.Errorf("expected harness.env to document FORGEJO_TOKEN_CMD, got:\n%s", harnessEnv.content)
+	}
+	if strings.Contains(harnessEnv.content, "SPINDRIFT_FORGEJO_CONNECTOR_TOKEN") {
+		t.Errorf("expected harness.env to omit the removed SPINDRIFT_FORGEJO_CONNECTOR_TOKEN, got:\n%s", harnessEnv.content)
 	}
 	if strings.Contains(harnessEnv.content, "SPINDRIFT_GITHUB_CONNECTOR_TOKEN") {
 		t.Errorf("expected harness.env to omit the github Connector credential when the tracker is forgejo, got:\n%s", harnessEnv.content)

@@ -914,7 +914,7 @@ func TestBuildDemandSources_ForgejoConnectorRowBuildsProbeSource(t *testing.T) {
 	if module == "" {
 		t.Skip("SPINDRIFT_FORGEJO_CONNECTOR_WASM unset: no compiled forgejo Connector to test")
 	}
-	raw := `[{"name":"forgejo","module":"` + module + `","credentialEnv":"SPINDRIFT_FORGEJO_CONNECTOR_TOKEN",
+	raw := `[{"name":"forgejo","module":"` + module + `","credentialEnv":"FORGEJO_TOKEN",
 "baseEnv":"FORGEJO_BASE_URL","routes":[{"method":"GET","host":"{base}","path":"/api/v1/repos/{repo}/issues"}]}]`
 	if err := backendrows.Use([]byte(raw), func(k string) string {
 		if k == "FORGEJO_BASE_URL" {

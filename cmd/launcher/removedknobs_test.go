@@ -241,6 +241,16 @@ func TestRemovedKnobsCheck_RejectsConnectorSandbox(t *testing.T) {
 	})
 }
 
+// The forgejo Connector's own token knob is gone (issue #7500), its secret
+// _CMD form included: each is rejected from the environment and the input
+// document, naming its replacement.
+func TestRemovedKnobsCheck_RejectsForgejoConnectorToken(t *testing.T) {
+	assertRemovedKnobsNameReplacement(t, map[string]string{
+		"SPINDRIFT_FORGEJO_CONNECTOR_TOKEN":     "set FORGEJO_TOKEN instead",
+		"SPINDRIFT_FORGEJO_CONNECTOR_TOKEN_CMD": "set FORGEJO_TOKEN_CMD instead",
+	})
+}
+
 // A row needs only env and reason: an env-only knob (one a Connector module
 // declared, with no flake option) is caught here from the environment or the
 // input document; mkHarness's `defaults` key also rejects it.
@@ -285,11 +295,19 @@ func TestRemovedKnobsCheck_RejectsGithubConnectorToken(t *testing.T) {
 // token's secret _CMD form included: each is rejected from the environment and
 // the input document, naming its replacement.
 func TestRemovedKnobsCheck_RejectsJiraConnectorCredentials(t *testing.T) {
-	for env, replacement := range map[string]string{
+	assertRemovedKnobsNameReplacement(t, map[string]string{
 		"SPINDRIFT_JIRA_CONNECTOR_TOKEN":     "JIRA_TOKEN",
 		"SPINDRIFT_JIRA_CONNECTOR_TOKEN_CMD": "JIRA_TOKEN_CMD",
 		"SPINDRIFT_JIRA_CONNECTOR_EMAIL":     "JIRA_EMAIL",
-	} {
+	})
+}
+
+// assertRemovedKnobsNameReplacement checks that each env key is rejected from
+// the environment and from the input document, and that the rejection names the
+// knob and its replacement text.
+func assertRemovedKnobsNameReplacement(t *testing.T, replacements map[string]string) {
+	t.Helper()
+	for env, replacement := range replacements {
 		assertRejected := func(t *testing.T) {
 			t.Helper()
 			_, err := removedKnobsCheck().Probe()

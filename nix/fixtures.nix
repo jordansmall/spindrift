@@ -141,8 +141,8 @@ let
     backendRows.forgejo = {
       module = p: "${forgejoConnector.package p}/forgejo.wasm";
       inherit (forgejoConnector) routes;
-      credentialEnv = "SPINDRIFT_FORGEJO_CONNECTOR_TOKEN";
-      credentialKnob = "forgejoConnectorToken";
+      credentialEnv = "FORGEJO_TOKEN";
+      credentialKnob = "forgejoToken";
       baseEnv = "FORGEJO_BASE_URL";
       acceptedRoutes = (builtins.fromJSON (builtins.readFile ../spindrift-connector-routes.json)).forgejo;
     };

@@ -17,24 +17,15 @@ in
   # Consumer that imports the same core module is unaffected.
   imports = [ core.flakeModules.default ];
 
-  # A dedicated token, not core's forgejoToken: the Connector is untrusted
-  # wasm, so a core secret must never reach it (lib/flakeModule.nix refuses one).
-  spindrift.connectors.forgejo.knobs.forgejoConnectorToken = {
-    env = "SPINDRIFT_FORGEJO_CONNECTOR_TOKEN";
-    group = "dispatch";
-    secret = true;
-    doc = "bearer token the forgejo Connector's backend row authorizes its calls with (needs read access to the repository, its pull requests, commit statuses and branches, and write access to open, edit, merge and comment on pull requests and to delete branches); host-only, never reaches the Box; needed on every run whose CODE_FORGE is forgejo, and on every run whose ISSUE_TRACKER is forgejo";
-    flakeOption = false;
-    boxEnv = false;
-  };
-
   spindrift.connectors.forgejo.routes = routes;
   spindrift.connectors.forgejo.fragments = fragments;
 
   spindrift.connectors.forgejo.backend = {
     module = pkgs: "${import ./package.nix { inherit pkgs core; }}/forgejo.wasm";
     inherit routes;
-    credential = "forgejoConnectorToken";
+    # Core's FORGEJO_TOKEN, which a row may name for its own backend: the host
+    # attaches it, so the untrusted wasm never holds it.
+    credential = "forgejoToken";
     # The instance URL is the core FORGEJO_BASE_URL knob; the base is not a
     # secret, so a core knob may carry it.
     base = "forgejoBaseURL";

@@ -423,9 +423,9 @@ func isCoreSecretKnob(env string) bool {
 
 // applyConnectorCredentials resolves each backend row's credential env the way
 // a core secret resolves. The rows only exist once backendrows.Use has run.
-// A row whose credential is itself a core secret knob (github's GH_TOKEN) is
-// skipped: parseFlags and applySecretCmdFallback own it, and resolving it
-// here would run its command a second time.
+// A row whose credential is itself a core secret knob (github's GH_TOKEN,
+// forgejo's FORGEJO_TOKEN) is skipped: parseFlags and applySecretCmdFallback
+// own it, and resolving it here would run its command a second time.
 func applyConnectorCredentials() error {
 	seen := map[string]bool{}
 	for _, row := range backendrows.All() {

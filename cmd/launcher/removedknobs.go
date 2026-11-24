@@ -25,6 +25,8 @@ var removedKnobs = []struct{ env, reason string }{
 	{"SPINDRIFT_JIRA_CONNECTOR_TOKEN", "the jira Connector authorizes with JIRA_TOKEN instead (issue #7501); see MIGRATING.md"},
 	{"SPINDRIFT_JIRA_CONNECTOR_TOKEN_CMD", "the jira Connector authorizes with JIRA_TOKEN_CMD instead (issue #7501); see MIGRATING.md"},
 	{"SPINDRIFT_JIRA_CONNECTOR_EMAIL", "the jira Connector takes its Basic identity from JIRA_EMAIL instead (issue #7501); see MIGRATING.md"},
+	{"SPINDRIFT_FORGEJO_CONNECTOR_TOKEN", "FORGEJO_TOKEN now authorizes forgejo Connector requests and git alike (issue #7500); set FORGEJO_TOKEN instead; see MIGRATING.md"},
+	{"SPINDRIFT_FORGEJO_CONNECTOR_TOKEN_CMD", "FORGEJO_TOKEN_CMD now supplies forgejo's one credential (issue #7500); set FORGEJO_TOKEN_CMD instead; see MIGRATING.md"},
 }
 
 // removedKnobsCheckName names the removed-knobs row, so validateConfigChecks
