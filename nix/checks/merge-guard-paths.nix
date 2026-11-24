@@ -36,7 +36,11 @@ let
     "lib/default-model-fixture.nix"
     "nix/dogfood-shadow.nix"
     "nix/dogfood-primary.nix"
+    # Reaches the dogfood via its restated schema default, not dogfood-defaults.nix.
     "spindrift-connector-routes.json"
+    "connectors/*/routes.nix"
+    "connectors/*/module.nix"
+    "connectors/*/row.nix"
   ];
   rowKnobSources = map (r: r.source) (import ../../lib/row-knob-registries.nix);
   uncoveredRowKnobSources = filter (
