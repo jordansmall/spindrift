@@ -70,29 +70,10 @@ type Git struct {
 	Note func(method string, err error)
 }
 
-// CallPolicy is the forge axis's retry policy.
-func CallPolicy() connectorcall.Policy {
-	return connectorcall.Policy{
-		// Not idempotent: a retry after a transient failure could repeat a
-		// merge, open a second PR or post a second comment when the first
-		// attempt landed and only its response was lost. Their caller owns
-		// the retry decision.
-		NotRetried: []string{"forge.merge", "forge.openPR", "forge.comment"},
-		OnRetryFailure: func(method string, err error) error {
-			// A retried DELETE may find its own earlier attempt already landed,
-			// its 5xx lost on the way back: that not-found is success.
-			if method == "forge.deleteBranch" && connectorhost.ErrorClass(err) == connectorhost.NotFound {
-				return nil
-			}
-			return err
-		},
-	}
-}
-
-// classedCall is c.Call through the shared retry and error-class path under
-// the forge's CallPolicy.
+// classedCall is c.Call through the shared retry and error-class path, which
+// reads each method's retry safety and capability from the protocol table.
 func classedCall(c *connectorhost.Connector, clock retry.Clock) guestCall {
-	return connectorcall.Classify(c.Call, clock, CallPolicy())
+	return connectorcall.Classify(c.Call, clock, c.Capabilities)
 }
 
 // pushOnly is a Code Forge with no PR concept: the Connector answers the forge

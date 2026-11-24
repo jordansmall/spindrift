@@ -1,8 +1,8 @@
 # The forge axis's methods, in the order docs/reference.md's "Forge
 # capabilities" lists them. Params follow the structs connectorforge sends and
 # results the ones it decodes (wirePR, wireRollup, wireRemote, wireGrant, ...);
-# sdk/forge serves the same. Retry follows connectorforge.CallPolicy, which
-# every forge call goes through (the composed forge, Probe, BranchProtected,
+# sdk/forge serves the same. A row's retry is the policy connectorcall.Classify
+# reads for every forge call (the composed forge, Probe, BranchProtected,
 # AutoMergeAllowed and IntrospectToken alike): merge, openPR and comment are
 # called once, since a retry could repeat the write after its first attempt
 # landed; a retried deleteBranch that finds the branch gone has succeeded.

@@ -5,12 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"spindrift.dev/launcher/internal/connectorcall"
-	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorprotocol"
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/retry"
@@ -27,12 +28,12 @@ func TestClassifyAcrossAxes(t *testing.T) {
 	backoff := []time.Duration{connectorcall.BackoffUnit, 2 * connectorcall.BackoffUnit}
 	axes := []struct {
 		name   string
-		policy connectorcall.Policy
+		axis   connectorprotocol.Axis
 		idem   string
-		single []string // the axis's never-retried methods, listed here rather than read from the policy
+		single []string // the axis's never-retried methods, listed here rather than read from the table
 	}{
-		{"forge", connectorforge.CallPolicy(), "forge.pr", []string{"forge.merge", "forge.openPR", "forge.comment"}},
-		{"tracker", connectortracker.CallPolicy(), connectortracker.CapEditLabels, []string{
+		{"forge", connectorprotocol.AxisForge, "forge.pr", []string{"forge.merge", "forge.openPR", "forge.comment"}},
+		{"tracker", connectorprotocol.AxisTracker, connectortracker.CapEditLabels, []string{
 			connectortracker.CapComment, connectortracker.CapFileIssue, connectortracker.CapCreateLabel, connectortracker.CapTransition,
 		}},
 	}
@@ -66,7 +67,7 @@ func TestClassifyAcrossAxes(t *testing.T) {
 						calls++
 						return tc.errs[calls-1]
 					}
-					err := connectorcall.Classify(raw, clock, ax.policy)(context.Background(), method, nil, nil)
+					err := connectorcall.Classify(raw, clock, axisCaps(ax.axis))(context.Background(), method, nil, nil)
 
 					if calls != tc.wantCalls {
 						t.Errorf("calls = %d, want %d", calls, tc.wantCalls)
@@ -104,5 +105,75 @@ func TestClassifyAcrossAxes(t *testing.T) {
 				})
 			}
 		}
+	}
+}
+
+// axisCaps is every capability the protocol declares for axis.
+func axisCaps(axis connectorprotocol.Axis) []string {
+	var caps []string
+	for name, a := range connectorprotocol.Capabilities {
+		if a == axis {
+			caps = append(caps, name)
+		}
+	}
+	return caps
+}
+
+func TestClassifyDoneOnAnsweredOnRetry(t *testing.T) {
+	failure := func(c connectorhost.Class) error {
+		return fmt.Errorf("%w: m: %w", connectorhost.ErrCall, &connectorhost.CallError{Class: c, Message: "boom"})
+	}
+	clock := retry.Clock{Now: time.Now, Sleep: func(time.Duration) {}}
+	caps := axisCaps(connectorprotocol.AxisForge)
+	for _, tc := range []struct {
+		name      string
+		errs      []error
+		wantCalls int
+		wantClass connectorhost.Class // "" for success
+	}{
+		{"not-found after a transient failure is success", []error{failure(connectorhost.Transient), failure(connectorhost.NotFound)}, 2, ""},
+		{"not-found on the first attempt stays an error", []error{failure(connectorhost.NotFound)}, 1, connectorhost.NotFound},
+		{"another class on a retry stays an error", []error{failure(connectorhost.Transient), failure(connectorhost.Permanent)}, 2, connectorhost.Permanent},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			raw := func(context.Context, string, any, any) error {
+				calls++
+				return tc.errs[calls-1]
+			}
+			err := connectorcall.Classify(raw, clock, caps)(context.Background(), connectorprotocol.MethodForgeDeleteBranch, nil, nil)
+			if calls != tc.wantCalls {
+				t.Errorf("calls = %d, want %d", calls, tc.wantCalls)
+			}
+			if got := connectorhost.ErrorClass(err); got != tc.wantClass {
+				t.Errorf("class = %q, want %q (err %v)", got, tc.wantClass, err)
+			}
+		})
+	}
+}
+
+func TestClassifyRefusesWhatTheTableDoesNotAllow(t *testing.T) {
+	for _, tc := range []struct {
+		name, method string
+		caps         []string
+		wantIn       string
+	}{
+		{"unadvertised capability", connectorprotocol.MethodForgeDeleteBranch, []string{connectorprotocol.CapForge}, connectorprotocol.CapForgeBranches},
+		{"unknown method", "forge.noSuchMethod", axisCaps(connectorprotocol.AxisForge), "forge.noSuchMethod"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			raw := func(context.Context, string, any, any) error { calls++; return nil }
+			err := connectorcall.Classify(raw, retry.Clock{}, tc.caps)(context.Background(), tc.method, nil, nil)
+			if !errors.Is(err, connectorhost.ErrProtocolUnsupported) {
+				t.Fatalf("err = %v, want ErrProtocolUnsupported", err)
+			}
+			if !strings.Contains(err.Error(), tc.wantIn) || !strings.Contains(err.Error(), tc.method) {
+				t.Errorf("err = %q, want it to name %q and %q", err, tc.method, tc.wantIn)
+			}
+			if calls != 0 {
+				t.Errorf("raw called %d times, want 0", calls)
+			}
+		})
 	}
 }

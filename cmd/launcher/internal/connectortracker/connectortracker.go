@@ -853,21 +853,6 @@ var (
 	_ forge.LabeledBacklogLister  = labeledLayer{}
 )
 
-// CallPolicy is the tracker axis's retry policy: Classify's shared path, and
-// these methods called once. editLabels, closeIssue and the reads are safe to
-// retry, so they take the default.
-func CallPolicy() connectorcall.Policy {
-	return connectorcall.Policy{NotRetried: []string{
-		// A lost response would mean a second post.
-		CapComment,
-		CapFileIssue,
-		// A replay is refused once the first landed.
-		CapCreateLabel,
-		// A replay may meet a status that no longer offers it.
-		CapTransition,
-	}}
-}
-
 // New builds core's tracker from a tracker Connector. A core IssueTracker method
 // whose capability the Connector does not advertise fails with
 // connectorhost.ErrProtocolUnsupported (transitions and verdicts need both
@@ -886,12 +871,12 @@ func New(c *connectorhost.Connector, lifecycle Lifecycle, target Target, clock r
 }
 
 // newFrom builds the tracker over c's handshake, routing calls through call
-// under CallPolicy; a zero clock sleeps for real.
+// through the shared retry path; a zero clock sleeps for real.
 func newFrom(c *connectorhost.Connector, call guestCall, lifecycle Lifecycle, target Target, clock retry.Clock) (forge.IssueTracker, error) {
 	if !slices.Contains(c.Capabilities, "tracker") {
 		return nil, fmt.Errorf("%w: capabilities %v lack \"tracker\"", ErrNotTracker, c.Capabilities)
 	}
-	return newTracker(connectorcall.Classify(call, clock, CallPolicy()), lifecycle, target, c.Capabilities, speaksV02(c.ProtocolVersion))
+	return newTracker(connectorcall.Classify(call, clock, c.Capabilities), lifecycle, target, c.Capabilities, speaksV02(c.ProtocolVersion))
 }
 
 // NewReloading is New for a tracker that lives as long as its process. A

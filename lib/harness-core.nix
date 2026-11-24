@@ -91,7 +91,13 @@ let
   backendBundleFiles =
     lib.fileset.difference
       (lib.fileset.unions (
-        [ ../cmd/launcher/internal/driver/bundle/backends.go ]
+        [
+          ../cmd/launcher/internal/driver/bundle/backends.go
+          # connectorcall reads the method table; schema.go embeds the schema.
+          ../cmd/launcher/internal/connectorprotocol/protocol_gen.go
+          ../cmd/launcher/internal/connectorprotocol/schema.go
+          ../cmd/launcher/internal/connectorprotocol/protocol.schema.json
+        ]
         ++ map (
           d:
           lib.fileset.fileFilter (f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name) (
@@ -516,6 +522,9 @@ let
         ../cmd/launcher/go.mod
         ../cmd/launcher/go.sum
         (lib.fileset.fileFilter (f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name) ../cmd/launcher)
+        # Embedded by connectorprotocol, which the launcher reaches through
+        # connectorcall.
+        ../cmd/launcher/internal/connectorprotocol/protocol.schema.json
       ])
       (
         lib.fileset.unions [

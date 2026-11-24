@@ -1,6 +1,6 @@
 // Package connectorcall is core's one retry-and-error-class path for tracker
-// and forge Connector calls: each axis declares its own Policy and wraps its
-// raw call in Classify.
+// and forge Connector calls: each axis wraps its raw call in Classify, which
+// reads retry safety and required capability from the protocol's method table.
 package connectorcall
 
 import (
@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorprotocol"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/retry"
 )
@@ -24,36 +25,37 @@ const (
 // Call is a Connector call: connectorhost.Connector.Call's shape.
 type Call = func(ctx context.Context, method string, params, result any) error
 
-// Policy is one axis's retry policy.
-type Policy struct {
-	// NotRetried are the methods whose request is not idempotent; each is
-	// called once.
-	NotRetried []string
-	// OnRetryFailure, when non-nil, runs on every failed attempt after the
-	// first and returns the error to carry on with; nil turns the failure into
-	// success.
-	OnRetryFailure func(method string, err error) error
-}
-
-// Classify is raw made to read as core does: a transient failure is retried
-// per p, then the Connector's error class is mapped onto core's sentinels (a
-// rate limit matches forge.ErrRateLimit and an auth failure
-// forge.ErrAuthFailure). The class stays readable through
-// connectorhost.ErrorClass. A zero clock sleeps for real.
-func Classify(raw Call, clock retry.Clock, p Policy) Call {
+// Classify is raw made to read as core does: a call is checked against the
+// protocol's method table, a transient failure is retried per the method's row,
+// then the Connector's error class is mapped onto core's sentinels (a rate
+// limit matches forge.ErrRateLimit and an auth failure forge.ErrAuthFailure).
+// The class stays readable through connectorhost.ErrorClass. A method the table
+// lacks, or whose capability caps (the Connector's advertised capabilities) do
+// not list, fails with connectorhost.ErrProtocolUnsupported before reaching
+// raw. A zero clock sleeps for real.
+func Classify(raw Call, clock retry.Clock, caps []string) Call {
 	clock = RealIfZero(clock)
 	b := retry.LinearBackoff{Unit: BackoffUnit, Clock: clock}
 	return func(ctx context.Context, method string, params, result any) error {
+		m, ok := connectorprotocol.Methods[method]
+		if !ok {
+			return fmt.Errorf("%w: %s is not a protocol method", connectorhost.ErrProtocolUnsupported, method)
+		}
+		if m.Capability != "" && !slices.Contains(caps, m.Capability) {
+			return fmt.Errorf("%w: %s needs capability %q", connectorhost.ErrProtocolUnsupported, method, m.Capability)
+		}
 		attempt := 0
 		attempts := Attempts
-		if slices.Contains(p.NotRetried, method) {
+		if !m.Retry.Safe {
 			attempts = 1
 		}
 		err := retryTransient(attempts, b, func() error {
 			attempt++
 			err := raw(ctx, method, params, result)
-			if attempt > 1 && err != nil && p.OnRetryFailure != nil {
-				return p.OnRetryFailure(method, err)
+			// A retry may find its own earlier attempt already landed, its
+			// failure lost on the way back: that class is success.
+			if attempt > 1 && err != nil && slices.Contains(m.Retry.DoneOn, string(connectorhost.ErrorClass(err))) {
+				return nil
 			}
 			return err
 		})

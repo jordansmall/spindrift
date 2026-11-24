@@ -13,6 +13,7 @@ import (
 
 	"spindrift.dev/launcher/internal/connectorcall"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorprotocol"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/retry"
 )
@@ -259,6 +260,12 @@ func TestMergeReturnsARefusedCallAsIsWithoutRereadingThePR(t *testing.T) {
 
 func TestClassifyDoesNotRetryNonIdempotentWrites(t *testing.T) {
 	clock := retry.Clock{Now: time.Now, Sleep: func(time.Duration) {}}
+	var forgeCaps []string
+	for name, axis := range connectorprotocol.Capabilities {
+		if axis == connectorprotocol.AxisForge {
+			forgeCaps = append(forgeCaps, name)
+		}
+	}
 	for method, wantCalls := range map[string]int{
 		"forge.merge": 1, "forge.openPR": 1, "forge.comment": 1, "forge.pr": connectorcall.Attempts, "forge.setDraft": connectorcall.Attempts,
 	} {
@@ -266,7 +273,7 @@ func TestClassifyDoesNotRetryNonIdempotentWrites(t *testing.T) {
 		call := connectorcall.Classify(func(context.Context, string, any, any) error {
 			calls++
 			return classed(connectorhost.Transient)
-		}, clock, CallPolicy())
+		}, clock, forgeCaps)
 		err := call(context.Background(), method, nil, nil)
 		if connectorhost.ErrorClass(err) != connectorhost.Transient {
 			t.Errorf("%s: err = %v, want the transient error", method, err)
