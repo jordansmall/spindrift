@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.5.0](https://github.com/jordansmall/spindrift/compare/github-v0.4.0...github-v0.5.0) (2026-11-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* **launcher:** a run-input document that still carries a backend row's shadow, shadowEvery or primary field fails to load; regenerate it.
+
+### Features
+
+* **launcher:** delete the backend read shadow ([c04637b](https://github.com/jordansmall/spindrift/commit/c04637b422e5d9e7cca4e55ca75dbbf516e930c0)), closes [#7456](https://github.com/jordansmall/spindrift/issues/7456) [#7359](https://github.com/jordansmall/spindrift/issues/7359) [#7298](https://github.com/jordansmall/spindrift/issues/7298)
+
+
+### Bug Fixes
+
+* **github:** report a deleted comment author as ghost ([1455c25](https://github.com/jordansmall/spindrift/commit/1455c25279744009fd26f643fc5f6a19b1171112)), closes [#7464](https://github.com/jordansmall/spindrift/issues/7464)
+
+
+### Documentation
+
+* **reference:** rename the Backend primary mode section ([397c07e](https://github.com/jordansmall/spindrift/commit/397c07edd46b90c3c3b949b179c22c51a8222b4e)), closes [#7468](https://github.com/jordansmall/spindrift/issues/7468)
+
 ## [0.4.0](https://github.com/jordansmall/spindrift/compare/github-v0.3.0...github-v0.4.0) (2026-11-23)
 
 
