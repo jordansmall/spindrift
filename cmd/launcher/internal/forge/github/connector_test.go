@@ -598,47 +598,10 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// failingPRWrites is the native adapter's role as the PRForge in a read-only
-// contract run: the reads must never reach it. The methods the Connector has no
-// primitive for (Mergeable, HeadCommitSHA, NeedsUpdate, ListPRFiles,
-// CanAutoMerge) are not part of the read contract either.
-type failingPRWrites struct{ t *testing.T }
-
-func (w failingPRWrites) fail(name string) error {
-	w.t.Errorf("read contract called the native adapter's %s", name)
-	return nil
-}
-
-func (w failingPRWrites) OpenPRForBranch(string) (forge.PR, bool, error) {
-	return forge.PR{}, false, w.fail("OpenPRForBranch")
-}
-func (w failingPRWrites) PRForBranch(string) (string, bool, error) {
-	return "", false, w.fail("PRForBranch")
-}
-func (w failingPRWrites) PRState(string) (forge.PRState, error) { return "", w.fail("PRState") }
-func (w failingPRWrites) Mergeable(string) (forge.MergeableState, error) {
-	return "", w.fail("Mergeable")
-}
-func (w failingPRWrites) CheckState(string) (forge.RollupState, error) {
-	return "", w.fail("CheckState")
-}
-func (w failingPRWrites) HeadCommitSHA(string) (string, error) { return "", w.fail("HeadCommitSHA") }
-func (w failingPRWrites) NeedsUpdate(string) (bool, error)     { return false, w.fail("NeedsUpdate") }
-func (w failingPRWrites) FailureDetail(string) (string, error) {
-	return "", w.fail("FailureDetail")
-}
-func (w failingPRWrites) ListPRFiles(string) ([]string, error) { return nil, w.fail("ListPRFiles") }
-func (w failingPRWrites) CanAutoMerge() (bool, error)          { return false, w.fail("CanAutoMerge") }
-func (w failingPRWrites) EnqueueAutoMerge(string) error        { return w.fail("EnqueueAutoMerge") }
-func (w failingPRWrites) MarkReady(string) error               { return w.fail("MarkReady") }
-func (w failingPRWrites) CommentPR(string, string) error       { return w.fail("CommentPR") }
-func (w failingPRWrites) MarkDraft(string) error               { return w.fail("MarkDraft") }
-
 // connectorHarness drives the compiled github Connector, through the
 // Connector host, against the scripted REST backend.
-// pf is the PRForge connectorforge.New builds over writes the reads must
-// never reach (failingPRWrites fails the test); cf and caps are the Code Forge
-// composed from the Connector alone, whose PRForge is caps.PRForge.
+// cf and caps are the Code Forge composed from the Connector alone, whose
+// PRForge is caps.PRForge.
 type connectorHarness struct {
 	t       *testing.T
 	backend *restBackend
@@ -646,7 +609,6 @@ type connectorHarness struct {
 	audit   *bytes.Buffer
 	conn    *connectorhost.Connector
 	tr      forge.IssueTracker
-	pf      forge.PRForge
 	cf      forge.CodeForge
 	caps    forge.Capabilities
 }
@@ -763,10 +725,6 @@ func newHarnessWith(t *testing.T, targetRepo string, lc connectortracker.Lifecyc
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.pf, err = connectorforge.New(conn, failingPRWrites{t}, connectorforge.Target{API: b.URL, Repo: connectorRepo}, b.host)
-	if err != nil {
-		t.Fatal(err)
-	}
 	h.cf, h.caps, err = composeForge(conn, b.URL, targetRepo)
 	if err != nil {
 		t.Fatal(err)
@@ -776,7 +734,7 @@ func newHarnessWith(t *testing.T, targetRepo string, lc connectortracker.Lifecyc
 
 func (h *connectorHarness) Tracker() forge.IssueTracker { return h.tr }
 
-func (h *connectorHarness) Forge() forge.PRForge       { return h.pf }
+func (h *connectorHarness) Forge() forge.PRForge       { return h.caps.PRForge }
 func (h *connectorHarness) CodeForge() forge.CodeForge { return h.cf }
 
 func (h *connectorHarness) BranchPrefix() string { return "agent/issue-" }

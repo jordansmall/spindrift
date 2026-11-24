@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -88,6 +89,31 @@ func TestMergeMapsTransientToTheRetriedSentinel(t *testing.T) {
 	}
 	if len(h.calls) != 1 {
 		t.Errorf("calls = %v, want the merge only (no PR re-read)", h.calls)
+	}
+}
+
+// An unregistered primitive reaches the caller as the guest's own error, after
+// exactly one guest call: nothing wraps, classifies, or falls back.
+func TestUnregisteredPrimitiveFailsWithTheGuestsError(t *testing.T) {
+	cases := []struct {
+		method string
+		call   func(forge.PRForge) error
+	}{
+		{"forge.merge", func(p forge.PRForge) error { return p.(forge.CodeForge).Merge(prURL7) }},
+		{"forge.setDraft", func(p forge.PRForge) error { return p.MarkReady(prURL7) }},
+		{"forge.comment", func(p forge.PRForge) error { return p.CommentPR(prURL7, "x") }},
+		{"forge.pr", func(p forge.PRForge) error { _, err := p.HeadCommitSHA(prURL7); return err }},
+		{"forge.pr", func(p forge.PRForge) error { _, err := p.PRState(prURL7); return err }},
+	}
+	for _, c := range cases {
+		h := newPRHarness(t, nil, nil)
+		err := c.call(h.pr())
+		if err == nil || err.Error() != "guest: no such method "+c.method {
+			t.Errorf("%s: err = %v, want the guest's own error", c.method, err)
+		}
+		if !slices.Equal(h.calls, []string{c.method}) {
+			t.Errorf("%s: calls = %v, want exactly that one", c.method, h.calls)
+		}
 	}
 }
 

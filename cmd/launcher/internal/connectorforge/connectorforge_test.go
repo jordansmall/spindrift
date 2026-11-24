@@ -46,66 +46,24 @@ func stubGuest(t *testing.T, replies map[string]string) (guestCall, *[]recordedC
 	}, &calls
 }
 
-// failingWrites is the native adapter's role: the five reads must never reach
-// it. Mergeable stands in for every method the wrapper leaves to it.
-type failingWrites struct {
-	forge.PRForge
-	t *testing.T
-}
-
-func (w failingWrites) OpenPRForBranch(string) (forge.PR, bool, error) {
-	w.t.Errorf("OpenPRForBranch reached the native adapter")
-	return forge.PR{}, false, nil
-}
-func (w failingWrites) PRForBranch(string) (string, bool, error) {
-	w.t.Errorf("PRForBranch reached the native adapter")
-	return "", false, nil
-}
-func (w failingWrites) PRState(string) (forge.PRState, error) {
-	w.t.Errorf("PRState reached the native adapter")
-	return "", nil
-}
-func (w failingWrites) CheckState(string) (forge.RollupState, error) {
-	w.t.Errorf("CheckState reached the native adapter")
-	return "", nil
-}
-func (w failingWrites) FailureDetail(string) (string, error) {
-	w.t.Errorf("FailureDetail reached the native adapter")
-	return "", nil
-}
-func (w failingWrites) Mergeable(string) (forge.MergeableState, error) {
-	return "native", nil
-}
-
-func newTestForge(t *testing.T, replies map[string]string) (forge.PRForge, *[]recordedCall) {
+func newTestForge(t *testing.T, replies map[string]string) (*reads, *[]recordedCall) {
 	call, calls := stubGuest(t, replies)
-	return newForge(call, failingWrites{t: t}, testTarget, testWebHost), calls
+	return &reads{call: call, target: testTarget, webHost: testWebHost}, calls
 }
 
-func TestNewRequiresCapability(t *testing.T) {
+func TestNewReaderRequiresCapability(t *testing.T) {
 	c := &connectorhost.Connector{Capabilities: []string{"tracker"}}
-	_, err := New(c, failingWrites{t: t}, testTarget, testWebHost)
+	_, err := NewReader(c, testTarget, testWebHost)
 	if !errors.Is(err, ErrNotForge) {
 		t.Fatalf("err = %v, want ErrNotForge", err)
 	}
 }
 
-func TestNewRefusesEmptyWebHost(t *testing.T) {
+func TestNewReaderRefusesEmptyWebHost(t *testing.T) {
 	c := &connectorhost.Connector{Capabilities: []string{"forge"}}
-	_, err := New(c, failingWrites{t: t}, testTarget, "")
+	_, err := NewReader(c, testTarget, "")
 	if !errors.Is(err, ErrNoWebHost) {
 		t.Fatalf("err = %v, want ErrNoWebHost", err)
-	}
-}
-
-func TestUnownedMethodsDelegateToWrites(t *testing.T) {
-	f, calls := newTestForge(t, nil)
-	got, err := f.Mergeable(prURL7)
-	if err != nil || got != "native" {
-		t.Fatalf("Mergeable = %q, %v; want the native answer", got, err)
-	}
-	if len(*calls) != 0 {
-		t.Errorf("guest called for a write-side method: %+v", *calls)
 	}
 }
 
