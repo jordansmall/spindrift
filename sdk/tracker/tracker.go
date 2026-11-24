@@ -30,9 +30,6 @@ type Status struct {
 	Category string
 }
 
-// StatusCategoryDone is the Category of a terminal status.
-const StatusCategoryDone = "done"
-
 // Target names the tracker repository a call reads from. API is the https
 // base URL without a trailing slash, for example https://api.github.com.
 // Dialect names the tracker deployment's API dialect (a Jira Connector takes
@@ -323,7 +320,7 @@ func handlers(r Reader) ([]string, map[string]method) {
 	}
 
 	m := map[string]method{
-		"tracker.listIssues": func(params json.RawMessage) (any, error) {
+		methodListIssues: func(params json.RawMessage) (any, error) {
 			var p struct {
 				Target Target `json:"target"`
 				Query
@@ -338,7 +335,7 @@ func handlers(r Reader) ([]string, map[string]method) {
 			}
 			return issueList(issues), nil
 		},
-		"tracker.issue": func(params json.RawMessage) (any, error) {
+		methodIssue: func(params json.RawMessage) (any, error) {
 			t, n, err := numbered(params)
 			if err != nil {
 				return nil, err
@@ -350,11 +347,11 @@ func handlers(r Reader) ([]string, map[string]method) {
 			return normalize(i), nil
 		},
 	}
-	caps := []string{"tracker"}
+	caps := []string{capTracker}
 
 	if r.Comments != nil {
-		caps = append(caps, "tracker.comments")
-		m["tracker.comments"] = func(params json.RawMessage) (any, error) {
+		caps = append(caps, capComments)
+		m[methodComments] = func(params json.RawMessage) (any, error) {
 			t, n, err := numbered(params)
 			if err != nil {
 				return nil, err
@@ -375,7 +372,7 @@ func handlers(r Reader) ([]string, map[string]method) {
 	for _, c := range []struct {
 		name string
 		fn   func(Target, string) ([]string, error)
-	}{{"tracker.nativeDeps", r.NativeDeps}, {"tracker.blocks", r.Blocks}} {
+	}{{capNativeDeps, r.NativeDeps}, {capBlocks, r.Blocks}} {
 		if c.fn == nil {
 			continue
 		}
@@ -383,8 +380,8 @@ func handlers(r Reader) ([]string, map[string]method) {
 		m[c.name] = idList(c.fn)
 	}
 	if r.Probe != nil {
-		caps = append(caps, "tracker.probe")
-		m["tracker.probe"] = func(params json.RawMessage) (any, error) {
+		caps = append(caps, capProbe)
+		m[methodProbe] = func(params json.RawMessage) (any, error) {
 			t, err := targetOnly(params)
 			if err != nil {
 				return nil, err
@@ -399,8 +396,8 @@ func handlers(r Reader) ([]string, map[string]method) {
 		}
 	}
 	if r.Statuses != nil {
-		caps = append(caps, "tracker.statuses")
-		m["tracker.statuses"] = func(params json.RawMessage) (any, error) {
+		caps = append(caps, capStatuses)
+		m[methodStatuses] = func(params json.RawMessage) (any, error) {
 			t, err := targetOnly(params)
 			if err != nil {
 				return nil, err
@@ -431,8 +428,8 @@ func handlers(r Reader) ([]string, map[string]method) {
 		}
 	}
 	if r.CreateMeta != nil {
-		caps = append(caps, "tracker.createMeta")
-		m["tracker.createMeta"] = func(params json.RawMessage) (any, error) {
+		caps = append(caps, capCreateMeta)
+		m[methodCreateMeta] = func(params json.RawMessage) (any, error) {
 			var p struct {
 				Target    Target `json:"target"`
 				IssueType string `json:"issueType"`
@@ -454,8 +451,8 @@ func handlers(r Reader) ([]string, map[string]method) {
 		}
 	}
 	if r.Count != nil {
-		caps = append(caps, "tracker.count")
-		m["tracker.count"] = func(params json.RawMessage) (any, error) {
+		caps = append(caps, capCount)
+		m[methodCount] = func(params json.RawMessage) (any, error) {
 			var p struct {
 				Target Target `json:"target"`
 				Query
@@ -474,15 +471,15 @@ func handlers(r Reader) ([]string, map[string]method) {
 			}{n}, nil
 		}
 		// The cadence is the Connector's, not a repo's: no target.
-		m["tracker.countInterval"] = func(json.RawMessage) (any, error) {
+		m[methodCountInterval] = func(json.RawMessage) (any, error) {
 			return struct {
 				Seconds int `json:"seconds"`
 			}{int(r.CountInterval / time.Second)}, nil
 		}
 	}
 	if r.RemovedLabels != nil {
-		caps = append(caps, "tracker.removedLabels")
-		m["tracker.removedLabels"] = func(params json.RawMessage) (any, error) {
+		caps = append(caps, capRemovedLabels)
+		m[methodRemovedLabels] = func(params json.RawMessage) (any, error) {
 			t, n, err := numbered(params)
 			if err != nil {
 				return nil, err
@@ -500,8 +497,8 @@ func handlers(r Reader) ([]string, map[string]method) {
 		}
 	}
 	if r.Search != nil {
-		caps = append(caps, "tracker.searchIssues")
-		m["tracker.searchIssues"] = func(params json.RawMessage) (any, error) {
+		caps = append(caps, capSearchIssues)
+		m[methodSearchIssues] = func(params json.RawMessage) (any, error) {
 			var p struct {
 				Target Target `json:"target"`
 				Text   string `json:"text"`
@@ -520,8 +517,8 @@ func handlers(r Reader) ([]string, map[string]method) {
 		}
 	}
 	if r.Labeled != nil || r.LabeledPage != nil {
-		caps = append(caps, "tracker.labeled")
-		m["tracker.labeled"] = func(params json.RawMessage) (any, error) {
+		caps = append(caps, capLabeled)
+		m[methodLabeled] = func(params json.RawMessage) (any, error) {
 			var p struct {
 				Target Target     `json:"target"`
 				Label  string     `json:"label"`
@@ -553,11 +550,11 @@ func handlers(r Reader) ([]string, map[string]method) {
 		}
 	}
 	if r.IDs == ProjectKeyIDs {
-		caps = append(caps, "tracker.ids.projectKey")
+		caps = append(caps, capIdsProjectKey)
 	}
 	if r.Routes {
-		caps = append(caps, "tracker.route")
-		m["tracker.matchesRoute"] = func(params json.RawMessage) (any, error) {
+		caps = append(caps, capRoute)
+		m[methodMatchesRoute] = func(params json.RawMessage) (any, error) {
 			var p struct {
 				Target Target     `json:"target"`
 				Number string     `json:"number"`

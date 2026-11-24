@@ -213,27 +213,27 @@ const (
 
 // The canonical event kinds.
 const (
-	// EventStart: A model call (turn) begins.
+	// EventStart: A model call (turn) begins. Fills Timestamp and MessageID. The classifier counts it as agent progress. A CLI with no per-call start record (claude) emits one per assistant or user turn as its progress marker, even for a line with no decodable content.
 	EventStart = "start"
-	// EventText: Assistant prose.
+	// EventText: Assistant prose. Fills Text (as the CLI wrote it, not trimmed), MessageID, Timestamp, Role. The result reader, transcript renderer and heartbeat writer consume it; the classifier counts it as agent progress.
 	EventText = "text"
-	// EventReasoning: Assistant reasoning; never narration or result text.
+	// EventReasoning: Assistant reasoning or thinking; never narration, transcript or result text, so decode a CLI's thinking output to this kind, never to text, or it would surface in the verdict scan and heartbeat. It counts as agent progress for the classifier. Fills Text, MessageID, Timestamp, Role.
 	EventReasoning = "reasoning"
-	// EventToolCall: The agent invoking a tool.
+	// EventToolCall: The agent invoking a tool. Fills ToolID, ToolName, ToolInput, ToolTarget, MessageID, Timestamp, Role. The transcript renderer shows it; it counts as agent progress.
 	EventToolCall = "tool_call"
-	// EventToolResult: A tool's output coming back.
+	// EventToolResult: A tool's output coming back. Fills ToolID, ToolName, ToolTarget, ToolOutput, IsError (the tool failed), Subagent (a spawn tool's report), MessageID, Timestamp, Role; Text stays empty. The transcript renderer shows it; it counts as agent progress. A CLI that reports call and result in one record emits both kinds from it, call first, the result repeating the call's ToolInput and ToolTarget.
 	EventToolResult = "tool_result"
-	// EventUsage: One model call's token tally.
+	// EventUsage: One model call's token tally. Fills Tokens, Model, Effort (when known), MessageID, Timestamp, Role. The usage reader sums every usage event for the run totals (so a decoder emits one per call, not a running total) and dedups the per-model breakdown by non-empty MessageID. It is not agent progress.
 	EventUsage = "usage"
-	// EventModel: The model in force changed.
+	// EventModel: The model in force changed: a model id observed. Fills Model, MessageID, Timestamp, Role, and Effort when known. The heartbeat writer reports a change of Model and, when Effort is set, shows model:effort in the role header.
 	EventModel = "model"
-	// EventError: An error the CLI reported.
+	// EventError: An error the CLI reported inside its grammar. Text keeps the error's raw text, because the classifier matches transient markers on it; ResetAt carries a rate-limit reset the payload names. The latest one not followed by agent progress decides the classification, or the first with ClassifyOptions.FirstMatch. A CLI that reports failures as plain text (claude) decodes every non-content line to this kind.
 	EventError = "error"
-	// EventUnparsed: A line outside the CLI's grammar.
+	// EventUnparsed: A line outside the CLI's grammar: stderr shares the Pass log, so a Driver sees the CLI's own diagnostics here. Text is the trimmed line. The classifier reads it only for terminal markers; nothing else consumes it.
 	EventUnparsed = "unparsed"
-	// EventResult: The session's final result and totals.
+	// EventResult: The CLI's final result text, for a CLI that reports one as its own event. Fills Text, and may carry totals in Tokens, DurationMs, DurationAPIMs and NumTurns, and name the session's Models. The result reader lets it replace the text gathered so far. A CLI whose result is its last message's prose emits no result event.
 	EventResult = "result"
-	// EventHostOp: Core's own spindrift_op line; a guest never emits it.
+	// EventHostOp: Spindrift's own host-written spindrift_op line, which rides the Pass log in every Driver's stream; a guest never emits it. Fills HostOp and Timestamp. The heartbeat writer renders it via FormatSpindriftOp.
 	EventHostOp = "host_op"
 )
 
@@ -242,6 +242,67 @@ var EventKinds = []string{EventStart, EventText, EventReasoning, EventToolCall, 
 
 // GuestEventKinds lists the kinds a Driver's decoder may emit.
 var GuestEventKinds = []string{EventStart, EventText, EventReasoning, EventToolCall, EventToolResult, EventUsage, EventModel, EventError, EventUnparsed, EventResult}
+
+// The Reason a driver Pattern carries.
+const (
+	// ReasonRateLimit: API rate limit.
+	ReasonRateLimit = "rateLimit"
+	// ReasonOverloaded: API overload or capacity error.
+	ReasonOverloaded = "overloaded"
+	// ReasonNetwork: Transient network failure.
+	ReasonNetwork = "network"
+	// ReasonTaskFailed: The agent ran but produced no valid result.
+	ReasonTaskFailed = "taskFailed"
+	// ReasonUnsupportedFlag: The driver rejected a CLI option core passed (version skew).
+	ReasonUnsupportedFlag = "unsupportedFlag"
+)
+
+// Reasons lists every Reason, in the order the protocol declares them.
+var Reasons = []string{ReasonRateLimit, ReasonOverloaded, ReasonNetwork, ReasonTaskFailed, ReasonUnsupportedFlag}
+
+// The tokens of the host line a Driver's decoder reads.
+const (
+	HostLineType        = "spindrift_op"
+	HostLineOpPassStart = "pass_start"
+)
+
+// The attribution roles core stamps on events.
+const (
+	// RoleImplementor: Attributes a top-level event in an implement, fix or land pass.
+	RoleImplementor = "implementor"
+	// RoleReviewer: Attributes a top-level event in a review or delta-review pass.
+	RoleReviewer = "reviewer"
+	// RoleSubagent: Attributes an event whose subagent parent is unknown.
+	RoleSubagent = "subagent"
+)
+
+// PassRoles maps a pass name to the role its pass_start op starts.
+var PassRoles = map[string]string{
+	"delta-review": RoleReviewer,
+	"fix":          RoleImplementor,
+	"implement":    RoleImplementor,
+	"land":         RoleImplementor,
+	"review":       RoleReviewer,
+}
+
+// The categories of a tracker.statuses entry that core reads.
+const (
+	// StatusCategoryDone: The category of a terminal workflow status.
+	StatusCategoryDone = "done"
+)
+
+// The outcomes of tracker.transition that are not an error.
+const (
+	// TransitionMoved: The issue now sits in the requested status.
+	TransitionMoved = "moved"
+	// TransitionUnavailable: The issue's workflow offers no transition to the resolved status; offered names the statuses it does offer.
+	TransitionUnavailable = "unavailable"
+	// TransitionUnmapped: The mapping holds no non-empty status for the state.
+	TransitionUnmapped = "unmapped"
+)
+
+// TransitionOutcomes lists every outcome, in the order the protocol declares them.
+var TransitionOutcomes = []string{TransitionMoved, TransitionUnavailable, TransitionUnmapped}
 
 // The result checks core applies to a method's answer.
 const (

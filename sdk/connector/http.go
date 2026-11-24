@@ -7,12 +7,6 @@ import (
 	"fmt"
 )
 
-// MaxHTTPResponse is the largest response body the host hands a guest; a
-// bigger one aborts the call and closes the Connector. It mirrors the host's
-// maxHTTPResponse (cmd/launcher/internal/connectorhost/network.go);
-// parity_test.go pins the two.
-const MaxHTTPResponse = 4 << 20
-
 // ErrNoHost is returned by HTTPRequest outside a wasip1 build, where there is
 // no host to serve the call.
 var ErrNoHost = errors.New("connector: no host to serve http_request outside wasip1")

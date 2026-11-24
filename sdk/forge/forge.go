@@ -137,7 +137,7 @@ func handlers(r Reader) ([]string, map[string]method) {
 	}
 
 	m := map[string]method{
-		"forge.prsForBranch": func(params json.RawMessage) (any, error) {
+		methodPrsForBranch: func(params json.RawMessage) (any, error) {
 			var p struct {
 				Target Target `json:"target"`
 				Branch string `json:"branch"`
@@ -156,14 +156,14 @@ func handlers(r Reader) ([]string, map[string]method) {
 				PRs []PR `json:"prs"`
 			}{prs}, nil
 		},
-		"forge.pr": func(params json.RawMessage) (any, error) {
+		methodPr: func(params json.RawMessage) (any, error) {
 			t, n, err := numbered(params)
 			if err != nil {
 				return nil, err
 			}
 			return r.PR(t, n)
 		},
-		"forge.checks": func(params json.RawMessage) (any, error) {
+		methodChecks: func(params json.RawMessage) (any, error) {
 			t, n, err := numbered(params)
 			if err != nil {
 				return nil, err
@@ -179,7 +179,7 @@ func handlers(r Reader) ([]string, map[string]method) {
 		},
 	}
 	if r.JobLog != nil {
-		m["forge.jobLog"] = func(params json.RawMessage) (any, error) {
+		m[methodJobLog] = func(params json.RawMessage) (any, error) {
 			var p struct {
 				Target Target `json:"target"`
 				JobID  string `json:"jobId"`
@@ -198,7 +198,7 @@ func handlers(r Reader) ([]string, map[string]method) {
 			}{tailBytes(log, p.Tail, p.Errors)}, nil
 		}
 	}
-	return []string{"forge"}, m
+	return []string{capForge}, m
 }
 
 // errorLineRE mirrors the launcher's forge.errorLineRE: the SDK is its own

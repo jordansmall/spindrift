@@ -6,23 +6,6 @@ import (
 	"spindrift.dev/sdk/connector"
 )
 
-// The capability names of the write primitives. Each is declared only when
-// the Connector sets the funcs behind it. Core keeps its own copies; a parity
-// test pins them.
-const (
-	CapTransition = "tracker.transition"
-	CapEditLabels = "tracker.editLabels"
-	CapLabels     = "tracker.labels"
-	CapComment    = "tracker.comment"
-	CapFileIssue  = "tracker.fileIssue"
-	CapCloseIssue = "tracker.closeIssue"
-
-	// The methods behind CapLabels; they ride on it rather than being
-	// advertised themselves.
-	CapListLabels  = "tracker.listLabels"
-	CapCreateLabel = "tracker.createLabel"
-)
-
 // StatusTarget is the tracker status a Dispatch state maps to and the
 // resolution to set on entering it ("" for none).
 type StatusTarget struct {
@@ -40,17 +23,6 @@ type TransitionRequest struct {
 	State   string                  `json:"state"`
 	Mapping map[string]StatusTarget `json:"mapping"`
 }
-
-// The outcomes of a Transition that is not an error.
-const (
-	// TransitionMoved means the issue now sits in the requested status.
-	TransitionMoved = "moved"
-	// TransitionUnavailable means the issue's workflow offers no transition to
-	// the resolved Status; Offered names the statuses it does offer.
-	TransitionUnavailable = "unavailable"
-	// TransitionUnmapped means Mapping holds no non-empty status for State.
-	TransitionUnmapped = "unmapped"
-)
 
 // TransitionResult is how a Transition ended. Status is the tracker status the
 // Connector resolved State to ("" when unmapped), so core can name it in a

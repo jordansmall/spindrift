@@ -292,6 +292,10 @@ let
           "errorClasses"
           "limits"
           "events"
+          "reasons"
+          "hostLine"
+          "statusCategories"
+          "transitionOutcomes"
           "resultChecks"
           "types"
           "methods"
@@ -312,7 +316,38 @@ let
         (noDups "errorClasses" (map (c: c.name) desc.errorClasses))
         (noDups "events" (map (e: e.name) desc.events))
         (noDups "methods" (map (m: m.name) desc.methods))
+        (noDups "reasons" (map (e: e.name) desc.reasons))
+        (noDups "statusCategories" (map (e: e.name) desc.statusCategories))
+        (noDups "transitionOutcomes" (map (e: e.name) desc.transitionOutcomes))
+        (checkFields "hostLine" desc.hostLine [
+          "type"
+          "opPassStart"
+          "roles"
+          "passRoles"
+        ])
+        (checkName "hostLine type" "[a-z]+(_[a-z]+)*" desc.hostLine.type)
+        (checkName "hostLine opPassStart" "[a-z]+(_[a-z]+)*" desc.hostLine.opPassStart)
+        (noDups "hostLine roles" (map (r: r.name) desc.hostLine.roles))
       ]
+      ++ concatMap' (e: entryChecks "reason ${toJSON (e.name or "?")}" "[a-z][A-Za-z]*" e) desc.reasons
+      ++ concatMap' (
+        e: entryChecks "statusCategory ${toJSON (e.name or "?")}" "[a-z]+" e
+      ) desc.statusCategories
+      ++ concatMap' (
+        e: entryChecks "transitionOutcome ${toJSON (e.name or "?")}" "[a-z]+" e
+      ) desc.transitionOutcomes
+      ++ concatMap' (
+        r: entryChecks "hostLine role ${toJSON (r.name or "?")}" "[a-z]+" r
+      ) desc.hostLine.roles
+      ++ concatMap' (pass: [
+        (checkName "hostLine pass" "[a-z]+(-[a-z]+)*" pass)
+        (
+          if elem desc.hostLine.passRoles.${pass} (map (r: r.name) desc.hostLine.roles) then
+            true
+          else
+            fail "hostLine pass ${toJSON pass}: role ${toJSON desc.hostLine.passRoles.${pass}} is not declared"
+        )
+      ]) (attrNames desc.hostLine.passRoles)
       ++ concatMap' (
         axis:
         concatMap' (
@@ -383,13 +418,22 @@ let
       "Retry"
       "Method"
       "Methods"
+      "Reasons"
+      "HostLineType"
+      "HostLineOpPassStart"
+      "PassRoles"
+      "TransitionOutcomes"
     ]
     ++ ids "Cap" (allCapNames desc)
     ++ ids "Class" (map (c: c.name) desc.errorClasses)
     ++ ids "" (attrNames desc.limits)
     ++ ids "Event" (map (e: e.name) desc.events)
     ++ ids "Check" (attrNames desc.resultChecks)
-    ++ ids "Method" (map (m: m.name) desc.methods);
+    ++ ids "Method" (map (m: m.name) desc.methods)
+    ++ ids "Reason" (map (e: e.name) desc.reasons)
+    ++ ids "Role" (map (r: r.name) desc.hostLine.roles)
+    ++ ids "StatusCategory" (map (e: e.name) desc.statusCategories)
+    ++ ids "Transition" (map (e: e.name) desc.transitionOutcomes);
 
   # --- Go -------------------------------------------------------------------
   goString = toJSON;
@@ -484,6 +528,52 @@ let
     + "var GuestEventKinds = ${
       goList (map (e: "Event${goIdent e.name}") (filter (e: e.guest) desc.events))
     }\n\n"
+    + "// The Reason a driver Pattern carries.\n"
+    + constBlock (
+      map (
+        e: commented "Reason${goIdent e.name}" e.doc + "Reason${goIdent e.name} = ${goString e.name}\n"
+      ) desc.reasons
+    )
+    + "// Reasons lists every Reason, in the order the protocol declares them.\n"
+    + "var Reasons = ${goList (map (e: "Reason${goIdent e.name}") desc.reasons)}\n\n"
+    + "// The tokens of the host line a Driver's decoder reads.\n"
+    + constBlock [
+      "HostLineType = ${goString desc.hostLine.type}\n"
+      "HostLineOpPassStart = ${goString desc.hostLine.opPassStart}\n"
+    ]
+    + "// The attribution roles core stamps on events.\n"
+    + constBlock (
+      map (
+        r: commented "Role${goIdent r.name}" r.doc + "Role${goIdent r.name} = ${goString r.name}\n"
+      ) desc.hostLine.roles
+    )
+    + "// PassRoles maps a pass name to the role its pass_start op starts.\n"
+    + "var PassRoles = map[string]string{\n"
+    + concat (
+      map (p: "${goString p}: Role${goIdent desc.hostLine.passRoles.${p}},\n") (
+        attrNames desc.hostLine.passRoles
+      )
+    )
+    + "}\n\n"
+    + "// The categories of a tracker.statuses entry that core reads.\n"
+    + constBlock (
+      map (
+        e:
+        commented "StatusCategory${goIdent e.name}" e.doc
+        + "StatusCategory${goIdent e.name} = ${goString e.name}\n"
+      ) desc.statusCategories
+    )
+    + "// The outcomes of tracker.transition that are not an error.\n"
+    + constBlock (
+      map (
+        e:
+        commented "Transition${goIdent e.name}" e.doc + "Transition${goIdent e.name} = ${goString e.name}\n"
+      ) desc.transitionOutcomes
+    )
+    + "// TransitionOutcomes lists every outcome, in the order the protocol declares them.\n"
+    + "var TransitionOutcomes = ${
+      goList (map (e: "Transition${goIdent e.name}") desc.transitionOutcomes)
+    }\n\n"
     + "// The result checks core applies to a method's answer.\n"
     + constBlock (
       map (
@@ -507,6 +597,258 @@ let
     + "var Methods = map[string]Method{\n"
     + concat (map methodEntry desc.methods)
     + "}\n";
+
+  # --- SDK ------------------------------------------------------------------
+  # The SDK cannot import core, so each of its packages gets the protocol facts it
+  # speaks as a protocol_gen.go of its own. `binding` (sdk.nix) says only how a
+  # description value is spelled in Go where the derived spelling is not the SDK's
+  # published one; it never holds a protocol value.
+  sdkPackages = [
+    "connector"
+    "event"
+    "forge"
+    "tracker"
+    "driver"
+  ];
+  # Per package, the binding fields it takes and the description values each
+  # one's keys must name.
+  sdkBindingKeys = desc: {
+    connector.limits = attrNames desc.limits;
+    event = { };
+    forge = {
+      caps = capNames desc "forge";
+      methods = methodNames desc "forge";
+    };
+    tracker = {
+      caps = capNames desc "tracker";
+      methods = methodNames desc "tracker";
+    };
+    driver = {
+      caps = capNames desc "driver";
+      methods = methodNames desc "driver";
+      roles = map (r: r.name) desc.hostLine.roles;
+    };
+  };
+  methodNames = desc: axis: map (m: m.name) (filter (m: axisOf m.name == axis) desc.methods);
+
+  checkSdkBinding =
+    desc: binding:
+    let
+      keys = sdkBindingKeys desc;
+      exported = what: name: checkName what "[A-Z][A-Za-z0-9]*" name;
+      # A field is a list of description values (limits) or an attribute set
+      # mapping a description value to its exported Go name.
+      fieldChecks =
+        pkg: field:
+        let
+          what = "sdk binding ${pkg}.${field}";
+          v = binding.${pkg}.${field};
+          known = keys.${pkg}.${field};
+          unknown = filter (k: !elem k known) (if isList v then v else attrNames v);
+        in
+        [
+          (
+            if unknown == [ ] then
+              true
+            else
+              fail "${what}: ${toJSON (head unknown)} is not a description value (one of ${concatStringsSep ", " known})"
+          )
+        ]
+        ++ (if isList v then [ ] else map (k: exported "${what}.${k}" v.${k}) (attrNames v));
+      pkgChecks =
+        pkg:
+        let
+          fields = attrNames (binding.${pkg} or { });
+          allowed = attrNames keys.${pkg};
+          bad = filter (f: !elem f allowed) fields;
+        in
+        [
+          (
+            if bad == [ ] then
+              true
+            else
+              fail "sdk binding ${pkg}: unknown field(s): ${concatStringsSep ", " bad}"
+          )
+        ]
+        ++ concatMap' (fieldChecks pkg) (filter (f: elem f allowed) fields);
+      unknownPkgs = filter (p: !elem p sdkPackages) (attrNames binding);
+    in
+    deepSeq (
+      [
+        (
+          if unknownPkgs == [ ] then
+            true
+          else
+            fail "sdk binding: unknown package(s): ${concatStringsSep ", " unknownPkgs}"
+        )
+      ]
+      ++ concatMap' pkgChecks sdkPackages
+    ) true;
+
+  renderSDK =
+    description: binding:
+    let
+      desc = validate description;
+      ok = checkSdkBinding desc binding;
+      bound = pkg: field: binding.${pkg}.${field} or { };
+      limits = binding.connector.limits or [ ];
+      header =
+        pkg:
+        "// Code generated by nix/regen.nix from lib/connector-protocol/*.nix. DO NOT EDIT.\n\npackage ${pkg}\n\n";
+      suffixOf =
+        axis: name:
+        if name == axis then axis else substring (stringLength axis + 1) (stringLength name) name;
+      # A name the binding spells out keeps it; any other is unexported, so only
+      # what the SDK publishes is part of its API.
+      capIdent = axis: c: (bound axis "caps").${c.name} or "cap${goIdent (suffixOf axis c.name)}";
+      methodIdent =
+        axis: m: (bound axis "methods").${m.name} or "method${goIdent (suffixOf axis m.name)}";
+      axisConsts =
+        axis:
+        let
+          caps = desc.capabilities.${axis};
+          methods = filter (m: axisOf m.name == axis) desc.methods;
+        in
+        {
+          idents = map (capIdent axis) caps ++ map (methodIdent axis) methods;
+          text =
+            "// The capability names a ${axis} Connector advertises.\n"
+            + constBlock (
+              map (c: commented (capIdent axis c) c.doc + "${capIdent axis c} = ${goString c.name}\n") caps
+            )
+            + "// The method names of the ${axis} axis.\n"
+            + constBlock (
+              map (
+                m: commented (methodIdent axis m) m.doc + "${methodIdent axis m} = ${goString m.name}\n"
+              ) methods
+            );
+        };
+      typedConsts =
+        ty: prefix: entries:
+        constBlock (
+          map (
+            e:
+            commented "${prefix}${goIdent e.name}" e.doc
+            + "${prefix}${goIdent e.name} ${ty} = ${goString e.name}\n"
+          ) entries
+        );
+      untypedConsts =
+        prefix: entries:
+        constBlock (
+          map (
+            e:
+            commented "${prefix}${goIdent e.name}" e.doc + "${prefix}${goIdent e.name} = ${goString e.name}\n"
+          ) entries
+        );
+      files = {
+        connector = {
+          idents = [
+            "protocolVersion"
+            "Class"
+          ]
+          ++ map (c: goIdent c.name) desc.errorClasses
+          ++ map goIdent limits;
+          text =
+            "// protocolVersion is the protocol version the SDK speaks. It is a var, not a\n"
+            + "// const, so a test fixture can override it with\n"
+            + "// -ldflags=-X spindrift.dev/sdk/connector.protocolVersion=<version>.\n"
+            + "var protocolVersion = ${goString desc.version}\n\n"
+            + "// Class is the canonical error class a Connector reports with a failure. Core\n"
+            + "// decides on retries from the class alone, so it must describe the failure and\n"
+            + "// not the primitive that raised it.\n"
+            + "type Class string\n\n"
+            + constBlock (
+              map (
+                c: commented (goIdent c.name) c.doc + "${goIdent c.name} Class = ${goString c.name}\n"
+              ) desc.errorClasses
+            )
+            + constBlock (
+              map (
+                n:
+                commented (goIdent n) desc.limits.${n}.doc + "${goIdent n} = ${toString desc.limits.${n}.value}\n"
+              ) limits
+            );
+        };
+        event = {
+          idents = [ "Kind" ] ++ map (e: "Kind${goIdent e.name}") desc.events;
+          text =
+            "// Kind names one canonical event a Driver's decoder derives from a Pass log\n"
+            + "// line (ADR 0065). Drivers translate their CLI's own grammar into these kinds\n"
+            + "// at their own boundary; the shared readers (classification, usage, result\n"
+            + "// text, transcript, heartbeat) consume only Events and never see a grammar.\n"
+            + "type Kind string\n\n"
+            + typedConsts "Kind" "Kind" desc.events;
+        };
+        forge = axisConsts "forge";
+        tracker =
+          let
+            axis = axisConsts "tracker";
+          in
+          {
+            idents =
+              axis.idents
+              ++ map (e: "StatusCategory${goIdent e.name}") desc.statusCategories
+              ++ map (e: "Transition${goIdent e.name}") desc.transitionOutcomes;
+            text =
+              axis.text
+              + "// The categories of a Status that the SDK names.\n"
+              + untypedConsts "StatusCategory" desc.statusCategories
+              + "// The outcomes of a Transition that is not an error.\n"
+              + untypedConsts "Transition" desc.transitionOutcomes;
+          };
+        driver =
+          let
+            axis = axisConsts "driver";
+            roleIdent = r: (bound "driver" "roles").${r.name} or "${goIdent r.name}Role";
+            roles = desc.hostLine.roles;
+          in
+          {
+            idents =
+              axis.idents
+              ++ [
+                "Reason"
+                "passRoles"
+                "hostLineType"
+                "hostLineOpPassStart"
+              ]
+              ++ map (e: goIdent e.name) desc.reasons
+              ++ map roleIdent roles;
+            text =
+              axis.text
+              + "// Reason classifies why a Pattern matched.\n"
+              + "type Reason string\n\n"
+              + typedConsts "Reason" "" desc.reasons
+              + "// The tokens of the host line HostLine reads.\n"
+              + constBlock [
+                "hostLineType = ${goString desc.hostLine.type}\n"
+                "hostLineOpPassStart = ${goString desc.hostLine.opPassStart}\n"
+              ]
+              + "// The attribution roles core stamps on events. A Driver's decoder uses them to\n"
+              + "// attribute the events it emits.\n"
+              + constBlock (
+                map (r: commented (roleIdent r) r.doc + "${roleIdent r} = ${goString r.name}\n") roles
+              )
+              + "// passRoles maps a pass to the role its pass_start op starts.\n"
+              + "var passRoles = map[string]string{\n"
+              + concat (
+                map (p: "${goString p}: ${roleIdent { name = desc.hostLine.passRoles.${p}; }},\n") (
+                  attrNames desc.hostLine.passRoles
+                )
+              )
+              + "}\n\n";
+          };
+      };
+    in
+    seq ok (
+      listToAttrs (
+        map (pkg: {
+          name = "sdk/${pkg}/protocol_gen.go";
+          value = seq (noDups "sdk/${pkg} Go identifiers" files.${pkg}.idents) (
+            header pkg + files.${pkg}.text
+          );
+        }) sdkPackages
+      )
+    );
 
   # --- JSON Schema ----------------------------------------------------------
   # builtins.toJSON is compact and has no pretty form, so print here: two-space
@@ -559,5 +901,5 @@ let
     + "\n";
 in
 {
-  inherit renderGo renderSchema;
+  inherit renderGo renderSchema renderSDK;
 }

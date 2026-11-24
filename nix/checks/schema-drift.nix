@@ -16,6 +16,7 @@ let
   renderers = import ../../lib/renderers.nix;
   connectorProtocol = import ../../lib/connector-protocol;
   connectorProtocolRender = import ../../lib/connector-protocol/render.nix;
+  sdkBinding = import ../../lib/connector-protocol/sdk.nix;
   driverRegistry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
   inherit (import ../../lib/driver-map.nix) placedPath exampleDriver;
   schema = import ../../lib/env-schema.nix;
@@ -640,6 +641,21 @@ checkedMerge {
     source = "lib/connector-protocol/*.nix";
   };
 
+  # The SDK's protocol_gen.go files, one per package (issue #7505). regen
+  # gofmts each, so the check does too.
+  connector-protocol-sdk-gen =
+    let
+      files = connectorProtocolRender.renderSDK connectorProtocol sdkBinding;
+    in
+    pkgs.runCommand "connector-protocol-sdk-gen" { nativeBuildInputs = [ pkgs.go ]; } ''
+      ${pkgs.lib.concatMapStrings (path: ''
+        gofmt ${pkgs.writeText "protocol_gen.go" files.${path}} > generated.go
+        diff generated.go ${../../. + "/${path}"} \
+          || { echo ${pkgs.lib.escapeShellArg "${path} is out of sync with lib/connector-protocol/*.nix — regenerate it with `nix run .#regen`"} >&2; exit 1; }
+      '') (builtins.attrNames files)}
+      touch $out
+    '';
+
   # regen writes the schema verbatim, so a byte diff is the exact freshness test.
   connector-protocol-schema-gen =
     pkgs.runCommand "connector-protocol-schema-gen"
@@ -668,6 +684,7 @@ checkedMerge {
           builtins.deepSeq [
             (connectorProtocolRender.renderGo d)
             (connectorProtocolRender.renderSchema d)
+            (connectorProtocolRender.renderSDK d sdkBinding)
           ] true
         );
       tweakFirst =
@@ -680,6 +697,14 @@ checkedMerge {
         what: d:
         assertMsg (!(render d).success)
           "connector-protocol-rows (issue #7504): the renderers must reject ${what}, but they rendered it successfully";
+      rejectsBinding =
+        what: b:
+        assertMsg
+          (
+            !(builtins.tryEval (builtins.deepSeq (connectorProtocolRender.renderSDK connectorProtocol b) true))
+            .success
+          )
+          "connector-protocol-rows (issue #7505): renderSDK must reject ${what}, but it rendered successfully";
       first = builtins.head connectorProtocol.methods;
       axis = builtins.head (splitString "." first.name);
     in
@@ -724,6 +749,50 @@ checkedMerge {
     assert rejects "a duplicate method name" (
       connectorProtocol // { methods = connectorProtocol.methods ++ [ first ]; }
     );
+    assert rejects "a duplicate reason" (
+      connectorProtocol
+      // {
+        reasons = connectorProtocol.reasons ++ [ (builtins.head connectorProtocol.reasons) ];
+      }
+    );
+    assert rejects "a passRole naming an undeclared role" (
+      connectorProtocol
+      // {
+        hostLine = connectorProtocol.hostLine // {
+          passRoles = connectorProtocol.hostLine.passRoles // {
+            review = "nonesuch";
+          };
+        };
+      }
+    );
+    # The SDK binding spells description values; it must name real ones.
+    assert rejectsBinding "an SDK binding keyed by a capability the forge axis lacks" {
+      forge.caps."forge.nonesuch" = "CapNonesuch";
+    };
+    assert rejectsBinding "an SDK binding keyed by a method the tracker axis lacks" {
+      tracker.methods."tracker.nonesuch" = "CapNonesuch";
+    };
+    assert rejectsBinding "an SDK binding keyed by an unknown limit" {
+      connector.limits = [ "nonesuch" ];
+    };
+    assert rejectsBinding "an SDK binding naming a role the host line lacks" {
+      driver.roles.nonesuch = "NonesuchRole";
+    };
+    assert rejectsBinding "an SDK binding name that is not an exported Go identifier" {
+      forge.caps."forge.prs" = "capPRs";
+    };
+    assert rejectsBinding "an SDK binding for an unknown package" {
+      nonesuch = { };
+    };
+    assert rejectsBinding "an SDK binding with an unknown field" {
+      forge.nonesuch = { };
+    };
+    assert rejectsBinding "an SDK binding that names two constants alike" {
+      forge.caps = {
+        "forge.prs" = "CapProbe";
+        "forge.probe" = "CapProbe";
+      };
+    };
     pkgs.runCommand "connector-protocol-rows" { } "touch $out";
 
   # A family row carries its own run-document keys (ADR 0069 decision 7), so a
