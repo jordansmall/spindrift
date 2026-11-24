@@ -642,6 +642,14 @@ in
     assert assertMsg (
       shape.effortFlag == "--variant"
     ) "opencode Driver's argvShape.effortFlag must stay \"--variant\", got: ${shape.effortFlag}";
+    assert assertMsg
+      (
+        shape.sessionFlags == [
+          "--title"
+          "--session"
+        ]
+      )
+      "opencode Driver's argvShape.sessionFlags must stay [ \"--title\" \"--session\" ], got: ${builtins.toJSON shape.sessionFlags}";
     assert assertMsg (
       shape.order == [
         "driverFlags"

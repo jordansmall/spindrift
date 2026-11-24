@@ -44,6 +44,7 @@
       modelFlag = "--model";
       modelOmitEmpty = false;
       effortFlag = "--effort";
+      sessionFlags = [ "--session-id" ];
       order = [
         "prompt"
         "model"

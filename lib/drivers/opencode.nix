@@ -251,6 +251,10 @@ in
     modelFlag = "-m";
     modelOmitEmpty = true;
     effortFlag = "--variant";
+    sessionFlags = [
+      "--title"
+      "--session"
+    ];
     order = [
       "driverFlags"
       "model"

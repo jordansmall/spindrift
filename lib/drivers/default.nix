@@ -301,6 +301,14 @@ let
       agentsFlagOk =
         !(shape ? agentsFlag) || (builtins.isString shape.agentsFlag && shape.agentsFlag != "");
       effortFlagOk = shape ? effortFlag && builtins.isString shape.effortFlag && shape.effortFlag != "";
+      # The flag names this Driver's `session` answer may carry; core accepts
+      # no other (issue #7507). An empty list is valid: a Driver with none.
+      sessionFlags = shape.sessionFlags or null;
+      sessionFlagsIsList = builtins.isList sessionFlags;
+      sessionFlagsOk =
+        sessionFlagsIsList
+        && lib.all (f: builtins.isString f && f != "") sessionFlags
+        && lib.unique sessionFlags == sessionFlags;
       order = shape.order or null;
       orderIsList = builtins.isList order;
       # A Driver with no agentsFlag has no "agents" slot in its order either.
@@ -327,6 +335,12 @@ let
           lib.optional (!agentsFlagOk)
             "argvShape.agentsFlag must be a non-empty string when present (omit it entirely for a Driver with no --agents equivalent)"
         ++ lib.optional (!effortFlagOk) "argvShape.effortFlag must be a non-empty string"
+        ++ lib.optional (!sessionFlagsOk) (
+          if !sessionFlagsIsList then
+            "argvShape.sessionFlags must be a list, got: ${builtins.toJSON sessionFlags}"
+          else
+            "argvShape.sessionFlags must be a list of distinct non-empty strings, got: ${builtins.toJSON sessionFlags}"
+        )
         ++ lib.optional (!orderOk) (
           if !orderIsList then
             "argvShape.order must be a list, got: ${builtins.toJSON order}"
@@ -347,19 +361,26 @@ let
   # A row validated as the core entries are: shape, then argv shape.
   assertRow = driverName: entry: assertArgvShape driverName (assertShape driverName entry);
 
+  # sessionFlags lives under argvShape; the descriptor field table reads it flat.
+  descriptorRow = row: row // { inherit (row.argvShape) sessionFlags; };
+  descriptorRows = lib.mapAttrs (_: descriptorRow) entries;
+
   # The row facts the Go Descriptor carries, under the keys its JSON tags read
   # (cmd/launcher/internal/driver/descriptor.go): the fields
   # renderDriverDescriptorsGo renders. Absent optional facts stay absent.
   descriptorFacts =
     row:
+    let
+      flat = descriptorRow row;
+    in
     {
-      inherit (row) name credentials;
+      inherit (flat) name credentials sessionFlags;
     }
-    // lib.getAttrs (lib.filter (k: row ? ${k}) [
+    // lib.getAttrs (lib.filter (k: flat ? ${k}) [
       "providerNamespacedModels"
       "effortOnModelLevels"
       "authContent"
-    ]) row;
+    ]) flat;
 
   entries = {
     claude = assertRow "claude" (import ./claude.nix { inherit lib; });
@@ -505,6 +526,7 @@ in
     assertArgvShape
     assertRow
     descriptorFacts
+    descriptorRows
     requiredAttrs
     knownAttrs
     renderPreamble

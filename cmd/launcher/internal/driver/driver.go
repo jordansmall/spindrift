@@ -318,3 +318,10 @@ func Names() []string {
 	sort.Strings(names)
 	return names
 }
+
+// SessionFlagDeclared reports whether the named Driver's row declares flag as
+// one its session answer may carry; unknown Drivers declare none.
+func SessionFlagDeclared(name, flag string) bool {
+	d, ok := descriptor(name)
+	return ok && slices.Contains(d.SessionFlags, flag)
+}

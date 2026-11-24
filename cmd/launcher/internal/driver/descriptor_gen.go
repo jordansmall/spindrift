@@ -8,6 +8,7 @@ var descriptors = []Descriptor{
 		Credentials: []CredentialRule{
 			{Env: []string{"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"}, Remedy: "set CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token') or ANTHROPIC_API_KEY", SetupCommand: []string{"claude", "setup-token"}, Labels: map[string]string{"ANTHROPIC_API_KEY": "Anthropic API key"}, SetupHint: "browser OAuth"},
 		},
+		SessionFlags: []string{"--session-id"},
 	},
 	{
 		Name:                     "opencode",
@@ -15,6 +16,7 @@ var descriptors = []Descriptor{
 		Credentials: []CredentialRule{
 			{Env: []string{"OPENCODE_AUTH_CONTENT"}, ModelPrefix: "github-copilot/", Remedy: "set OPENCODE_AUTH_CONTENT for the github-copilot Provider (run 'opencode auth login -p github-copilot' on a host, then export the auth slice) under the opencode Driver"},
 		},
+		SessionFlags: []string{"--title", "--session"},
 	},
 	{
 		Name:                     "pi",
@@ -31,10 +33,11 @@ var descriptors = []Descriptor{
 			{Env: []string{"DEEPSEEK_API_KEY"}, ModelPrefix: "deepseek/", Remedy: "set DEEPSEEK_API_KEY for the deepseek Provider under the pi Driver"},
 			{Env: []string{"PI_AUTH_CONTENT"}, ModelPrefix: "github-copilot/", Remedy: "set PI_AUTH_CONTENT to a pi auth.json holding a github-copilot OAuth entry under the pi Driver"},
 		},
-		AuthContent: &AuthContent{Env: "PI_AUTH_CONTENT", OAuthProviders: []string{"github-copilot"}, APIKeyProviderFor: map[string]string{"openai-codex": "openai"}},
+		AuthContent:  &AuthContent{Env: "PI_AUTH_CONTENT", OAuthProviders: []string{"github-copilot"}, APIKeyProviderFor: map[string]string{"openai-codex": "openai"}},
+		SessionFlags: []string{"--session-id"},
 	},
 }
 
 // descriptorRowFields lists the Descriptor fields the nix table renders, for
 // the struct-sync test; it is not read at runtime.
-var descriptorRowFields = []string{"Name", "ProviderNamespacedModels", "EffortOnModelLevels", "Credentials", "AuthContent"}
+var descriptorRowFields = []string{"Name", "ProviderNamespacedModels", "EffortOnModelLevels", "Credentials", "AuthContent", "SessionFlags"}
