@@ -71,7 +71,8 @@ func newPRHarness(t *testing.T, caps []string, replies map[string]any) *prHarnes
 	}
 	clock := retry.Clock{Now: time.Now, Sleep: func(d time.Duration) { h.sleeps = append(h.sleeps, d) }}
 	conn := auditStub{&h.audit}
-	p := &pushOnly{conn: conn, call: call, clock: clock, target: testTarget, git: h.git}
+	p := pushOnlyOver(conn, call, clock, testTarget)
+	p.git = h.git
 	h.f = composePR(p, caps, testWebHost)
 	h.caps = forge.ResolveCodeForge(h.f)
 	return h
@@ -610,9 +611,15 @@ func TestCreateDraftPR(t *testing.T) {
 		}
 	})
 	t.Run("refuses a foreign PR", func(t *testing.T) {
-		h := newPRHarness(t, []string{capDraftPRs}, map[string]any{"forge.openPR": `{"number":"7","url":"https://evil.example/o/r/pull/7","state":"open","merged":false}`})
-		if _, _, err := h.caps.DraftPRCreator.CreateDraftPR("t", "b", "main", "h"); !errors.Is(err, ErrAnswer) {
-			t.Fatalf("CreateDraftPR = %v, want ErrAnswer", err)
+		h := newPRHarness(t, []string{capDraftPRs}, map[string]any{
+			"forge.openPR":       `{"number":"7","url":"https://evil.example/o/r/pull/7","state":"open","merged":false}`,
+			"forge.prsForBranch": `{"prs":[` + created + `]}`})
+		url, _, err := h.caps.DraftPRCreator.CreateDraftPR("t", "b", "main", "h")
+		if !errors.Is(err, ErrAnswer) || url != "" {
+			t.Fatalf("CreateDraftPR = (%q, %v), want ErrAnswer and no URL", url, err)
+		}
+		if !slices.Equal(h.calls, []string{"forge.openPR"}) {
+			t.Errorf("calls = %v, want only forge.openPR (a refused answer is not adopted)", h.calls)
 		}
 	})
 }

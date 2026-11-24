@@ -12,6 +12,7 @@ import (
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectorprotocol/schematest"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/retry"
 )
 
 var testTarget = Target{API: "https://api.example", Repo: "o/r"}
@@ -46,7 +47,9 @@ func stubGuest(t *testing.T, replies map[string]string) (guestCall, *[]recordedC
 
 func newTestForge(t *testing.T, replies map[string]string) (*reads, *[]recordedCall) {
 	call, calls := stubGuest(t, replies)
-	return &reads{call: call, target: testTarget, webHost: testWebHost}, calls
+	p := pushOnlyOver(auditStub{}, call, retry.Clock{}, testTarget)
+	p.rd.webHost = testWebHost
+	return p.rd, calls
 }
 
 func TestNewReaderRequiresCapability(t *testing.T) {

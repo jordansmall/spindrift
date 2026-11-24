@@ -181,45 +181,48 @@ func (t *reads) ownRunLink(raw string) string {
 	return raw
 }
 
-// check validates a PR the guest returned: a canonical number, a URL naming
+// checkPR validates a PR the guest returned: a canonical number, a URL naming
 // that same number in the target repository, and a state/merged pair that is
 // possible.
-func (t *reads) check(w wirePR) (forge.PRState, error) {
+func (t *reads) checkPR(w wirePR) error {
 	if !isPRNumber(w.Number) {
-		return "", fmt.Errorf("%w: PR number %q is not a positive integer", ErrAnswer, w.Number)
+		return fmt.Errorf("%w: PR number %q is not a positive integer", ErrAnswer, w.Number)
 	}
 	n, err := t.prNumber(w.URL)
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrAnswer, err)
+		return fmt.Errorf("%w: %v", ErrAnswer, err)
 	}
 	if n != w.Number {
-		return "", fmt.Errorf("%w: PR %s has URL %q for PR %s", ErrAnswer, w.Number, w.URL, n)
+		return fmt.Errorf("%w: PR %s has URL %q for PR %s", ErrAnswer, w.Number, w.URL, n)
 	}
+	if prState(w) == "" {
+		return fmt.Errorf("%w: PR %s has state %q (merged %t)", ErrAnswer, w.Number, w.State, w.Merged)
+	}
+	return nil
+}
+
+// prState is the state of a PR checkPR accepted.
+func prState(w wirePR) forge.PRState {
 	switch {
 	case w.State == "open" && !w.Merged:
-		return forge.PROpen, nil
+		return forge.PROpen
 	case w.State == "closed" && w.Merged:
-		return forge.PRMerged, nil
+		return forge.PRMerged
 	case w.State == "closed":
-		return forge.PRClosed, nil
+		return forge.PRClosed
 	}
-	return "", fmt.Errorf("%w: PR %s has state %q (merged %t)", ErrAnswer, w.Number, w.State, w.Merged)
+	return ""
 }
 
 // branchPRs asks the guest for every PR on branch and validates all of them.
 func (t *reads) branchPRs(branch string) ([]wirePR, []forge.PRState, error) {
-	var res struct {
-		PRs []wirePR `json:"prs"`
-	}
+	var res wirePRList
 	if err := t.call(context.Background(), "forge.prsForBranch", branchParams{t.target, branch}, &res); err != nil {
 		return nil, nil, err
 	}
 	states := make([]forge.PRState, len(res.PRs))
 	for i, w := range res.PRs {
-		var err error
-		if states[i], err = t.check(w); err != nil {
-			return nil, nil, err
-		}
+		states[i] = prState(w)
 	}
 	return res.PRs, states, nil
 }
@@ -256,14 +259,7 @@ func (t *reads) pr(prURL string) (wirePR, forge.PRState, error) {
 	if err := t.call(context.Background(), "forge.pr", numberedParams{t.target, n}, &w); err != nil {
 		return wirePR{}, "", err
 	}
-	state, err := t.check(w)
-	if err != nil {
-		return wirePR{}, "", err
-	}
-	if w.Number != n {
-		return wirePR{}, "", fmt.Errorf("%w: asked for PR %s, got %s", ErrAnswer, n, w.Number)
-	}
-	return w, state, nil
+	return w, prState(w), nil
 }
 
 func (t *reads) PRState(prURL string) (forge.PRState, error) {
@@ -286,15 +282,10 @@ func (t *reads) CheckState(prURL string) (forge.RollupState, error) {
 	if err != nil {
 		return "", err
 	}
-	// Unlike the native adapter, which passes states through, fail closed on a
-	// guest-supplied state outside the five known values.
-	switch s := forge.RollupState(ro.State); s {
-	case "":
+	if ro.State == "" {
 		return forge.StateNone, nil
-	case forge.StateSuccess, forge.StatePending, forge.StateExpected, forge.StateFailure, forge.StateError:
-		return s, nil
 	}
-	return "", fmt.Errorf("%w: unknown rollup state %q", ErrAnswer, ro.State)
+	return forge.RollupState(ro.State), nil
 }
 
 // The failing sets match the native github adapter's (ci_rollup.go): a CheckRun

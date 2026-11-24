@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/retry"
 )
 
 func TestTokenPrefix(t *testing.T) {
@@ -38,7 +39,7 @@ func TestIntrospectTokenSendsOnlyThePrefix(t *testing.T) {
 		sent, _ = json.Marshal(params)
 		return json.Unmarshal([]byte(`{"introspectable":true,"writeCapable":true,"scopes":["read:org","repo"]}`), result)
 	}
-	got, err := introspectToken(call, []string{capTokenGrant}, testTarget, "ghp_SECRET")
+	got, err := introspectToken(checked(call), []string{capTokenGrant}, testTarget, "ghp_SECRET")
 	if err != nil || !reflect.DeepEqual(got, backendkit.TokenIntrospection{Introspectable: true, WriteCapable: true, Scopes: []string{"read:org", "repo"}}) {
 		t.Fatalf("introspectToken = %+v, %v", got, err)
 	}
@@ -61,7 +62,7 @@ func TestIntrospectTokenCarriesTheReason(t *testing.T) {
 	call := func(_ context.Context, _ string, _, result any) error {
 		return json.Unmarshal([]byte(`{"introspectable":false,"writeCapable":false,"reason":"why"}`), result)
 	}
-	got, err := introspectToken(call, []string{capTokenGrant}, testTarget, "github_pat_x")
+	got, err := introspectToken(checked(call), []string{capTokenGrant}, testTarget, "github_pat_x")
 	if err != nil || !reflect.DeepEqual(got, backendkit.TokenIntrospection{Reason: "why"}) {
 		t.Fatalf("introspectToken = %+v, %v", got, err)
 	}
@@ -72,7 +73,7 @@ func TestIntrospectTokenUnadvertisedIsErrNoTokenGrant(t *testing.T) {
 		t.Fatal("called a Connector that does not declare forge.tokenGrant")
 		return nil
 	}
-	_, err := introspectToken(call, []string{capProbe}, testTarget, "ghp_x")
+	_, err := introspectToken(checked(call), []string{capProbe}, testTarget, "ghp_x")
 	if !errors.Is(err, ErrNoTokenGrant) {
 		t.Fatalf("err = %v, want ErrNoTokenGrant", err)
 	}
@@ -81,7 +82,7 @@ func TestIntrospectTokenUnadvertisedIsErrNoTokenGrant(t *testing.T) {
 func TestIntrospectTokenPassesTheConnectorsErrorThrough(t *testing.T) {
 	boom := errors.New("boom")
 	call := func(context.Context, string, any, any) error { return boom }
-	_, err := introspectToken(call, []string{capTokenGrant}, testTarget, "ghp_x")
+	_, err := introspectToken(checked(call), []string{capTokenGrant}, testTarget, "ghp_x")
 	if !errors.Is(err, boom) || errors.Is(err, ErrNoTokenGrant) {
 		t.Fatalf("err = %v, want the Connector's own error", err)
 	}
@@ -104,7 +105,7 @@ func TestIntrospectTokenRefusesAnInconsistentGrant(t *testing.T) {
 		"overlong scope":                `{"introspectable":true,"scopes":["` + strings.Repeat("a", maxScopeLen+1) + `"]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := introspectToken(grantCall(raw), []string{capTokenGrant}, testTarget, "ghp_x")
+			_, err := introspectToken(checked(grantCall(raw)), []string{capTokenGrant}, testTarget, "ghp_x")
 			if !errors.Is(err, ErrAnswer) {
 				t.Errorf("err = %v, want ErrAnswer", err)
 			}
@@ -114,7 +115,7 @@ func TestIntrospectTokenRefusesAnInconsistentGrant(t *testing.T) {
 
 func TestIntrospectTokenAcceptsRealScopes(t *testing.T) {
 	raw := `{"introspectable":true,"writeCapable":true,"scopes":["repo","public_repo","write:repository","read:org","admin:repo_hook"]}`
-	got, err := introspectToken(grantCall(raw), []string{capTokenGrant}, testTarget, "ghp_x")
+	got, err := introspectToken(checked(grantCall(raw)), []string{capTokenGrant}, testTarget, "ghp_x")
 	if err != nil || len(got.Scopes) != 5 || !got.WriteCapable {
 		t.Fatalf("introspectToken = %+v, %v", got, err)
 	}
@@ -122,7 +123,7 @@ func TestIntrospectTokenAcceptsRealScopes(t *testing.T) {
 
 func TestIntrospectTokenSanitisesAndCapsTheReason(t *testing.T) {
 	raw := `{"introspectable":false,"reason":"\u001b[2Jfine\nINJECTED\u0007‮ ` + strings.Repeat("x", 2*maxReasonLen) + `"}`
-	got, err := introspectToken(grantCall(raw), []string{capTokenGrant}, testTarget, "ghp_x")
+	got, err := introspectToken(checked(grantCall(raw)), []string{capTokenGrant}, testTarget, "ghp_x")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,4 +136,10 @@ func TestIntrospectTokenSanitisesAndCapsTheReason(t *testing.T) {
 	if !strings.HasPrefix(got.Reason, "fine INJECTED ") {
 		t.Errorf("reason = %q", got.Reason)
 	}
+}
+
+// checked runs a stub guest through the forge's result checks, as every
+// Connector call does.
+func checked(call guestCall) guestCall {
+	return pushOnlyOver(auditStub{}, call, retry.Clock{}, testTarget).call
 }

@@ -3,7 +3,6 @@ package connectorforge
 import (
 	"context"
 	"errors"
-	"fmt"
 	"slices"
 
 	"spindrift.dev/launcher/internal/connectorhost"
@@ -23,21 +22,16 @@ func Probe(c *connectorhost.Connector, t Target) (string, error) {
 	if !slices.Contains(c.Capabilities, capProbe) {
 		return "", ErrNoProbe
 	}
-	return probeRepo(classedCall(c, retry.Clock{}), t)
+	return probeRepo(newPushOnly(c, t, retry.Clock{}).call, t)
 }
 
 func probeRepo(call guestCall, t Target) (string, error) {
-	var res struct {
-		Repo string `json:"repo"`
-	}
+	var res wireProbe
 	p := struct {
 		Target Target `json:"target"`
 	}{t}
 	if err := call(context.Background(), "forge.probe", p, &res); err != nil {
 		return "", err
-	}
-	if res.Repo == "" {
-		return "", fmt.Errorf("%w: probe named no repository", ErrAnswer)
 	}
 	return res.Repo, nil
 }
@@ -73,5 +67,5 @@ func AutoMergeAllowed(c *connectorhost.Connector, t Target) (bool, error) {
 
 // readOnlyForge holds only reads (push is nil): never hand it out as a Code Forge.
 func readOnlyForge(c *connectorhost.Connector, t Target) *prForge {
-	return &prForge{reads: &reads{call: classedCall(c, retry.Clock{}), target: t}}
+	return &prForge{reads: newPushOnly(c, t, retry.Clock{}).rd}
 }
