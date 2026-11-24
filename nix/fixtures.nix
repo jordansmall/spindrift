@@ -258,6 +258,7 @@ let
   # builds it.
   nonRustHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
+    imageCompressor = "none";
     # Empty tiers keep this a genuine no-model harness, so agents-json-baked
     # can assert an empty AGENTS_JSON_TEMPLATE. scoutModel, reviewModel and
     # workerModel each need an explicit "" because their schema defaults are
@@ -283,6 +284,7 @@ let
   # the Linux checks that inspect the built image realize it.
   nixStoreWritableHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
+    imageCompressor = "none";
     nixStoreWritable = true;
     packages = p: [ p.hello ];
   };
@@ -292,6 +294,7 @@ let
   # is unambiguous.
   extraClosuresHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
+    imageCompressor = "none";
     extraClosures = p: [ p.cowsay ];
     packages = p: [ p.hello ];
   };
@@ -479,6 +482,7 @@ let
   # #6902). Eval-only, consumed by box-has-no-forge-cli-or-token.
   forgejoHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
+    imageCompressor = "none";
     defaults = {
       issueTracker = "forgejo";
     };
@@ -489,6 +493,7 @@ let
   # default.
   forgejoForgeHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
+    imageCompressor = "none";
     defaults = {
       codeForge = "forgejo";
     };
@@ -497,6 +502,7 @@ let
 
   forgejoBothHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
+    imageCompressor = "none";
     defaults = {
       issueTracker = "forgejo";
       codeForge = "forgejo";
@@ -506,6 +512,7 @@ let
 
   jiraHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
+    imageCompressor = "none";
     defaults = {
       issueTracker = "jira";
     };
@@ -517,6 +524,7 @@ let
   # Eval-only, consumed by the opencode-agent-files image check.
   opencodeHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
+    imageCompressor = "none";
     driver = "opencode";
     defaults = {
       model = opencodeDefaultModel;
@@ -543,6 +551,7 @@ let
   # pi-hook-bridge image checks (issue #5482) share it.
   piHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
+    imageCompressor = "none";
     driver = "pi";
     packages = p: [ p.hello ];
     # pi model ids are `<provider>/<model>`, like opencode's.
