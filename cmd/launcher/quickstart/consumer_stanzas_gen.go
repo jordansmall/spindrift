@@ -49,9 +49,8 @@ var consumerStanzas = map[string]consumerStanza{
 		DisplayName: "GitHub",
 		Secrets: []stanzaSecret{
 			{Env: "GH_TOKEN", Secret: true},
-			{Env: "SPINDRIFT_GITHUB_CONNECTOR_TOKEN", Secret: true},
 		},
-		Credential: "SPINDRIFT_GITHUB_CONNECTOR_TOKEN",
+		Credential: "GH_TOKEN",
 	},
 	"git": {
 		DisplayName: "Git",

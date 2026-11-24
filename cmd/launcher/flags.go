@@ -417,15 +417,20 @@ func connectorCredentialNeededThisRun(row backendrows.Row) bool {
 		(isTracker && backendkit.TrackerReadsThroughConnector(row.Name))
 }
 
+func isCoreSecretKnob(env string) bool {
+	return slices.ContainsFunc(inputdoc.SecretKnobs, func(k inputdoc.SecretKnob) bool { return k.Env == env })
+}
+
 // applyConnectorCredentials resolves each backend row's credential env the way
-// a core secret resolves. Connector modules declare these knobs, so
-// inputdoc.SecretKnobs never lists them, and the rows only exist once
-// backendrows.Use has run.
+// a core secret resolves. The rows only exist once backendrows.Use has run.
+// A row whose credential is itself a core secret knob (github's GH_TOKEN) is
+// skipped: parseFlags and applySecretCmdFallback own it, and resolving it
+// here would run its command a second time.
 func applyConnectorCredentials() error {
 	seen := map[string]bool{}
 	for _, row := range backendrows.All() {
 		env := row.CredentialEnv
-		if seen[env] {
+		if seen[env] || isCoreSecretKnob(env) {
 			continue
 		}
 		tmpl := ""

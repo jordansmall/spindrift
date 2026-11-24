@@ -739,14 +739,19 @@ func TestRunQuickstart_HappyPath_WritesFiles(t *testing.T) {
 		t.Fatalf("read harness.env: %v", err)
 	}
 	for _, want := range []string{
-		"GH_TOKEN=ghp_faketoken",
 		"CLAUDE_CODE_OAUTH_TOKEN=claude-oauth-faketoken",
-		"SPINDRIFT_GITHUB_CONNECTOR_TOKEN_CMD=",
-		"SPINDRIFT_GITHUB_CONNECTOR_TOKEN=ghp_faketoken\n",
+		"GH_TOKEN_CMD=",
+		"GH_TOKEN=ghp_faketoken\n",
 	} {
 		if !strings.Contains(string(harnessEnv), want) {
 			t.Errorf("expected harness.env to contain %q, got:\n%s", want, harnessEnv)
 		}
+	}
+	if n := strings.Count(string(harnessEnv), "\nGH_TOKEN="); n != 1 {
+		t.Errorf("expected harness.env to write GH_TOKEN exactly once for a github backend, got %d:\n%s", n, harnessEnv)
+	}
+	if strings.Contains(string(harnessEnv), "SPINDRIFT_GITHUB_CONNECTOR_TOKEN") {
+		t.Errorf("expected harness.env to carry no github Connector token, got:\n%s", harnessEnv)
 	}
 
 	gitignore, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
@@ -2211,7 +2216,8 @@ func TestRender_ForgejoCodeberg_ConfiguresBothSeamsOmitsDefaultBaseURL(t *testin
 // Pins that renderHarnessEnv writes the Connector credential stanza for every
 // quickstart backend whose Consumer stanza names a Connector credential, so a
 // renamed or added Connector credential reaches harness.env without a
-// hand-edit here. A backend with no Connector row writes no such line.
+// hand-edit here. A backend with no Connector row writes no such line, and a
+// credential that is the backend's own token carries no least-privilege note.
 func TestRenderHarnessEnv_WritesConnectorCredentialForEveryRow(t *testing.T) {
 	checked := 0
 	for name, stanza := range consumerStanzas {
@@ -2225,7 +2231,12 @@ func TestRenderHarnessEnv_WritesConnectorCredentialForEveryRow(t *testing.T) {
 		env := stanza.Credential
 		t.Run(name, func(t *testing.T) {
 			out := harnessEnvFor(name, "faketoken", nil)
-			for _, want := range []string{env + "=faketoken\n", env + "_CMD=", "docs/reference.md#backend-connectors"} {
+			wants := []string{env + "=faketoken\n", env + "_CMD="}
+			// A core-token credential has no separate token to point at.
+			if ownCredential(name, stanza) != "" {
+				wants = append(wants, "docs/reference.md#backend-connectors")
+			}
+			for _, want := range wants {
 				if !strings.Contains(out, want) {
 					t.Errorf("harnessEnvFor(%q, ...) does not contain %q, got:\n%s", name, want, out)
 				}
@@ -2967,11 +2978,12 @@ func TestHarnessEnvSecretLine_MatchesTemplateHarnessEnvExample(t *testing.T) {
 		i = end
 	}
 
-	// One secret knob per backend Connector (its backend.credential), counted from
-	// the generated consumerStanzas table.
+	// One secret knob per backend Connector's own credential, counted from the
+	// generated consumerStanzas table; a credential that is the backend's core
+	// token is already in the schema count.
 	credentials := 0
-	for _, stanza := range consumerStanzas {
-		if stanza.Credential != "" {
+	for name, stanza := range consumerStanzas {
+		if ownCredential(name, stanza) != "" {
 			credentials++
 		}
 	}

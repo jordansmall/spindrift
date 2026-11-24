@@ -7,8 +7,9 @@
 # moduleImport; credential; }`, where `settings` is the row's own `flakeOption`
 # knobs, `secrets` is the row's `tokenEnvVar` schema entry (when it has one)
 # followed by the Connector knobs its `consumerStanza.connectorKnobs` lists, and
-# `credential` is the env of the Connector knob its row's `backend.credential`
-# names (null when the backend has no Connector). Forcing
+# `credential` is the env of the knob its row's `backend.credential` names, a
+# Connector knob or the row's own core token (null when the backend has no
+# Connector). Forcing
 # `stanzas` throws when `errors` is non-empty; `errors` is also exposed so a
 # check can read the messages, which builtins.tryEval cannot.
 {
@@ -57,7 +58,10 @@ let
           let
             connector = connectorRows.${row.name} or { };
           in
-          if connector ? backend then declared.${connector.backend.credential}.env else null;
+          if connector ? backend then
+            (declared.${connector.backend.credential} or schema.${connector.backend.credential}).env
+          else
+            null;
       };
     };
   composed = map compose backendRows;

@@ -2925,3 +2925,64 @@ func TestParseFlags_IssueRouteIsNotAFlag(t *testing.T) {
 		t.Errorf("parseResolved err = %v, want unknown flag: --issue-route", err)
 	}
 }
+
+// useGithubGHTokenRow installs a github row whose credential is core's GH_TOKEN
+// secret knob, with github the active backend and every GH_TOKEN form unset.
+func useGithubGHTokenRow(t *testing.T, run func(string) (string, error)) func() []string {
+	t.Helper()
+	t.Cleanup(backendrows.Snapshot())
+	doc := `[{"name":"github","module":"/nonexistent.wasm","credentialEnv":"GH_TOKEN",
+"routes":[{"method":"GET","host":"github.example","path":"/x"}]}]`
+	if err := backendrows.Use([]byte(doc), func(string) string { return "" }); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GH_TOKEN_CMD", "")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "existing-value")
+	ran := stubSecretCmd(t, "", run)
+	setKnob(t, "CODE_FORGE", "github")
+	setKnob(t, "ISSUE_TRACKER", "github")
+	return ran
+}
+
+// GH_TOKEN is both a core secret knob and the github row's credential, so
+// parseFlags already resolved GH_TOKEN_CMD: the Connector pass and the
+// template fallback must not run the vault command a second time.
+func TestGHTokenCmd_GithubRunResolvesOnce(t *testing.T) {
+	ran := useGithubGHTokenRow(t, func(string) (string, error) { return "from-cmd\n", nil })
+	t.Setenv("GH_TOKEN_CMD", "vault get gh")
+	if _, err := parseResolved(t, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := applyConnectorCredentials(); err != nil {
+		t.Fatal(err)
+	}
+	if err := applySecretCmdFallback(); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv("GH_TOKEN"); got != "from-cmd" {
+		t.Errorf("GH_TOKEN = %q, want from-cmd", got)
+	}
+	if want := []string{"vault get gh"}; !reflect.DeepEqual(ran(), want) {
+		t.Errorf("ran %q, want exactly %q", ran(), want)
+	}
+}
+
+func TestSecretCmdTemplate_GithubRunSuppliesGHTokenOnce(t *testing.T) {
+	ran := useGithubGHTokenRow(t, func(string) (string, error) { return "from-template\n", nil })
+	if _, err := parseResolved(t, []string{"--secret-cmd", "vault get {name}"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := applyConnectorCredentials(); err != nil {
+		t.Fatal(err)
+	}
+	if err := applySecretCmdFallback(); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv("GH_TOKEN"); got != "from-template" {
+		t.Errorf("GH_TOKEN = %q, want from-template", got)
+	}
+	if want := []string{"vault get gh-token"}; !reflect.DeepEqual(ran(), want) {
+		t.Errorf("ran %q, want exactly %q", ran(), want)
+	}
+}

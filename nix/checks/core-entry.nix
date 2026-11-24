@@ -78,7 +78,7 @@ in
         ${fixtures.runInputDocOf
           (fixtures.moduleConsumerVia rootFlakeModule).apps.${system}.default.program
         }
-        jq -e '[.backends[] | select(.credentialKnob == "githubConnectorToken")]
+        jq -e '[.backends[] | select(.credentialKnob == "ghToken")]
           | length == 1 and (.[0] | (has("primary") | not) and (has("shadow") | not))' "$doc"
         touch $out
       '';
@@ -122,7 +122,7 @@ in
   core-entry-root-and-connector-module-dedup = rootAndConnectorModuleDedup {
     name = "core-entry-root-and-connector-module-dedup";
     module = githubConnectorModule;
-    credentialKnob = "githubConnectorToken";
+    credentialKnob = "ghToken";
   };
 
   core-entry-consumer-evaluates-identically =

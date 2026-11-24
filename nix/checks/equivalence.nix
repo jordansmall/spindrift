@@ -296,7 +296,7 @@ in
           /nix/store/*spindrift*) : ;;
           *) echo "unexpected image path: $imagePath" >&2; exit 1 ;;
         esac
-        jq -e '[.backends[] | select(.credentialKnob == "githubConnectorToken")] | length == 1' "$doc"
+        jq -e '[.backends[] | select(.credentialKnob == "ghToken")] | length == 1' "$doc"
         jq -e '[.backends[] | select(.credentialKnob == "forgejoConnectorToken")] | length == 0' "$doc"
         touch $out
       '';
