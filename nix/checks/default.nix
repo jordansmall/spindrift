@@ -501,14 +501,19 @@ let
       "negative control: an unlisted source tree named from nix/checks/drivers/ must be flagged under `drivers/<name>`";
     pkgs.runCommand "ci-comment-readers-cover-checks" { } "touch $out";
 
-  # Coverage guard (issue #7010): every core file the SDK parity tests or a
-  # Connector conformance suite reads must match .github/scripts/ci-connector-contract.
-  # The suite copies whole trees, so no per-file read list exists; the reads
-  # are derived from three inputs: the core paths quoted in sdk/**/*_test.go
-  # (a directory expands to its files), the *test/conformance kit packages a
-  # Connector's tests import, and the path literals reachable from
-  # lib/connector-checks.nix (a .nix file is walked, a directory is not) plus
-  # each backend row's goTestRepoFiles. cmd/launcher is excluded from the walk:
+  # Coverage guard (issue #7010): every file that makes up the Connector
+  # contract, or that a Connector conformance suite reads, must match
+  # .github/scripts/ci-connector-contract. The suite copies whole trees, so no
+  # per-file read list exists; the reads come from four inputs: the protocol
+  # paths (core's side of the wire, listed by hand; the description and its core
+  # render; every SDK file renderSDK emits, taken from its output), the core
+  # paths quoted in sdk/**/*_test.go (a directory expands to its files), the
+  # *test/conformance kit packages a Connector's tests import, and the path
+  # literals reachable from lib/connector-checks.nix (a .nix file is walked, a
+  # directory is not) plus each backend row's goTestRepoFiles. The hand list
+  # keeps the core paths the SDK parity tests quoted before the protocol
+  # description rendered the SDK (issue #7505), so deleting a test cannot
+  # shrink the scan. cmd/launcher is excluded from the walk:
   # the conformance test compiles only internal/{forge,driver}/<name>'s import
   # closure, which the first two inputs approximate, and listing the whole
   # launcher would select every Connector on every launcher edit (<name>'s own
@@ -635,6 +640,32 @@ let
       nixInputs = unique (
         concatMap filesUnder (filter (k: k != "cmd/launcher") walked) ++ goTestRepoFiles
       );
+      # The SDK files the description renders, named by renderSDK itself so a new
+      # SDK package is covered without touching this list.
+      sdkRendered = builtins.attrNames (
+        (import ../../lib/connector-protocol/render.nix).renderSDK (import ../../lib/connector-protocol) (
+          import ../../lib/connector-protocol/sdk.nix
+        )
+      );
+      # Core's side of the protocol: the hand-written copies the protocol
+      # agreement tests hold to the description (files, or a whole package
+      # where its tests read every file), then the description and its core
+      # render, then the rendered SDK. A path that stops existing fails the
+      # check, so a rename cannot silently drop one.
+      protocolPaths = [
+        "cmd/launcher/internal/connectorhost/network.go"
+        "cmd/launcher/internal/connectorhost/class.go"
+        "cmd/launcher/internal/connectorforge/connectorforge.go"
+        "cmd/launcher/internal/connectorforge/pushonly.go"
+        "cmd/launcher/internal/connectortracker/connectortracker.go"
+        "cmd/launcher/internal/forge/issuetracker.go"
+        "cmd/launcher/internal/driver/driverkit"
+        "cmd/launcher/internal/dispatchkind"
+        "cmd/launcher/internal/hostop"
+        "lib/connector-protocol"
+        "cmd/launcher/internal/connectorprotocol"
+      ]
+      ++ sdkRendered;
     in
     {
       inherit
@@ -643,6 +674,8 @@ let
         textsUnder
         kitDirs
         nixInputs
+        protocolPaths
+        sdkRendered
         ;
       findings =
         globs:
@@ -650,10 +683,14 @@ let
           tests,
           kits,
           nixFiles,
+          protocol,
         }:
         unique (
           filter (f: !(covered globs f)) (
-            concatMap parityReads tests ++ concatMap filesUnder kits ++ nixFiles
+            concatMap parityReads tests
+            ++ concatMap filesUnder kits
+            ++ nixFiles
+            ++ concatMap filesUnder protocol
           )
         );
     };
@@ -661,6 +698,7 @@ let
   ci-connector-contract-covers-reads =
     let
       inherit (pkgs.lib)
+        all
         assertMsg
         concatStringsSep
         elem
@@ -673,6 +711,8 @@ let
         textsUnder
         kitDirs
         nixInputs
+        protocolPaths
+        sdkRendered
         findings
         ;
       globs = globsOf ../../.github/scripts/ci-connector-contract;
@@ -681,42 +721,73 @@ let
         tests = textsUnder "sdk";
         kits = pkgs.lib.unique kitDirs;
         nixFiles = nixInputs;
+        protocol = protocolPaths;
       };
       noReads = {
         tests = [ ];
         kits = [ ];
         nixFiles = [ ];
+        protocol = [ ];
+      };
+      onlyProtocol = noReads // {
+        protocol = protocolPaths;
       };
       uncovered = findings globs scannedReads;
+      missing = filter (p: !(builtins.pathExists (../../. + "/${p}"))) protocolPaths;
       badGlobs = filter (g: builtins.match "[A-Za-z0-9_./*-]+" g == null) globs;
       fakeTest = lit: {
-        rel = "sdk/x/parity_test.go";
+        rel = "sdk/x/twin_test.go";
         text = ''const c = "${lit}"'';
       };
     in
     assert assertMsg (badGlobs == [ ])
       ".github/scripts/ci-connector-contract: only `*` wildcards are supported; ${concatStringsSep ", " badGlobs} uses another glob character, which this check's regex would read differently from bash";
     assert assertMsg
-      (scannedReads.tests != [ ] && scannedReads.kits != [ ] && builtins.length nixInputs > 1)
-      "ci-connector-contract-covers-reads found no parity tests, kits or Nix inputs; the scan is vacuous";
+      (
+        sdkRendered != [ ]
+        && all (hasPrefix "sdk/") sdkRendered
+        && scannedReads.kits != [ ]
+        && builtins.length nixInputs > 1
+      )
+      "ci-connector-contract-covers-reads found no rendered SDK files, kits or Nix inputs; the scan is vacuous";
+    assert assertMsg (missing == [ ])
+      "ci-connector-contract-covers-reads lists ${concatStringsSep ", " missing} as part of the protocol, but no such path exists; update protocolPaths in nix/checks/default.nix";
     assert assertMsg (uncovered == [ ])
-      "${concatStringsSep ", " uncovered} is read by the SDK parity tests or a Connector conformance suite but .github/scripts/ci-connector-contract does not match it, so a PR changing it would skip some Connector's conformance";
+      "${concatStringsSep ", " uncovered} is part of the Connector protocol or read by a Connector conformance suite, but .github/scripts/ci-connector-contract does not match it, so a PR changing it would skip some Connector's conformance";
+    # The suite's Nix inputs already copy all of sdk/, so these controls feed the
+    # protocol list alone: they prove it is what flags a rendered file.
+    assert assertMsg (all (
+      p: elem p (findings [ ] onlyProtocol)
+    ) sdkRendered) "negative control: with no globs, every rendered SDK file must be flagged";
+    assert assertMsg (elem "sdk/connector/protocol_gen.go" (
+      findings (dropMatching "sdk/connector/protocol_gen.go") onlyProtocol
+    )) "negative control: dropping the glob for a rendered SDK file must flag it";
     assert assertMsg (
-      let
-        dropped = filter (g: !(hasPrefix "cmd/launcher/internal/hostop" g)) globs;
-      in
-      filter (hasPrefix "cmd/launcher/internal/hostop") (findings dropped scannedReads) != [ ]
-    ) "negative control: dropping the hostop glob must flag a hostop file the parity tests read";
+      elem "lib/connector-protocol/default.nix" (
+        findings (dropMatching "lib/connector-protocol/default.nix") onlyProtocol
+      )
+      && elem "cmd/launcher/internal/connectorprotocol/protocol_gen.go" (
+        findings (dropMatching "cmd/launcher/internal/connectorprotocol/protocol_gen.go") onlyProtocol
+      )
+    ) "negative control: dropping the glob for the description or its core render must flag them";
+    assert assertMsg
+      (
+        let
+          dropped = filter (g: !(hasPrefix "cmd/launcher/internal/hostop" g)) globs;
+        in
+        filter (hasPrefix "cmd/launcher/internal/hostop") (findings dropped scannedReads) != [ ]
+      )
+      "negative control: dropping the hostop glob must flag a hostop file the protocol agreement tests read";
     assert assertMsg (
       findings globs (
         noReads // { tests = [ (fakeTest "${dotDotPath 2}cmd/launcher/internal/zzz/z.go") ]; }
       ) == [ "cmd/launcher/internal/zzz/z.go" ]
-    ) "negative control: an unmatched core path quoted in a parity test must be flagged";
+    ) "negative control: an unmatched core path quoted in an SDK test must be flagged";
     assert assertMsg (
       findings globs (
         noReads // { tests = [ (fakeTest "${dotDotPath 2}cmd/launcher/internal/hostop/z.go") ]; }
       ) == [ ]
-    ) "control: a matched core path quoted in a parity test must not be flagged";
+    ) "control: a matched core path quoted in an SDK test must not be flagged";
     assert assertMsg (
       let
         dropped = filter (g: !(covered [ g ] "sdk/go.mod")) globs;
