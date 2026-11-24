@@ -127,9 +127,12 @@ in
       "nix/dogfood-shadow.nix"
       # Which Connectors dogfood runs as primary (issue #6998).
       "nix/dogfood-primary.nix"
-      # The accepted Route baseline a widened Connector table is reviewed against
-      # (ADR 0073).
-      "spindrift-connector-routes.json"
+      # First-party Connectors' grant-bearing declarations: Route table
+      # (routes.nix), backend row and credential knob (module.nix), Driver row
+      # (row.nix) (ADR 0073, issue #7465).
+      "connectors/*/routes.nix"
+      "connectors/*/module.nix"
+      "connectors/*/row.nix"
     ];
     autoFormat = true;
     autoLint = true;
