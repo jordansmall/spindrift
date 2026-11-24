@@ -12,21 +12,21 @@ import (
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorrecord"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgejo"
 	"spindrift.dev/launcher/internal/hostpaths"
-	"spindrift.dev/launcher/internal/primaryrecord"
 )
 
-// primaryLog is the failed-operation record this process left under the host
+// connectorLog is the failed-operation record this process left under the host
 // log directory of the current working directory, empty when there is none.
-func primaryLog(t *testing.T) string {
+func connectorLog(t *testing.T) string {
 	t.Helper()
 	pwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile(filepath.Join(hostpaths.LogDir(pwd), primaryrecord.Name("forgejo", ".log")))
+	raw, err := os.ReadFile(filepath.Join(hostpaths.LogDir(pwd), connectorrecord.Name("forgejo", ".log")))
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestConnectorTracker_FailedCallIsRecordedByMethod(t *testing.T) {
 	if err == nil {
 		t.Fatal("Issue succeeded, want the refused route")
 	}
-	if log := primaryLog(t); !strings.Contains(log, `"op":"tracker.issue"`) || !strings.Contains(log, "route") {
+	if log := connectorLog(t); !strings.Contains(log, `"op":"tracker.issue"`) || !strings.Contains(log, "route") {
 		t.Errorf("log = %q, want the tracker.issue failure", log)
 	}
 }
@@ -71,7 +71,7 @@ func TestConnectorTracker_LoadFailureIsRecorded(t *testing.T) {
 		t.Fatal("want the load error")
 	}
 
-	if log := primaryLog(t); !strings.Contains(log, `"op":"load the Connector"`) || !strings.Contains(log, "missing.wasm") {
+	if log := connectorLog(t); !strings.Contains(log, `"op":"load the Connector"`) || !strings.Contains(log, "missing.wasm") {
 		t.Errorf("log = %q, want the op and the module read error", log)
 	}
 }
@@ -92,7 +92,7 @@ func TestConnectorTracker_LostClaimRaceRecordsNothing(t *testing.T) {
 	if !errors.Is(err, forge.ErrAlreadyClaimed) {
 		t.Fatalf("second claim = %v, want ErrAlreadyClaimed", err)
 	}
-	if log := primaryLog(t); log != "" {
+	if log := connectorLog(t); log != "" {
 		t.Errorf("log = %q, want none for a lost claim", log)
 	}
 }
@@ -107,7 +107,7 @@ func TestConnectorForge_LoadFailureIsRecorded(t *testing.T) {
 		t.Fatal("want the load error")
 	}
 
-	if log := primaryLog(t); !strings.Contains(log, `"op":"load the Connector"`) || !strings.Contains(log, "missing.wasm") {
+	if log := connectorLog(t); !strings.Contains(log, `"op":"load the Connector"`) || !strings.Contains(log, "missing.wasm") {
 		t.Errorf("log = %q, want the op and the module read error", log)
 	}
 }
@@ -123,7 +123,7 @@ func TestConnectorForge_FailedCallIsRecordedByMethod(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if log := primaryLog(t); log != "" {
+	if log := connectorLog(t); log != "" {
 		t.Fatalf("composing recorded %q, want a clean log", log)
 	}
 
@@ -131,7 +131,7 @@ func TestConnectorForge_FailedCallIsRecordedByMethod(t *testing.T) {
 		t.Fatal("Probe succeeded, want the refused route")
 	}
 
-	if log := primaryLog(t); strings.Count(log, "\n") != 1 || !strings.Contains(log, `"op":"forge.probe"`) {
+	if log := connectorLog(t); strings.Count(log, "\n") != 1 || !strings.Contains(log, `"op":"forge.probe"`) {
 		t.Errorf("log = %q, want one forge.probe failure", log)
 	}
 }
@@ -156,7 +156,7 @@ func TestConnectorForge_ComposeFailureIsRecorded(t *testing.T) {
 		t.Fatalf("buildForge = %v, want ErrNotForge", err)
 	}
 
-	if log := primaryLog(t); strings.Count(log, "\n") != 1 || !strings.Contains(log, `"op":"compose the Code Forge"`) {
+	if log := connectorLog(t); strings.Count(log, "\n") != 1 || !strings.Contains(log, `"op":"compose the Code Forge"`) {
 		t.Errorf("log = %q, want one compose failure", log)
 	}
 }

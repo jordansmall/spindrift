@@ -18,11 +18,11 @@ import (
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorrecord"
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgejo"
 	"spindrift.dev/launcher/internal/hostpaths"
-	"spindrift.dev/launcher/internal/primaryrecord"
 )
 
 const connectorCredentialEnv = "SPINDRIFT_FORGEJO_CONNECTOR_TOKEN"
@@ -72,7 +72,7 @@ func productionForge(t *testing.T, srv *httptest.Server) (forge.CodeForge, []con
 	t.Chdir(dir)
 	cf, err := buildForge(srv, "")
 	row, _ := backendrows.Lookup("forgejo")
-	return cf, connectortracker.Routes(row.Routes, connectorRepo), filepath.Join(hostpaths.LogDir(dir), primaryrecord.Name("forgejo", ".audit.jsonl")), err
+	return cf, connectortracker.Routes(row.Routes, connectorRepo), filepath.Join(hostpaths.LogDir(dir), connectorrecord.Name("forgejo", ".audit.jsonl")), err
 }
 
 // A Connector that fails to load fails the construction with its error and
@@ -114,7 +114,7 @@ func TestConnectorForge_UnopenableAuditFileFailsConstruction(t *testing.T) {
 
 	cf, err := buildForge(srv, "")
 
-	want := filepath.Join(logDir, primaryrecord.Name("forgejo", ".audit.jsonl"))
+	want := filepath.Join(logDir, connectorrecord.Name("forgejo", ".audit.jsonl"))
 	if err == nil || !strings.Contains(err.Error(), want) || cf != nil {
 		t.Errorf("buildForge = (%v, %v), want (nil, an error naming %s)", cf, err, want)
 	}

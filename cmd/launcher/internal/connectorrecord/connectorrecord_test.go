@@ -1,4 +1,4 @@
-package primaryrecord_test
+package connectorrecord_test
 
 import (
 	"errors"
@@ -9,17 +9,17 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/connectorrecord"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/hostpaths"
-	"spindrift.dev/launcher/internal/primaryrecord"
 )
 
 func TestName_CarriesBackendAndSuffix(t *testing.T) {
-	n := primaryrecord.Name("jira", ".log")
-	if !strings.HasPrefix(n, "primary-jira-") || !strings.HasSuffix(n, ".log") {
+	n := connectorrecord.Name("jira", ".log")
+	if !strings.HasPrefix(n, "connector-jira-") || !strings.HasSuffix(n, ".log") {
 		t.Errorf("Name = %q", n)
 	}
-	if got, want := primaryrecord.Name("github", ".log"), strings.Replace(n, "jira", "github", 1); got != want {
+	if got, want := connectorrecord.Name("github", ".log"), strings.Replace(n, "jira", "github", 1); got != want {
 		t.Errorf("backends do not share one stamp: %q vs %q", got, want)
 	}
 }
@@ -29,14 +29,14 @@ func TestNote_AppendsOpAndError(t *testing.T) {
 	t.Chdir(dir)
 	boom := errors.New("boom")
 
-	if got := primaryrecord.Note("jira", "search", boom); got != boom {
+	if got := connectorrecord.Note("jira", "search", boom); got != boom {
 		t.Errorf("Note = %v, want the error unchanged", got)
 	}
-	if got := primaryrecord.Note("jira", "search", nil); got != nil {
+	if got := connectorrecord.Note("jira", "search", nil); got != nil {
 		t.Errorf("Note(nil) = %v", got)
 	}
 
-	raw, err := os.ReadFile(filepath.Join(hostpaths.LogDir(dir), primaryrecord.Name("jira", ".log")))
+	raw, err := os.ReadFile(filepath.Join(hostpaths.LogDir(dir), connectorrecord.Name("jira", ".log")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,10 +52,10 @@ func TestNote_LostClaimRaceRecordsNothing(t *testing.T) {
 	t.Chdir(dir)
 	lost := fmt.Errorf("claim #7: %w", forge.ErrAlreadyClaimed)
 
-	if got := primaryrecord.Note("jira", "claim", lost); got != lost {
+	if got := connectorrecord.Note("jira", "claim", lost); got != lost {
 		t.Errorf("Note = %v, want the error unchanged", got)
 	}
-	logFile := filepath.Join(hostpaths.LogDir(dir), primaryrecord.Name("jira", ".log"))
+	logFile := filepath.Join(hostpaths.LogDir(dir), connectorrecord.Name("jira", ".log"))
 	if _, err := os.Stat(logFile); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("a lost claim race wrote %s (stat err %v)", logFile, err)
 	}
@@ -81,7 +81,7 @@ func TestNote_UnwritableRecordNamesBothErrors(t *testing.T) {
 	os.Stderr = w
 	readErr := errors.New("the read broke")
 
-	got := primaryrecord.Note("github", "read an issue", readErr)
+	got := connectorrecord.Note("github", "read an issue", readErr)
 
 	os.Stderr = old
 	_ = w.Close()
@@ -114,7 +114,7 @@ func TestOpenFile_UnopenableReturnsNoWriterAndNamesThePath(t *testing.T) {
 	t.Chdir(dir)
 	blockLogDir(t, dir)
 
-	w, closeFile, err := primaryrecord.OpenFile("x.log")
+	w, closeFile, err := connectorrecord.OpenFile("x.log")
 	if w != nil {
 		t.Errorf("writer = %v, want nil: no failed open may substitute a discard", w)
 	}
@@ -130,11 +130,11 @@ func TestAuditFile_OpensOnceAndAppends(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 
-	w1, err := primaryrecord.AuditFile("jira")
+	w1, err := connectorrecord.AuditFile("jira")
 	if err != nil {
 		t.Fatal(err)
 	}
-	w2, err := primaryrecord.AuditFile("jira")
+	w2, err := connectorrecord.AuditFile("jira")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestAuditFile_OpensOnceAndAppends(t *testing.T) {
 	}
 	_, _ = io.WriteString(w1, "one\n")
 	_, _ = io.WriteString(w2, "two\n")
-	raw, err := os.ReadFile(filepath.Join(hostpaths.LogDir(dir), primaryrecord.Name("jira", ".audit.jsonl")))
+	raw, err := os.ReadFile(filepath.Join(hostpaths.LogDir(dir), connectorrecord.Name("jira", ".audit.jsonl")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,11 +157,11 @@ func TestAuditFile_UnopenableNamesThePathAndIsNotCached(t *testing.T) {
 	t.Chdir(dir)
 	blockLogDir(t, dir)
 
-	w, err := primaryrecord.AuditFile("jira")
+	w, err := connectorrecord.AuditFile("jira")
 	if w != nil {
 		t.Errorf("writer = %v, want nil", w)
 	}
-	want := filepath.Join(hostpaths.LogDir(dir), primaryrecord.Name("jira", ".audit.jsonl"))
+	want := filepath.Join(hostpaths.LogDir(dir), connectorrecord.Name("jira", ".audit.jsonl"))
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("err = %v, want one naming %s", err, want)
 	}
@@ -169,7 +169,7 @@ func TestAuditFile_UnopenableNamesThePathAndIsNotCached(t *testing.T) {
 	if err := os.Remove(hostpaths.LogDir(dir)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := primaryrecord.AuditFile("jira"); err != nil {
+	if _, err := connectorrecord.AuditFile("jira"); err != nil {
 		t.Errorf("a later call after the cause is fixed = %v; the failure was cached", err)
 	}
 }

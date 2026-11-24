@@ -52,7 +52,7 @@ let
   ecosystemBundleFile = ../cmd/launcher/internal/driver/bundle/ecosystems.go;
 
   # internal/backend without backendrows: only the host and the backend
-  # adapters load Connector rows, and backendrows imports primaryrecord, which
+  # adapters load Connector rows, and backendrows imports connectorrecord, which
   # only backendBundleFiles carries (`go mod vendor` loads every package in the
   # tree, imported or not).
   backendRegistryFiles = lib.fileset.difference (lib.fileset.fileFilter (
@@ -69,6 +69,7 @@ let
     "backendkit"
     "connectorcall"
     "connectorforge"
+    "connectorrecord"
     "connectortracker"
     "dedupmarker"
     "flock"
@@ -82,7 +83,6 @@ let
     "gitexec"
     "gitremote"
     "hostpaths"
-    "primaryrecord"
     "seambundle"
   ];
   # connectorforgetest and connectortrackertest are test kits importing

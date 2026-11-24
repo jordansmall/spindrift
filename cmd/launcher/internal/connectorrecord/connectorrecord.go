@@ -1,8 +1,8 @@
-// Package primaryrecord names and writes the per-process record files a
-// primary backend row leaves in the host's log directory: a
-// primary-<backend>-<stamp>-<pid>.audit.jsonl of Connector audit lines and a
+// Package connectorrecord names and writes the per-process record files a
+// Connector-routed backend row leaves in the host's log directory: a
+// connector-<backend>-<stamp>-<pid>.audit.jsonl of Connector audit lines and a
 // .log of the reads and calls that failed (ADR 0073).
-package primaryrecord
+package connectorrecord
 
 import (
 	"encoding/json"
@@ -20,7 +20,7 @@ import (
 )
 
 // stamp is taken once per process, so every backend's record files share it
-// and a human can count clean primary runs: an empty .log and no refused entry
+// and a human can count clean runs: an empty .log and no refused entry
 // in the .audit.jsonl is a clean one.
 var stamp = sync.OnceValue(func() string {
 	return time.Now().UTC().Format("20060102T150405Z") + "-" + strconv.Itoa(os.Getpid())
@@ -29,7 +29,7 @@ var stamp = sync.OnceValue(func() string {
 // Name is this process's record file for backend with suffix (".audit.jsonl"
 // or ".log").
 func Name(backend, suffix string) string {
-	return "primary-" + backend + "-" + stamp() + suffix
+	return "connector-" + backend + "-" + stamp() + suffix
 }
 
 // OpenFile opens the named file in the host's log directory for appending. An
@@ -88,7 +88,7 @@ func AuditFile(backend string) (io.Writer, error) {
 	return w, nil
 }
 
-// Note appends the error a primary-routed operation returned to backend's
+// Note appends the error a Connector-routed operation returned to backend's
 // .log and returns err unchanged. A nil err records nothing. A record that
 // cannot be written goes to stderr instead, so the failure is not lost. A lost
 // claim race records nothing: forge.ErrAlreadyClaimed is core policy, not a
@@ -107,7 +107,7 @@ func Note(backend, op string, err error) error {
 		_, oerr = w.Write(append(line, '\n'))
 	}
 	if oerr != nil {
-		fmt.Fprintf(os.Stderr, "primary %s %q failed (%v) and its record was not written: %v\n", backend, op, err, oerr)
+		fmt.Fprintf(os.Stderr, "Connector %s %q failed (%v) and its record was not written: %v\n", backend, op, err, oerr)
 	}
 	return err
 }

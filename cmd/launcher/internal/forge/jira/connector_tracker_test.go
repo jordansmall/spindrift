@@ -14,11 +14,11 @@ import (
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorrecord"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/jira"
 	"spindrift.dev/launcher/internal/hostpaths"
-	"spindrift.dev/launcher/internal/primaryrecord"
 )
 
 func useJiraRow(t *testing.T) {
@@ -83,7 +83,7 @@ func TestConnectorTracker_RefusedRouteFailsWithoutReachingTheBackend(t *testing.
 			if _, err := h.tr.ListLabels(); !errors.Is(err, connectorhost.ErrRouteRefused) {
 				t.Fatalf("ListLabels err = %v, want ErrRouteRefused", err)
 			}
-			if log := primaryLog(t); !strings.Contains(log, connectorhost.ErrRouteRefused.Error()) {
+			if log := connectorLog(t); !strings.Contains(log, connectorhost.ErrRouteRefused.Error()) {
 				t.Errorf("log = %q, want the refused route recorded", log)
 			}
 			h.seenMu.Lock()
@@ -267,17 +267,17 @@ func TestConnectorTracker_LabeledListerReadsClosedNotPlannedFindings(t *testing.
 	}
 }
 
-// primaryLog is the failed-operation record the process left under the host
+// connectorLog is the failed-operation record the process left under the host
 // log directory of the current working directory.
-func primaryLog(t *testing.T) string {
+func connectorLog(t *testing.T) string {
 	t.Helper()
 	pwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile(filepath.Join(hostpaths.LogDir(pwd), primaryrecord.Name("jira", ".log")))
+	raw, err := os.ReadFile(filepath.Join(hostpaths.LogDir(pwd), connectorrecord.Name("jira", ".log")))
 	if err != nil {
-		t.Fatalf("no primary log: %v", err)
+		t.Fatalf("no Connector log: %v", err)
 	}
 	return string(raw)
 }
@@ -289,7 +289,7 @@ func TestConnectorTracker_LoadFailureIsRecorded(t *testing.T) {
 	if _, err := newJiraTracker(t); err == nil {
 		t.Fatal("want the load error")
 	}
-	if log := primaryLog(t); !strings.Contains(log, `"op":"load the Connector"`) || !strings.Contains(log, "missing.wasm") {
+	if log := connectorLog(t); !strings.Contains(log, `"op":"load the Connector"`) || !strings.Contains(log, "missing.wasm") {
 		t.Errorf("log = %q, want the op and the module read error", log)
 	}
 }

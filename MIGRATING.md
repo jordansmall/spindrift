@@ -1,5 +1,30 @@
 # Migration Guide
 
+## The Connector record files are renamed from `primary-*` to `connector-*` (issue #7468)
+
+Every launcher process that routes through a Connector writes a record pair
+under `.spindrift/logs/`. The stem is now `connector-<backend>-<UTC
+stamp>-<pid>` (`.audit.jsonl` and `.log`), not `primary-<backend>-<UTC
+stamp>-<pid>`: the files no longer name a primary mode that no backend row
+has. Nothing to do on a live host, since new runs write the new names. The
+stderr line printed when a record cannot be written begins `Connector
+<backend>`, not `primary <backend>`; update any log grep that matches it.
+
+The clean-run recipe in [Backend primary
+mode](docs/reference.md#backend-primary-mode) globs the new prefix, so old
+`primary-*` records in an existing log directory or a CI artifact are never
+counted. A streak spanning the rename starts over from the first
+`connector-*` record. To count older records, rename them:
+
+```sh
+for f in .spindrift/logs/primary-github-*; do
+  mv "$f" ".spindrift/logs/connector-${f##*/primary-}"
+done
+```
+
+The recipe's marker comment is now `# connector=github`, where it was
+`# primary=github`; copy the recipe afresh rather than patching a saved one.
+
 ## The Route baseline is merge-guarded by default (issue #7465)
 
 The shipped `MERGE_GUARD_PATHS` default now ends in

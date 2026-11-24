@@ -12,9 +12,9 @@ import (
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorrecord"
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/primaryrecord"
 	"spindrift.dev/launcher/internal/retry"
 )
 
@@ -90,7 +90,7 @@ func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (for
 			return nil, err
 		}
 		return conn, nil
-	}, recordPrimaryFailure, connectortracker.Lifecycle{
+	}, recordFailure, connectortracker.Lifecycle{
 		Labels:        s.Labels,
 		VerdictLabels: s.VerdictLabels,
 		IssueType:     k.JiraIssueType,
@@ -105,13 +105,13 @@ func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (for
 		Dialect: dialect,
 	}, connectorClock)
 	if err != nil {
-		recordPrimaryFailure("load the Connector", err)
+		recordFailure("load the Connector", err)
 		return nil, err
 	}
 	return connectorTracker{it}, nil
 }
 
-// recordPrimaryFailure records a Connector failure in the primaryrecord .log.
-func recordPrimaryFailure(op string, err error) {
-	_ = primaryrecord.Note(backend.Jira.Name, op, err)
+// recordFailure records a Connector failure in the connectorrecord .log.
+func recordFailure(op string, err error) {
+	_ = connectorrecord.Note(backend.Jira.Name, op, err)
 }

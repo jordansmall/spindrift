@@ -15,9 +15,9 @@ import (
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorrecord"
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/primaryrecord"
 	"spindrift.dev/launcher/internal/retry"
 )
 
@@ -148,7 +148,7 @@ func routeRow() (backendrows.Row, error) {
 // noteRouted records the error a routed read or write returned and returns
 // it unchanged.
 func noteRouted(op string, err error) error {
-	return primaryrecord.Note(backend.GitHub.Name, op, err)
+	return connectorrecord.Note(backend.GitHub.Name, op, err)
 }
 
 // connectorOp runs fn over the shared Connector for e's repository, and records

@@ -306,11 +306,11 @@ func TestRoutedRow_MergeSurvivesAFailedBranchDelete(t *testing.T) {
 	// stderr carries the same failure as a warning; only the log is asserted.
 	logs := routedFiles(t, logDir, ".log")
 	if len(logs) != 1 {
-		t.Fatalf("primary logs = %v, want one recording the failed delete", logs)
+		t.Fatalf("Connector logs = %v, want one recording the failed delete", logs)
 	}
 	raw, err := os.ReadFile(logs[0])
 	if err != nil || !strings.Contains(string(raw), "delete a merged PR's head branch") {
-		t.Errorf("primary log = %q (%v), want the failed head-branch delete", raw, err)
+		t.Errorf("Connector log = %q (%v), want the failed head-branch delete", raw, err)
 	}
 }
 
@@ -346,12 +346,12 @@ func TestRoutedRow_MergeLeavesACrossRepoHeadAlone(t *testing.T) {
 		t.Errorf("BranchExists(%s) = (%v, %v), want the base repo's same-named branch kept", landingBranch, ok, err)
 	}
 	if logs := routedFiles(t, logDir, ".log"); len(logs) != 0 {
-		t.Errorf("primary logs = %v, want none", logs)
+		t.Errorf("Connector logs = %v, want none", logs)
 	}
 }
 
 // A head the repository already deleted is done, not a fault: nothing is
-// recorded for a clean primary run.
+// recorded for a clean run.
 func TestRoutedRow_MergeWithTheHeadAlreadyGoneRecordsNothing(t *testing.T) {
 	h, _, calls, logDir := routedLogHarness(t, useGithubRowAt)
 	url := h.SeedOpenPR("9")
@@ -366,7 +366,7 @@ func TestRoutedRow_MergeWithTheHeadAlreadyGoneRecordsNothing(t *testing.T) {
 		t.Errorf("ran gh %d times", n)
 	}
 	if logs := routedFiles(t, logDir, ".log"); len(logs) != 0 {
-		t.Errorf("primary logs = %v, want none for an already-deleted head", logs)
+		t.Errorf("Connector logs = %v, want none for an already-deleted head", logs)
 	}
 }
 

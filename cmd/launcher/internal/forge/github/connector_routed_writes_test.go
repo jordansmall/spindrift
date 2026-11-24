@@ -255,11 +255,11 @@ func TestNotePrimary_SkipsALostClaimRace(t *testing.T) {
 		t.Errorf("noteRouted = %v, want the error unchanged", got)
 	}
 	if logs := routedFiles(t, logDir, ".log"); len(logs) != 0 {
-		t.Errorf("a lost claim race wrote primary logs %v", logs)
+		t.Errorf("a lost claim race wrote Connector logs %v", logs)
 	}
 
 	_ = noteRouted("transition an issue", errors.New("boom"))
 	if logs := routedFiles(t, logDir, ".log"); len(logs) != 1 {
-		t.Errorf("a failed write wrote primary logs %v, want one", logs)
+		t.Errorf("a failed write wrote Connector logs %v, want one", logs)
 	}
 }
