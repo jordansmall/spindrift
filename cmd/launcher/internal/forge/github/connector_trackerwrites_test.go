@@ -3,9 +3,6 @@ package github
 import (
 	"errors"
 	"fmt"
-	"net/http"
-	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -17,7 +14,6 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/retry"
-	"spindrift.dev/launcher/internal/tokenrefresh"
 )
 
 // trackerWriteLifecycle is the label-only lifecycle GitHub has: the Connector
@@ -225,56 +221,6 @@ func TestConnector_UndeclaredTrackerWritesAreRefusedUnsentAndAudited(t *testing.
 				t.Errorf("audit = %+v, want one refused entry for the undeclared path", entries)
 			}
 		})
-	}
-}
-
-// A write made after the token file rotates carries the new token, with no
-// restart: the Connector's credential is read per request.
-func TestConnector_TrackerWriteCarriesARotatedToken(t *testing.T) {
-	file := filepath.Join(t.TempDir(), "token")
-	rotate := func(token string) {
-		t.Helper()
-		tmp := file + ".tmp"
-		if err := os.WriteFile(tmp, []byte(token+"\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Rename(tmp, file); err != nil {
-			t.Fatal(err)
-		}
-	}
-	rotate(connectorToken)
-	token := tokenrefresh.Follow("", file)
-	h := newHarnessWith(t, connectorRepo, trackerWriteLifecycle, func(r *http.Request) error {
-		r.Header.Set("Authorization", "Bearer "+token())
-		return nil
-	})
-	const rotated = "rotated-token"
-	h.backend.mu.Lock()
-	h.backend.tokens = map[string]bool{"Bearer " + rotated: true}
-	h.backend.mu.Unlock()
-	h.SeedIssue(forge.Issue{Number: "921", Title: "rotation"})
-	w := trackerWriteHarness{h}
-	hc := h.tr.(forge.HostPostedCommenter)
-
-	h.backend.mu.Lock()
-	start := len(h.backend.auths)
-	h.backend.mu.Unlock()
-	if err := hc.Comment("921", "before"); err != nil {
-		t.Fatalf("Comment before rotation: %v", err)
-	}
-	rotate(rotated)
-	if err := hc.Comment("921", "after"); err != nil {
-		t.Fatalf("Comment after rotation: %v", err)
-	}
-
-	h.backend.mu.Lock()
-	auths := slices.Clone(h.backend.auths[start:])
-	h.backend.mu.Unlock()
-	if want := []string{"Bearer " + connectorToken, "Bearer " + rotated}; !slices.Equal(auths, want) {
-		t.Errorf("writes carried %q, want %q", auths, want)
-	}
-	if !w.CommentPosted("921", "before") || !w.CommentPosted("921", "after") {
-		t.Error("a write across the rotation did not land")
 	}
 }
 

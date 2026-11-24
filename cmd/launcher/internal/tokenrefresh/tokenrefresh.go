@@ -8,7 +8,6 @@ package tokenrefresh
 import (
 	"os"
 	"strings"
-	"sync/atomic"
 	"time"
 )
 
@@ -29,26 +28,6 @@ func ReadIfChanged(path, prev string) (next string, changed bool) {
 		return prev, false
 	}
 	return token, true
-}
-
-// Follow returns a func yielding the current token. With path empty it always
-// returns static and reads nothing. Otherwise every call re-reads path, so the
-// next request after a rotation carries the new token; static is returned until
-// the file first holds a token, and the last good token is kept thereafter. The
-// returned func is safe for concurrent use.
-func Follow(static, path string) func() string {
-	if path == "" {
-		return func() string { return static }
-	}
-	var last atomic.Pointer[string]
-	last.Store(&static)
-	return func() string {
-		// No lock across the read, so concurrent requests do not serialise. A
-		// racing store can leave an older fallback, harmless as every call re-reads.
-		next, _ := ReadIfChanged(path, *last.Load())
-		last.Store(&next)
-		return next
-	}
 }
 
 // Watch polls path every interval and calls setenv on each change, checking once
@@ -75,4 +54,11 @@ func Watch(path string, interval time.Duration, stop <-chan struct{}, setenv fun
 			apply()
 		}
 	}
+}
+
+// WatchGHToken is Watch applying each token to GH_TOKEN. The launcher and the
+// daemon both start it, and the github row's credential reads GH_TOKEN at each
+// use, so this is what carries a rotation to Connector requests and core's git.
+func WatchGHToken(path string, interval time.Duration, stop <-chan struct{}) {
+	Watch(path, interval, stop, func(v string) error { return os.Setenv("GH_TOKEN", v) })
 }

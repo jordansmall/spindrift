@@ -852,9 +852,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	// The github Demand probe runs gh in this process: an expired token fails
 	// every probe, and probe failures feed the breaker.
 	if f := childKnob(doc, "GH_TOKEN_REFRESH_FILE", os.Getenv("GH_TOKEN_REFRESH_FILE")); f != "" {
-		go tokenrefresh.Watch(f, tokenrefresh.Interval, nil, func(v string) error {
-			return os.Setenv("GH_TOKEN", v)
-		})
+		go tokenrefresh.WatchGHToken(f, tokenrefresh.Interval, nil)
 	}
 
 	wd, err := os.Getwd()
