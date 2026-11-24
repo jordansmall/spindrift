@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -27,6 +28,7 @@ import (
 	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/forge/git"
 	"spindrift.dev/launcher/internal/gitexec"
+	"spindrift.dev/launcher/internal/gitexec/gitexectest"
 	"spindrift.dev/launcher/internal/retry"
 )
 
@@ -129,6 +131,9 @@ type Backend struct {
 	branch   int
 	remotes  int
 
+	// gitHandler, when set, serves smart HTTP under the clone URL's owner.
+	gitHandler *gitexectest.AuthHandler
+
 	prs prStore
 }
 
@@ -176,7 +181,12 @@ func (b *Backend) RemoteRequests() int {
 func (b *Backend) serve(w http.ResponseWriter, r *http.Request) {
 	b.mu.Lock()
 	b.prs.requests++
+	gitHandler := b.gitHandler
 	b.mu.Unlock()
+	if gitHandler != nil && strings.HasPrefix(r.URL.Path, "/"+path.Dir(Repo)+"/") {
+		gitHandler.ServeHTTP(w, r)
+		return
+	}
 	if ServeScript(w, r, b.script) {
 		return
 	}
@@ -313,8 +323,12 @@ type PlumbingCall struct {
 
 // newBase starts the backend, loads the Connector and composes the forge with
 // the default, valid remote.
-func newBase(t *testing.T, eng Engine, c Connector) *base {
+func newBase(t *testing.T, eng Engine, c Connector, opts ...Option) *base {
 	t.Helper()
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
 	t.Setenv("GIT_AUTHOR_NAME", "Test Bot")
 	t.Setenv("GIT_AUTHOR_EMAIL", "bot@example.com")
 	t.Setenv("GIT_COMMITTER_NAME", "Test Bot")
@@ -326,11 +340,19 @@ func newBase(t *testing.T, eng Engine, c Connector) *base {
 		t: t, eng: eng, connector: c, Repo: repo, Backend: s.backend, Conn: s.conn, Audit: s.audit, target: s.target,
 		Credential: gitexec.Credential{Username: "bot", Password: "git-secret"},
 	}
-	// Production code is https-only, so git is pointed at the bare repo through
-	// the environment: no config file, and Credential.Apply extends the count.
-	t.Setenv("GIT_CONFIG_COUNT", "1")
-	t.Setenv("GIT_CONFIG_KEY_0", "url."+repo.Bare+".insteadOf")
-	t.Setenv("GIT_CONFIG_VALUE_0", s.backend.clone)
+	if o.gitOverHTTPS {
+		t.Setenv("GIT_CONFIG_COUNT", "0")
+		g := gitexectest.ServeTLS(t, s.backend.Server, Repo+".git", repo.Bare, h.Credential.Username, h.Credential.Password)
+		s.backend.mu.Lock()
+		s.backend.gitHandler = g
+		s.backend.mu.Unlock()
+	} else {
+		// Production code is https-only, so git is pointed at the bare repo through
+		// the environment: no config file, and Credential.Apply extends the count.
+		t.Setenv("GIT_CONFIG_COUNT", "1")
+		t.Setenv("GIT_CONFIG_KEY_0", "url."+repo.Bare+".insteadOf")
+		t.Setenv("GIT_CONFIG_VALUE_0", s.backend.clone)
+	}
 
 	cf, caps, err := h.Compose()
 	if err != nil {
@@ -338,6 +360,21 @@ func newBase(t *testing.T, eng Engine, c Connector) *base {
 	}
 	h.cf, h.caps = cf, caps
 	return h
+}
+
+// GitRequest is one git request the backend received over smart HTTP.
+type GitRequest = gitexectest.Request
+
+// GitRequests returns every git request the backend received, in arrival
+// order; empty unless the harness was built WithGitOverHTTPS.
+func (h *base) GitRequests() []GitRequest {
+	h.Backend.mu.Lock()
+	g := h.Backend.gitHandler
+	h.Backend.mu.Unlock()
+	if g == nil {
+		return nil
+	}
+	return g.Requests()
 }
 
 func (h *base) git() connectorforge.Git {
@@ -386,15 +423,15 @@ type Harness struct{ *base }
 
 // New starts the backend, loads the fixture push-only Connector and composes the
 // forge with the default, valid remote.
-func New(t *testing.T) *Harness {
+func New(t *testing.T, opts ...Option) *Harness {
 	t.Helper()
-	return NewFor(t, fixtureConnector(t, "forge.wasm", pushOnlyMethods))
+	return NewFor(t, fixtureConnector(t, "forge.wasm", pushOnlyMethods), opts...)
 }
 
 // NewFor is New over a Connector's own wasm and declared Route table.
-func NewFor(t *testing.T, c Connector) *Harness {
+func NewFor(t *testing.T, c Connector, opts ...Option) *Harness {
 	t.Helper()
-	return &Harness{newBase(t, inProcess, c)}
+	return &Harness{newBase(t, inProcess, c, opts...)}
 }
 
 // Forge returns the composed forge.

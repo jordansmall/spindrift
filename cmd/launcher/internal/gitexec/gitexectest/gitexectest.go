@@ -5,6 +5,7 @@ package gitexectest
 
 import (
 	"crypto/subtle"
+	"encoding/pem"
 	"net/http"
 	"net/http/cgi"
 	"net/http/httptest"
@@ -34,8 +35,7 @@ type Remote struct {
 	URL, OtherURL, MovedURL string
 	BareDir                 string
 
-	mu   sync.Mutex
-	reqs []Request
+	handler *AuthHandler
 }
 
 // Request is one request the server received.
@@ -45,11 +45,7 @@ type Request struct {
 }
 
 // Requests returns every request received so far, in arrival order.
-func (r *Remote) Requests() []Request {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return append([]Request(nil), r.reqs...)
-}
+func (r *Remote) Requests() []Request { return r.handler.Requests() }
 
 // NewAuthRemote is AuthRemote with a second repository (other.git), a
 // redirecting path (moved.git -> repo.git), and a record of which requests
@@ -74,39 +70,94 @@ func NewAuthRemote(t testing.TB, user, pass string) *Remote {
 	git(t, seed, "push", bareDir, "main")
 	git(t, seed, "push", otherDir, "main")
 
+	h := NewAuthHandler(t, root, user, pass)
+	h.Redirects = map[string]string{"/moved.git": "/repo.git"}
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	return &Remote{
+		URL: srv.URL + "/repo.git", OtherURL: srv.URL + "/other.git", MovedURL: srv.URL + "/moved.git",
+		BareDir: bareDir, handler: h,
+	}
+}
+
+// AuthHandler is the auth-gated smart-HTTP handler NewAuthRemote serves, for a
+// test that mounts git under a server of its own. It serves the bare
+// repositories under a root directory at their root-relative paths.
+type AuthHandler struct {
+	// Redirects maps a path prefix to the prefix it moved to. A matching
+	// request is answered 301 before the auth gate, as a forge's rename
+	// redirect does.
+	Redirects map[string]string
+
+	user, pass string
+	backend    *cgi.Handler
+
+	mu   sync.Mutex
+	reqs []Request
+}
+
+// NewAuthHandler returns a handler serving the bare repositories under root.
+// A request whose basic-auth user and password do not match gets 401.
+func NewAuthHandler(t testing.TB, root, user, pass string) *AuthHandler {
+	t.Helper()
 	execPath := git(t, root, "--exec-path")
-	backend := &cgi.Handler{
+	return &AuthHandler{user: user, pass: pass, backend: &cgi.Handler{
 		Path:       filepath.Join(strings.TrimSpace(execPath), "git-http-backend"),
 		Env:        []string{"GIT_PROJECT_ROOT=" + root, "GIT_HTTP_EXPORT_ALL=1"},
 		InheritEnv: []string{"PATH"},
+	}}
+}
+
+// ServeTLS mounts the bare repository bare at path (say "o/r.git") on srv's
+// TLS server, which must route that path to the returned handler, and makes
+// git trust srv's certificate for the rest of the test. Pushes are allowed.
+func ServeTLS(t testing.TB, srv *httptest.Server, path, bare, user, pass string) *AuthHandler {
+	t.Helper()
+	git(t, bare, "config", "http.receivepack", "true")
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, filepath.Dir(path)), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	rem := &Remote{BareDir: bareDir}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rem.mu.Lock()
-		rem.reqs = append(rem.reqs, Request{Path: r.URL.Path, HasAuth: r.Header.Get("Authorization") != ""})
-		rem.mu.Unlock()
-		if rest, ok := strings.CutPrefix(r.URL.Path, "/moved.git"); ok {
-			target := "/repo.git" + rest
+	if err := os.Symlink(bare, filepath.Join(root, path)); err != nil {
+		t.Fatal(err)
+	}
+	ca := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_SSL_CAINFO", ca)
+	return NewAuthHandler(t, root, user, pass)
+}
+
+// Requests returns every request received so far, in arrival order.
+func (h *AuthHandler) Requests() []Request {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]Request(nil), h.reqs...)
+}
+
+func (h *AuthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.mu.Lock()
+	h.reqs = append(h.reqs, Request{Path: r.URL.Path, HasAuth: r.Header.Get("Authorization") != ""})
+	h.mu.Unlock()
+	for from, to := range h.Redirects {
+		if rest, ok := strings.CutPrefix(r.URL.Path, from); ok {
+			target := to + rest
 			if r.URL.RawQuery != "" {
 				target += "?" + r.URL.RawQuery
 			}
 			http.Redirect(w, r, target, http.StatusMovedPermanently)
 			return
 		}
-		u, p, ok := r.BasicAuth()
-		if !ok || subtle.ConstantTimeCompare([]byte(u), []byte(user)) != 1 ||
-			subtle.ConstantTimeCompare([]byte(p), []byte(pass)) != 1 {
-			w.Header().Set("WWW-Authenticate", `Basic realm="gitexectest"`)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		backend.ServeHTTP(w, r)
-	}))
-	t.Cleanup(srv.Close)
-	rem.URL = srv.URL + "/repo.git"
-	rem.OtherURL = srv.URL + "/other.git"
-	rem.MovedURL = srv.URL + "/moved.git"
-	return rem
+	}
+	u, p, ok := r.BasicAuth()
+	if !ok || subtle.ConstantTimeCompare([]byte(u), []byte(h.user)) != 1 ||
+		subtle.ConstantTimeCompare([]byte(p), []byte(h.pass)) != 1 {
+		w.Header().Set("WWW-Authenticate", `Basic realm="gitexectest"`)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	h.backend.ServeHTTP(w, r)
 }
 
 func git(t testing.TB, dir string, args ...string) string {
@@ -118,4 +169,22 @@ func git(t testing.TB, dir string, args ...string) string {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
 	return string(out)
+}
+
+// RequireAuthOnlyUnder fails unless some request authenticated and every one that did has a path under pathPrefix.
+func RequireAuthOnlyUnder(t testing.TB, reqs []Request, pathPrefix string) {
+	t.Helper()
+	authed := 0
+	for _, r := range reqs {
+		if !r.HasAuth {
+			continue
+		}
+		authed++
+		if !strings.HasPrefix(r.Path, pathPrefix) {
+			t.Errorf("credential sent to %s, want only paths under %s", r.Path, pathPrefix)
+		}
+	}
+	if authed == 0 {
+		t.Error("no authenticated git request reached the backend")
+	}
 }
