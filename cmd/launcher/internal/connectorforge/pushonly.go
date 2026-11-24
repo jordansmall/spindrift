@@ -18,7 +18,8 @@ import (
 )
 
 // The capability names a forge Connector advertises. sdk/forge declares the
-// same strings, and its parity test pins them. The three that select a
+// same strings, rendered from the protocol description that
+// TestProtocolForgeAxisAgrees holds these to. The three that select a
 // contract are exported for connectorconformance.
 const (
 	capForge            = "forge"

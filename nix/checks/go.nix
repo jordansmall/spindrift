@@ -748,24 +748,15 @@ let
     cd src
   '';
   # sdk/ is a standalone, dependency-free module, so GOFLAGS=-mod=vendor
-  # (goCheckEnv) would fail on it. The parity tests read driverkit, dispatchkind,
-  # hostop, connectorhost's network.go and class.go, connectorforge's
-  # connectorforge.go and pushonly.go, connectortracker.go, and forge's
-  # issuetracker.go under ../../cmd/launcher/internal, so the source tree holds
-  # them at their repo-relative layout.
+  # (goCheckEnv) would fail on it. Its twin_test.go reads driverkit under
+  # ../../cmd/launcher/internal, so the source tree holds it at its
+  # repo-relative layout; every other fact the SDK shares with core is rendered
+  # from lib/connector-protocol, so no other core file is copied.
   sdkSrc = fs.toSource {
     root = ../..;
     fileset = fs.unions [
       ../../sdk
       ../../cmd/launcher/internal/driver/driverkit
-      ../../cmd/launcher/internal/dispatchkind
-      ../../cmd/launcher/internal/hostop
-      ../../cmd/launcher/internal/connectorhost/network.go
-      ../../cmd/launcher/internal/connectorhost/class.go
-      ../../cmd/launcher/internal/connectorforge/connectorforge.go
-      ../../cmd/launcher/internal/connectorforge/pushonly.go
-      ../../cmd/launcher/internal/connectortracker/connectortracker.go
-      ../../cmd/launcher/internal/forge/issuetracker.go
     ];
   };
   sdkPrologue = ''
