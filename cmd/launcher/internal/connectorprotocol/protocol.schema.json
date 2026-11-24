@@ -1,0 +1,631 @@
+{
+  "$defs": {
+    "event": {
+      "additionalProperties": false,
+      "properties": {
+        "DurationAPIMs": {
+          "type": "integer"
+        },
+        "DurationMs": {
+          "type": "integer"
+        },
+        "Effort": {
+          "type": "string"
+        },
+        "InSubagent": {
+          "type": "boolean"
+        },
+        "IsError": {
+          "type": "boolean"
+        },
+        "Kind": {
+          "enum": [
+            "start",
+            "text",
+            "reasoning",
+            "tool_call",
+            "tool_result",
+            "usage",
+            "model",
+            "error",
+            "unparsed",
+            "result"
+          ],
+          "type": "string"
+        },
+        "MessageID": {
+          "type": "string"
+        },
+        "Model": {
+          "type": "string"
+        },
+        "ModelOutput": {
+          "oneOf": [
+            {
+              "additionalProperties": {
+                "type": "integer"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "Models": {
+          "oneOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "NoTotals": {
+          "type": "boolean"
+        },
+        "NoTurns": {
+          "type": "boolean"
+        },
+        "NumTurns": {
+          "type": "integer"
+        },
+        "ResetAt": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "Role": {
+          "type": "string"
+        },
+        "SessionID": {
+          "type": "string"
+        },
+        "Subagent": {
+          "type": "string"
+        },
+        "Synthetic": {
+          "type": "boolean"
+        },
+        "Text": {
+          "type": "string"
+        },
+        "Timestamp": {
+          "type": "integer"
+        },
+        "Tokens": {
+          "$ref": "#/$defs/tokens"
+        },
+        "ToolID": {
+          "type": "string"
+        },
+        "ToolInput": {},
+        "ToolName": {
+          "type": "string"
+        },
+        "ToolOutput": {
+          "type": "string"
+        },
+        "ToolTarget": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "Kind"
+      ],
+      "type": "object"
+    },
+    "pattern": {
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "substr": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason",
+        "substr"
+      ],
+      "type": "object"
+    },
+    "tokens": {
+      "additionalProperties": false,
+      "properties": {
+        "CacheRead": {
+          "type": "integer"
+        },
+        "CacheWrite1h": {
+          "type": "integer"
+        },
+        "CacheWrite5m": {
+          "type": "integer"
+        },
+        "CostUSD": {
+          "type": "number"
+        },
+        "Input": {
+          "type": "integer"
+        },
+        "Output": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$id": "https://spindrift.dev/connector-protocol/0.3.0/schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "methods": {
+    "driver.decode": {
+      "capability": "driver",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "decoder": {
+            "type": "integer"
+          },
+          "line": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "decoder",
+          "line"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "items": {
+          "$ref": "#/$defs/event"
+        },
+        "type": "array"
+      }
+    },
+    "driver.decodeBatch": {
+      "capability": "driver.decodeBatch",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "decoder": {
+            "type": "integer"
+          },
+          "lines": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "decoder",
+          "lines"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/event"
+          },
+          "type": "array"
+        },
+        "type": "array"
+      }
+    },
+    "driver.decodeRaw": {
+      "capability": "driver.decodeRaw",
+      "params": {
+        "description": "The bytes \"driver.decodeRaw\\n<decoder>\\n\" then each Pass-log line followed by \"\\n\"; a line holds no newline, and nothing is JSON-escaped.",
+        "type": "string"
+      },
+      "result": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/event"
+          },
+          "type": "array"
+        },
+        "type": "array"
+      }
+    },
+    "driver.describe": {
+      "capability": "driver",
+      "params": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "classify": {
+            "properties": {
+              "chunkOversized": {
+                "type": "boolean"
+              },
+              "firstMatch": {
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          },
+          "defaultTopLevelRole": {
+            "type": "string"
+          },
+          "kindOrder": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "kindPlurals": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "name": {
+            "type": "string"
+          },
+          "result": {
+            "enum": [
+              "events",
+              "lastMessage"
+            ],
+            "type": "string"
+          },
+          "terminalPatterns": {
+            "items": {
+              "$ref": "#/$defs/pattern"
+            },
+            "type": "array"
+          },
+          "totals": {
+            "enum": [
+              "perCall",
+              "session"
+            ],
+            "type": "string"
+          },
+          "transientPatterns": {
+            "items": {
+              "$ref": "#/$defs/pattern"
+            },
+            "type": "array"
+          },
+          "writeTool": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "terminalPatterns",
+          "transientPatterns",
+          "writeTool"
+        ],
+        "type": "object"
+      }
+    },
+    "driver.freeDecoder": {
+      "capability": "driver",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "decoder": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "decoder"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "type": "null"
+      }
+    },
+    "driver.freeStreamFilter": {
+      "capability": "driver.streamFilter",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "filter": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "filter"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "type": "null"
+      }
+    },
+    "driver.modelFamily": {
+      "capability": "driver.modelFamily",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "model": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "rank": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "label",
+          "rank"
+        ],
+        "type": "object"
+      }
+    },
+    "driver.newDecoder": {
+      "capability": "driver",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "now": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "decoder": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "decoder"
+        ],
+        "type": "object"
+      }
+    },
+    "driver.newStreamFilter": {
+      "capability": "driver.streamFilter",
+      "params": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "filter": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "filter"
+        ],
+        "type": "object"
+      }
+    },
+    "driver.resolveExit": {
+      "capability": "driver.resolveExit",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "exitCode": {
+            "type": "integer"
+          },
+          "log": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "exitCode",
+          "log"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "exitCode": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "exitCode"
+        ],
+        "type": "object"
+      }
+    },
+    "driver.resultEvent": {
+      "capability": "driver",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "event": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "event"
+        ],
+        "type": "object"
+      }
+    },
+    "driver.sessionFlags": {
+      "capability": "driver",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "home": {
+            "type": "string"
+          },
+          "issue": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "repoSlug": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "home",
+          "issue",
+          "mode",
+          "repoSlug"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "flags": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "flags"
+        ],
+        "type": "object"
+      }
+    },
+    "driver.streamFlush": {
+      "capability": "driver.streamFilter",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "filter": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "filter"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "data": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      }
+    },
+    "driver.streamWrite": {
+      "capability": "driver.streamFilter",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "type": "string"
+          },
+          "filter": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "filter"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "data": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      }
+    },
+    "driver.toolKind": {
+      "capability": "driver.toolKind",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "tool": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "kind": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      }
+    },
+    "driver.toolPhase": {
+      "capability": "driver.toolPhase",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "input": {},
+          "tool": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "input",
+          "tool"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "phase": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "phase"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "title": "spindrift Connector protocol 0.3.0"
+}
