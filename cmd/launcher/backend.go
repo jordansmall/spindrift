@@ -61,7 +61,7 @@ func ledgerFor(c config, s backendkit.Strategy) (ledger.Backend, butler.Tree, fu
 // mustBuild unwraps a Strategy constructor. On a native row they fail only
 // when ReadKnobs rejects a malformed knob; a bool reader cannot fail, and the
 // loader hands ReadKnobs an int only as strconv.Itoa output, so the error is
-// unreachable. Production callers return the error instead: a primary
+// unreachable. Production callers return the error instead: a
 // Connector row can fail either constructor at runtime.
 func mustBuild[T any](v T, err error) T {
 	if err != nil {

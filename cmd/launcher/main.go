@@ -534,7 +534,7 @@ func researchVerdictLabels(c config) forge.VerdictLabels {
 // newIssueTracker returns the IssueTracker adapter selected by ISSUE_TRACKER
 // (default "github"), carrying c.dispatchKind's label and verdict families
 // (ADR 0022). An unregistered name or constructor-less Strategy is unreachable
-// post-validate and panics; a constructor error (a primary Connector that will
+// post-validate and panics; a constructor error (a Connector that will
 // not load) is the caller's.
 func newIssueTracker(c config) (forge.IssueTracker, error) {
 	s, ok := backendkit.ByName(c.IssueTracker)
@@ -591,7 +591,7 @@ func issueScope(c config) string {
 // (host-mediated landing onto the Accumulation repo's Integration branch, ADR
 // 0033). parent is only the local seam's Integration-branch key (issue #1734).
 // An unregistered name panics (unreachable post-validate); a constructor error
-// is returned, since a primary Connector row can fail at runtime.
+// is returned, since a Connector row can fail at runtime.
 func newCodeForge(c config, parent local.SanitizedParent, it forge.IssueTracker) (forge.CodeForge, error) {
 	s, ok := backendkit.ByName(c.CodeForge)
 	if !ok || s.NewCodeForge == nil {

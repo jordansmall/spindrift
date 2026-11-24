@@ -125,7 +125,7 @@ type Strategy struct {
 
 	// IntrospectToken probes the launcher's own forge token for write capability,
 	// scoped to repoSlug where the probe itself is repo-scoped. Nil means the
-	// backend cannot introspect it, and the primary Connector write gate warns
+	// backend cannot introspect it, and the Connector write gate warns
 	// instead of refusing.
 	IntrospectToken TokenIntrospector
 }

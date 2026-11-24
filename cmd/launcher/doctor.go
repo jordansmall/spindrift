@@ -193,7 +193,7 @@ func doctorExitCodeFor(configErr, runErr error) int {
 // them here would re-run each credential Probe un-memoized (issue #3144).
 // checkW is a gate Check's own operator-facing writer (issue #2942 AC5),
 // distinct from the rep report stream; `spindrift doctor` passes rep's
-// AdvisoryWriter() so a passing gate's prose (e.g. the primary Connector write
+// AdvisoryWriter() so a passing gate's prose (e.g. the Connector write
 // gate's WARNING: line) obeys the same quiet gate as an advisory row (#3777).
 func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, rep *doctor.Reporter, checkW io.Writer, stdin io.Reader, interactive bool, extraChecks []doctor.Check, requiredLabels ...string) error {
 	row, _ := backendkit.ByName(c.IssueTracker)

@@ -131,7 +131,7 @@ const (
 	// sandboxLocal has no github row: the run reads a local issue and lands by
 	// plain git push, so the only Connector it loads is the Driver's.
 	sandboxLocal
-	// sandboxTracker is the compiled github Connector as the primary tracker,
+	// sandboxTracker is the compiled github Connector as the tracker,
 	// routed to a fake backend, with landing by plain git push. Every tracker
 	// read and write, the run's settle included, goes through the sandbox, so
 	// a dead sandbox fails the settle.
@@ -287,11 +287,11 @@ func runSandboxExit(t *testing.T, runtime string, x sandboxExit) {
 		t.Errorf("output lacks %q:\n%s", x.wantOut, out)
 	}
 	assertSandboxSurvivedSettle(t, "output", out)
-	primary, _ := filepath.Glob(filepath.Join(hostpaths.LogDir(rig.workDir), "connector-github-*"))
-	if x.mode == sandboxTracker && len(primary) == 0 {
+	records, _ := filepath.Glob(filepath.Join(hostpaths.LogDir(rig.workDir), "connector-github-*"))
+	if x.mode == sandboxTracker && len(records) == 0 {
 		t.Errorf("no connector-github record in %s", hostpaths.LogDir(rig.workDir))
 	}
-	for _, record := range primary {
+	for _, record := range records {
 		b, _ := os.ReadFile(record)
 		assertSandboxSurvivedSettle(t, record, string(b))
 	}
@@ -560,14 +560,14 @@ func bwrapSandboxArtifacts(t *testing.T, host string) map[string]string {
 	return map[string]string{"CONNECTOR_HOST": pkg, "SYSCALL_FILTER": filter}
 }
 
-// TestSeamConnectorSandboxPrimaryTotals runs a work dispatch under a primary
+// TestSeamConnectorSandboxTotals runs a work dispatch under a routed
 // github row with the sandbox on and pins the totals line appended to the
-// run's primary audit file once the sandbox closes. The fixture Connector
+// run's Connector audit file once the sandbox closes. The fixture Connector
 // declares no forge.tokenGrant (the write gate warns and continues) and is no
-// tracker (the first primary read, listing issues, is refused: exit 1), so the
+// tracker (the first routed read, listing issues, is refused: exit 1), so the
 // .log holds only the gate's token introspection and that read, and the audit
 // file only the totals.
-func TestSeamConnectorSandboxPrimaryTotals(t *testing.T) {
+func TestSeamConnectorSandboxTotals(t *testing.T) {
 	t.Parallel()
 	rig := newSandboxRig(t, "podman", sandboxRigOpts{mode: sandboxRouted, issues: []int{7}})
 	res := seamtest.Start(t, rig.cmd).Wait(t)
@@ -579,7 +579,7 @@ func TestSeamConnectorSandboxPrimaryTotals(t *testing.T) {
 	logDir := hostpaths.LogDir(rig.workDir)
 	audits, _ := filepath.Glob(filepath.Join(logDir, "connector-github-*.audit.jsonl"))
 	if len(audits) != 1 {
-		t.Fatalf("primary audit files = %v, want one\nstderr:\n%s", audits, res.Stderr)
+		t.Fatalf("Connector audit files = %v, want one\nstderr:\n%s", audits, res.Stderr)
 	}
 	raw, err := os.ReadFile(audits[0])
 	if err != nil {
@@ -587,7 +587,7 @@ func TestSeamConnectorSandboxPrimaryTotals(t *testing.T) {
 	}
 	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
 	if len(lines) != 1 {
-		t.Fatalf("primary audit has %d lines, want just the totals line:\n%s", len(lines), raw)
+		t.Fatalf("Connector audit has %d lines, want just the totals line:\n%s", len(lines), raw)
 	}
 	var totals map[string]int64
 	if err := json.Unmarshal([]byte(lines[0]), &totals); err != nil {
@@ -615,12 +615,12 @@ func TestSeamConnectorSandboxPrimaryTotals(t *testing.T) {
 
 	logs, _ := filepath.Glob(filepath.Join(logDir, "connector-github-*.log"))
 	if len(logs) != 1 {
-		t.Fatalf("primary logs = %v, want one", logs)
+		t.Fatalf("Connector logs = %v, want one", logs)
 	}
 	b, _ := os.ReadFile(logs[0])
 	logLines := strings.Split(strings.TrimSpace(string(b)), "\n")
 	if len(logLines) != 2 || !strings.Contains(logLines[0], `"op":"introspect the token"`) || !strings.Contains(logLines[1], `"op":"list issues"`) {
-		t.Errorf("primary log is not the token introspection then the refused issue listing:\n%s", b)
+		t.Errorf("Connector log is not the token introspection then the refused issue listing:\n%s", b)
 	}
 	if out := res.Stdout + res.Stderr; !strings.Contains(out, "could not be determined") || !strings.Contains(out, "forge.tokenGrant") {
 		t.Errorf("the write gate did not warn that the capability is undetermined:\n%s", out)

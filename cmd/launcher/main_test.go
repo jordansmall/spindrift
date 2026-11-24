@@ -3502,7 +3502,7 @@ func useForgejoFixtureRow(t *testing.T) string {
 // A forgejo row builds its Code Forge, read-only included, from the row's
 // Connector, so the composed forge must itself offer the MirrorSeeder the
 // host-side fetch keys on.
-func TestDispatchConfig_SeedMirror_ForgejoPrimaryRow(t *testing.T) {
+func TestDispatchConfig_SeedMirror_ForgejoRow(t *testing.T) {
 	base := useForgejoFixtureRow(t)
 	c := minimalValidConfig()
 	c.CodeForge = "forgejo"
