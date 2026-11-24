@@ -24,6 +24,36 @@
       ],
       "type": "object"
     },
+    "comment": {
+      "properties": {
+        "association": {
+          "type": "string"
+        },
+        "author": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "minimized": {
+          "type": "boolean"
+        },
+        "minimizedReason": {
+          "type": "string"
+        },
+        "researchMarker": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "author",
+        "createdAt"
+      ],
+      "type": "object"
+    },
     "event": {
       "additionalProperties": false,
       "properties": {
@@ -168,6 +198,49 @@
       },
       "type": "object"
     },
+    "issue": {
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "closedAt": {
+          "type": "string"
+        },
+        "closedNotPlanned": {
+          "type": "boolean"
+        },
+        "dedupMarker": {
+          "type": "string"
+        },
+        "labels": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "number": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "",
+            "open",
+            "closed"
+          ],
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "number"
+      ],
+      "type": "object"
+    },
     "pattern": {
       "properties": {
         "reason": {
@@ -247,6 +320,38 @@
       ],
       "type": "object"
     },
+    "route": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "value"
+      ],
+      "type": "object"
+    },
+    "statusTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "resolution": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "resolution",
+        "status"
+      ],
+      "type": "object"
+    },
     "target": {
       "additionalProperties": false,
       "properties": {
@@ -285,6 +390,26 @@
           "type": "integer"
         }
       },
+      "type": "object"
+    },
+    "trackerTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "api": {
+          "type": "string"
+        },
+        "dialect": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "api",
+        "dialect",
+        "repo"
+      ],
       "type": "object"
     }
   },
@@ -1296,6 +1421,795 @@
       },
       "result": {
         "$ref": "#/$defs/grant"
+      }
+    },
+    "tracker.blocks": {
+      "capability": "tracker.blocks",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "number": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/trackerTarget"
+          }
+        },
+        "required": [
+          "number",
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "type": "object"
+      }
+    },
+    "tracker.closeIssue": {
+      "capability": "tracker.closeIssue",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "number": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/trackerTarget"
+          }
+        },
+        "required": [
+          "number",
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "type": "object"
+      }
+    },
+    "tracker.comment": {
+      "capability": "tracker.comment",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "number": {
+            "type": "string"
+          },
+          "research": {
+            "type": "boolean"
+          },
+          "target": {
+            "$ref": "#/$defs/trackerTarget"
+          }
+        },
+        "required": [
+          "body",
+          "number",
+          "research",
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "type": "object"
+      }
+    },
+    "tracker.comments": {
+      "capability": "tracker.comments",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "number": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/trackerTarget"
+          }
+        },
+        "required": [
+          "number",
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "comments": {
+            "items": {
+              "$ref": "#/$defs/comment"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "comments"
+        ],
+        "type": "object"
+      }
+    },
+    "tracker.count": {
+      "capability": "tracker.count",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "fresh": {
+            "type": "boolean"
+          },
+          "label": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "route": {
+            "items": {
+              "$ref": "#/$defs/route"
+            },
+            "type": "array"
+          },
+          "status": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/trackerTarget"
+          }
+        },
+        "required": [
+          "fresh",
+          "label",
+          "limit",
+          "status",
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "count": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count"
+        ],
+        "type": "object"
+      }
+    },
+    "tracker.countInterval": {
+      "capability": "tracker.count",
+      "params": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "seconds": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "seconds"
+        ],
+        "type": "object"
+      }
+    },
+    "tracker.createLabel": {
+      "capability": "tracker.labels",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/trackerTarget"
+          }
+        },
+        "required": [
+          "color",
+          "description",
+          "name",
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "type": "object"
+      }
+    },
+    "tracker.createMeta": {
+      "capability": "tracker.createMeta",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "issueType": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/trackerTarget"
+          }
+        },
+        "required": [
+          "issueType",
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "fields": {
+            "items": {
+              "properties": {
+                "fieldId": {
+                  "type": "string"
+                },
+                "hasDefaultValue": {
+                  "type": "boolean"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "required": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "fieldId",
+                "hasDefaultValue",
+                "name",
+                "required"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "issueTypes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "fields",
+          "issueTypes"
+        ],
+        "type": "object"
+      }
+    },
+    "tracker.editLabels": {
+      "capability": "tracker.editLabels",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "add": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "number": {
+            "type": "string"
+          },
+          "remove": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "target": {
+            "$ref": "#/$defs/trackerTarget"
+          }
+        },
+        "required": [
+          "add",
+          "number",
+          "remove",
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "type": "object"
+      }
+    },
+    "tracker.fileIssue": {
+      "capability": "tracker.fileIssue",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "dedupMarker": {
+            "type": "string"
+          },
+          "issueType": {
+            "type": "string"
+          },
+          "labels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "route": {
+            "items": {
+              "$ref": "#/$defs/route"
+            },
+            "type": "array"
+          },
+          "target": {
+            "$ref": "#/$defs/trackerTarget"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "body",
+          "dedupMarker",
+          "issueType",
+          "labels",
+          "target",
+          "title"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "type": "object"
+      }
+    },
+    "tracker.issue": {
+      "capability": "tracker",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "number": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/trackerTarget"
+          }
+        },
+        "required": [
+          "number",
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "$ref": "#/$defs/issue"
+      }
+    },
+    "tracker.labeled": {
+      "capability": "tracker.labeled",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "route": {
+            "items": {
+              "$ref": "#/$defs/route"
+            },
+            "type": "array"
+          },
+          "state": {
+            "enum": [
+              "open",
+              "closed"
+            ],
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/trackerTarget"
+          }
+        },
+        "required": [
+          "label",
+          "limit",
+          "state",
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "issues": {
+            "items": {
+              "$ref": "#/$defs/issue"
+            },
+            "type": "array"
+          },
+          "next": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "issues"
+        ],
+        "type": "object"
+      }
+    },
+    "tracker.listIssues": {
+      "capability": "tracker",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "route": {
+            "items": {
+              "$ref": "#/$defs/route"
+            },
+            "type": "array"
+          },
+          "status": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/trackerTarget"
+          }
+        },
+        "required": [
+          "label",
+          "limit",
+          "status",
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "issues": {
+            "items": {
+              "$ref": "#/$defs/issue"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "issues"
+        ],
+        "type": "object"
+      }
+    },
+    "tracker.listLabels": {
+      "capability": "tracker.labels",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "target": {
+            "$ref": "#/$defs/trackerTarget"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "labels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "labels"
+        ],
+        "type": "object"
+      }
+    },
+    "tracker.matchesRoute": {
+      "capability": "tracker.route",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "number": {
+            "type": "string"
+          },
+          "route": {
+            "items": {
+              "$ref": "#/$defs/route"
+            },
+            "type": "array"
+          },
+          "target": {
+            "$ref": "#/$defs/trackerTarget"
+          }
+        },
+        "required": [
+          "number",
+          "route",
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "matches": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "matches"
+        ],
+        "type": "object"
+      }
+    },
+    "tracker.nativeDeps": {
+      "capability": "tracker.nativeDeps",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "number": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/trackerTarget"
+          }
+        },
+        "required": [
+          "number",
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "type": "object"
+      }
+    },
+    "tracker.probe": {
+      "capability": "tracker.probe",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "target": {
+            "$ref": "#/$defs/trackerTarget"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "status": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      }
+    },
+    "tracker.removedLabels": {
+      "capability": "tracker.removedLabels",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "number": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/trackerTarget"
+          }
+        },
+        "required": [
+          "number",
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "labels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "labels"
+        ],
+        "type": "object"
+      }
+    },
+    "tracker.searchIssues": {
+      "capability": "tracker.searchIssues",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "open",
+              "closed"
+            ],
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/trackerTarget"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "limit",
+          "state",
+          "target",
+          "text"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "issues": {
+            "items": {
+              "$ref": "#/$defs/issue"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "issues"
+        ],
+        "type": "object"
+      }
+    },
+    "tracker.statuses": {
+      "capability": "tracker.statuses",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "target": {
+            "$ref": "#/$defs/trackerTarget"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "categories": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "statuses": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "statuses"
+        ],
+        "type": "object"
+      }
+    },
+    "tracker.transition": {
+      "capability": "tracker.transition",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "mapping": {
+            "additionalProperties": {
+              "$ref": "#/$defs/statusTarget"
+            },
+            "type": "object"
+          },
+          "number": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/trackerTarget"
+          }
+        },
+        "required": [
+          "mapping",
+          "number",
+          "state",
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "properties": {
+          "offered": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "outcome": {
+            "enum": [
+              "moved",
+              "unavailable",
+              "unmapped"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome",
+          "status"
+        ],
+        "type": "object"
       }
     }
   },

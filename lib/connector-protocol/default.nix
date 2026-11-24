@@ -156,6 +156,22 @@ let
         value = 256;
         doc = "Bytes of Connector-supplied error text core keeps.";
       };
+      resultPageLimit = {
+        value = 100;
+        doc = "Count of issues core keeps from one tracker list or search page, and the cap on a tracker.count answer.";
+      };
+      labeledMaxPages = {
+        value = 1000;
+        doc = "Count of pages one tracker.labeled walk reads before core keeps what it has and warns.";
+      };
+      labeledMaxBytes = {
+        value = 64 * 1024 * 1024;
+        doc = "Bytes of answers one tracker.labeled walk holds before core keeps what it has and warns.";
+      };
+      maxCountIntervalSeconds = {
+        value = 86400;
+        doc = "Seconds, at most, of the cadence a tracker.countInterval answer may ask for.";
+      };
       maxScopeLen = {
         value = 64;
         doc = "Bytes of one scope in a forge.tokenGrant answer.";
@@ -243,6 +259,18 @@ let
       runLink = "connectorforge reads.ownRunLink drops, rather than fails on, a URL that is not a plain https URL on the web host under the target repository's path; a backslash is refused.";
       probeRepo = "connectorforge probeRepo refuses an empty repo.";
       tokenGrant = "connectorforge.checkGrant refuses writeCapable or scopes without introspectable and a scope that is not a well-formed token (wellFormedScope); cleanReason then sanitises the reason and caps it at maxReasonLen; a scope is capped at maxScopeLen.";
+      issueShape = "connectortracker wireIssue.issue refuses an issue whose number is outside the Connector's id grammar (a positive integer, or a project key and number under tracker.ids.projectKey), whose state is not open or closed (a listIssues answer may leave it empty), or that has an empty or control-character label name (checkLabels); a hit tracker.searchIssues returns outside the state or label asked for is dropped, not refused.";
+      issueAnswer = "connectortracker reads.readIssue applies issueShape, then refuses an issue other than the one asked for.";
+      commentShape = "connectortracker commentsLayer.Comments refuses a comment whose author is empty or holds a control character, or whose createdAt is not RFC3339; an association outside forge.KnownAssociation's vocabulary is blanked, not refused.";
+      idList = "connectortracker reads.idList refuses an id outside the Connector's id grammar and drops a repeated one.";
+      labeledPaging = "connectortracker labeledLayer.walkLabeled applies issueShape to each issue, and fails the label closed on a next cursor already returned or a page of only issues already read; a walk past labeledMaxPages or labeledMaxBytes keeps what it read and warns.";
+      probeStatus = "connectortracker probeLayer.Probe reads the status: 2xx proves the repository, 401 and 403 are an auth failure, any other status means the repository is unreachable.";
+      createMetaIssueType = "connectortracker createMetaLayer.CheckIssueType refuses an answer whose issueTypes omit the issue type core files as (forge.IssueTypeNotOffered).";
+      countClamp = "connectortracker countLayer.CountReady refuses a negative count and clamps the rest to resultPageLimit.";
+      countInterval = "connectortracker readCountInterval refuses seconds outside 1 to maxCountIntervalSeconds.";
+      transitionOutcome = "connectortracker transitionLayer.TransitionState refuses an outcome other than moved, unavailable and unmapped.";
+      labelNames = "connectortracker labelsLayer.ListLabels refuses an empty or control-character label name (checkLabels).";
+      filedURL = "connectortracker reads.unusableFiledURL refuses a url that is empty, not https, carrying userinfo, off the tracker's web host (Lifecycle.WebHost) or not ending in an issue id; the issue was filed, so the error says so and core must not refile.";
     };
 
     # Shared JSON types, rendered as the schema's $defs. A result field is
@@ -255,6 +283,55 @@ let
       target = t.object {
         api = t.string;
         repo = t.string;
+      };
+      # The repository a tracker call reads. Unlike a forge's target it carries
+      # the API dialect, "" for a tracker with one ("cloud" or "server" for Jira).
+      trackerTarget = t.object {
+        api = t.string;
+        repo = t.string;
+        dialect = t.string;
+      };
+      # One term of an issue route; core sends a route only to a Connector
+      # advertising tracker.route.
+      route = t.object {
+        kind = t.string;
+        value = t.string;
+      };
+      # connectortracker.StatusTarget: the native status a Dispatch state maps to
+      # and the resolution to set on entering it, "" for none.
+      statusTarget = t.object {
+        status = t.string;
+        resolution = t.string;
+      };
+      # connectortracker.wireIssue. An open issue, a tracker with no side store
+      # or one with no workflow leaves closedAt, closedNotPlanned, dedupMarker and
+      # status empty.
+      issue = t.open {
+        number = t.string;
+        title = t.optional t.string;
+        body = t.optional t.string;
+        state = t.optional (
+          t.enum [
+            ""
+            "open"
+            "closed"
+          ]
+        );
+        labels = t.optional (t.list t.string);
+        closedAt = t.optional t.string;
+        closedNotPlanned = t.optional t.boolean;
+        dedupMarker = t.optional t.string;
+        status = t.optional t.string;
+      };
+      # connectortracker.wireComment.
+      comment = t.open {
+        author = t.string;
+        createdAt = t.string;
+        body = t.optional t.string;
+        minimized = t.optional t.boolean;
+        minimizedReason = t.optional t.string;
+        association = t.optional t.string;
+        researchMarker = t.optional t.boolean;
       };
       # connectorforge.wirePR: the fields after merged are a PR-capable forge's,
       # each omitted when empty.
