@@ -201,6 +201,9 @@ func (l labelsLayer) ListLabels() ([]string, error) {
 	if err := l.r.call(context.Background(), CapListLabels, targetParams{l.r.target}, &res); err != nil {
 		return nil, err
 	}
+	if err := checkLabels(res.Labels); err != nil {
+		return nil, err
+	}
 	return res.Labels, nil
 }
 

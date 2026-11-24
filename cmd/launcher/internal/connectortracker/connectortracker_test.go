@@ -639,8 +639,8 @@ func TestTrackerClosedFields(t *testing.T) {
 
 func TestTrackerRestoresResearchMarkerOnlyWhenFlagged(t *testing.T) {
 	call, _ := stubGuest(t, map[string]string{"tracker.comments": `{"comments":[
-		{"author":"bot","body":"verdict","researchMarker":true},
-		{"author":"human","body":"verdict"}]}`})
+		{"author":"bot","createdAt":"2024-01-02T03:04:05Z","body":"verdict","researchMarker":true},
+		{"author":"human","createdAt":"2024-01-02T03:04:06Z","body":"verdict"}]}`})
 	tr := mustTracker(t, call, newNative(), testLifecycle, testTarget, []string{CapComments}, true)
 	cl, ok := forge.As[forge.CommentLister](tr)
 	if !ok {

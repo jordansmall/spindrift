@@ -377,6 +377,10 @@ func (h *jiraHarness) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		var c jiraWireComment
 		json.NewDecoder(r.Body).Decode(&c)
+		// Jira stamps the authenticated user and the creation time on a
+		// posted comment; the request body carries neither.
+		c.Author.DisplayName = "spindrift-bot"
+		c.Created = "2024-01-02T03:04:05.000+0000"
 		rec.comments = append(rec.comments, c)
 		w.WriteHeader(http.StatusCreated)
 		return
