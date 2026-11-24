@@ -59,4 +59,8 @@
     ];
     message = "CONNECTOR_SANDBOX was removed: the Connector sandbox is always on (issue #7022), so there is nothing to switch; delete the setting";
   };
+  githubConnectorToken = {
+    env = "SPINDRIFT_GITHUB_CONNECTOR_TOKEN";
+    message = "SPINDRIFT_GITHUB_CONNECTOR_TOKEN was removed: the github Connector takes GH_TOKEN as its credential instead (issue #7499; see MIGRATING.md); delete the setting";
+  };
 }

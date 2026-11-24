@@ -839,8 +839,9 @@ in
       )
     );
     # The flake module reads the table through this function, so a fixture
-    # env-only row exercises its `flakePath` guards; the real table has no such
-    # row yet, and an unguarded read would break every Consumer eval.
+    # env-only row exercises its `flakePath` guards; an unguarded read would
+    # break every Consumer eval. The real githubConnectorToken row is env-only
+    # too; the fixture keeps the guard covered if that row is ever dropped.
     assert
       let
         fixture = removedKnobs // {
@@ -856,7 +857,7 @@ in
         tree = flake.treeEntries null;
       in
       assertMsg (
-        builtins.length tree == builtins.length (builtins.attrNames removedKnobs)
+        builtins.length tree == builtins.length (builtins.attrNames flakeRows)
       ) "an env-only row must add no removed-knob option tree entry"
       && assertMsg (flake.hits { } == [ ]) "an env-only row must not hit on an empty Consumer config"
       && assertMsg (
