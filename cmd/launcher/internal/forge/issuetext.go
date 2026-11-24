@@ -28,9 +28,10 @@ type Comment struct {
 	// zero.
 	Minimized       bool
 	MinimizedReason string
-	// Association is the author's GitHub author_association as the tracker
-	// reports it (OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR, NONE, ...), empty
-	// when the tracker cannot attest the author's standing.
+	// Association is the author's GitHub author_association (OWNER, MEMBER,
+	// COLLABORATOR, CONTRIBUTOR, NONE, ...), empty when the tracker cannot
+	// attest the author's standing. A value outside KnownAssociation's
+	// vocabulary arrives as "".
 	Association string
 }
 
@@ -44,6 +45,19 @@ func CommentTrusted(c Comment) bool {
 		return true
 	}
 	return false
+}
+
+// KnownAssociation keeps an author_association from the vocabulary core
+// understands; anything else becomes "", the no-standing value, rather than
+// failing the read, so a Connector cannot mint trust with an invented value.
+// It lives beside CommentTrusted so the two vocabularies cannot drift apart.
+func KnownAssociation(a string) string {
+	switch a {
+	case "OWNER", "MEMBER", "COLLABORATOR", "CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR",
+		"FIRST_TIMER", "MANNEQUIN", "NONE":
+		return a
+	}
+	return ""
 }
 
 // CommentLister is the optional IssueTracker interface for adapters that can

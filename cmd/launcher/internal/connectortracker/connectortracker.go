@@ -384,7 +384,9 @@ type commentsLayer struct {
 
 func (l commentsLayer) Unwrap() forge.IssueTracker { return l.IssueTracker }
 
-// Comments returns the comments oldest first, as the Connector reports them.
+// Comments returns the comments oldest first. A comment with an empty or
+// control-character author, or an unparseable createdAt, fails the read; an
+// association outside forge.KnownAssociation's vocabulary is blanked.
 func (l commentsLayer) Comments(num string) ([]forge.Comment, error) {
 	var res struct {
 		Comments []wireComment `json:"comments"`
@@ -402,7 +404,7 @@ func (l commentsLayer) Comments(num string) ([]forge.Comment, error) {
 		}
 		comments[i] = forge.Comment{
 			Author: c.Author, CreatedAt: c.CreatedAt, Body: c.Body,
-			Minimized: c.Minimized, MinimizedReason: c.MinimizedReason, Association: knownAssociation(c.Association),
+			Minimized: c.Minimized, MinimizedReason: c.MinimizedReason, Association: forge.KnownAssociation(c.Association),
 		}
 		if c.ResearchMarker {
 			comments[i].Body = forge.ResearchMarker + "\n" + c.Body
@@ -1227,18 +1229,6 @@ func checkLabels(labels []string) error {
 		}
 	}
 	return nil
-}
-
-// knownAssociation keeps an author_association from the vocabulary core
-// understands; anything else becomes "", the no-standing value, rather than
-// failing the read, so a Connector cannot mint trust with an invented value.
-func knownAssociation(a string) string {
-	switch a {
-	case "OWNER", "MEMBER", "COLLABORATOR", "CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR",
-		"FIRST_TIMER", "MANNEQUIN", "NONE":
-		return a
-	}
-	return ""
 }
 
 // HostOf is the host[:port] of a tracker's base URL, for Lifecycle.WebHost;
