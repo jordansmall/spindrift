@@ -401,7 +401,7 @@ func TestComments_MapsEveryField(t *testing.T) {
 	want := []tracker.Comment{
 		{Author: "alice", CreatedAt: "2026-01-02T03:04:05Z", Body: "live", Association: "MEMBER"},
 		{Author: "bob", CreatedAt: "2026-01-03T04:05:06Z", Body: "noise\n<!-- spindrift-research -->", Minimized: true, MinimizedReason: "SPAM", Association: "NONE"},
-		{Author: "", CreatedAt: "2026-01-04T05:06:07Z", Body: "orphan", Association: "CONTRIBUTOR"},
+		{Author: "ghost", CreatedAt: "2026-01-04T05:06:07Z", Body: "orphan", Association: "CONTRIBUTOR"},
 	}
 	if !reflect.DeepEqual(comments, want) {
 		t.Fatalf("comments = %#v", comments)
