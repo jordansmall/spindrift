@@ -19,6 +19,7 @@ import (
 	"spindrift.dev/launcher/internal/bundleout"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/homelayout"
@@ -552,15 +553,9 @@ func (r *boxRun) pass(handoff, driverName, prompt, sessionMode string) (int, err
 	if err != nil {
 		return 0, phaseErr("driver", err)
 	}
-	sessionArgs := ""
-	if len(argv) > 0 {
-		// A JSON array, not a joined string: driver-exec appends each word as
-		// one argv element, so a value with spaces survives.
-		b, err := json.Marshal(argv)
-		if err != nil {
-			return 0, phaseErr("driver", err)
-		}
-		sessionArgs = string(b)
+	sessionArgs, err := driverkit.EncodeSessionArgs(argv)
+	if err != nil {
+		return 0, phaseErr("driver", err)
 	}
 	sessionFile, err := writeTemp("box-session-", sessionArgs)
 	if err != nil {

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,6 +9,8 @@ import (
 
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
+	"spindrift.dev/launcher/internal/driver/opencode"
+	"spindrift.dev/launcher/internal/driver/pi"
 	"spindrift.dev/launcher/internal/promptassembly"
 )
 
@@ -492,15 +493,16 @@ func TestSessionAnswerReachesAgentArgv(t *testing.T) {
 			[]string{"-p", "do it", "--model", "m", "--session-id", uuid}},
 		{"claude resume", "claude", claudeShape, driverkit.SessionFlag{},
 			[]string{"-p", "do it", "--model", "m"}},
-		{"opencode initial", "opencode", opencodeShape, driverkit.SessionFlag{Flag: "--title", Value: title},
+		{"opencode initial", "opencode", opencodeShape, opencode.SessionFlags("initial", "o/r", "7", ""),
 			[]string{"-m", "m", "--title", title, "do it"}},
 		{"opencode resume", "opencode", opencodeShape, driverkit.SessionFlag{Flag: "--session", Value: "ses_x"},
 			[]string{"-m", "m", "--session", "ses_x", "do it"}},
 		{"opencode value with spaces", "opencode", opencodeShape, driverkit.SessionFlag{Flag: "--title", Value: "spindrift-o/r 7 two words"},
 			[]string{"-m", "m", "--title", "spindrift-o/r 7 two words", "do it"}},
-		{"pi initial", "pi", piShape, driverkit.SessionFlag{Flag: "--session-id", Value: uuid},
+		// pi answers the same pin for both modes: --session-id opens or creates.
+		{"pi initial", "pi", piShape, pi.SessionFlags("initial", "o/r", "7", ""),
 			[]string{"--model", "m", "--session-id", uuid, "do it"}},
-		{"pi resume", "pi", piShape, driverkit.SessionFlag{Flag: "--session-id", Value: uuid},
+		{"pi resume", "pi", piShape, pi.SessionFlags("resume", "o/r", "7", ""),
 			[]string{"--model", "m", "--session-id", uuid, "do it"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -508,13 +510,9 @@ func TestSessionAnswerReachesAgentArgv(t *testing.T) {
 			if err != nil {
 				t.Fatalf("SessionArgs: %v", err)
 			}
-			session := ""
-			if len(argv) > 0 {
-				b, err := json.Marshal(argv)
-				if err != nil {
-					t.Fatal(err)
-				}
-				session = string(b)
+			session, err := driverkit.EncodeSessionArgs(argv)
+			if err != nil {
+				t.Fatal(err)
 			}
 			dir := t.TempDir()
 			promptFile := filepath.Join(dir, "prompt.txt")
