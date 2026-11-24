@@ -23,15 +23,15 @@ type HostMediationHarness struct {
 
 // NewHostMediation loads the full-capability fixture PR Connector and composes
 // it.
-func NewHostMediation(t *testing.T) *HostMediationHarness {
+func NewHostMediation(t *testing.T, opts ...Option) *HostMediationHarness {
 	t.Helper()
-	return NewHostMediationVariant(t, PRWasm)
+	return NewHostMediationVariant(t, PRWasm, opts...)
 }
 
 // NewHostMediationVariant is NewHostMediation over the named fixture wasm file.
-func NewHostMediationVariant(t *testing.T, wasm string) *HostMediationHarness {
+func NewHostMediationVariant(t *testing.T, wasm string, opts ...Option) *HostMediationHarness {
 	t.Helper()
-	b := newBase(t, inProcess, fixtureConnector(t, wasm, prMethods))
+	b := newBase(t, inProcess, fixtureConnector(t, wasm, prMethods), opts...)
 	return &HostMediationHarness{base: b, fake: forge.NewFake(), relayedSHA: map[string]string{}, prSeq: 100}
 }
 
