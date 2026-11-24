@@ -212,6 +212,7 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, rep *doctor.
 		RuntimeProbe:     runtimePrerequisiteProbe(c),
 		MergePolicy:      c.MergeMode,
 		BaseBranch:       c.BaseBranch,
+		RepoSlug:         c.RepoSlug,
 	}, rep, bufio.NewScanner(stdin), interactive, extraChecks); err != nil {
 		return err
 	}

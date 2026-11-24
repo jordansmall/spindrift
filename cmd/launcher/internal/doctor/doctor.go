@@ -217,6 +217,10 @@ type Config struct {
 	// BaseBranch is the branch the branch-protection row queries (BASE_BRANCH,
 	// default "main").
 	BaseBranch string
+
+	// RepoSlug is the configured Target repo (REPO_SLUG). Empty skips the
+	// repo-name row.
+	RepoSlug string
 }
 
 // Run probes the issue tracker and code forge, then checks every work-tier and
@@ -237,6 +241,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 
 	// These rows fail fast. Each Probe returns the repo slug so SuccessMsg can
 	// name it.
+	var forgeRepo string // the code-forge probe's answer, read by the repo-name row
 	connectivityChecks := []Check{
 		{
 			Name: "issue-tracker",
@@ -279,6 +284,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 					}
 					return nil, fmt.Errorf("%w: code forge connectivity check failed: %w", ErrConnectivity, err)
 				}
+				forgeRepo = repo
 				return repo, nil
 			},
 			SuccessMsg: func(output any) string {
@@ -329,6 +335,14 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 		return WithRemedy(results[len(results)-1])
 	}
 	rep.Results(results)
+
+	// Only a PR forge's Probe answers a canonical slug. Push-only forges don't:
+	// the git and local forges return a remote URL or path, and the Connector
+	// push-only forge echoes the configured slug back, so the row would
+	// false-warn or never fire.
+	if forgeRepo != "" && c.RepoSlug != "" && caps.PRForge != nil {
+		repoStateChecks = append(repoStateChecks, RepoNameCheck(forgeRepo, c.RepoSlug))
+	}
 
 	// A blocking repository-state failure is reported inline, unlike the failing
 	// connectivity row above: the report continues past it, so suppressing the
