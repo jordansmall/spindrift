@@ -16,6 +16,7 @@ import (
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
+	"spindrift.dev/launcher/internal/gitexec"
 )
 
 func TestComposedForgePRForgeContract(t *testing.T) {
@@ -183,10 +184,10 @@ func TestFullCapabilityForgeHostMediatesWithCoresCredential(t *testing.T) {
 	if err != nil {
 		t.Fatalf("git shim never ran with a credential: %v", err)
 	}
-	if !strings.Contains(string(log), h.Credential.Username+":"+h.Credential.Password) {
+	if !strings.Contains(string(log), h.Credential.Username+":"+secretOf(t, h.Credential)) {
 		t.Errorf("git ran without core's credential: %q", log)
 	}
-	if strings.Contains(h.Audit.String(), h.Credential.Password) {
+	if strings.Contains(h.Audit.String(), secretOf(t, h.Credential)) {
 		t.Error("the Connector's audit log carries core's git credential")
 	}
 
@@ -196,7 +197,7 @@ func TestFullCapabilityForgeHostMediatesWithCoresCredential(t *testing.T) {
 	forgetest.Run(t, src, "commit", "-m", "more")
 	if err := caps.BranchPusher.PushBranch(src, "work", branch, "main"); err == nil {
 		t.Error("second PushBranch onto the same branch succeeded, want create-only refusal")
-	} else if strings.Contains(err.Error(), h.Credential.Password) {
+	} else if strings.Contains(err.Error(), secretOf(t, h.Credential)) {
 		t.Errorf("PushBranch error leaks the credential: %v", err)
 	}
 
@@ -256,7 +257,7 @@ func TestBoxRelaysAndOpensTheDraftWithoutTheConnectorSeeingGit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("git shim never ran with a credential: %v", err)
 	}
-	if !strings.Contains(string(log), h.Credential.Username+":"+h.Credential.Password) {
+	if !strings.Contains(string(log), h.Credential.Username+":"+secretOf(t, h.Credential)) {
 		t.Errorf("relay's git ran without core's credential: %q", log)
 	}
 	if n := h.Backend.Requests() - before; n != 0 || h.Audit.Len() != 0 {
@@ -280,7 +281,7 @@ func TestBoxRelaysAndOpensTheDraftWithoutTheConnectorSeeingGit(t *testing.T) {
 	if n := h.Backend.Requests() - before; n != 1 {
 		t.Errorf("backend saw %d requests, want only the openPR POST", n)
 	}
-	if strings.Contains(h.Audit.String(), h.Credential.Password) {
+	if strings.Contains(h.Audit.String(), secretOf(t, h.Credential)) {
 		t.Error("the Connector's audit log carries core's git credential")
 	}
 }
@@ -337,7 +338,7 @@ func TestSeedMirrorClonesTheRepoBareWithCoresCredential(t *testing.T) {
 		t.Errorf("mirror main = %s, want %s", got, want)
 	}
 	log, err := os.ReadFile(seen)
-	if err != nil || !strings.Contains(string(log), h.Credential.Username+":"+h.Credential.Password) {
+	if err != nil || !strings.Contains(string(log), h.Credential.Username+":"+secretOf(t, h.Credential)) {
 		t.Errorf("seed's git ran without core's credential: (%q, %v)", log, err)
 	}
 }
@@ -372,7 +373,7 @@ func TestRelayCloneFailureNamesGitsCauseWithoutTheCredential(t *testing.T) {
 	if !strings.Contains(err.Error(), "fatal") {
 		t.Errorf("error %q does not name git's cause", err)
 	}
-	if strings.Contains(err.Error(), h.Credential.Password) {
+	if strings.Contains(err.Error(), secretOf(t, h.Credential)) {
 		t.Errorf("error %q carries core's credential", err)
 	}
 }
@@ -387,7 +388,18 @@ func TestSeedMirrorFailureNamesGitsCauseWithoutTheCredential(t *testing.T) {
 	if !strings.Contains(err.Error(), "fatal") {
 		t.Errorf("error %q does not name git's cause", err)
 	}
-	if strings.Contains(err.Error(), h.Credential.Password) {
+	if strings.Contains(err.Error(), secretOf(t, h.Credential)) {
 		t.Errorf("error %q carries core's credential", err)
 	}
+}
+
+// secretOf is the credential's password for a leak guard. An env-backed
+// credential carries none, and Contains(x, "") is always true, so it fails the
+// test rather than let the guard pass vacuously.
+func secretOf(t *testing.T, c gitexec.Credential) string {
+	t.Helper()
+	if c.Password == "" {
+		t.Fatal("credential carries no password to guard against leaking")
+	}
+	return c.Password
 }

@@ -145,6 +145,14 @@ func (h *AuthHandler) Requests() []Request {
 	return append([]Request(nil), h.reqs...)
 }
 
+// SetPassword changes the password the handler accepts from now on, as a forge
+// does when its token is rotated.
+func (h *AuthHandler) SetPassword(pass string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.pass = pass
+}
+
 func (h *AuthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	_, pass, _ := r.BasicAuth()
@@ -153,9 +161,12 @@ func (h *AuthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if redirect(w, r, h.Redirects) {
 		return
 	}
+	h.mu.Lock()
+	wantPass := h.pass
+	h.mu.Unlock()
 	u, p, ok := r.BasicAuth()
 	if !ok || subtle.ConstantTimeCompare([]byte(u), []byte(h.user)) != 1 ||
-		subtle.ConstantTimeCompare([]byte(p), []byte(h.pass)) != 1 {
+		subtle.ConstantTimeCompare([]byte(p), []byte(wantPass)) != 1 {
 		w.Header().Set("WWW-Authenticate", `Basic realm="gitexectest"`)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
