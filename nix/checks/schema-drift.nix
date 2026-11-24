@@ -1,6 +1,8 @@
 # Every committed generated artifact must stay in sync with its schema source.
 # These guards share their renderers with `nix run .#regen` via
-# lib/renderers.nix, so a guard and the regenerator cannot drift (issue #402).
+# lib/renderers.nix (the connector-protocol checks, via
+# lib/connector-protocol/render.nix), so a guard and the regenerator cannot
+# drift (issue #402).
 {
   pkgs,
   fixtures,
@@ -12,6 +14,8 @@
 let
   inherit (fixtures) harness;
   renderers = import ../../lib/renderers.nix;
+  connectorProtocol = import ../../lib/connector-protocol;
+  connectorProtocolRender = import ../../lib/connector-protocol/render.nix;
   driverRegistry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
   inherit (import ../../lib/driver-map.nix) placedPath exampleDriver;
   schema = import ../../lib/env-schema.nix;
@@ -626,6 +630,101 @@ checkedMerge {
     assert assertMsg (!(render setsPassRoles).success)
       "dispatch-kinds-default-count (issue #5668): renderDispatchKindsGo must reject a row that sets the renderer-supplied passRoles, but it rendered successfully";
     pkgs.runCommand "dispatch-kinds-default-count" { } "touch $out";
+
+  # Regenerate with `nix run .#regen` when lib/connector-protocol/*.nix changes
+  # (issue #7504).
+  connector-protocol-gen = mkGofmtDriftCheck {
+    name = "connector-protocol-gen";
+    rendered = connectorProtocolRender.renderGo connectorProtocol;
+    committedPath = "cmd/launcher/internal/connectorprotocol/protocol_gen.go";
+    source = "lib/connector-protocol/*.nix";
+  };
+
+  # regen writes the schema verbatim, so a byte diff is the exact freshness test.
+  connector-protocol-schema-gen =
+    pkgs.runCommand "connector-protocol-schema-gen"
+      {
+        rendered = pkgs.writeText "protocol.schema.json" (
+          connectorProtocolRender.renderSchema connectorProtocol
+        );
+        committed = ../../cmd/launcher/internal/connectorprotocol/protocol.schema.json;
+      }
+      ''
+        diff -u "$committed" "$rendered" \
+          || { echo "cmd/launcher/internal/connectorprotocol/protocol.schema.json is out of sync with lib/connector-protocol/*.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
+        touch $out
+      '';
+
+  # The renderers validate the description (issue #7504), so each rejection
+  # needs a real description that renders first, else a negative is vacuous.
+  # deepSeq forces both rendered strings inside tryEval: a throw hidden in a
+  # lazy part would otherwise escape it.
+  connector-protocol-rows =
+    let
+      inherit (pkgs.lib) assertMsg imap0 splitString;
+      render =
+        d:
+        builtins.tryEval (
+          builtins.deepSeq [
+            (connectorProtocolRender.renderGo d)
+            (connectorProtocolRender.renderSchema d)
+          ] true
+        );
+      tweakFirst =
+        f:
+        connectorProtocol
+        // {
+          methods = imap0 (i: m: if i == 0 then f m else m) connectorProtocol.methods;
+        };
+      rejects =
+        what: d:
+        assertMsg (!(render d).success)
+          "connector-protocol-rows (issue #7504): the renderers must reject ${what}, but they rendered it successfully";
+      first = builtins.head connectorProtocol.methods;
+      axis = builtins.head (splitString "." first.name);
+    in
+    assert assertMsg (render connectorProtocol).success
+      "connector-protocol-rows (issue #7504): the real lib/connector-protocol description must render with both renderers, but it failed -- the guard would be vacuous";
+    assert rejects "a method missing resultCheck" (tweakFirst (m: removeAttrs m [ "resultCheck" ]));
+    assert rejects "a method missing retry" (tweakFirst (m: removeAttrs m [ "retry" ]));
+    assert rejects "a method missing capability" (tweakFirst (m: removeAttrs m [ "capability" ]));
+    assert rejects "a method with a misspelled field" (
+      tweakFirst (m: m // { resultcheck = "decode"; })
+    );
+    assert rejects "a method naming an undeclared capability" (
+      tweakFirst (m: m // { capability = "${axis}.nonesuch"; })
+    );
+    assert rejects "a method with an unknown resultCheck" (
+      tweakFirst (m: m // { resultCheck = "nonesuch"; })
+    );
+    assert rejects "a method whose doneOn names an unknown class" (
+      tweakFirst (
+        m:
+        m
+        // {
+          retry = {
+            safe = true;
+            doneOn = [ "nonesuch" ];
+          };
+        }
+      )
+    );
+    assert rejects "a doneOn on a method that is not retry-safe" (
+      tweakFirst (
+        m:
+        m
+        // {
+          retry = {
+            safe = false;
+            doneOn = [ "not-found" ];
+          };
+        }
+      )
+    );
+    assert rejects "a duplicate method name" (
+      connectorProtocol // { methods = connectorProtocol.methods ++ [ first ]; }
+    );
+    pkgs.runCommand "connector-protocol-rows" { } "touch $out";
 
   # A family row carries its own run-document keys (ADR 0069 decision 7), so a
   # stub row with a made-up key must reach both the rendered artifacts and the
