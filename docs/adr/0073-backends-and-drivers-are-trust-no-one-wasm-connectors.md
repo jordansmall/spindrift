@@ -925,21 +925,23 @@ absorbs. Deleting the native path on shadow evidence alone would be the first
 time anything depended on the Connector.
 
 Primary mode is the row option `spindrift.connectors.<name>.primary`, off by
-default and exclusive with `shadow`. The Connector answers every read the native
-backend would, so cut-over (#6811) can delete the native read path; writes stay
-native (amended by issue #7127: only on github, see the amendment below). There is no fallback to the native read. A failure that fell back would be invisible, so
-a Connector that fails to load, or a request its Route table refuses, fails the
-read with its own error and is recorded: a per-process
-`primary-<backend>-<stamp>-<pid>.audit.jsonl` of Connector audit lines (plus a
-sandbox totals line with no decision, #7116) and a `.log` of failed reads
-(amended by issue #7127: jira's `.log` records every failed operation; amended
-by issue #7128: a primary forgejo row builds its whole Code Forge, writes
-included, from the Connector and appends refusals to one
+default and exclusive with `shadow`. The Connector answers every read the
+native backend would, so cut-over (#6811) can delete the native read path;
+writes stay native (amended by issue #7127: only on github, see the amendment
+below). There is no fallback to the native read. A failure that fell back
+would be invisible, so a Connector that fails to load, or a request its
+Route table refuses, fails the read with its own error and is recorded:
+a per-process `primary-<backend>-<stamp>-<pid>.audit.jsonl` of Connector
+audit lines (plus a sandbox totals line with no decision, #7116) and a `.log`
+of failed reads (amended by issue #7127: jira's `.log` records every failed
+operation; amended by issue #7128: a primary forgejo row builds its whole
+Code Forge, writes included, from the Connector and appends refusals to one
 `connector-forgejo.audit.jsonl`, with no failed-call log; its tracker stays
-native). The stage is reversible by dropping `primary` from the row, with no
-code revert (amended by issue #7139: not on github, whose row routes through
-the Connector with or without `primary`, see the amendment below), and
-dogfood runs github there first.
+native; amended by issue #7461: forgejo writes the shared per-process pair,
+failed calls included, see the amendment below). The stage is reversible by
+dropping `primary` from the row, with no code revert (amended by issue #7139:
+not on github, whose row routes through the Connector with or without `primary`,
+see the amendment below), and dogfood runs github there first.
 
 The bars become: a shadow moves to primary after 20 consecutive clean shadow
 runs, and primary cuts over (#6811, which deletes the native github read path)
@@ -1405,3 +1407,17 @@ Built-in `local` and `git` backends. The generic backend read shadow has no
 native adapter left to serve. The in-box half (the Box token, the in-box forge
 CLI and forgejo-cli) stays until #6757; an `ISSUE_TRACKER=forgejo` run now
 needs `SPINDRIFT_FORGEJO_CONNECTOR_TOKEN`.
+
+## Amendment (issue #7461): an unopenable audit file fails the load
+
+Opening a backend row's `primary-<backend>-<stamp>-<pid>.audit.jsonl` is part
+of loading its Connector, so a file that cannot be opened fails the load with
+its path, before the Connector sends any request. Until now github and jira
+dropped the open error and forgejo printed one stderr line, and each ran
+unrecorded on a discarding writer. No path substitutes one now, and the loader
+takes no writer to be handed one. forgejo's fixed
+`connector-forgejo.audit.jsonl` is gone: it writes the same per-process pair as
+github and jira, and its `.log` records a failed tracker or Code Forge call by
+guest RPC method, a failed load as `load the Connector`, and a failed Code
+Forge compose. Like github, it records no lost claim race, so an empty `.log`
+marks a clean run.

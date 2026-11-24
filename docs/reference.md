@@ -2858,7 +2858,9 @@ evaluates unchanged.
 - There is no fallback. A Connector that fails to
   load, or a request its Route table refuses, fails the operation with the
   Connector's own error, and the native adapter never answers instead. The
-  Connector's audit lines go to `.spindrift/logs/connector-forgejo.audit.jsonl`.
+  Connector writes the same per-process record pair as github and jira
+  (`primary-forgejo-<stamp>-<pid>`, see [Backend primary
+  mode](#backend-primary-mode)): its audit lines and its failed calls.
 - Every tracker operation goes through the Connector: reads,
   the claim and every transition, label edits and creation, comments (the
   agent-facing and the host-posted ones), filed findings, and native
@@ -3292,7 +3294,10 @@ with or without those signals.
 Each launcher process writes its own record pair under `.spindrift/logs/`, the
 directory CI uploads, once it makes its first primary read (a daemon writes one
 pair for its whole life). The stem is `primary-<backend>-<UTC stamp>-<pid>`,
-with the stamp as `20060102T150405Z`:
+with the stamp as `20060102T150405Z`. Opening `<stem>.audit.jsonl` is part of
+loading the Connector: a file that cannot be opened, in an unwritable log
+directory say, fails the load with an error naming its path, before the
+Connector sends any request, so a run never proceeds unrecorded.
 
 - `<stem>.audit.jsonl` holds the Connector's [audit lines](#connector-protocol),
   token introspection's included. `"decision":"refused"` marks a request the
@@ -3309,15 +3314,19 @@ with the stamp as `20060102T150405Z`:
   hosts.
 - `<stem>.log` gets one JSON line, `{"op":"<verb>","error":"<err>"}`, per
   failed routed read or write (`op` is its verb, such as `count demand`), a load
-  failure included; doctor and daemon reads record the same way. A github claim
-  that loses its race (`forge.ErrAlreadyClaimed`) is an expected outcome, not a
-  failure, and is not recorded. A github read that replaces a Connector a failed
+  failure included; doctor and daemon reads record the same way. A github or
+  forgejo claim that loses its race (`forge.ErrAlreadyClaimed`) is an expected
+  outcome, not a failure, and is not recorded, so an empty `.log` still marks
+  a clean run. A github read that replaces a Connector a failed
   call closed adds
   `{"op":"reload the Connector","error":"<that failure>"}`. A jira row records
   every failed operation, a write included, with `op` the guest RPC method
   (such as `tracker.list` or `tracker.transition`) and `load the Connector` for
   a first-load failure; a failed reload is recorded under the method that
-  needed it, with no `reload the Connector` line. A record that
+  needed it, with no `reload the Connector` line. A forgejo row records the
+  same way for its tracker and its Code Forge (such as `forge.probe`), plus
+  `compose the Code Forge` when a loaded Connector cannot be composed into a
+  Code Forge. A record that
   cannot be written goes to stderr. A process whose reads all succeeded writes
   none.
 
