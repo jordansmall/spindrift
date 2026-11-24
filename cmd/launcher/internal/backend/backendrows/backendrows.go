@@ -301,6 +301,28 @@ type Options struct {
 	Client *http.Client
 }
 
+// Authorizer returns the function that attaches the row's credential to an
+// admitted request. It reads getenv at each request, so a rotated token reaches
+// the next one, and a missing credential fails the request before it is sent.
+func (row Row) Authorizer(getenv func(string) string) func(*http.Request) error {
+	return func(r *http.Request) error {
+		token := getenv(row.CredentialEnv)
+		if token == "" {
+			return errors.New(row.CredentialEnv + " is not set")
+		}
+		if row.CredentialScheme == SchemeBasic {
+			identity := getenv(row.IdentityEnv)
+			if identity == "" {
+				return errors.New(row.IdentityEnv + " is not set")
+			}
+			r.SetBasicAuth(identity, token)
+			return nil
+		}
+		r.Header.Set("Authorization", "Bearer "+token)
+		return nil
+	}
+}
+
 // Load compiles the row's module as a network Connector bound to its Route
 // table. The credential is read at each request, not at load, and a missing one
 // fails the request before it is sent.
@@ -320,26 +342,11 @@ func Load(ctx context.Context, row Row, o Options) (*connectorhost.Connector, er
 		return nil, fmt.Errorf("backend %q: read module: %w", row.Name, err)
 	}
 	return connectorsandbox.LoadNetwork(ctx, wasm, connectorhost.Network{
-		Name:   row.Name,
-		Routes: row.Routes,
-		Authorize: func(r *http.Request) error {
-			token := getenv(row.CredentialEnv)
-			if token == "" {
-				return errors.New(row.CredentialEnv + " is not set")
-			}
-			if row.CredentialScheme == SchemeBasic {
-				identity := getenv(row.IdentityEnv)
-				if identity == "" {
-					return errors.New(row.IdentityEnv + " is not set")
-				}
-				r.SetBasicAuth(identity, token)
-				return nil
-			}
-			r.Header.Set("Authorization", "Bearer "+token)
-			return nil
-		},
-		Client: o.Client,
-		Audit:  connectorhost.NewAuditLog(audit),
+		Name:      row.Name,
+		Routes:    row.Routes,
+		Authorize: row.Authorizer(getenv),
+		Client:    o.Client,
+		Audit:     connectorhost.NewAuditLog(audit),
 	})
 }
 

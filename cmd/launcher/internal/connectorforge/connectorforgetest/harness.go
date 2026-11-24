@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectortracker"
@@ -127,6 +128,7 @@ type Backend struct {
 	mu       sync.Mutex
 	clone    string
 	web      string
+	token    string
 	failures []int
 	branch   int
 	remotes  int
@@ -178,12 +180,31 @@ func (b *Backend) RemoteRequests() int {
 	return b.remotes
 }
 
+// SetToken makes the backend refuse any request that does not carry token, as
+// the Connector's bearer or as git's basic-auth password, from now on. It is
+// how a test rotates the credential the backend accepts mid-run.
+func (b *Backend) SetToken(token string) {
+	b.mu.Lock()
+	b.token = token
+	g := b.gitHandler
+	b.mu.Unlock()
+	if g != nil {
+		g.SetPassword(token)
+	}
+}
+
 func (b *Backend) serve(w http.ResponseWriter, r *http.Request) {
 	b.mu.Lock()
 	b.prs.requests++
 	gitHandler := b.gitHandler
+	token := b.token
 	b.mu.Unlock()
-	if gitHandler != nil && strings.HasPrefix(r.URL.Path, "/"+path.Dir(Repo)+"/") {
+	isGit := gitHandler != nil && strings.HasPrefix(r.URL.Path, "/"+path.Dir(Repo)+"/")
+	if token != "" && !isGit && r.Header.Get("Authorization") != "Bearer "+token {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if isGit {
 		gitHandler.ServeHTTP(w, r)
 		return
 	}
@@ -263,20 +284,26 @@ var (
 
 // load starts a backend and loads the Connector against it, its declared routes
 // rebound to the backend's host.
-func load(t *testing.T, eng Engine, bare string, c Connector) *stack {
+func load(t *testing.T, eng Engine, bare string, c Connector, tokenEnv string) *stack {
 	t.Helper()
 	b := newBackend(t, bare)
 	b.script = c.Script
 	audit := &bytes.Buffer{}
+	authorizer := func(r *http.Request) error {
+		r.Header.Set("Authorization", "Bearer "+Token)
+		return nil
+	}
+	if tokenEnv != "" {
+		// The production authorizer, so the rotation test exercises the
+		// read-at-use the launcher ships rather than a copy of it.
+		authorizer = backendrows.Row{CredentialEnv: tokenEnv}.Authorizer(os.Getenv)
+	}
 	conn, err := eng(context.Background(), c.Wasm, connectorhost.Network{
-		Name:   "fixture-forge",
-		Routes: c.BoundRoutes(b.Host),
-		Authorize: func(r *http.Request) error {
-			r.Header.Set("Authorization", "Bearer "+Token)
-			return nil
-		},
-		Client: b.Client(),
-		Audit:  connectorhost.NewAuditLog(audit),
+		Name:      "fixture-forge",
+		Routes:    c.BoundRoutes(b.Host),
+		Authorize: authorizer,
+		Client:    b.Client(),
+		Audit:     connectorhost.NewAuditLog(audit),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -335,14 +362,20 @@ func newBase(t *testing.T, eng Engine, c Connector, opts ...Option) *base {
 	t.Setenv("GIT_COMMITTER_EMAIL", "bot@example.com")
 
 	repo := forgetest.NewGitRepoFixture(t, "main")
-	s := load(t, eng, repo.Bare, c)
+	s := load(t, eng, repo.Bare, c, o.tokenEnv)
+	user, pass := "bot", "git-secret"
+	cred := gitexec.Credential{Username: user, Password: pass}
+	if o.tokenEnv != "" {
+		pass, cred = os.Getenv(o.tokenEnv), gitexec.EnvCredential(user, o.tokenEnv)
+		s.backend.SetToken(pass)
+	}
 	h := &base{
 		t: t, eng: eng, connector: c, Repo: repo, Backend: s.backend, Conn: s.conn, Audit: s.audit, target: s.target,
-		Credential: gitexec.Credential{Username: "bot", Password: "git-secret"},
+		Credential: cred,
 	}
 	if o.gitOverHTTPS {
 		t.Setenv("GIT_CONFIG_COUNT", "0")
-		g := gitexectest.ServeTLS(t, s.backend.Server, Repo+".git", repo.Bare, h.Credential.Username, h.Credential.Password)
+		g := gitexectest.ServeTLS(t, s.backend.Server, Repo+".git", repo.Bare, user, pass)
 		s.backend.mu.Lock()
 		s.backend.gitHandler = g
 		s.backend.mu.Unlock()
@@ -440,7 +473,7 @@ func (h *Harness) Forge() forge.CodeForge { return h.cf }
 // Unreachable composes against a second backend, then closes it so Probe fails.
 func (h *Harness) Unreachable() forge.CodeForge {
 	h.t.Helper()
-	s := load(h.t, h.eng, h.Repo.Bare, h.connector)
+	s := load(h.t, h.eng, h.Repo.Bare, h.connector, "")
 	cf, _, err := connectorforge.Compose(s.conn, s.target, h.git())
 	if err != nil {
 		h.t.Fatal(err)
