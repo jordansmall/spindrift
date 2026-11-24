@@ -16,7 +16,7 @@ import (
 )
 
 // errConnectorCapabilities is a Connector whose handshake omits a method the
-// tracker needs, with nothing behind it to fall back to.
+// tracker needs.
 var errConnectorCapabilities = errors.New("forgejo Connector lacks required capabilities")
 
 // connectorCapabilities are what the forgejo tracker needs, so none silently
@@ -44,7 +44,7 @@ func checkConnectorCapabilities(have []string) error {
 }
 
 // newConnectorTracker builds the issue tracker from row's Connector alone:
-// every read and write goes through it, with no native tracker behind it.
+// every read and write goes through it.
 // Lifecycle policy stays core's. The tracker reloads a dead Connector, so it
 // may live as long as a daemon; the Connector and its audit file live for the
 // process.
@@ -60,7 +60,7 @@ func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (for
 			return nil, err
 		}
 		return conn, nil
-	}, recordFailure, nil, connectortracker.Lifecycle{
+	}, recordFailure, connectortracker.Lifecycle{
 		Labels:        s.Labels,
 		Route:         s.Route,
 		VerdictLabels: s.VerdictLabels,

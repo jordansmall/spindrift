@@ -196,7 +196,7 @@ func TestConnector_UndeclaredTrackerWritesAreRefusedUnsentAndAudited(t *testing.
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			h := newComposedHarness(t)
-			tr, err := connectortracker.New(h.conn, failingWrites{t}, trackerWriteLifecycle,
+			tr, err := connectortracker.New(h.conn, trackerWriteLifecycle,
 				connectortracker.Target{API: h.backend.URL, Repo: hostileRepo}, retry.NoSleepClock())
 			if err != nil {
 				t.Fatal(err)

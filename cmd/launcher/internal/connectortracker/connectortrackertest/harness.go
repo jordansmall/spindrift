@@ -6,8 +6,8 @@
 //
 // The backend models issue reads and, by label name, label writes (POST and
 // DELETE under /issues/{n}/labels); every other write answers 404. The tracker
-// is Connector-only: no native adapter stands behind it, so a core method the
-// Connector does not serve panics rather than reaching a stub.
+// is Connector-only: a core method the Connector does not serve fails with
+// connectorhost.ErrProtocolUnsupported.
 package connectortrackertest
 
 import (
@@ -262,7 +262,7 @@ func New(t *testing.T, c connectorforgetest.Connector) forgetest.Harness {
 	}
 	t.Cleanup(func() { _ = conn.Close(context.Background()) })
 	h.Conn = conn
-	h.tr, err = connectortracker.New(conn, nil, connectortracker.Lifecycle{Labels: Labels, VerdictLabels: forge.ResearchVerdictLabels(), WebHost: b.Host},
+	h.tr, err = connectortracker.New(conn, connectortracker.Lifecycle{Labels: Labels, VerdictLabels: forge.ResearchVerdictLabels(), WebHost: b.Host},
 		connectortracker.Target{API: b.URL + apiPath, Repo: Repo}, retry.NoSleepClock())
 	if err != nil {
 		t.Fatal(err)

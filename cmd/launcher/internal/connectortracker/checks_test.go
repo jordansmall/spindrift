@@ -15,9 +15,9 @@ import (
 )
 
 // mustTracker is newTracker for a Connector whose handshake the test controls.
-func mustTracker(t *testing.T, call guestCall, writes forge.IssueTracker, lc Lifecycle, target Target, caps []string, v02 bool) forge.IssueTracker {
+func mustTracker(t *testing.T, call guestCall, lc Lifecycle, target Target, caps []string, v02 bool) forge.IssueTracker {
 	t.Helper()
-	tr, err := newTracker(call, writes, lc, target, caps, v02)
+	tr, err := newTracker(call, lc, target, caps, v02)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,14 +25,11 @@ func mustTracker(t *testing.T, call guestCall, writes forge.IssueTracker, lc Lif
 }
 
 func TestAbsentCheckCapabilitiesStayAbsent(t *testing.T) {
-	call, calls := stubGuest(t, nil)
-	tr := mustTracker(t, call, richNative{newNative()}, testLifecycle, testTarget, nil, true)
+	call, _ := stubGuest(t, nil)
+	tr := mustTracker(t, call, testLifecycle, testTarget, nil, true)
 	c := forge.ResolveCapabilities(nil, tr, backend.Descriptor{}, backend.Descriptor{})
 	if c.DemandCounter != nil || c.IssueTypeChecker != nil || c.StatusMappingChecker != nil || c.StatusCategoryReader != nil {
 		t.Errorf("absent capabilities resolved: %+v", c)
-	}
-	if _, err := tr.Probe(); err != nil || len(*calls) != 0 {
-		t.Errorf("Probe = %v with %d calls; want the native probe and no call", err, len(*calls))
 	}
 }
 
@@ -43,7 +40,7 @@ func TestEachCheckCapabilityAppearsAlone(t *testing.T) {
 		CapStatuses:   {false, false, true, true},
 	} {
 		call, _ := stubGuest(t, map[string]string{"tracker.countInterval": `{"seconds":7}`})
-		tr := mustTracker(t, call, richNative{newNative()}, testLifecycle, testTarget, []string{capName}, true)
+		tr := mustTracker(t, call, testLifecycle, testTarget, []string{capName}, true)
 		c := forge.ResolveCapabilities(nil, tr, backend.Descriptor{}, backend.Descriptor{})
 		got := [4]bool{c.DemandCounter != nil, c.IssueTypeChecker != nil, c.StatusMappingChecker != nil, c.StatusCategoryReader != nil}
 		if got != want {
@@ -78,7 +75,7 @@ func TestProbeStatusMapping(t *testing.T) {
 				}
 				return jsonInto(tc.reply, result)
 			}
-			tr := mustTracker(t, call, newNative(), testLifecycle, testTarget, []string{CapProbe}, true)
+			tr := mustTracker(t, call, testLifecycle, testTarget, []string{CapProbe}, true)
 			got, err := tr.Probe()
 			if tc.wantErr == nil {
 				if err != nil || got != "o/r" {
@@ -101,7 +98,7 @@ func TestStatusesLayer(t *testing.T) {
 		forge.Dispatchable: "Ready", forge.InProgress: "Doing", forge.Complete: "",
 	}}
 	call, calls := stubGuest(t, map[string]string{"tracker.statuses": `{"statuses":["ready","To Do"]}`})
-	tr := mustTracker(t, call, newNative(), lc, testTarget, []string{CapStatuses}, true)
+	tr := mustTracker(t, call, lc, testTarget, []string{CapStatuses}, true)
 	checker, ok := forge.As[forge.StatusMappingChecker](tr)
 	if !ok {
 		t.Fatal("no StatusMappingChecker")
@@ -117,7 +114,7 @@ func TestStatusesLayer(t *testing.T) {
 
 func TestStatusesLayerNothingMappedMakesNoCall(t *testing.T) {
 	call, calls := stubGuest(t, nil)
-	tr := mustTracker(t, call, newNative(), testLifecycle, testTarget, []string{CapStatuses}, true)
+	tr := mustTracker(t, call, testLifecycle, testTarget, []string{CapStatuses}, true)
 	checker, _ := forge.As[forge.StatusMappingChecker](tr)
 	missing, err := checker.CheckMappedStatuses()
 	if err != nil || missing != nil || len(*calls) != 0 {
@@ -153,7 +150,7 @@ func TestStatusCategoryReader(t *testing.T) {
 				lc.Statuses = map[forge.DispatchState]string{tc.state: tc.mapped}
 			}
 			call, calls := stubGuest(t, map[string]string{"tracker.statuses": tc.reply})
-			tr := mustTracker(t, call, newNative(), lc, testTarget, []string{CapStatuses}, true)
+			tr := mustTracker(t, call, lc, testTarget, []string{CapStatuses}, true)
 			r, ok := forge.As[forge.StatusCategoryReader](tr)
 			if !ok {
 				t.Fatal("no StatusCategoryReader")
@@ -174,7 +171,7 @@ func TestStatusCategoryReaderReachableFromResolvedDemandCounter(t *testing.T) {
 		"tracker.statuses":      `{"statuses":["Closed"],"categories":{"Closed":"done"}}`,
 		"tracker.countInterval": `{"seconds":7}`,
 	})
-	tr := mustTracker(t, call, richNative{newNative()}, lc, testTarget, []string{CapCount, CapStatuses}, true)
+	tr := mustTracker(t, call, lc, testTarget, []string{CapCount, CapStatuses}, true)
 	c := forge.ResolveCapabilities(nil, tr, backend.Descriptor{}, backend.Descriptor{})
 	it, ok := c.DemandCounter.(forge.IssueTracker)
 	if !ok {
@@ -192,7 +189,7 @@ func TestStatusCategoryReaderReachableFromResolvedDemandCounter(t *testing.T) {
 func TestStatusCategoryReaderCallError(t *testing.T) {
 	lc := Lifecycle{Labels: testLabels, Statuses: map[forge.DispatchState]string{forge.Complete: "Closed"}}
 	call, _ := stubGuest(t, nil)
-	tr := mustTracker(t, call, newNative(), lc, testTarget, []string{CapStatuses}, true)
+	tr := mustTracker(t, call, lc, testTarget, []string{CapStatuses}, true)
 	r, _ := forge.As[forge.StatusCategoryReader](tr)
 	if got, err := r.MappedStatusCategory(forge.Complete); err == nil || got != "" {
 		t.Errorf("= %q, %v; want the call error", got, err)
@@ -207,7 +204,7 @@ func TestCreateMetaLayer(t *testing.T) {
 		{"fieldId":"customfield_2","name":"Env","required":true,"hasDefaultValue":true},
 		{"fieldId":"customfield_3","name":"Opt","required":false,"hasDefaultValue":false}]}`
 	call, calls := stubGuest(t, map[string]string{"tracker.createMeta": reply})
-	tr := mustTracker(t, call, newNative(), lc, testTarget, []string{CapCreateMeta}, true)
+	tr := mustTracker(t, call, lc, testTarget, []string{CapCreateMeta}, true)
 	checker, ok := forge.As[forge.IssueTypeChecker](tr)
 	if !ok {
 		t.Fatal("no IssueTypeChecker")
@@ -221,7 +218,7 @@ func TestCreateMetaLayer(t *testing.T) {
 	}
 
 	lc.IssueType = "Epic"
-	tr = mustTracker(t, call, newNative(), lc, testTarget, []string{CapCreateMeta}, true)
+	tr = mustTracker(t, call, lc, testTarget, []string{CapCreateMeta}, true)
 	checker, _ = forge.As[forge.IssueTypeChecker](tr)
 	if _, err := checker.CheckIssueType(); !errors.Is(err, forge.ErrUnknownIssueType) {
 		t.Errorf("err = %v, want ErrUnknownIssueType", err)
@@ -234,7 +231,7 @@ func TestCountLayer(t *testing.T) {
 		"tracker.countInterval": `{"seconds":90}`,
 		"tracker.count":         `{"count":4}`,
 	})
-	tr := mustTracker(t, call, newNative(), lc, testTarget, []string{CapCount}, true)
+	tr := mustTracker(t, call, lc, testTarget, []string{CapCount}, true)
 	dc, ok := forge.As[forge.DemandCounter](tr)
 	if !ok {
 		t.Fatal("no DemandCounter")
@@ -266,7 +263,7 @@ func TestCountLayer(t *testing.T) {
 
 func TestCountLayerNoSelectorMakesNoCall(t *testing.T) {
 	call, calls := stubGuest(t, map[string]string{"tracker.countInterval": `{"seconds":5}`})
-	tr := mustTracker(t, call, newNative(), Lifecycle{}, testTarget, []string{CapCount}, true)
+	tr := mustTracker(t, call, Lifecycle{}, testTarget, []string{CapCount}, true)
 	dc, _ := forge.As[forge.DemandCounter](tr)
 	n, err := dc.CountReady(false)
 	if err != nil || n != 0 || len(*calls) != 1 {
@@ -276,7 +273,7 @@ func TestCountLayerNoSelectorMakesNoCall(t *testing.T) {
 
 func TestCountLayerRefusesNegativeCount(t *testing.T) {
 	call, _ := stubGuest(t, map[string]string{"tracker.countInterval": `{"seconds":5}`, "tracker.count": `{"count":-1}`})
-	tr := mustTracker(t, call, newNative(), testLifecycle, testTarget, []string{CapCount}, true)
+	tr := mustTracker(t, call, testLifecycle, testTarget, []string{CapCount}, true)
 	dc, _ := forge.As[forge.DemandCounter](tr)
 	if _, err := dc.CountReady(false); !errors.Is(err, ErrAnswer) {
 		t.Errorf("err = %v, want ErrAnswer", err)
@@ -285,7 +282,7 @@ func TestCountLayerRefusesNegativeCount(t *testing.T) {
 
 func TestCountIntervalBelowOneSecondRefused(t *testing.T) {
 	call, _ := stubGuest(t, map[string]string{"tracker.countInterval": `{"seconds":0}`})
-	_, err := newTracker(call, newNative(), testLifecycle, testTarget, []string{CapCount}, true)
+	_, err := newTracker(call, testLifecycle, testTarget, []string{CapCount}, true)
 	if !errors.Is(err, ErrAnswer) {
 		t.Errorf("err = %v, want ErrAnswer", err)
 	}
@@ -293,7 +290,7 @@ func TestCountIntervalBelowOneSecondRefused(t *testing.T) {
 
 func TestCountIntervalOverflowRefused(t *testing.T) {
 	call, _ := stubGuest(t, map[string]string{"tracker.countInterval": `{"seconds":10000000000}`})
-	_, err := newTracker(call, newNative(), testLifecycle, testTarget, []string{CapCount}, true)
+	_, err := newTracker(call, testLifecycle, testTarget, []string{CapCount}, true)
 	if !errors.Is(err, ErrAnswer) {
 		t.Errorf("err = %v, want ErrAnswer", err)
 	}
@@ -317,7 +314,7 @@ func TestPriorClaimLayer(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			call, calls := stubGuest(t, map[string]string{"tracker.removedLabels": `{"labels":` + tc.removed + `}`})
-			tr := mustTracker(t, call, richNative{newNative()}, lc, testTarget, []string{CapRemovedLabels}, true)
+			tr := mustTracker(t, call, lc, testTarget, []string{CapRemovedLabels}, true)
 			r, ok := forge.As[forge.PriorClaimStateReader](tr)
 			if !ok {
 				t.Fatal("no PriorClaimStateReader")
@@ -335,7 +332,7 @@ func TestPriorClaimLayer(t *testing.T) {
 
 func TestPriorClaimLayerEmptyLabelNeverMatches(t *testing.T) {
 	call, _ := stubGuest(t, map[string]string{"tracker.removedLabels": `{"labels":[""]}`})
-	tr := mustTracker(t, call, newNative(), testLifecycle, testTarget, []string{CapRemovedLabels}, true)
+	tr := mustTracker(t, call, testLifecycle, testTarget, []string{CapRemovedLabels}, true)
 	r, _ := forge.As[forge.PriorClaimStateReader](tr)
 	if _, found, err := r.PriorClaimState("42"); err != nil || found {
 		t.Errorf("found = %v, %v; want an unmapped state never found", found, err)
@@ -345,7 +342,7 @@ func TestPriorClaimLayerEmptyLabelNeverMatches(t *testing.T) {
 func TestPriorClaimLayerGuestError(t *testing.T) {
 	boom := errors.New("boom")
 	call := func(context.Context, string, any, any) error { return boom }
-	tr := mustTracker(t, call, newNative(), testLifecycle, testTarget, []string{CapRemovedLabels}, true)
+	tr := mustTracker(t, call, testLifecycle, testTarget, []string{CapRemovedLabels}, true)
 	r, _ := forge.As[forge.PriorClaimStateReader](tr)
 	if _, found, err := r.PriorClaimState("42"); !errors.Is(err, boom) || found {
 		t.Errorf("found = %v, err = %v; want boom", found, err)
@@ -354,7 +351,7 @@ func TestPriorClaimLayerGuestError(t *testing.T) {
 
 func TestAbsentPriorClaimStaysAbsent(t *testing.T) {
 	call, calls := stubGuest(t, nil)
-	tr := mustTracker(t, call, richNative{newNative()}, testLifecycle, testTarget, nil, true)
+	tr := mustTracker(t, call, testLifecycle, testTarget, nil, true)
 	c := forge.ResolveCapabilities(nil, tr, backend.Descriptor{}, backend.Descriptor{})
 	if c.PriorClaimStateReader != nil || len(*calls) != 0 {
 		t.Errorf("PriorClaimStateReader = %v with %d calls; want none", c.PriorClaimStateReader, len(*calls))
@@ -366,7 +363,7 @@ func TestCountLayerClampsToResultPageLimit(t *testing.T) {
 		"tracker.countInterval": `{"seconds":5}`,
 		"tracker.count":         fmt.Sprintf(`{"count":%d}`, forge.ResultPageLimit+40),
 	})
-	tr := mustTracker(t, call, newNative(), testLifecycle, testTarget, []string{CapCount}, true)
+	tr := mustTracker(t, call, testLifecycle, testTarget, []string{CapCount}, true)
 	dc, _ := forge.As[forge.DemandCounter](tr)
 	n, err := dc.CountReady(false)
 	if err != nil || n != forge.ResultPageLimit {
@@ -379,7 +376,7 @@ func TestCountLayerClampsToResultPageLimit(t *testing.T) {
 func TestStatusesLayerIgnoresMalformedCategories(t *testing.T) {
 	lc := Lifecycle{Labels: testLabels, Statuses: map[forge.DispatchState]string{forge.Complete: "Closed"}}
 	call, _ := stubGuest(t, map[string]string{"tracker.statuses": `{"statuses":["Closed"],"categories":["done"]}`})
-	tr := mustTracker(t, call, newNative(), lc, testTarget, []string{CapStatuses}, true)
+	tr := mustTracker(t, call, lc, testTarget, []string{CapStatuses}, true)
 	checker, _ := forge.As[forge.StatusMappingChecker](tr)
 	if missing, err := checker.CheckMappedStatuses(); err != nil || missing != nil {
 		t.Errorf("missing = %v, %v; want nil, nil", missing, err)
@@ -402,7 +399,7 @@ func TestProbeClassifiedErrorsMatchNotFoundAndTheirSentinels(t *testing.T) {
 			call, _ := stubGuestErrs(t, nil, map[string][]error{CapProbe: {&connectorhost.CallError{Class: tc.class, Message: "x"}}})
 			c := &connectorhost.Connector{Capabilities: []string{"tracker", CapProbe}, ProtocolVersion: "0.2.0"}
 			clk, _ := fakeClock()
-			tr, err := newFrom(c, call, newNative(), testLifecycle, testTarget, clk)
+			tr, err := newFrom(c, call, testLifecycle, testTarget, clk)
 			if err != nil {
 				t.Fatal(err)
 			}

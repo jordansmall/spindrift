@@ -241,8 +241,7 @@ func (l commentPostLayer) Comment(num, body string) error {
 }
 
 // filerLayer files host-posted issues through the Connector. It exists only
-// when the Connector advertises CapFileIssue; otherwise forge.As finds the
-// native adapter's filer, if it has one.
+// when the Connector advertises CapFileIssue.
 type filerLayer struct {
 	forge.IssueTracker
 	r *reads

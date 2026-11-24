@@ -11,7 +11,7 @@ import (
 func commentsOf(t *testing.T, reply string) ([]forge.Comment, error) {
 	t.Helper()
 	call, _ := stubGuest(t, map[string]string{"tracker.comments": reply})
-	tr := mustTracker(t, call, newNative(), testLifecycle, testTarget, []string{CapComments}, true)
+	tr := mustTracker(t, call, testLifecycle, testTarget, []string{CapComments}, true)
 	cl, ok := forge.As[forge.CommentLister](tr)
 	if !ok {
 		t.Fatal("no CommentLister")
@@ -71,7 +71,7 @@ func TestIssueReadRefusesHostileLabels(t *testing.T) {
 				"tracker.issue":      body,
 				"tracker.listIssues": `{"issues":[` + body + `]}`,
 			})
-			tr := mustTracker(t, call, &forge.IssueTrackerFake{}, testLifecycle, testTarget, nil, true)
+			tr := mustTracker(t, call, testLifecycle, testTarget, nil, true)
 			if _, err := tr.Issue("1"); !errors.Is(err, ErrAnswer) || !strings.Contains(err.Error(), "label") {
 				t.Errorf("Issue err = %v, want ErrAnswer naming label", err)
 			}
@@ -86,7 +86,7 @@ func TestListLabelsRefusesHostileNames(t *testing.T) {
 	for name, label := range hostileLabels {
 		t.Run(name, func(t *testing.T) {
 			call, _ := stubGuest(t, map[string]string{"tracker.listLabels": `{"labels":["ok",` + label + `]}`})
-			tr := mustTracker(t, call, newNative(), testLifecycle, testTarget, []string{CapLabels}, true)
+			tr := mustTracker(t, call, testLifecycle, testTarget, []string{CapLabels}, true)
 			if got, err := tr.ListLabels(); !errors.Is(err, ErrAnswer) || !strings.Contains(err.Error(), "label") {
 				t.Errorf("ListLabels = %v, %v; want ErrAnswer naming label", got, err)
 			}

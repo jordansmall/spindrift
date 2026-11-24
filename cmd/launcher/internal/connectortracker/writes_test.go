@@ -108,9 +108,9 @@ func lifecycle(statusOnly bool) Lifecycle {
 	return lc
 }
 
-func writeTracker(t *testing.T, g *writeGuest, lc Lifecycle, native forge.IssueTracker, caps []string) forge.IssueTracker {
+func writeTracker(t *testing.T, g *writeGuest, lc Lifecycle, caps []string) forge.IssueTracker {
 	t.Helper()
-	return mustTracker(t, g.call, native, lc, testTarget, caps, true)
+	return mustTracker(t, g.call, lc, testTarget, caps, true)
 }
 
 func strs(v any) []string {
@@ -123,13 +123,9 @@ func strs(v any) []string {
 
 func TestTransitionMovedStripsStaleLabels(t *testing.T) {
 	g := &writeGuest{transition: `{"outcome":"moved","offered":[]}`}
-	native := newNative()
-	tr := writeTracker(t, g, lifecycle(false), native, writeCaps)
+	tr := writeTracker(t, g, lifecycle(false), writeCaps)
 	if err := tr.TransitionState("7", forge.InProgress, forge.Complete); err != nil {
 		t.Fatal(err)
-	}
-	if len(native.TransitionStateCalls) != 0 {
-		t.Errorf("native writes used: %+v", native.TransitionStateCalls)
 	}
 	want := recordedCall{CapTransition, map[string]any{
 		"target": map[string]any{"api": "https://api.example", "repo": "o/r", "dialect": ""},
@@ -151,7 +147,7 @@ func TestTransitionMovedStripsStaleLabels(t *testing.T) {
 
 func TestTransitionMovedPostStripFailureIsIgnored(t *testing.T) {
 	g := &writeGuest{transition: `{"outcome":"moved","offered":[]}`, editErr: errors.New("boom")}
-	tr := writeTracker(t, g, lifecycle(false), newNative(), writeCaps)
+	tr := writeTracker(t, g, lifecycle(false), writeCaps)
 	if err := tr.TransitionState("7", forge.InProgress, forge.Complete); err != nil {
 		t.Fatalf("err = %v, want nil", err)
 	}
@@ -159,7 +155,7 @@ func TestTransitionMovedPostStripFailureIsIgnored(t *testing.T) {
 
 func TestTransitionRequestCarriesStateAndMapping(t *testing.T) {
 	g := &writeGuest{transition: `{"outcome":"moved","status":"Done","offered":[]}`}
-	tr := writeTracker(t, g, lifecycle(false), newNative(), writeCaps)
+	tr := writeTracker(t, g, lifecycle(false), writeCaps)
 	if err := tr.TransitionState("7", forge.InProgress, forge.Complete); err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +178,7 @@ func TestTransitionRequestCarriesStateAndMapping(t *testing.T) {
 
 func TestTransitionStateNameIsDispatchStateString(t *testing.T) {
 	g := &writeGuest{transition: `{"outcome":"moved","offered":[]}`, issue: issueJSON("Open")}
-	tr := writeTracker(t, g, lifecycle(false), newNative(), writeCaps)
+	tr := writeTracker(t, g, lifecycle(false), writeCaps)
 	if err := tr.TransitionState("7", forge.Dispatchable, forge.InProgress); err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +201,7 @@ func TestTransitionMovedStripFailureWarnsOnStderr(t *testing.T) {
 	orig := os.Stderr
 	os.Stderr = w
 	g := &writeGuest{transition: `{"outcome":"moved","offered":[]}`, editErr: errors.New("boom")}
-	tr := writeTracker(t, g, lifecycle(false), newNative(), writeCaps)
+	tr := writeTracker(t, g, lifecycle(false), writeCaps)
 	trErr := tr.TransitionState("7", forge.InProgress, forge.Complete)
 	os.Stderr = orig
 	_ = w.Close()
@@ -220,7 +216,7 @@ func TestTransitionMovedStripFailureWarnsOnStderr(t *testing.T) {
 
 func TestTransitionUnavailableHybridSwapsLabel(t *testing.T) {
 	g := &writeGuest{transition: `{"outcome":"unavailable","offered":["X"]}`}
-	tr := writeTracker(t, g, lifecycle(false), newNative(), writeCaps)
+	tr := writeTracker(t, g, lifecycle(false), writeCaps)
 	if err := tr.TransitionState("7", forge.InProgress, forge.Complete); err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +230,7 @@ func TestTransitionUnmappedHybridSwapsLabel(t *testing.T) {
 	g := &writeGuest{transition: `{"outcome":"unmapped","offered":[]}`}
 	lc := lifecycle(false)
 	lc.Statuses = nil
-	tr := writeTracker(t, g, lc, newNative(), writeCaps)
+	tr := writeTracker(t, g, lc, writeCaps)
 	if err := tr.TransitionState("7", forge.InProgress, forge.Complete); err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +248,7 @@ func TestTransitionNoStatusNoLabelErrors(t *testing.T) {
 	lc := lifecycle(false)
 	lc.Statuses = nil
 	lc.Labels = forge.DispatchLabels{}
-	tr := writeTracker(t, g, lc, newNative(), writeCaps)
+	tr := writeTracker(t, g, lc, writeCaps)
 	err := tr.TransitionState("7", forge.InProgress, forge.Complete)
 	if err == nil || !strings.Contains(err.Error(), "no status mapping or fallback label configured for state complete") {
 		t.Fatalf("err = %v", err)
@@ -264,7 +260,7 @@ func TestTransitionNoStatusNoLabelErrors(t *testing.T) {
 
 func TestTransitionUnavailableStatusOnlyRefuses(t *testing.T) {
 	g := &writeGuest{transition: `{"outcome":"unavailable","status":"Done","offered":["Review","Closed"]}`, issue: issueJSON("Open")}
-	tr := writeTracker(t, g, lifecycle(true), newNative(), writeCaps)
+	tr := writeTracker(t, g, lifecycle(true), writeCaps)
 	err := tr.TransitionState("7", forge.InProgress, forge.Complete)
 	var refused *forge.TransitionRefusedError
 	if !errors.As(err, &refused) {
@@ -283,7 +279,7 @@ func TestTransitionUnmappedStatusOnlyRefuses(t *testing.T) {
 	g := &writeGuest{transition: `{"outcome":"unmapped","offered":[]}`, issue: issueJSON("Open")}
 	lc := lifecycle(true)
 	lc.Statuses = nil
-	tr := writeTracker(t, g, lc, newNative(), writeCaps)
+	tr := writeTracker(t, g, lc, writeCaps)
 	err := tr.TransitionState("7", forge.InProgress, forge.Complete)
 	var refused *forge.TransitionRefusedError
 	if !errors.As(err, &refused) {
@@ -300,7 +296,7 @@ func TestTransitionUnmappedStatusOnlyRefuses(t *testing.T) {
 
 func TestTransitionRefusalSurvivesFailedStatusRead(t *testing.T) {
 	g := &writeGuest{transition: `{"outcome":"unavailable","status":"Done","offered":["Review"]}`, issueErr: errors.New("down")}
-	tr := writeTracker(t, g, lifecycle(true), newNative(), writeCaps)
+	tr := writeTracker(t, g, lifecycle(true), writeCaps)
 	err := tr.TransitionState("7", forge.InProgress, forge.Complete)
 	var refused *forge.TransitionRefusedError
 	if !errors.As(err, &refused) || refused.From != "" || refused.To != "Done" {
@@ -311,7 +307,7 @@ func TestTransitionRefusalSurvivesFailedStatusRead(t *testing.T) {
 func TestTransitionErrorPropagatesWithoutFallback(t *testing.T) {
 	boom := errors.New("transition requires field")
 	g := &writeGuest{transitionErr: boom}
-	tr := writeTracker(t, g, lifecycle(false), newNative(), writeCaps)
+	tr := writeTracker(t, g, lifecycle(false), writeCaps)
 	if err := tr.TransitionState("7", forge.InProgress, forge.Complete); !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want %v", err, boom)
 	}
@@ -322,7 +318,7 @@ func TestTransitionErrorPropagatesWithoutFallback(t *testing.T) {
 
 func TestTransitionUnknownOutcomeIsAnswerError(t *testing.T) {
 	g := &writeGuest{transition: `{"outcome":"sideways","offered":[]}`}
-	tr := writeTracker(t, g, lifecycle(false), newNative(), writeCaps)
+	tr := writeTracker(t, g, lifecycle(false), writeCaps)
 	if err := tr.TransitionState("7", forge.InProgress, forge.Complete); !errors.Is(err, ErrAnswer) {
 		t.Fatalf("err = %v, want ErrAnswer", err)
 	}
@@ -330,7 +326,7 @@ func TestTransitionUnknownOutcomeIsAnswerError(t *testing.T) {
 
 func TestClaimAlreadyClaimedByLabel(t *testing.T) {
 	g := &writeGuest{transition: `{"outcome":"moved","offered":[]}`, issue: issueJSON("Open", "wip")}
-	tr := writeTracker(t, g, lifecycle(false), newNative(), writeCaps)
+	tr := writeTracker(t, g, lifecycle(false), writeCaps)
 	err := tr.TransitionState("7", forge.Dispatchable, forge.InProgress)
 	if !errors.Is(err, forge.ErrAlreadyClaimed) {
 		t.Fatalf("err = %v, want ErrAlreadyClaimed", err)
@@ -342,7 +338,7 @@ func TestClaimAlreadyClaimedByLabel(t *testing.T) {
 
 func TestClaimAlreadyClaimedByNativeStatus(t *testing.T) {
 	g := &writeGuest{transition: `{"outcome":"moved","offered":[]}`, issue: issueJSON("in progress")}
-	tr := writeTracker(t, g, lifecycle(true), newNative(), writeCaps)
+	tr := writeTracker(t, g, lifecycle(true), writeCaps)
 	err := tr.TransitionState("7", forge.Dispatchable, forge.InProgress)
 	if !errors.Is(err, forge.ErrAlreadyClaimed) {
 		t.Fatalf("err = %v, want ErrAlreadyClaimed", err)
@@ -356,7 +352,7 @@ func TestClaimNativeStatusExemptsSharedFromStatus(t *testing.T) {
 	g := &writeGuest{transition: `{"outcome":"moved","offered":[]}`, issue: issueJSON("In Progress")}
 	lc := lifecycle(true)
 	lc.Statuses = map[forge.DispatchState]string{forge.Dispatchable: "In Progress", forge.InProgress: "In Progress"}
-	tr := writeTracker(t, g, lc, newNative(), writeCaps)
+	tr := writeTracker(t, g, lc, writeCaps)
 	if err := tr.TransitionState("7", forge.Dispatchable, forge.InProgress); err != nil {
 		t.Fatalf("err = %v, want the claim to proceed", err)
 	}
@@ -366,7 +362,7 @@ func TestClaimStatusOnlyIgnoresLabelClaim(t *testing.T) {
 	g := &writeGuest{transition: `{"outcome":"moved","offered":[]}`, issue: issueJSON("Open", "wip")}
 	lc := lifecycle(true)
 	lc.Labels = hybridLC.Labels
-	tr := writeTracker(t, g, lc, newNative(), writeCaps)
+	tr := writeTracker(t, g, lc, writeCaps)
 	if err := tr.TransitionState("7", forge.Dispatchable, forge.InProgress); err != nil {
 		t.Fatalf("err = %v, want the label claim ignored", err)
 	}
@@ -374,7 +370,7 @@ func TestClaimStatusOnlyIgnoresLabelClaim(t *testing.T) {
 
 func TestClaimStripsSettledLabelsBeforeNativeClaim(t *testing.T) {
 	g := &writeGuest{transition: `{"outcome":"moved","offered":[]}`, issue: issueJSON("Open", "done", "rec", "other")}
-	tr := writeTracker(t, g, lifecycle(false), newNative(), writeCaps)
+	tr := writeTracker(t, g, lifecycle(false), writeCaps)
 	if err := tr.TransitionState("7", forge.Dispatchable, forge.InProgress); err != nil {
 		t.Fatal(err)
 	}
@@ -389,7 +385,7 @@ func TestClaimStripsSettledLabelsBeforeNativeClaim(t *testing.T) {
 
 func TestClaimSettledStripFailureFailsClaim(t *testing.T) {
 	g := &writeGuest{transition: `{"outcome":"moved","offered":[]}`, issue: issueJSON("Open", "done"), editErr: errors.New("boom")}
-	tr := writeTracker(t, g, lifecycle(false), newNative(), writeCaps)
+	tr := writeTracker(t, g, lifecycle(false), writeCaps)
 	err := tr.TransitionState("7", forge.Dispatchable, forge.InProgress)
 	if err == nil || !strings.Contains(err.Error(), "strip settled labels before claim") {
 		t.Fatalf("err = %v", err)
@@ -405,7 +401,7 @@ func TestClaimWithoutNativeStatusSkipsSettledStrip(t *testing.T) {
 	g := &writeGuest{transition: `{"outcome":"unmapped","offered":[]}`, issue: issueJSON("Open", "done")}
 	lc := lifecycle(false)
 	lc.Statuses = nil
-	tr := writeTracker(t, g, lc, newNative(), writeCaps)
+	tr := writeTracker(t, g, lc, writeCaps)
 	if err := tr.TransitionState("7", forge.Dispatchable, forge.InProgress); err != nil {
 		t.Fatal(err)
 	}
@@ -417,7 +413,7 @@ func TestClaimWithoutNativeStatusSkipsSettledStrip(t *testing.T) {
 
 func TestCompleteVerdictSwapsInProgressLabel(t *testing.T) {
 	g := &writeGuest{issue: issueJSON("Open", "wip")}
-	tr := writeTracker(t, g, lifecycle(false), newNative(), writeCaps)
+	tr := writeTracker(t, g, lifecycle(false), writeCaps)
 	if err := tr.CompleteVerdict("7", "recommend"); err != nil {
 		t.Fatal(err)
 	}
@@ -429,7 +425,7 @@ func TestCompleteVerdictSwapsInProgressLabel(t *testing.T) {
 
 func TestCompleteVerdictGuardsMissingInProgressLabel(t *testing.T) {
 	g := &writeGuest{issue: issueJSON("Open", "other")}
-	tr := writeTracker(t, g, lifecycle(false), newNative(), writeCaps)
+	tr := writeTracker(t, g, lifecycle(false), writeCaps)
 	err := tr.CompleteVerdict("7", "recommend")
 	if err == nil || !strings.Contains(err.Error(), `expected "wip" label`) {
 		t.Fatalf("err = %v", err)
@@ -441,7 +437,7 @@ func TestCompleteVerdictGuardsMissingInProgressLabel(t *testing.T) {
 
 func TestCompleteVerdictUnconfiguredMakesNoCall(t *testing.T) {
 	g := &writeGuest{issue: issueJSON("Open", "wip")}
-	tr := writeTracker(t, g, lifecycle(false), newNative(), writeCaps)
+	tr := writeTracker(t, g, lifecycle(false), writeCaps)
 	if err := tr.CompleteVerdict("7", "reject"); err == nil {
 		t.Fatal("want an error for an unconfigured verdict")
 	}
@@ -453,7 +449,7 @@ func TestCompleteVerdictUnconfiguredMakesNoCall(t *testing.T) {
 func TestCompleteVerdictWithoutInProgressLabelSkipsRead(t *testing.T) {
 	g := &writeGuest{}
 	lc := lifecycle(true)
-	tr := writeTracker(t, g, lc, newNative(), writeCaps)
+	tr := writeTracker(t, g, lc, writeCaps)
 	if err := tr.CompleteVerdict("7", "recommend"); err != nil {
 		t.Fatal(err)
 	}
@@ -464,7 +460,7 @@ func TestCompleteVerdictWithoutInProgressLabelSkipsRead(t *testing.T) {
 
 func TestLabelRegistryPassesThrough(t *testing.T) {
 	g := &writeGuest{}
-	tr := writeTracker(t, g, lifecycle(false), newNative(), []string{CapLabels})
+	tr := writeTracker(t, g, lifecycle(false), []string{CapLabels})
 	got, err := tr.ListLabels()
 	if err != nil || !reflect.DeepEqual(got, []string{"a", "b"}) {
 		t.Fatalf("ListLabels = %v, %v", got, err)
@@ -478,31 +474,13 @@ func TestLabelRegistryPassesThrough(t *testing.T) {
 	}
 }
 
-func TestWritesStayNativeWithoutCapabilities(t *testing.T) {
-	for _, caps := range [][]string{nil, {CapTransition}, {CapEditLabels}} {
-		g := &writeGuest{}
-		native := newNative()
-		tr := writeTracker(t, g, lifecycle(false), native, caps)
-		if err := tr.TransitionState("7", forge.Dispatchable, forge.InProgress); err != nil {
-			t.Fatal(err)
-		}
-		if err := tr.CompleteVerdict("7", "recommend"); err != nil {
-			t.Fatal(err)
-		}
-		if len(native.TransitionStateCalls) != 1 || len(native.CompleteVerdictCalls) != 1 || len(g.calls) != 0 {
-			t.Errorf("caps %v: native calls = %d/%d, guest calls = %v", caps, len(native.TransitionStateCalls), len(native.CompleteVerdictCalls), g.methods())
-		}
-	}
-}
-
 func postCaps(caps ...string) []string { return caps }
 
 func (g *writeGuest) last() recordedCall { return g.calls[len(g.calls)-1] }
 
 func TestCommentStripsFirstResearchMarkerAndFlagsIt(t *testing.T) {
 	g := &writeGuest{}
-	native := newNative()
-	tr := writeTracker(t, g, lifecycle(false), native, postCaps(CapComment))
+	tr := writeTracker(t, g, lifecycle(false), postCaps(CapComment))
 	body := forge.ResearchMarker + "\nverdict\n  " + forge.ResearchMarker + "  \nquoted"
 	if err := tr.Comment("7", body); err != nil {
 		t.Fatal(err)
@@ -514,14 +492,11 @@ func TestCommentStripsFirstResearchMarkerAndFlagsIt(t *testing.T) {
 	if want := "verdict\n  " + forge.ResearchMarker + "  \nquoted"; c.params["body"] != want {
 		t.Errorf("body = %q, want %q", c.params["body"], want)
 	}
-	if len(native.CommentCalls) != 0 {
-		t.Errorf("native comment used: %+v", native.CommentCalls)
-	}
 }
 
 func TestCommentWithoutMarkerPassesVerbatim(t *testing.T) {
 	g := &writeGuest{}
-	tr := writeTracker(t, g, lifecycle(false), newNative(), postCaps(CapComment))
+	tr := writeTracker(t, g, lifecycle(false), postCaps(CapComment))
 	body := "plain\nbody " + forge.ResearchMarker + "\n"
 	if err := tr.Comment("7", body); err != nil {
 		t.Fatal(err)
@@ -533,7 +508,7 @@ func TestCommentWithoutMarkerPassesVerbatim(t *testing.T) {
 
 func TestCommentGuestErrorPropagates(t *testing.T) {
 	g := &writeGuest{commentErr: errors.New("boom")}
-	tr := writeTracker(t, g, lifecycle(false), newNative(), postCaps(CapComment))
+	tr := writeTracker(t, g, lifecycle(false), postCaps(CapComment))
 	if err := tr.Comment("7", "x"); err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Errorf("err = %v", err)
 	}
@@ -543,7 +518,7 @@ func TestPostIssueSplitsDedupMarkerAndSendsIssueType(t *testing.T) {
 	g := &writeGuest{fileURL: `{"url":"https://tracker.example/o/r/issues/7"}`}
 	lc := lifecycle(false)
 	lc.IssueType = "Bug"
-	tr := writeTracker(t, g, lc, newNative(), postCaps(CapFileIssue))
+	tr := writeTracker(t, g, lc, postCaps(CapFileIssue))
 	filer, ok := forge.As[forge.HostPostedIssueFiler](tr)
 	if !ok {
 		t.Fatal("no filer")
@@ -561,7 +536,7 @@ func TestPostIssueSplitsDedupMarkerAndSendsIssueType(t *testing.T) {
 
 func TestPostIssueNilLabelsSendEmptyList(t *testing.T) {
 	g := &writeGuest{fileURL: `{"url":"https://tracker.example/o/r/issues/7"}`}
-	tr := writeTracker(t, g, lifecycle(false), newNative(), postCaps(CapFileIssue))
+	tr := writeTracker(t, g, lifecycle(false), postCaps(CapFileIssue))
 	filer, _ := forge.As[forge.HostPostedIssueFiler](tr)
 	if _, err := filer.PostIssue("t", "b", nil); err != nil {
 		t.Fatal(err)
@@ -587,7 +562,7 @@ func TestPostIssueRefusesAnUnusableURLAsFiledWithoutRetry(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			g := &writeGuest{fileURL: fmt.Sprintf(`{"url":%q}`, url)}
-			tr := writeTracker(t, g, lifecycle(false), newNative(), postCaps(CapFileIssue))
+			tr := writeTracker(t, g, lifecycle(false), postCaps(CapFileIssue))
 			filer, _ := forge.As[forge.HostPostedIssueFiler](tr)
 			got, err := filer.PostIssue("t", "b", nil)
 			if !errors.Is(err, ErrAnswer) || !errors.Is(err, forge.ErrFiledUnusableURL) {
@@ -605,7 +580,7 @@ func TestPostIssueRefusesAnUnusableURLAsFiledWithoutRetry(t *testing.T) {
 
 func TestPostIssueAcceptsTheWebHostCaseInsensitively(t *testing.T) {
 	g := &writeGuest{fileURL: `{"url":"https://Tracker.Example/o/r/issues/7"}`}
-	tr := writeTracker(t, g, lifecycle(false), newNative(), postCaps(CapFileIssue))
+	tr := writeTracker(t, g, lifecycle(false), postCaps(CapFileIssue))
 	filer, _ := forge.As[forge.HostPostedIssueFiler](tr)
 	if url, err := filer.PostIssue("t", "b", nil); err != nil || url != "https://Tracker.Example/o/r/issues/7" {
 		t.Errorf("url, err = %q, %v", url, err)
@@ -614,7 +589,7 @@ func TestPostIssueAcceptsTheWebHostCaseInsensitively(t *testing.T) {
 
 func TestPostIssueGuestErrorPropagates(t *testing.T) {
 	g := &writeGuest{fileErr: errors.New("boom")}
-	tr := writeTracker(t, g, lifecycle(false), newNative(), postCaps(CapFileIssue))
+	tr := writeTracker(t, g, lifecycle(false), postCaps(CapFileIssue))
 	filer, _ := forge.As[forge.HostPostedIssueFiler](tr)
 	if _, err := filer.PostIssue("t", "b", nil); err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Errorf("err = %v", err)
@@ -623,7 +598,7 @@ func TestPostIssueGuestErrorPropagates(t *testing.T) {
 
 func TestCloseMergedIssueClosesAnOpenIssueThroughTheConnector(t *testing.T) {
 	g := &writeGuest{issue: issueJSON("")}
-	tr := writeTracker(t, g, lifecycle(false), nil, postCaps(CapCloseIssue))
+	tr := writeTracker(t, g, lifecycle(false), postCaps(CapCloseIssue))
 	closer, ok := forge.As[forge.MergeCloser](tr)
 	if !ok {
 		t.Fatal("no MergeCloser")
@@ -641,7 +616,7 @@ func TestCloseMergedIssueClosesAnOpenIssueThroughTheConnector(t *testing.T) {
 
 func TestCloseMergedIssueSkipsAClosedIssue(t *testing.T) {
 	g := &writeGuest{issue: `{"number":"7","title":"t","state":"closed","labels":[]}`}
-	tr := writeTracker(t, g, lifecycle(false), nil, postCaps(CapCloseIssue))
+	tr := writeTracker(t, g, lifecycle(false), postCaps(CapCloseIssue))
 	closer, _ := forge.As[forge.MergeCloser](tr)
 	if err := closer.CloseMergedIssue("7"); err != nil {
 		t.Fatal(err)
@@ -653,7 +628,7 @@ func TestCloseMergedIssueSkipsAClosedIssue(t *testing.T) {
 
 func TestCloseMergedIssueCloseErrorPropagates(t *testing.T) {
 	g := &writeGuest{issue: issueJSON(""), closeErr: errors.New("boom")}
-	tr := writeTracker(t, g, lifecycle(false), nil, postCaps(CapCloseIssue))
+	tr := writeTracker(t, g, lifecycle(false), postCaps(CapCloseIssue))
 	closer, _ := forge.As[forge.MergeCloser](tr)
 	if err := closer.CloseMergedIssue("7"); err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Errorf("close err = %v", err)
@@ -662,7 +637,7 @@ func TestCloseMergedIssueCloseErrorPropagates(t *testing.T) {
 
 func TestCloseMergedIssueReadErrorPropagates(t *testing.T) {
 	g := &writeGuest{issueErr: errors.New("gone")}
-	tr := writeTracker(t, g, lifecycle(false), nil, postCaps(CapCloseIssue))
+	tr := writeTracker(t, g, lifecycle(false), postCaps(CapCloseIssue))
 	closer, _ := forge.As[forge.MergeCloser](tr)
 	if err := closer.CloseMergedIssue("7"); err == nil || !strings.Contains(err.Error(), "gone") || len(g.calls) != 1 {
 		t.Errorf("read err = %v, calls %v", err, g.methods())
@@ -670,36 +645,15 @@ func TestCloseMergedIssueReadErrorPropagates(t *testing.T) {
 }
 
 func TestNoMergeCloserWithoutTheCapability(t *testing.T) {
-	tr := writeTracker(t, &writeGuest{}, lifecycle(false), nil, postCaps(CapFileIssue))
+	tr := writeTracker(t, &writeGuest{}, lifecycle(false), postCaps(CapFileIssue))
 	if _, ok := forge.As[forge.MergeCloser](tr); ok {
 		t.Error("MergeCloser exposed without CapCloseIssue")
 	}
 }
 
-func TestCommentAndFilingStayNativeWithoutCapabilities(t *testing.T) {
-	g := &writeGuest{}
-	fake := forge.NewFake(testLabels)
-	fake.PostIssueURL = "native-url"
-	tr := writeTracker(t, g, lifecycle(false), fake.AsIssueFiler(), nil)
-	if err := tr.Comment("7", "hi"); err != nil {
-		t.Fatal(err)
-	}
-	filer, ok := forge.As[forge.HostPostedIssueFiler](tr)
-	if !ok {
-		t.Fatal("native filer hidden")
-	}
-	if url, err := filer.PostIssue("t", "b", nil); err != nil || url != "native-url" {
-		t.Errorf("url, err = %q, %v", url, err)
-	}
-	if len(fake.CommentCalls) != 1 || len(fake.PostIssueCalls) != 1 || len(g.calls) != 0 {
-		t.Errorf("native %d/%d, guest %v", len(fake.CommentCalls), len(fake.PostIssueCalls), g.methods())
-	}
-}
-
 func TestAddLabelsSendsOneEditAndSkipsEmpties(t *testing.T) {
 	g := &writeGuest{}
-	native := newNative()
-	tr := writeTracker(t, g, lifecycle(false), native, []string{CapEditLabels})
+	tr := writeTracker(t, g, lifecycle(false), []string{CapEditLabels})
 	lb, ok := forge.As[forge.IssueLabeler](tr)
 	if !ok {
 		t.Fatal("no IssueLabeler with tracker.editLabels advertised")
@@ -720,31 +674,11 @@ func TestAddLabelsSendsOneEditAndSkipsEmpties(t *testing.T) {
 	if got := edits[0].params["number"]; got != "7" {
 		t.Errorf("number = %v", got)
 	}
-	if len(native.AddLabelsCalls) != 0 {
-		t.Errorf("native writes used: %+v", native.AddLabelsCalls)
-	}
-}
-
-func TestAddLabelsStaysNativeWithoutEditLabels(t *testing.T) {
-	g := &writeGuest{}
-	native := newNative()
-	native.SetIssue(forge.Issue{Number: "7"})
-	tr := writeTracker(t, g, lifecycle(false), native, []string{CapTransition})
-	lb, ok := forge.As[forge.IssueLabeler](tr)
-	if !ok {
-		t.Fatal("native IssueLabeler hidden")
-	}
-	if err := lb.AddLabels("7", []string{"a"}); err != nil {
-		t.Fatal(err)
-	}
-	if len(native.AddLabelsCalls) != 1 || len(g.calls) != 0 {
-		t.Errorf("native calls = %d, guest calls = %v", len(native.AddLabelsCalls), g.methods())
-	}
 }
 
 func TestAddLabelsSurfacesConnectorError(t *testing.T) {
 	g := &writeGuest{editErr: errors.New("boom")}
-	tr := writeTracker(t, g, lifecycle(false), newNative(), []string{CapEditLabels})
+	tr := writeTracker(t, g, lifecycle(false), []string{CapEditLabels})
 	lb, ok := forge.As[forge.IssueLabeler](tr)
 	if !ok {
 		t.Fatal("IssueLabeler hidden")
@@ -756,7 +690,7 @@ func TestAddLabelsSurfacesConnectorError(t *testing.T) {
 
 func TestClaimAlreadyClaimedWithoutStatusNamesTheLabel(t *testing.T) {
 	g := &writeGuest{transition: `{"outcome":"moved","offered":[]}`, issue: issueJSON("", "wip")}
-	tr := writeTracker(t, g, lifecycle(false), newNative(), writeCaps)
+	tr := writeTracker(t, g, lifecycle(false), writeCaps)
 	err := tr.TransitionState("7", forge.Dispatchable, forge.InProgress)
 	if !errors.Is(err, forge.ErrAlreadyClaimed) {
 		t.Fatalf("err = %v, want ErrAlreadyClaimed", err)

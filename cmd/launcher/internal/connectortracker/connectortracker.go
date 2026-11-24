@@ -2,11 +2,10 @@
 // read capability the Connector advertises, from a tracker Connector over the
 // sdk/tracker primitives. A Connector advertising transition and label-edit
 // performs the writes while core keeps every lifecycle decision (claim checks,
-// the settled-label strip, fallback and refusal, verdicts). Any other write,
-// and any capability the protocol does not carry, falls to the native adapter
-// the caller passes, if any: the result is a stack of forge.Unwrapper layers
-// over it, so forge.As reaches through. The check and demand capabilities come
-// only from the Connector and are absent when it omits them.
+// the settled-label strip, fallback and refusal, verdicts). The result is a
+// stack of forge.Unwrapper layers, one per advertised capability: a core method
+// the Connector does not serve fails with connectorhost.ErrProtocolUnsupported,
+// and an optional capability it omits is absent from forge.As.
 package connectortracker
 
 import (
@@ -282,8 +281,7 @@ const (
 	CapSearchIssues  = "tracker.searchIssues"
 	// CapLabeled: the Connector serves tracker.labeled, the open or closed
 	// issues carrying one label, newest first, with the close date and
-	// not-planned flag on closed ones. Core's finding dedup scan reads it; no
-	// native fallback answers for a Connector that omits it under primary.
+	// not-planned flag on closed ones. Core's finding dedup scan reads it.
 	CapLabeled = "tracker.labeled"
 	// CapTransition: the Connector serves tracker.transition. With CapEditLabels
 	// it performs core's transitions and verdicts.
@@ -317,11 +315,10 @@ const (
 // shape is closed rather than sanitised.
 var projectKeyID = regexp.MustCompile(`^[A-Z][A-Z0-9_]*-[1-9][0-9]*$`)
 
-// reads serves the list and issue reads from a Connector and leaves every write
-// to the embedded native adapter (nil for a Connector-only tracker), which the
-// write layers override. It is the base layer; the optional layers stack on it.
+// reads serves the list and issue reads from a Connector. It is the base
+// layer; the optional layers stack on it. The core methods no read serves fail
+// as unadvertised until a layer for their capability overrides them.
 type reads struct {
-	forge.IssueTracker
 	call      guestCall
 	lifecycle Lifecycle
 	target    Target
@@ -363,22 +360,33 @@ func (t *reads) MatchesRoute(num string) (bool, error) {
 	return res.Matches, nil
 }
 
-// Unwrap implements forge.Unwrapper, so forge.As finds the native adapter's own
-// optional capabilities behind this layer.
-func (t *reads) Unwrap() forge.IssueTracker { return t.IssueTracker }
+// unadvertised is the error a core method returns when the Connector does not
+// advertise caps.
+func unadvertised(caps ...string) error {
+	return fmt.Errorf("%w: the method needs the connector to advertise \"%s\"", connectorhost.ErrProtocolUnsupported, strings.Join(caps, "\" and \""))
+}
 
-// WalksAllPages implements forge.FullyPaginated. It shadows the native
-// adapter's answer, which describes the native list, not the Connector's: one
-// page capped at forge.ResultPageLimit.
+func (*reads) TransitionState(string, forge.DispatchState, forge.DispatchState) error {
+	return unadvertised(CapTransition, CapEditLabels)
+}
+func (*reads) CompleteVerdict(string, forge.Verdict) error {
+	return unadvertised(CapTransition, CapEditLabels)
+}
+func (*reads) Comment(string, string) error     { return unadvertised(CapComment) }
+func (*reads) Probe() (string, error)           { return "", unadvertised(CapProbe) }
+func (*reads) ListLabels() ([]string, error)    { return nil, unadvertised(CapLabels) }
+func (*reads) CreateLabel(_, _, _ string) error { return unadvertised(CapLabels) }
+
+// WalksAllPages implements forge.FullyPaginated: one page capped at
+// forge.ResultPageLimit.
 func (t *reads) WalksAllPages() bool { return false }
 
-// StateLabels implements forge.LabeledTracker. It shadows the native adapter's
-// labels with the family the Connector's lists are resolved through.
+// StateLabels implements forge.LabeledTracker: the family the Connector's lists
+// are resolved through.
 func (t *reads) StateLabels() forge.DispatchLabels { return t.lifecycle.Labels }
 
 // commentsLayer serves forge.CommentLister from the Connector. It exists only
-// when the Connector advertises CapComments; otherwise the lookup falls through
-// to the native adapter's lister, whose minimized handling core already trusts.
+// when the Connector advertises CapComments.
 type commentsLayer struct {
 	forge.IssueTracker
 	r *reads
@@ -416,8 +424,7 @@ func (l commentsLayer) Comments(num string) ([]forge.Comment, error) {
 }
 
 // nativeDepsLayer serves forge.NativeDepsReader from the Connector. It exists
-// only when the Connector advertises CapNativeDeps; otherwise the lookup falls
-// through to the native adapter's reader, if it has one.
+// only when the Connector advertises CapNativeDeps.
 type nativeDepsLayer struct {
 	forge.IssueTracker
 	r *reads
@@ -431,8 +438,7 @@ func (l nativeDepsLayer) NativeDepsOf(num string) ([]string, error) {
 }
 
 // blocksLayer serves forge.BlockersLister from the Connector. It exists only
-// when the Connector advertises CapBlocks; otherwise the lookup falls through
-// to the native adapter's lister, if it has one.
+// when the Connector advertises CapBlocks.
 type blocksLayer struct {
 	forge.IssueTracker
 	r *reads
@@ -471,11 +477,6 @@ func (t *reads) idList(method, num string) ([]string, error) {
 	}
 	return ids, nil
 }
-
-// A layer for a check or demand capability exists only when the Connector
-// advertises it; reads hides the native adapter's version of each but Probe
-// (which falls back to native), so an absent capability is absent rather than
-// answered from the native side.
 
 // probeLayer serves Probe from the Connector's one authenticated read.
 type probeLayer struct {
@@ -677,20 +678,8 @@ func readCountInterval(call guestCall) (time.Duration, error) {
 	return time.Duration(res.Seconds) * time.Second, nil
 }
 
-// Hides implements forge.CapabilityHider for the capabilities the protocol
-// owns: the native adapter's own must never answer for a Connector that omits
-// them.
-func (t *reads) Hides(capability any) bool {
-	switch capability.(type) {
-	case *forge.DemandCounter, *forge.IssueTypeChecker, *forge.StatusMappingChecker, *forge.StatusCategoryReader, *forge.PriorClaimStateReader:
-		return true
-	}
-	return false
-}
-
 // searchLayer serves forge.IssueSearcher from the Connector. It exists only
-// when the Connector advertises CapSearchIssues; otherwise the lookup falls
-// through to the native adapter's searcher, if it has one.
+// when the Connector advertises CapSearchIssues.
 type searchLayer struct {
 	forge.IssueTracker
 	r *reads
@@ -728,8 +717,7 @@ func (l searchLayer) SearchIssues(text string, state forge.IssueState, label str
 }
 
 // labeledLayer serves forge.LabeledBacklogLister from the Connector. It exists
-// only when the Connector advertises CapLabeled; otherwise the scan falls
-// through to the native adapter's lister, if it has one.
+// only when the Connector advertises CapLabeled.
 type labeledLayer struct {
 	forge.IssueTracker
 	r *reads
@@ -840,7 +828,6 @@ func (l labeledLayer) walkLabeled(state forge.IssueState, source, label string) 
 }
 
 var (
-	_ forge.Unwrapper             = (*reads)(nil)
 	_ forge.FullyPaginated        = (*reads)(nil)
 	_ forge.LabeledTracker        = (*reads)(nil)
 	_ forge.RouteMatcher          = (*reads)(nil)
@@ -850,7 +837,6 @@ var (
 	_ forge.NativeDepsReader      = nativeDepsLayer{}
 	_ forge.Unwrapper             = blocksLayer{}
 	_ forge.BlockersLister        = blocksLayer{}
-	_ forge.CapabilityHider       = (*reads)(nil)
 	_ forge.Unwrapper             = probeLayer{}
 	_ forge.Unwrapper             = statusesLayer{}
 	_ forge.StatusMappingChecker  = statusesLayer{}
@@ -882,36 +868,30 @@ func CallPolicy() connectorcall.Policy {
 	}}
 }
 
-// New builds core's tracker from a tracker Connector. writes answers every
-// write the Connector does not perform (transitions and verdicts unless it
-// advertises both CapTransition and CapEditLabels, the label registry unless
-// CapLabels, comments unless CapComment, filing unless CapFileIssue, closing
-// unless CapCloseIssue, issue edits always), every optional read it omits, and
-// Probe unless CapProbe. The doctor and demand checks (CapStatuses,
-// CapCreateMeta, CapCount) and recover's prior-claim read (CapRemovedLabels)
-// are never answered natively. Calls run under context.Background()
-// because IssueTracker methods carry no context.
-//
-// writes is nil for a Connector-only tracker: an optional capability the
-// Connector omits is then absent, and a core IssueTracker method it does not
-// serve panics, so such a caller first checks the Connector advertises every
-// capability it uses.
+// New builds core's tracker from a tracker Connector. A core IssueTracker method
+// whose capability the Connector does not advertise fails with
+// connectorhost.ErrProtocolUnsupported (transitions and verdicts need both
+// CapTransition and CapEditLabels; the label registry CapLabels; comments
+// CapComment; Probe CapProbe), so a caller first checks the Connector
+// advertises every capability it uses. Every optional capability it omits is
+// absent from forge.As. Calls run under context.Background() because
+// IssueTracker methods carry no context.
 //
 // A 0.1 Connector predates the status selector, tracker.blocks and project-key
 // ids, so core ignores those capabilities for it and never sends a status.
 //
 // clock paces the retry backoff; the zero value sleeps for real.
-func New(c *connectorhost.Connector, writes forge.IssueTracker, lifecycle Lifecycle, target Target, clock retry.Clock) (forge.IssueTracker, error) {
-	return newFrom(c, c.Call, writes, lifecycle, target, clock)
+func New(c *connectorhost.Connector, lifecycle Lifecycle, target Target, clock retry.Clock) (forge.IssueTracker, error) {
+	return newFrom(c, c.Call, lifecycle, target, clock)
 }
 
 // newFrom builds the tracker over c's handshake, routing calls through call
 // under CallPolicy; a zero clock sleeps for real.
-func newFrom(c *connectorhost.Connector, call guestCall, writes forge.IssueTracker, lifecycle Lifecycle, target Target, clock retry.Clock) (forge.IssueTracker, error) {
+func newFrom(c *connectorhost.Connector, call guestCall, lifecycle Lifecycle, target Target, clock retry.Clock) (forge.IssueTracker, error) {
 	if !slices.Contains(c.Capabilities, "tracker") {
 		return nil, fmt.Errorf("%w: capabilities %v lack \"tracker\"", ErrNotTracker, c.Capabilities)
 	}
-	return newTracker(connectorcall.Classify(call, clock, CallPolicy()), writes, lifecycle, target, c.Capabilities, speaksV02(c.ProtocolVersion))
+	return newTracker(connectorcall.Classify(call, clock, CallPolicy()), lifecycle, target, c.Capabilities, speaksV02(c.ProtocolVersion))
 }
 
 // NewReloading is New for a tracker that lives as long as its process. A
@@ -922,13 +902,13 @@ func newFrom(c *connectorhost.Connector, call guestCall, writes forge.IssueTrack
 // failure the Connector causes, by the method that met it: the retry wraps
 // outside the reloader, so that includes a failed attempt a later retry
 // recovers. clock is as for New.
-func NewReloading(load func() (*connectorhost.Connector, error), note func(method string, err error), writes forge.IssueTracker, lifecycle Lifecycle, target Target, clock retry.Clock) (forge.IssueTracker, error) {
+func NewReloading(load func() (*connectorhost.Connector, error), note func(method string, err error), lifecycle Lifecycle, target Target, clock retry.Clock) (forge.IssueTracker, error) {
 	c, err := load()
 	if err != nil {
 		return nil, err
 	}
 	r := &reloader{load: func() (conn, error) { return load() }, cur: c, note: note}
-	return newFrom(c, r.call, writes, lifecycle, target, clock)
+	return newFrom(c, r.call, lifecycle, target, clock)
 }
 
 // conn is the part of a Connector the reloader drives, a seam for its tests.
@@ -1010,7 +990,7 @@ func wireRoute(r forge.Route) []Selector {
 	return out
 }
 
-func newTracker(call guestCall, writes forge.IssueTracker, lifecycle Lifecycle, target Target, caps []string, v02 bool) (forge.IssueTracker, error) {
+func newTracker(call guestCall, lifecycle Lifecycle, target Target, caps []string, v02 bool) (forge.IssueTracker, error) {
 	if !v02 {
 		caps = slices.DeleteFunc(slices.Clone(caps), func(c string) bool {
 			return c == CapBlocks || c == CapProjectKeyIDs || c == CapRoute
@@ -1020,7 +1000,7 @@ func newTracker(call guestCall, writes forge.IssueTracker, lifecycle Lifecycle, 
 	if slices.Contains(caps, CapProjectKeyIDs) {
 		ids = projectKeyIDs
 	}
-	r := &reads{IssueTracker: writes, call: call, lifecycle: lifecycle, target: target, ids: ids, v02: v02, routes: slices.Contains(caps, CapRoute), route: wireRoute(lifecycle.Route)}
+	r := &reads{call: call, lifecycle: lifecycle, target: target, ids: ids, v02: v02, routes: slices.Contains(caps, CapRoute), route: wireRoute(lifecycle.Route)}
 	var it forge.IssueTracker = r
 	if slices.Contains(caps, CapComments) {
 		it = commentsLayer{it, r}

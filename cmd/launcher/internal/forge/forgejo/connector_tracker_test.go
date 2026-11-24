@@ -17,9 +17,8 @@ import (
 )
 
 // trackerHarness drives the tracker contracts through the Connector's tracker
-// primitives, built by the production constructor under a forgejo row with no
-// native adapter behind it. It omits forgetest.StateSeeder, so state moves
-// through TransitionState.
+// primitives, built by the production constructor under a forgejo row. It omits
+// forgetest.StateSeeder, so state moves through TransitionState.
 type trackerHarness struct {
 	*connectorHarness
 	tr forge.IssueTracker
