@@ -1,8 +1,8 @@
 // Command escape is a fixture Connector that calls the test-only
 // spindrift_escape host module, standing in for a wazero escape: it asks the
-// host process to read a file, dial a socket or dump its environment. Only a
-// connector-host built with the escapeprobe tag instantiates that module, so
-// under any production build this Connector fails to link.
+// host process to read or write a file, dial a socket or dump its environment.
+// Only a connector-host built with the escapeprobe tag instantiates that
+// module, so under any production build this Connector fails to link.
 package main
 
 import (

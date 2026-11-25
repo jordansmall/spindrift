@@ -80,6 +80,8 @@ func runEscape(kind, arg string) (string, error) {
 	switch kind {
 	case "read":
 		return escapeRead(arg)
+	case "write":
+		return escapeWrite(arg)
 	case "tcp", "unix":
 		c, err := net.DialTimeout(kind, arg, dialTimeout)
 		if err != nil {
@@ -90,6 +92,24 @@ func runEscape(kind, arg string) (string, error) {
 		return strings.Join(os.Environ(), "\n"), nil
 	}
 	return "", fmt.Errorf("unknown escape kind %q", kind)
+}
+
+// escapeWrite creates path exclusively and removes it again, so a write that
+// succeeds leaves nothing behind.
+func escapeWrite(path string) (string, error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return "", err
+	}
+	_, werr := f.Write([]byte{0})
+	cerr := f.Close()
+	if err := os.Remove(path); err != nil {
+		return "", err
+	}
+	if werr != nil {
+		return "", werr
+	}
+	return "written", cerr
 }
 
 func escapeRead(path string) (string, error) {
