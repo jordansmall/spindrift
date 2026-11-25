@@ -94,10 +94,7 @@ func declaredRoutes(t *testing.T) (string, []connectorhost.Route) {
 	if path == "" {
 		t.Skipf("%s unset: no compiled forgejo Connector to test; connectors/forgejo's connector-forgejo-conformance check runs it", connectorWasmEnv)
 	}
-	var table []struct {
-		Method, Host, Path string
-		FollowRedirect     bool
-	}
+	var table []connectorhost.Route
 	if err := json.Unmarshal([]byte(os.Getenv(connectorRoutesEnv)), &table); err != nil {
 		t.Fatalf("%s: %v", connectorRoutesEnv, err)
 	}
@@ -106,7 +103,7 @@ func declaredRoutes(t *testing.T) (string, []connectorhost.Route) {
 		if r.Host != backendrows.BaseHost {
 			t.Fatalf("route %s %s names host %q, want %s", r.Method, r.Path, r.Host, backendrows.BaseHost)
 		}
-		declared = append(declared, connectorhost.Route{Method: r.Method, Host: r.Host, Path: r.Path, FollowRedirect: r.FollowRedirect})
+		declared = append(declared, r)
 	}
 	return path, declared
 }

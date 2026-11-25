@@ -637,10 +637,7 @@ func githubConnectorRoutes(t *testing.T, host, repo string) (string, []connector
 	if path == "" {
 		t.Skipf("%s unset: no compiled github Connector to test; connectors/github's connector-github-conformance check runs it", connectorWasmEnv)
 	}
-	var table []struct {
-		Method, Host, Path string
-		FollowRedirect     bool
-	}
+	var table []connectorhost.Route
 	if err := json.Unmarshal([]byte(os.Getenv(connectorRoutesEnv)), &table); err != nil {
 		t.Fatalf("%s: %v", connectorRoutesEnv, err)
 	}
@@ -649,7 +646,8 @@ func githubConnectorRoutes(t *testing.T, host, repo string) (string, []connector
 		if r.Host != "api.github.com" {
 			t.Fatalf("route %s %s names host %q, want api.github.com", r.Method, r.Path, r.Host)
 		}
-		declared = append(declared, connectorhost.Route{Method: r.Method, Host: host, Path: r.Path, FollowRedirect: r.FollowRedirect})
+		r.Host = host
+		declared = append(declared, r)
 	}
 	return path, connectortracker.Routes(declared, repo)
 }
