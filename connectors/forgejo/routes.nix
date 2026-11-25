@@ -30,6 +30,10 @@
 # label create. The org-label read cannot be pinned to the owner, since core
 # substitutes only `{repo}`: `GET /orgs` admits every org read, as the GitHub
 # table's unpinned `GET /search/issues` does; the route admits no write.
+#
+# The issue count reads `X-Total-Count` off a `GET /issues` answer, which the
+# repository root admits, so that Route declares `responseHeaders`; the host hands
+# the guest no response header outside its fixed set unless the Route names it.
 [
   {
     method = "GET";
@@ -41,6 +45,7 @@
     method = "GET";
     host = "{base}";
     path = "/api/v1/repos/{repo}";
+    responseHeaders = [ "X-Total-Count" ];
   }
   {
     method = "POST";

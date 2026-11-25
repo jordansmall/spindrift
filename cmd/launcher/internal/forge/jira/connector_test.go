@@ -74,7 +74,8 @@ func newConnectorHarnessWith(t *testing.T, cloud bool, lc connectortracker.Lifec
 	}
 	// The table spells the site as {base}; the scripted backend stands in for it.
 	for _, r := range table {
-		h.routes = append(h.routes, connectorhost.Route{Method: r.Method, Host: u.Host, Path: r.Path})
+		r.Host = u.Host
+		h.routes = append(h.routes, r)
 	}
 
 	h.routes = connectortracker.Routes(h.routes, connectorProject)
