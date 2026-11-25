@@ -696,6 +696,7 @@ let
       else
         throw "mkHarness: the accepted baseline (spindrift-connector-routes.json) is invalid:\n${lib.concatStringsSep "\n" ps}";
   isNonEmptyStr = v: builtins.isString v && v != "";
+  connectorNames = import ./connector-names.nix;
   checkBackendRow =
     name: row:
     let
@@ -734,6 +735,14 @@ let
       row ? credentialKnob && !(builtins.isString row.credentialKnob && row.credentialKnob != "")
     then
       throw "mkHarness: backendRows.${name} `credentialKnob` must be a non-empty string"
+    else if row ? gitRemote && row ? gitRemoteEnv then
+      throw "mkHarness: backendRows.${name} sets both `gitRemote` and `gitRemoteEnv`; declare one"
+    else if row ? gitRemote && !connectorNames.isGitOrigin row.gitRemote then
+      throw "mkHarness: backendRows.${name} `gitRemote` must be a bare https origin (`https://host[:port]`, no path)"
+    else if row ? gitRemoteEnv && !isNonEmptyStr row.gitRemoteEnv then
+      throw "mkHarness: backendRows.${name} `gitRemoteEnv` must be a non-empty string"
+    else if !(row ? gitRemote || row ? gitRemoteEnv) && connectorNames.isCodeForgeRow backends name then
+      throw "mkHarness: backendRows.${name} is a Code Forge row and must carry `gitRemote` or `gitRemoteEnv`"
     else
       row
       // {
@@ -756,6 +765,8 @@ let
       // lib.optionalAttrs (r ? credentialScheme) { inherit (r) credentialScheme; }
       // lib.optionalAttrs (r ? identityEnv) { inherit (r) identityEnv; }
       // lib.optionalAttrs (r ? baseEnv) { inherit (r) baseEnv; }
+      // lib.optionalAttrs (r ? gitRemote) { inherit (r) gitRemote; }
+      // lib.optionalAttrs (r ? gitRemoteEnv) { inherit (r) gitRemoteEnv; }
     ) (lib.mapAttrs checkBackendRow backendRows);
   driverEntry =
     driverEntries.${driver}

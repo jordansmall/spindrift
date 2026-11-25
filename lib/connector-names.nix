@@ -65,6 +65,43 @@ rec {
     else
       null;
 
+  # A literal https origin: scheme and host[:port] only, so core appends the
+  # repository path itself (the Go side, backendrows, refuses the rest).
+  isGitOrigin = v: builtins.isString v && builtins.match "https://[^/?#@[:space:]]+" v != null;
+
+  # Whether `backends` (the core registry) lists `name` as a Code Forge backend.
+  isCodeForgeRow =
+    backends: name: builtins.any (b: b.name == name && (b.validAsCodeForge or false)) backends;
+
+  # Why a backend row's `gitRemote` cannot stand, or null. `value` is the
+  # declaration (null when absent), `knobKnown` whether it names an env-schema
+  # knob. Only a row of a Code Forge backend must declare one.
+  gitRemoteError =
+    {
+      backends,
+      name,
+      value,
+      knobKnown,
+    }:
+    let
+      fail = why: "Connector '${name}': backend gitRemote '${value}' ${why}";
+      isForge = isCodeForgeRow backends name;
+    in
+    if value == null then
+      if isForge then
+        "Connector '${name}': a Code Forge backend row must declare `gitRemote` (a literal https origin, or the env-schema key of the knob holding the forge's https base URL)"
+      else
+        null
+    else if builtins.substring 0 8 value == "https://" then
+      if isGitOrigin value then
+        null
+      else
+        fail "is not a bare https origin (`https://host[:port]`, no path, query or userinfo)"
+    else if knobKnown then
+      null
+    else
+      fail "is neither an https origin nor an env-schema knob";
+
   # Why a row's `primary` (issues #6998, #6999) cannot stand, or null.
   # `nativeDriverNames` is the core Driver registry's. A backend row never
   # reaches here: checkedConnectors refuses its switches first, so only the

@@ -330,6 +330,52 @@ in
         };
       }))
     ) "an empty baseEnv must fail";
+    # A Code Forge row (github, forgejo) declares its Git remote, either
+    # `gitRemote` (a bare https origin) or `gitRemoteEnv`; other rows may omit it.
+    assert assertMsg (evaluates (withRows {
+      github = row // {
+        gitRemote = "https://github.com";
+      };
+    })) "control: a forge row with a literal gitRemote must evaluate";
+    assert assertMsg (evaluates (withRows {
+      forgejo = row // {
+        gitRemoteEnv = "FORGEJO_BASE_URL";
+      };
+    })) "control: a forge row with a gitRemoteEnv must evaluate";
+    assert assertMsg (
+      !(evaluates (withRows {
+        github = row;
+      }))
+    ) "a forge row with no Git remote declaration must fail";
+    assert assertMsg (
+      !(evaluates (withRows {
+        github = row // {
+          gitRemote = "https://github.com/o";
+        };
+      }))
+    ) "a gitRemote with a path must fail";
+    assert assertMsg (
+      !(evaluates (withRows {
+        github = row // {
+          gitRemote = "http://github.com";
+        };
+      }))
+    ) "a non-https gitRemote must fail";
+    assert assertMsg (
+      !(evaluates (withRows {
+        github = row // {
+          gitRemote = "https://github.com";
+          gitRemoteEnv = "GITHUB_URL";
+        };
+      }))
+    ) "both gitRemote and gitRemoteEnv must fail";
+    assert assertMsg (
+      !(evaluates (withRows {
+        forgejo = row // {
+          gitRemoteEnv = "";
+        };
+      }))
+    ) "an empty gitRemoteEnv must fail";
     # Checked whichever Driver the Harness selects, so a bad second row fails too.
     assert assertMsg (
       !(evaluates (withRows {
@@ -360,6 +406,20 @@ in
           and .baseEnv == "FIXTURE_BASE_URL" and .routes[0].host == "{base}"' ${
             (withRows { fixture = baseRow; }).internals.runInputDocumentFile
           }
+        jq -e '.backends[0] | keys == ["credentialEnv", "gitRemote", "module", "name", "routes"] and .gitRemote == "https://github.com"' ${
+          (withRows {
+            github = row // {
+              gitRemote = "https://github.com";
+            };
+          }).internals.runInputDocumentFile
+        }
+        jq -e '.backends[0] | keys == ["credentialEnv", "gitRemoteEnv", "module", "name", "routes"] and .gitRemoteEnv == "FORGEJO_BASE_URL"' ${
+          (withRows {
+            forgejo = row // {
+              gitRemoteEnv = "FORGEJO_BASE_URL";
+            };
+          }).internals.runInputDocumentFile
+        }
         touch $out
       '';
 
@@ -433,8 +493,10 @@ in
       names = import ../../lib/connector-names.nix;
       coreBackends = import ../../lib/backends/default.nix;
       # A row of core backend `rowName` naming core knob `knob` as its own credential.
-      probeRow =
-        rowName: knob:
+      probeRow = rowName: knob: probeGitRow rowName knob "probeBase";
+      # The same row declaring `gitRemote` as `git` (null leaves it undeclared).
+      probeGitRow =
+        rowName: knob: git:
         consumerWith [
           {
             spindrift.connectors.${rowName} = {
@@ -445,6 +507,7 @@ in
               backend = probeBackend // {
                 credential = knob;
                 base = "probeBase";
+                gitRemote = git;
               };
             };
           }
@@ -500,6 +563,55 @@ in
     assert assertMsg (
       !(builds (probeRow "github" "issueTracker"))
     ) "a github row naming a non-token core knob must fail evaluation";
+    # A forge row declares its Git remote: a literal https origin or a known
+    # knob; the message naming the row is pinned on the pure decision below.
+    assert assertMsg (builds (
+      probeGitRow "github" "ghToken" "https://github.com"
+    )) "a forge row with a literal https origin must evaluate";
+    assert assertMsg (builds (
+      probeGitRow "forgejo" "forgejoToken" "probeBase"
+    )) "a forge row naming a knob must evaluate";
+    assert assertMsg (builds (
+      probeGitRow "jira" "jiraToken" null
+    )) "a non-forge row may omit gitRemote";
+    assert assertMsg (
+      !(builds (probeGitRow "github" "ghToken" null))
+    ) "a forge row with no gitRemote must fail evaluation";
+    assert assertMsg (
+      !(builds (probeGitRow "github" "ghToken" "notAKnob"))
+    ) "a gitRemote that is neither an origin nor a knob must fail evaluation";
+    assert assertMsg (
+      !(builds (probeGitRow "github" "ghToken" "http://github.com"))
+    ) "an http gitRemote must fail evaluation";
+    assert assertMsg (
+      !(builds (probeGitRow "github" "ghToken" "https://github.com/o"))
+    ) "a gitRemote origin with a path must fail evaluation";
+    assert assertMsg (
+      let
+        err =
+          name: value:
+          names.gitRemoteError {
+            backends = coreBackends;
+            inherit name value;
+            knobKnown = value == "forgejoBaseURL";
+          };
+      in
+      err "github" null
+      == "Connector 'github': a Code Forge backend row must declare `gitRemote` (a literal https origin, or the env-schema key of the knob holding the forge's https base URL)"
+      && err "jira" null == null
+      && err "github" "https://github.com" == null
+      && err "github" "https://git.example:8443" == null
+      && err "forgejo" "forgejoBaseURL" == null
+      &&
+        err "github" "notAKnob"
+        == "Connector 'github': backend gitRemote 'notAKnob' is neither an https origin nor an env-schema knob"
+      &&
+        err "github" "http://github.com"
+        == "Connector 'github': backend gitRemote 'http://github.com' is neither an https origin nor an env-schema knob"
+      &&
+        err "github" "https://github.com/o"
+        == "Connector 'github': backend gitRemote 'https://github.com/o' is not a bare https origin (`https://host[:port]`, no path, query or userinfo)"
+    ) "a gitRemote refusal must name the Connector and the offending value";
     # A basic row's identity may name its own backend's `identityEnvVar` knob
     # (issue #7501), and no other core knob.
     assert assertMsg (builds (

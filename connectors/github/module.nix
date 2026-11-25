@@ -30,5 +30,8 @@ in
     # (lib/connector-names.nix): the host attaches it, so the untrusted wasm
     # never holds it.
     credential = "ghToken";
+    # Git and the web live on github.com while the Routes name api.github.com;
+    # the GH_HOST rule still refuses any other host.
+    gitRemote = "https://github.com";
   };
 }

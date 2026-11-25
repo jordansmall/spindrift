@@ -29,5 +29,7 @@ in
     # The instance URL is the core FORGEJO_BASE_URL knob; the base is not a
     # secret, so a core knob may carry it.
     base = "forgejoBaseURL";
+    # Core derives the clone URL from the same instance URL.
+    gitRemote = "forgejoBaseURL";
   };
 }

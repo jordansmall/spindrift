@@ -135,6 +135,7 @@ let
       inherit (githubConnector) routes;
       credentialEnv = "GH_TOKEN";
       credentialKnob = "ghToken";
+      gitRemote = "https://github.com";
       acceptedRoutes = (builtins.fromJSON (builtins.readFile ../spindrift-connector-routes.json)).github;
     };
     # The Connector is the tracker and Code Forge.
@@ -144,6 +145,7 @@ let
       credentialEnv = "FORGEJO_TOKEN";
       credentialKnob = "forgejoToken";
       baseEnv = "FORGEJO_BASE_URL";
+      gitRemoteEnv = "FORGEJO_BASE_URL";
       acceptedRoutes = (builtins.fromJSON (builtins.readFile ../spindrift-connector-routes.json)).forgejo;
     };
     # jira's Connector is its only tracker, so the row loads for ISSUE_TRACKER=jira.

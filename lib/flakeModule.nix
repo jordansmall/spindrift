@@ -132,8 +132,15 @@ let
       baseEnv =
         config.spindrift.envSchema.${b.base}.env
           or (throw "Connector '${name}': backend base '${b.base}' is not an env-schema knob");
+      gitRemoteErr = names.gitRemoteError {
+        inherit backends name;
+        value = b.gitRemote;
+        knobKnown = b.gitRemote != null && config.spindrift.envSchema ? ${b.gitRemote};
+      };
     in
-    if b.scheme == "basic" && b.identity == null then
+    if gitRemoteErr != null then
+      throw gitRemoteErr
+    else if b.scheme == "basic" && b.identity == null then
       throw "Connector '${name}': backend scheme 'basic' needs an `identity` (the knob holding the Basic username)"
     else if b.scheme == "bearer" && b.identity != null then
       throw "Connector '${name}': backend `identity` applies only to scheme 'basic'"
@@ -147,6 +154,12 @@ let
       // lib.optionalAttrs (b.scheme != "bearer") { credentialScheme = b.scheme; }
       // lib.optionalAttrs (b.identity != null) { identityEnv = ownKnobEnv "identity" b.identity false; }
       // lib.optionalAttrs (b.base != null) { inherit baseEnv; }
+      // lib.optionalAttrs (b.gitRemote != null) (
+        if names.isGitOrigin b.gitRemote then
+          { gitRemote = b.gitRemote; }
+        else
+          { gitRemoteEnv = config.spindrift.envSchema.${b.gitRemote}.env; }
+      )
   ) (lib.filterAttrs (_: r: r.backend != null) checkedConnectors);
   shadowConnectors = lib.attrNames (lib.filterAttrs (_: r: r.driver != null) shadowRows);
   # Driver rows asking for primary mode, already checked by checkedConnectors.
@@ -585,6 +598,11 @@ in
                           default = null;
                           description = "Env-schema key of the knob holding the site's https base URL. A route whose `host` is `{base}` resolves to that URL's host, with its path prefix prepended to the route path.";
                         };
+                        gitRemote = mkOption {
+                          type = types.nullOr types.str;
+                          default = null;
+                          description = "Where the forge's Git remote lives: a literal https origin (`https://host[:port]`, no path) or the env-schema key of the knob holding the forge's https web base URL (any env-schema knob, like `base`). Required of a Code Forge row (github, forgejo), where core derives the clone URL from it; other rows may omit it.";
+                        };
                       };
                     }
                   );
@@ -592,8 +610,8 @@ in
                   description = ''
                     The network Connector's backend row (ADR 0073, issue
                     #6805): `{ module; routes; credential; scheme; identity;
-                    base; }`. `module` is a function of pkgs returning the
-                    Connector's wasm file path, `routes` its Route table (a
+                    base; gitRemote; }`. `module` is a function of pkgs returning
+                    the Connector's wasm file path, `routes` its Route table (a
                     list of `{ method; host; path; }` validated at evaluation
                     with the registry-route rules, so a blanket or non-canonical
                     route fails the build naming this Connector), and
@@ -608,6 +626,9 @@ in
                     username (not necessarily secret), and bearer refuses it.
                     `base` names any env-schema knob holding the site's https
                     base URL, which a route host of `{base}` resolves from.
+                    `gitRemote` is a literal https origin or the key of a knob
+                    holding the forge's https web base URL, required of a
+                    github or forgejo row.
                     Null declares no backend; a name equal to a built-in
                     backend (git, local) is refused.
                   '';
