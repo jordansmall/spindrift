@@ -2,10 +2,11 @@
 // Connectors: the backend rows, the sandbox it loads them into, and the live
 // sessions, closed together.
 //
-// A session is the one Connector a (row, Target) pair keeps alive. It owns,
-// for every backend, the load, the reload of a Connector that died, the
-// cooldown after repeated load failures, the failure note, and the one-time
-// check of the capabilities the backend requires.
+// A session is the one Connector a (row, Target) pair keeps alive, whichever
+// axis (tracker or Code Forge) asks for it. It owns, for every backend, the
+// load, the reload of a Connector that died, the cooldown after repeated load
+// failures, the failure note, and the one-time check of the capabilities the
+// backend requires.
 package connectorruntime
 
 import (
@@ -19,11 +20,13 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
+	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectorrecord"
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/gitexec"
 	"spindrift.dev/launcher/internal/retry"
 )
 
@@ -31,11 +34,11 @@ import (
 // backend requires.
 var ErrMissingCapabilities = errors.New("Connector lacks required capabilities")
 
-// ErrClosed is a Tracker request on a runtime already closed.
+// ErrClosed is a Tracker or Code Forge request on a runtime already closed.
 var ErrClosed = errors.New("Connector runtime closed")
 
-// ErrNoRuntime is a tracker built without a Connector runtime.
-var ErrNoRuntime = errors.New("tracker built without a Connector runtime")
+// ErrNoRuntime is a tracker or Code Forge built without a Connector runtime.
+var ErrNoRuntime = errors.New("tracker or Code Forge built without a Connector runtime")
 
 const (
 	maxLoadFailures = 3
@@ -80,8 +83,8 @@ func newRuntime(lookup func(string) (backendrows.Row, bool), sandbox connectorsa
 // Row is the named backend row.
 func (r *Runtime) Row(name string) (backendrows.Row, bool) { return r.lookup(name) }
 
-// Close closes every session's live Connector and refuses further Trackers; a
-// second Close does nothing.
+// Close closes every session's live Connector and refuses further Trackers and
+// Code Forges; a second Close does nothing.
 func (r *Runtime) Close() error {
 	r.mu.Lock()
 	if r.closed {
@@ -99,12 +102,11 @@ func (r *Runtime) Close() error {
 	return errors.Join(errs...)
 }
 
-// TrackerSpec is what a tracker needs of its backend beyond the row. Its
-// loading fields (Requires, Record, Options) are those of the call that first
-// opened the (row, Target) session.
-type TrackerSpec struct {
-	Target    connectortracker.Target
-	Lifecycle connectortracker.Lifecycle
+// SessionSpec names a (row, Target) session and how it loads. Its loading
+// fields (Requires, Record, Options) are those of the call that first opened
+// the session, whichever axis made it.
+type SessionSpec struct {
+	Target connectortracker.Target
 	// Requires are the capabilities the backend requires; a Connector missing
 	// one is refused at load.
 	Requires []string
@@ -114,6 +116,12 @@ type TrackerSpec struct {
 	// Options are the host's Client and Getenv for the load; the runtime
 	// supplies the sandbox.
 	Options backendrows.Options
+}
+
+// TrackerSpec is what a tracker needs of its backend beyond the row.
+type TrackerSpec struct {
+	SessionSpec
+	Lifecycle connectortracker.Lifecycle
 	// Clock paces the retry backoff; the zero value sleeps for real.
 	Clock retry.Clock
 }
@@ -122,23 +130,66 @@ type TrackerSpec struct {
 // (row, Target) share its session, so the Connector loads once and a dead one
 // reloads before the next call, whichever tracker makes it.
 func (r *Runtime) Tracker(row backendrows.Row, spec TrackerSpec) (forge.IssueTracker, error) {
-	s, err := r.session(row, spec)
+	s, err := r.session(row, spec.SessionSpec)
 	if err != nil {
 		return nil, err
 	}
 	c, err := s.live()
-	if err == nil {
-		var it forge.IssueTracker
-		if it, err = connectortracker.NewCalling(c, s.call, spec.Lifecycle, spec.Target, spec.Clock); err == nil {
-			return it, nil
-		}
-		s.drop(c)
+	if err != nil {
+		_ = connectorrecord.Note(s.record, "load the Connector", err)
+		return nil, err
 	}
-	_ = connectorrecord.Note(s.record, "load the Connector", err)
-	return nil, err
+	it, err := connectortracker.NewCalling(c, s.call, spec.Lifecycle, spec.Target, spec.Clock)
+	if err != nil {
+		// Unlike the Code Forge's compose, building the tracker can call the
+		// guest (the count interval), so a failure may mean a dead Connector.
+		s.drop(c)
+		_ = connectorrecord.Note(s.record, "compose the tracker", err)
+		return nil, err
+	}
+	return it, nil
 }
 
-func (r *Runtime) session(row backendrows.Row, spec TrackerSpec) (*session, error) {
+// ForgeSpec is what a Code Forge needs of its backend beyond the row. Its
+// fields are those of connectorforge.Git but Note, which the session supplies:
+// it already notes every failed guest call by method.
+type ForgeSpec struct {
+	SessionSpec
+	Credential gitexec.Credential
+	Plumbing   func(cloneURL string, cred gitexec.Credential) forge.CodeForge
+	Clock      retry.Clock
+	WebBase    string
+}
+
+// CodeForge is a live Code Forge for row and spec.Target, sharing the
+// (row, Target) session with Trackers: one row serving both axes loads one
+// Connector, and a dead one reloads before the next call, whichever axis makes
+// it.
+func (r *Runtime) CodeForge(row backendrows.Row, spec ForgeSpec) (forge.CodeForge, error) {
+	s, err := r.session(row, spec.SessionSpec)
+	if err != nil {
+		return nil, err
+	}
+	c, err := s.live()
+	if err != nil {
+		_ = connectorrecord.Note(s.record, "load the Connector", err)
+		return nil, err
+	}
+	// Dialect is tracker-only: the forge axis keys on API and Repo.
+	target := connectorforge.Target{API: spec.Target.API, Repo: spec.Target.Repo}
+	git := connectorforge.Git{Credential: spec.Credential, Plumbing: spec.Plumbing, Clock: spec.Clock, WebBase: spec.WebBase}
+	cf, _, err := connectorforge.ComposeCalling(c, s.call, s, target, git)
+	if err != nil {
+		// Compose reads the loaded manifest and host configuration and makes no
+		// guest call, so a failure never means a dead Connector, and this one
+		// may be serving the tracker too: do not drop it.
+		_ = connectorrecord.Note(s.record, "compose the Code Forge", err)
+		return nil, err
+	}
+	return cf, nil
+}
+
+func (r *Runtime) session(row backendrows.Row, spec SessionSpec) (*session, error) {
 	key := sessionKey{row.Name, spec.Target}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -232,6 +283,17 @@ func (s *session) callOnce(ctx context.Context, method string, params, result an
 		return err
 	}
 	return c.Call(ctx, method, params, result)
+}
+
+// AuditRefusal records a refusal core made itself in the live Connector's
+// audit log, so after a reload it lands in the guest now serving. With no live
+// Connector the refusal stays in the returned chain.
+func (s *session) AuditRefusal(method string, refusal error) error {
+	c, err := s.live()
+	if err != nil {
+		return errors.Join(refusal, err)
+	}
+	return c.AuditRefusal(method, refusal)
 }
 
 // drop closes c, a Connector the caller cannot use, unless the session has

@@ -1,6 +1,7 @@
 # Builds driver.wasm (the fixture Driver's host half), network.wasm (the
 # fixture network Connector, ./network), forge.wasm (the fixture push-only
-# forge Connector, ./forge), forge-pr.wasm (the fixture PR-capable forge
+# forge Connector, ./forge), forge-tracker.wasm (the same forge also serving
+# the tracker axis), forge-pr.wasm (the fixture PR-capable forge
 # Connector, ./forgepr), tracker.wasm (the fixture read-only tracker
 # Connector, ./tracker), tracker-writes.wasm (the same tracker built
 # in its write-capable mode) and tracker-dialect.wasm (the same tracker built to
@@ -30,6 +31,7 @@ pkgs.runCommand "connector-fixture-wasm" { nativeBuildInputs = [ pkgs.go ]; } ''
   go build -buildmode=c-shared -o $out/driver.wasm .
   go build -buildmode=c-shared -o $out/network.wasm ./network
   go build -buildmode=c-shared -o $out/forge.wasm ./forge
+  go build -buildmode=c-shared -ldflags=-X=main.mode=tracker -o $out/forge-tracker.wasm ./forge
   go build -buildmode=c-shared -o $out/forge-pr.wasm ./forgepr
   go build -buildmode=c-shared -o $out/tracker.wasm ./tracker
   go build -buildmode=c-shared -ldflags=-X=main.mode=writes -o $out/tracker-writes.wasm ./tracker

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
+	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorforge/connectorforgetest"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectorrecord"
@@ -23,6 +24,7 @@ import (
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/fixturebuild"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/gitexec"
 	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/retry"
 )
@@ -76,8 +78,8 @@ type env struct {
 	err503 *atomic.Int32 // backend requests still to answer 503
 }
 
-// newEnv is a runtime over the fixture tracker Connector served by an
-// httptest backend with one issue, 1, titled "first". It runs in a fresh
+// newEnv is a runtime over a fixture Connector served by an httptest backend
+// with one issue, 1, titled "first", and one branch, main. It runs in a fresh
 // working directory, where the audit file and the .log land.
 func newEnv(t *testing.T, wasmFile string) *env {
 	t.Helper()
@@ -92,11 +94,14 @@ func newEnv(t *testing.T, wasmFile string) *env {
 			http.Error(w, "unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		if r.URL.Path != apiPath+"/repos/"+connectorforgetest.Repo+"/issues/1" {
+		switch r.URL.Path {
+		case apiPath + "/repos/" + connectorforgetest.Repo + "/issues/1":
+			_, _ = w.Write([]byte(`{"number":1,"title":"first","body":"","state":"open","labels":[]}`))
+		case apiPath + "/repos/" + connectorforgetest.Repo + "/branches/main":
+			_, _ = w.Write([]byte(`{}`))
+		default:
 			http.NotFound(w, r)
-			return
 		}
-		_, _ = w.Write([]byte(`{"number":1,"title":"first","body":"","state":"open","labels":[]}`))
 	}))
 	t.Cleanup(srv.Close)
 	e := &env{
@@ -111,9 +116,11 @@ func newEnv(t *testing.T, wasmFile string) *env {
 		now: time.Unix(1000, 0),
 	}
 	e.spec = connectorruntime.TrackerSpec{
-		Target:  connectortracker.Target{API: srv.URL + apiPath, Repo: connectorforgetest.Repo},
-		Options: backendrows.Options{Client: srv.Client(), Getenv: func(string) string { return "tok" }},
-		Clock:   retry.NoSleepClock(),
+		SessionSpec: connectorruntime.SessionSpec{
+			Target:  connectortracker.Target{API: srv.URL + apiPath, Repo: connectorforgetest.Repo},
+			Options: backendrows.Options{Client: srv.Client(), Getenv: func(string) string { return "tok" }},
+		},
+		Clock: retry.NoSleepClock(),
 	}
 	e.rt = connectorruntime.New([]backendrows.Row{e.row}, e.sb)
 	e.rt.SetClock(func() time.Time { return e.now })
@@ -130,6 +137,16 @@ func (e *env) tracker(t *testing.T) forge.IssueTracker {
 	return tr
 }
 
+// forgeSpec is the Code Forge's spec over the same session as e.spec.
+func (e *env) forgeSpec() connectorruntime.ForgeSpec {
+	return connectorruntime.ForgeSpec{
+		SessionSpec: e.spec.SessionSpec,
+		Plumbing:    func(string, gitexec.Credential) forge.CodeForge { return nil },
+		WebBase:     "https://forge.example",
+		Clock:       retry.NoSleepClock(),
+	}
+}
+
 func readFirst(t *testing.T, tr forge.IssueTracker) error {
 	t.Helper()
 	iss, err := tr.Issue("1")
@@ -137,6 +154,96 @@ func readFirst(t *testing.T, tr forge.IssueTracker) error {
 		t.Errorf("Issue(1).Title = %q, want %q", iss.Title, "first")
 	}
 	return err
+}
+
+func readMain(t *testing.T, cf forge.CodeForge) error {
+	t.Helper()
+	ok, err := cf.BranchExists("main")
+	if err == nil && !ok {
+		t.Error("BranchExists(main) = false, want true")
+	}
+	return err
+}
+
+// axis is one way into a session: the fixture serving it, the read that
+// exercises it, and the handle the runtime hands back. The lifecycle suite runs
+// once per axis.
+type axis struct {
+	name string
+	wasm string
+	// op is the failure-note op of read.
+	op string
+	// requires are capabilities wasm lacks; okWasm advertises okRequires.
+	requires   []string
+	okWasm     string
+	okRequires []string
+	// otherWasm serves only the other axis, which open refuses with errNot and
+	// notes under otherOp.
+	otherWasm string
+	errNot    error
+	otherOp   string
+	// dropsOther is whether open closes the Connector it refused: a tracker's
+	// build can fail on a guest call, a Code Forge's compose never does.
+	dropsOther bool
+	// open is the runtime's handle for e.spec's session; read performs one
+	// operation through it.
+	open func(t *testing.T, e *env) (read func() error, err error)
+}
+
+var axes = []axis{
+	{
+		name:       "tracker",
+		wasm:       "tracker.wasm",
+		op:         "tracker.issue",
+		requires:   []string{connectortracker.CapTransition, connectortracker.CapEditLabels},
+		okWasm:     "tracker-writes.wasm",
+		okRequires: []string{connectortracker.CapTransition, connectortracker.CapEditLabels},
+		otherWasm:  "forge.wasm",
+		errNot:     connectortracker.ErrNotTracker,
+		otherOp:    "compose the tracker",
+		dropsOther: true,
+		open: func(t *testing.T, e *env) (func() error, error) {
+			tr, err := e.rt.Tracker(e.row, e.spec)
+			if err != nil {
+				return nil, err
+			}
+			return func() error { return readFirst(t, tr) }, nil
+		},
+	},
+	{
+		name:       "code forge",
+		wasm:       "forge.wasm",
+		op:         "forge.branchExists",
+		requires:   []string{connectorforge.CapPRs, "forge.draftPRs"},
+		okWasm:     "forge.wasm",
+		okRequires: []string{connectorforge.CapPushOnly, connectorforge.CapBranches},
+		otherWasm:  "tracker.wasm",
+		errNot:     connectorforge.ErrNotForge,
+		otherOp:    "compose the Code Forge",
+		open: func(t *testing.T, e *env) (func() error, error) {
+			cf, err := e.rt.CodeForge(e.row, e.forgeSpec())
+			if err != nil {
+				return nil, err
+			}
+			return func() error { return readMain(t, cf) }, nil
+		},
+	},
+}
+
+func eachAxis(t *testing.T, f func(t *testing.T, a axis)) {
+	t.Helper()
+	for _, a := range axes {
+		t.Run(a.name, func(t *testing.T) { f(t, a) })
+	}
+}
+
+func (a axis) mustOpen(t *testing.T, e *env) func() error {
+	t.Helper()
+	read, err := a.open(t, e)
+	if err != nil {
+		t.Fatalf("open %s: %v", a.name, err)
+	}
+	return read
 }
 
 // connectorLog is the failed-operation record the runtime left under the
@@ -154,263 +261,319 @@ func connectorLog(t *testing.T) string {
 	return string(raw)
 }
 
-func TestTrackerPerformsAnOperationThroughTheConnector(t *testing.T) {
-	e := newEnv(t, "tracker.wasm")
-	if err := readFirst(t, e.tracker(t)); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestTrackersForOneTargetShareOneLiveConnector(t *testing.T) {
-	e := newEnv(t, "tracker.wasm")
-	for range 3 {
-		if err := readFirst(t, e.tracker(t)); err != nil {
+func TestHandlePerformsAnOperationThroughTheConnector(t *testing.T) {
+	eachAxis(t, func(t *testing.T, a axis) {
+		e := newEnv(t, a.wasm)
+		if err := a.mustOpen(t, e)(); err != nil {
 			t.Fatal(err)
 		}
-	}
-	if n := len(e.sb.loads()); n != 1 {
-		t.Errorf("loads = %d, want the one Connector reused", n)
-	}
-	other := e.spec
-	other.Target.Repo = "o/other"
-	if _, err := e.rt.Tracker(e.row, other); err != nil {
+	})
+}
+
+func TestHandlesForOneTargetShareOneLiveConnector(t *testing.T) {
+	eachAxis(t, func(t *testing.T, a axis) {
+		e := newEnv(t, a.wasm)
+		for range 3 {
+			if err := a.mustOpen(t, e)(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if n := len(e.sb.loads()); n != 1 {
+			t.Errorf("loads = %d, want the one Connector reused", n)
+		}
+		e.spec.Target.Repo = "o/other"
+		a.mustOpen(t, e)
+		if n := len(e.sb.loads()); n != 2 {
+			t.Errorf("loads = %d, want a second Connector for another Target", n)
+		}
+	})
+}
+
+// One row serving both axes keeps one Connector, however each axis opens.
+func TestTrackerAndCodeForgeOfOneRowShareOneConnector(t *testing.T) {
+	e := newEnv(t, "forge-tracker.wasm")
+	tr := e.tracker(t)
+	cf, err := e.rt.CodeForge(e.row, e.forgeSpec())
+	if err != nil {
 		t.Fatal(err)
 	}
+	if err := readFirst(t, tr); err != nil {
+		t.Fatal(err)
+	}
+	if err := readMain(t, cf); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(e.sb.loads()); n != 1 {
+		t.Fatalf("loads = %d, want one Connector for both axes", n)
+	}
+
+	e.sb.killGuest()
+	if err := readMain(t, cf); err == nil {
+		t.Fatal("the call on a killed guest succeeded, want it to fail")
+	}
+	if err := readFirst(t, tr); err != nil {
+		t.Fatalf("tracker after the Code Forge's call saw the guest die: %v, want the reloaded Connector", err)
+	}
 	if n := len(e.sb.loads()); n != 2 {
-		t.Errorf("loads = %d, want a second Connector for another Target", n)
+		t.Errorf("loads = %d, want one reload for both axes", n)
 	}
 }
 
 func TestDeadConnectorIsReloadedBeforeTheNextCall(t *testing.T) {
-	e := newEnv(t, "tracker.wasm")
-	tr := e.tracker(t)
-	if err := readFirst(t, tr); err != nil {
-		t.Fatal(err)
-	}
-	e.sb.killGuest()
-	if err := readFirst(t, tr); err == nil {
-		t.Fatal("the call on a killed guest succeeded, want it to fail")
-	}
-	if err := readFirst(t, tr); err != nil {
-		t.Fatalf("call after the guest died: %v, want a reloaded Connector", err)
-	}
-	if n := len(e.sb.loads()); n != 2 {
-		t.Errorf("loads = %d, want one reload", n)
-	}
+	eachAxis(t, func(t *testing.T, a axis) {
+		e := newEnv(t, a.wasm)
+		read := a.mustOpen(t, e)
+		if err := read(); err != nil {
+			t.Fatal(err)
+		}
+		e.sb.killGuest()
+		if err := read(); err == nil {
+			t.Fatal("the call on a killed guest succeeded, want it to fail")
+		}
+		if err := read(); err != nil {
+			t.Fatalf("call after the guest died: %v, want a reloaded Connector", err)
+		}
+		if n := len(e.sb.loads()); n != 2 {
+			t.Errorf("loads = %d, want one reload", n)
+		}
+	})
 }
 
 func TestFailedReloadFailsTheCallAndTheNextRetries(t *testing.T) {
-	e := newEnv(t, "tracker.wasm")
-	tr := e.tracker(t)
-	e.sb.killGuest()
-	_ = readFirst(t, tr)
+	eachAxis(t, func(t *testing.T, a axis) {
+		e := newEnv(t, a.wasm)
+		read := a.mustOpen(t, e)
+		e.sb.killGuest()
+		_ = read()
 
-	boom := errors.New("sandbox gone")
-	e.sb.failLoads(boom)
-	if err := readFirst(t, tr); !errors.Is(err, boom) {
-		t.Fatalf("err = %v, want the load error", err)
-	}
-	e.sb.failLoads(nil)
-	if err := readFirst(t, tr); err != nil {
-		t.Fatalf("the call after a failed reload: %v, want it to reload and succeed", err)
-	}
+		boom := errors.New("sandbox gone")
+		e.sb.failLoads(boom)
+		if err := read(); !errors.Is(err, boom) {
+			t.Fatalf("err = %v, want the load error", err)
+		}
+		e.sb.failLoads(nil)
+		if err := read(); err != nil {
+			t.Fatalf("the call after a failed reload: %v, want it to reload and succeed", err)
+		}
+	})
 }
 
 func TestRepeatedReloadFailuresStartACooldown(t *testing.T) {
-	e := newEnv(t, "tracker.wasm")
-	tr := e.tracker(t)
-	e.sb.killGuest()
-	_ = readFirst(t, tr)
-	boom := errors.New("compile module")
-	e.sb.failLoads(boom)
+	eachAxis(t, func(t *testing.T, a axis) {
+		e := newEnv(t, a.wasm)
+		read := a.mustOpen(t, e)
+		e.sb.killGuest()
+		_ = read()
+		boom := errors.New("compile module")
+		e.sb.failLoads(boom)
 
-	for i := range 3 {
-		if err := readFirst(t, tr); !errors.Is(err, boom) {
-			t.Fatalf("call %d: err = %v, want the load error", i, err)
+		for i := range 3 {
+			if err := read(); !errors.Is(err, boom) {
+				t.Fatalf("call %d: err = %v, want the load error", i, err)
+			}
 		}
-	}
-	e.sb.failLoads(nil)
-	err := readFirst(t, tr)
-	if !errors.Is(err, boom) || !strings.Contains(err.Error(), "3 times in a row") {
-		t.Fatalf("in cooldown: err = %v, want the wrapped load error without a load", err)
-	}
-	if n := len(e.sb.loads()); n != 1 {
-		t.Fatalf("loads = %d, want none during the cooldown", n)
-	}
-	e.now = e.now.Add(time.Minute)
-	if err := readFirst(t, tr); err != nil {
-		t.Fatalf("after the cooldown: %v, want a reload", err)
-	}
+		e.sb.failLoads(nil)
+		err := read()
+		if !errors.Is(err, boom) || !strings.Contains(err.Error(), "3 times in a row") {
+			t.Fatalf("in cooldown: err = %v, want the wrapped load error without a load", err)
+		}
+		if n := len(e.sb.loads()); n != 1 {
+			t.Fatalf("loads = %d, want none during the cooldown", n)
+		}
+		e.now = e.now.Add(time.Minute)
+		if err := read(); err != nil {
+			t.Fatalf("after the cooldown: %v, want a reload", err)
+		}
+	})
 }
 
 func TestFirstLoadFailuresCountTowardTheCooldown(t *testing.T) {
-	e := newEnv(t, "tracker.wasm")
-	boom := errors.New("compile module")
-	e.sb.failLoads(boom)
-	for i := range 3 {
-		if _, err := e.rt.Tracker(e.row, e.spec); !errors.Is(err, boom) {
-			t.Fatalf("Tracker %d: err = %v, want the load error", i, err)
+	eachAxis(t, func(t *testing.T, a axis) {
+		e := newEnv(t, a.wasm)
+		boom := errors.New("compile module")
+		e.sb.failLoads(boom)
+		for i := range 3 {
+			if _, err := a.open(t, e); !errors.Is(err, boom) {
+				t.Fatalf("open %d: err = %v, want the load error", i, err)
+			}
 		}
-	}
-	e.sb.failLoads(nil)
-	_, err := e.rt.Tracker(e.row, e.spec)
-	if !errors.Is(err, boom) || !strings.Contains(err.Error(), "3 times in a row") {
-		t.Fatalf("in cooldown: err = %v, want the wrapped load error", err)
-	}
-	if n := len(e.sb.loads()); n != 0 {
-		t.Fatalf("loads = %d, want none during the cooldown", n)
-	}
-	e.now = e.now.Add(time.Minute)
-	if err := readFirst(t, e.tracker(t)); err != nil {
-		t.Fatalf("after the cooldown: %v", err)
-	}
+		e.sb.failLoads(nil)
+		_, err := a.open(t, e)
+		if !errors.Is(err, boom) || !strings.Contains(err.Error(), "3 times in a row") {
+			t.Fatalf("in cooldown: err = %v, want the wrapped load error", err)
+		}
+		if n := len(e.sb.loads()); n != 0 {
+			t.Fatalf("loads = %d, want none during the cooldown", n)
+		}
+		e.now = e.now.Add(time.Minute)
+		if err := a.mustOpen(t, e)(); err != nil {
+			t.Fatalf("after the cooldown: %v", err)
+		}
+	})
 }
 
 func TestFailedCallAndFailedReloadAreWrittenToTheFailureNote(t *testing.T) {
-	e := newEnv(t, "tracker.wasm")
-	e.spec.Record = "fixture"
-	tr := e.tracker(t)
-	e.sb.killGuest()
-	if err := readFirst(t, tr); err == nil {
-		t.Fatal("want the call on a killed guest to fail")
-	}
-	e.sb.failLoads(errors.New("sandbox gone"))
-	if err := readFirst(t, tr); err == nil {
-		t.Fatal("want the failed reload to fail the call")
-	}
-	log := connectorLog(t)
-	if n := strings.Count(log, `"op":"tracker.issue"`); n != 2 {
-		t.Errorf("log has %d tracker.issue failures, want the failed call and the failed reload:\n%s", n, log)
-	}
-	if !strings.Contains(log, "sandbox gone") {
-		t.Errorf("log = %q, want the reload error", log)
-	}
+	eachAxis(t, func(t *testing.T, a axis) {
+		e := newEnv(t, a.wasm)
+		e.spec.Record = "fixture"
+		read := a.mustOpen(t, e)
+		e.sb.killGuest()
+		if err := read(); err == nil {
+			t.Fatal("want the call on a killed guest to fail")
+		}
+		e.sb.failLoads(errors.New("sandbox gone"))
+		if err := read(); err == nil {
+			t.Fatal("want the failed reload to fail the call")
+		}
+		log := connectorLog(t)
+		if n := strings.Count(log, `"op":"`+a.op+`"`); n != 2 {
+			t.Errorf("log has %d %s failures, want the failed call and the failed reload:\n%s", n, a.op, log)
+		}
+		if !strings.Contains(log, "sandbox gone") {
+			t.Errorf("log = %q, want the reload error", log)
+		}
+	})
 }
 
 func TestFirstLoadFailureIsWrittenToTheFailureNote(t *testing.T) {
-	e := newEnv(t, "tracker.wasm")
-	e.spec.Record = "fixture"
-	boom := errors.New("sandbox gone")
-	e.sb.failLoads(boom)
-	if _, err := e.rt.Tracker(e.row, e.spec); !errors.Is(err, boom) {
-		t.Fatalf("err = %v, want the load error as is", err)
-	}
-	if log := connectorLog(t); !strings.Contains(log, `"op":"load the Connector"`) || !strings.Contains(log, "sandbox gone") {
-		t.Errorf("log = %q, want the op and the load error", log)
-	}
+	eachAxis(t, func(t *testing.T, a axis) {
+		e := newEnv(t, a.wasm)
+		e.spec.Record = "fixture"
+		boom := errors.New("sandbox gone")
+		e.sb.failLoads(boom)
+		if _, err := a.open(t, e); !errors.Is(err, boom) {
+			t.Fatalf("err = %v, want the load error as is", err)
+		}
+		if log := connectorLog(t); !strings.Contains(log, `"op":"load the Connector"`) || !strings.Contains(log, "sandbox gone") {
+			t.Errorf("log = %q, want the op and the load error", log)
+		}
+	})
 }
 
 func TestUnopenableAuditFileFailsTheLoad(t *testing.T) {
-	e := newEnv(t, "tracker.wasm")
-	if err := os.WriteFile(".spindrift", nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := e.rt.Tracker(e.row, e.spec); err == nil || !strings.Contains(err.Error(), "audit file") {
-		t.Fatalf("err = %v, want the audit file open failure", err)
-	}
-	if n := len(e.sb.loads()); n != 0 {
-		t.Errorf("loads = %d, want the Connector never to run unrecorded", n)
-	}
+	eachAxis(t, func(t *testing.T, a axis) {
+		e := newEnv(t, a.wasm)
+		if err := os.WriteFile(".spindrift", nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := a.open(t, e); err == nil || !strings.Contains(err.Error(), "audit file") {
+			t.Fatalf("err = %v, want the audit file open failure", err)
+		}
+		if n := len(e.sb.loads()); n != 0 {
+			t.Errorf("loads = %d, want the Connector never to run unrecorded", n)
+		}
+	})
 }
 
 func TestConnectorMissingARequiredCapabilityIsRefusedAtLoad(t *testing.T) {
-	e := newEnv(t, "tracker.wasm")
-	e.spec.Record = "fixture"
-	e.spec.Requires = []string{connectortracker.CapTransition, connectortracker.CapEditLabels}
-	_, err := e.rt.Tracker(e.row, e.spec)
-	if !errors.Is(err, connectorruntime.ErrMissingCapabilities) {
-		t.Fatalf("err = %v, want ErrMissingCapabilities", err)
-	}
-	want := "fixture Connector lacks required capabilities: tracker.transition, tracker.editLabels"
-	if !strings.Contains(err.Error(), want) {
-		t.Errorf("err = %q, want it to contain %q", err, want)
-	}
-	loaded := e.sb.loads()
-	if len(loaded) != 1 {
-		t.Fatalf("loads = %d, want the refused Connector loaded once", len(loaded))
-	}
-	if err := loaded[0].Call(context.Background(), "tracker.issue", nil, nil); !errors.Is(err, connectorhost.ErrUnusable) {
-		t.Errorf("refused Connector's call = %v, want it closed (ErrUnusable)", err)
-	}
+	eachAxis(t, func(t *testing.T, a axis) {
+		e := newEnv(t, a.wasm)
+		e.spec.Record = "fixture"
+		e.spec.Requires = a.requires
+		_, err := a.open(t, e)
+		if !errors.Is(err, connectorruntime.ErrMissingCapabilities) {
+			t.Fatalf("err = %v, want ErrMissingCapabilities", err)
+		}
+		want := "fixture Connector lacks required capabilities: " + strings.Join(a.requires, ", ")
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q, want it to contain %q", err, want)
+		}
+		loaded := e.sb.loads()
+		if len(loaded) != 1 {
+			t.Fatalf("loads = %d, want the refused Connector loaded once", len(loaded))
+		}
+		if err := loaded[0].Call(context.Background(), a.op, nil, nil); !errors.Is(err, connectorhost.ErrUnusable) {
+			t.Errorf("refused Connector's call = %v, want it closed (ErrUnusable)", err)
+		}
+	})
 }
 
 func TestConnectorAdvertisingEveryRequiredCapabilityLoads(t *testing.T) {
-	e := newEnv(t, "tracker-writes.wasm")
-	e.spec.Requires = []string{connectortracker.CapTransition, connectortracker.CapEditLabels}
-	if err := readFirst(t, e.tracker(t)); err != nil {
-		t.Fatal(err)
-	}
+	eachAxis(t, func(t *testing.T, a axis) {
+		e := newEnv(t, a.okWasm)
+		e.spec.Requires = a.okRequires
+		if err := a.mustOpen(t, e)(); err != nil {
+			t.Fatal(err)
+		}
+	})
 }
 
 func TestCloseClosesLiveConnectors(t *testing.T) {
-	e := newEnv(t, "tracker.wasm")
-	tr := e.tracker(t)
-	if err := readFirst(t, tr); err != nil {
-		t.Fatal(err)
-	}
-	if err := e.rt.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := readFirst(t, tr); !errors.Is(err, connectorhost.ErrUnusable) {
-		t.Errorf("call after Close = %v, want ErrUnusable", err)
-	}
+	eachAxis(t, func(t *testing.T, a axis) {
+		e := newEnv(t, a.wasm)
+		read := a.mustOpen(t, e)
+		if err := read(); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.rt.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := read(); !errors.Is(err, connectorhost.ErrUnusable) {
+			t.Errorf("call after Close = %v, want ErrUnusable", err)
+		}
+	})
 }
 
-func TestConnectorThatIsNotATrackerIsWrittenToTheFailureNote(t *testing.T) {
-	e := newEnv(t, "forge.wasm")
-	e.spec.Record = "fixture"
-	if _, err := e.rt.Tracker(e.row, e.spec); !errors.Is(err, connectortracker.ErrNotTracker) {
-		t.Fatalf("err = %v, want ErrNotTracker", err)
-	}
-	if log := connectorLog(t); !strings.Contains(log, `"op":"load the Connector"`) {
-		t.Errorf("log = %q, want the load op", log)
-	}
-	loaded := e.sb.loads()
-	if len(loaded) != 1 {
-		t.Fatalf("loads = %d, want one", len(loaded))
-	}
-	if err := loaded[0].Call(context.Background(), "tracker.issue", nil, nil); !errors.Is(err, connectorhost.ErrUnusable) {
-		t.Errorf("useless Connector's call = %v, want it dropped and closed (ErrUnusable)", err)
-	}
+func TestConnectorServingOnlyTheOtherAxisIsWrittenToTheFailureNote(t *testing.T) {
+	eachAxis(t, func(t *testing.T, a axis) {
+		e := newEnv(t, a.otherWasm)
+		e.spec.Record = "fixture"
+		if _, err := a.open(t, e); !errors.Is(err, a.errNot) {
+			t.Fatalf("err = %v, want %v", err, a.errNot)
+		}
+		if log := connectorLog(t); !strings.Contains(log, `"op":"`+a.otherOp+`"`) {
+			t.Errorf("log = %q, want the load op", log)
+		}
+		loaded := e.sb.loads()
+		if len(loaded) != 1 {
+			t.Fatalf("loads = %d, want one", len(loaded))
+		}
+		err := loaded[0].Call(context.Background(), a.op, nil, nil)
+		if dropped := errors.Is(err, connectorhost.ErrUnusable); dropped != a.dropsOther {
+			t.Errorf("refused Connector's call = %v, want dropped = %v", err, a.dropsOther)
+		}
+	})
 }
 
 func TestFailedRetryRestartsTheCooldownAndASuccessResetsTheCount(t *testing.T) {
-	e := newEnv(t, "tracker.wasm")
-	tr := e.tracker(t)
-	e.sb.killGuest()
-	_ = readFirst(t, tr)
-	boom := errors.New("compile module")
-	e.sb.failLoads(boom)
-	for range 3 {
-		_ = readFirst(t, tr)
-	}
-
-	e.now = e.now.Add(time.Minute)
-	e.sb.failLoads(boom)
-	if err := readFirst(t, tr); !errors.Is(err, boom) {
-		t.Fatalf("after the cooldown: err = %v, want the load error from one more attempt", err)
-	}
-	e.sb.failLoads(nil)
-	err := readFirst(t, tr)
-	if !errors.Is(err, boom) || !strings.Contains(err.Error(), "4 times in a row") {
-		t.Fatalf("after a failed retry: err = %v, want the cooldown restarted", err)
-	}
-	if n := len(e.sb.loads()); n != 1 {
-		t.Fatalf("loads = %d, want none during the restarted cooldown", n)
-	}
-
-	e.now = e.now.Add(time.Minute)
-	if err := readFirst(t, tr); err != nil {
-		t.Fatalf("recovery: %v", err)
-	}
-	e.sb.killGuest()
-	_ = readFirst(t, tr)
-	e.sb.failLoads(boom)
-	for i := range 3 {
-		if err := readFirst(t, tr); !errors.Is(err, boom) || strings.Contains(err.Error(), "times in a row") {
-			t.Fatalf("call %d after recovery: err = %v, want a load attempt, not the cooldown", i, err)
+	eachAxis(t, func(t *testing.T, a axis) {
+		e := newEnv(t, a.wasm)
+		read := a.mustOpen(t, e)
+		e.sb.killGuest()
+		_ = read()
+		boom := errors.New("compile module")
+		e.sb.failLoads(boom)
+		for range 3 {
+			_ = read()
 		}
-	}
+
+		e.now = e.now.Add(time.Minute)
+		e.sb.failLoads(boom)
+		if err := read(); !errors.Is(err, boom) {
+			t.Fatalf("after the cooldown: err = %v, want the load error from one more attempt", err)
+		}
+		e.sb.failLoads(nil)
+		err := read()
+		if !errors.Is(err, boom) || !strings.Contains(err.Error(), "4 times in a row") {
+			t.Fatalf("after a failed retry: err = %v, want the cooldown restarted", err)
+		}
+		if n := len(e.sb.loads()); n != 1 {
+			t.Fatalf("loads = %d, want none during the restarted cooldown", n)
+		}
+
+		e.now = e.now.Add(time.Minute)
+		if err := read(); err != nil {
+			t.Fatalf("recovery: %v", err)
+		}
+		e.sb.killGuest()
+		_ = read()
+		e.sb.failLoads(boom)
+		for i := range 3 {
+			if err := read(); !errors.Is(err, boom) || strings.Contains(err.Error(), "times in a row") {
+				t.Fatalf("call %d after recovery: err = %v, want a load attempt, not the cooldown", i, err)
+			}
+		}
+	})
 }
 
 // The retry wraps outside the session, so the failed first attempt reaches the
@@ -428,18 +591,38 @@ func TestRetriedReadNotesTheFailedAttempt(t *testing.T) {
 	}
 }
 
-func TestTrackerAfterCloseFailsAndLoadsNothing(t *testing.T) {
-	e := newEnv(t, "tracker.wasm")
-	if err := e.rt.Close(); err != nil {
-		t.Fatal(err)
+func TestOpenAfterCloseFailsAndLoadsNothing(t *testing.T) {
+	eachAxis(t, func(t *testing.T, a axis) {
+		e := newEnv(t, a.wasm)
+		if err := e.rt.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := a.open(t, e); !errors.Is(err, connectorruntime.ErrClosed) {
+			t.Fatalf("open after Close = %v, want ErrClosed", err)
+		}
+		if n := len(e.sb.loads()); n != 0 {
+			t.Errorf("loads = %d, want none after Close", n)
+		}
+		if err := e.rt.Close(); err != nil {
+			t.Errorf("second Close = %v, want nil", err)
+		}
+	})
+}
+
+// A Code Forge refused for the host's own configuration leaves the Connector
+// the tracker of the same row is using alone.
+func TestCodeForgeComposeFailureLeavesTheTrackersConnector(t *testing.T) {
+	e := newEnv(t, "forge-tracker.wasm")
+	tr := e.tracker(t)
+	spec := e.forgeSpec()
+	spec.Plumbing = nil
+	if _, err := e.rt.CodeForge(e.row, spec); err == nil {
+		t.Fatal("CodeForge without plumbing succeeded, want a compose failure")
 	}
-	if _, err := e.rt.Tracker(e.row, e.spec); !errors.Is(err, connectorruntime.ErrClosed) {
-		t.Fatalf("Tracker after Close = %v, want ErrClosed", err)
+	if err := readFirst(t, tr); err != nil {
+		t.Fatalf("tracker after the Code Forge's compose failure: %v", err)
 	}
-	if n := len(e.sb.loads()); n != 0 {
-		t.Errorf("loads = %d, want none after Close", n)
-	}
-	if err := e.rt.Close(); err != nil {
-		t.Errorf("second Close = %v, want nil", err)
+	if n := len(e.sb.loads()); n != 1 {
+		t.Errorf("loads = %d, want the one Connector kept", n)
 	}
 }

@@ -49,10 +49,15 @@ func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (for
 	}
 	row.Routes = connectortracker.Routes(row.Routes, k.JiraProjectKey)
 	it, err := s.Connectors.Tracker(row, connectorruntime.TrackerSpec{
-		Target: connectortracker.Target{
-			API:     strings.TrimRight(k.JiraBaseURL, "/"),
-			Repo:    k.JiraProjectKey,
-			Dialect: k.JiraDeployment,
+		SessionSpec: connectorruntime.SessionSpec{
+			Target: connectortracker.Target{
+				API:     strings.TrimRight(k.JiraBaseURL, "/"),
+				Repo:    k.JiraProjectKey,
+				Dialect: k.JiraDeployment,
+			},
+			Requires: connectorCapabilities,
+			Record:   backend.Jira.Name,
+			Options:  backendrows.Options{Client: connectorClient, Getenv: identityGetenv(row, k)},
 		},
 		Lifecycle: connectortracker.Lifecycle{
 			Labels:        s.Labels,
@@ -64,10 +69,7 @@ func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (for
 			StatusOnly:    wl.StatusOnly,
 			Route:         s.Route,
 		},
-		Requires: connectorCapabilities,
-		Record:   backend.Jira.Name,
-		Options:  backendrows.Options{Client: connectorClient, Getenv: identityGetenv(row, k)},
-		Clock:    connectorClock,
+		Clock: connectorClock,
 	})
 	if err != nil {
 		return nil, err
