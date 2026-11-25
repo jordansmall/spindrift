@@ -1,5 +1,27 @@
 # Migration Guide
 
+## A forge Connector drops `forge.remote` and probes through `Branches` (issue #7510)
+
+**An out-of-tree forge Connector must rebuild against the 0.4 SDK: the
+protocol is 0.4.0, and core refuses a 0.3 forge or Driver Connector at the
+handshake.** A 0.3 tracker Connector still loads, but a Connector declaring
+both tracker and forge capabilities at 0.3 is refused too.
+
+- **Drop `Branches.Remote`.** `forge.remote` is gone from the protocol.
+- **Move `Probe` from `PRs` to `Branches`.** It is required whenever
+  `Branches` is registered (`RegisterBranches` panics without it, and
+  `Compose` refuses a forge without it), and it must make a real backend
+  request, since a successful probe proves the credential works.
+
+```go
+// before
+forge.RegisterBranches(forge.Branches{Remote: remote, BranchExists: exists, DeleteBranch: del})
+forge.RegisterPRs(forge.PRs{ /* ... */ Probe: probe})
+// after
+forge.RegisterBranches(forge.Branches{BranchExists: exists, DeleteBranch: del, Probe: probe})
+forge.RegisterPRs(forge.PRs{ /* ... */ })
+```
+
 ## A Driver Connector answers `driver.sessionFlags` as a flag and a value (issue #7507)
 
 **A third-party Driver Connector must declare its session flag names on its
