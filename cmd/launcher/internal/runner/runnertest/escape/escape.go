@@ -78,6 +78,11 @@ func escapeTargets(t *testing.T) []escapeTarget {
 	}
 	add("read a file of the host", "read", secret, true)
 
+	add("write a file of the host", "write", filepath.Join(t.TempDir(), "probe"), true)
+	// Directly under the root: the sandbox mounts it read-only, and an
+	// unprivileged unsandboxed run cannot write it either, so it is no control.
+	add("write under the root", "write", fmt.Sprintf("/escape-probe-%d", os.Getpid()), false)
+
 	add("tcp to the host loopback", "tcp", listen(t, "tcp", "127.0.0.1:0"), true)
 	if ip := nonLoopbackIPv4(t); ip != "" {
 		add("tcp to the host address", "tcp", listen(t, "tcp", ip+":0"), true)

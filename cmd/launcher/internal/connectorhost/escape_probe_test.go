@@ -47,6 +47,19 @@ func TestEscapeReadsFileAndDirectory(t *testing.T) {
 	}
 }
 
+func TestEscapeWritesAndRemovesAFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "probe")
+	if got := escape(t, "write", path); !got.OK {
+		t.Errorf("write = %+v, want ok", got)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("stat after write = %v, want the probe file removed", err)
+	}
+	if got := escape(t, "write", filepath.Join(t.TempDir(), "absent", "probe")); got.OK || got.Detail == "" {
+		t.Errorf("write under a missing directory = %+v, want failure with a reason", got)
+	}
+}
+
 func TestEscapeDialsTCPAndUnix(t *testing.T) {
 	tcp, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
