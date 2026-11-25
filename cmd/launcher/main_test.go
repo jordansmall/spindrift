@@ -1055,8 +1055,8 @@ func TestNewIssueTracker_JiraNeedsTheConnectorRow(t *testing.T) {
 	c.setRowKnob("JIRA_PROJECT_KEY", "PROJ")
 	c.setRowKnob("JIRA_TOKEN", "tok")
 
-	if _, err := newIssueTracker(c); err == nil || !strings.Contains(err.Error(), "flake module") {
-		t.Fatalf("err = %v, want one naming the jira Connector's flake module", err)
+	if _, err := newIssueTracker(c); err == nil || !strings.Contains(err.Error(), "spindrift.connectorData") {
+		t.Fatalf("err = %v, want one naming the jira Connector's spindrift.connectorData", err)
 	}
 }
 
