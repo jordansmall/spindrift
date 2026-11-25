@@ -2369,15 +2369,8 @@ mean at runtime is issue #6751. The worked example is the fixture Connector in
   }
   ```
 
-  The keys are `name` (required, the row's name in `spindrift.connectors`),
-  `module`, `routes`, `credential`, `scheme`, `identity`, `base` and
-  `gitRemote` (the [backend row](#backend-rows-on-a-connector), declared by
-  `module`, which also needs `routes`; `credential` is a first-party row's
-  alone, a third-party one derives its credential), and `knobs`,
-  `fragments` and `driver` (the row's own fields). `driver` may be a row or a
-  function of nixpkgs `lib` returning one, for a row built from core's
-  (`lib: (core.lib.driverEntries { inherit lib; }).<name> // { module = …; }`).
-  Core builds the `spindrift.connectors.<name>` row and the module's `key`
+  [Authoring a Connector](#authoring-a-connector) describes the keys field by
+  field. Core builds the `spindrift.connectors.<name>` row and the module's `key`
   (`spindrift-connector-<name>`) itself, so the data declares only its own row
   and sets no other option. An unknown key, a wrongly typed field, or a
   backend field without `module` fails evaluation with a message naming the
@@ -2387,9 +2380,10 @@ mean at runtime is issue #6751. The worked example is the fixture Connector in
   fixture Connector ([`data.nix`](../nix/fixtures/connector/data.nix)),
   github ([`data.nix`](../connectors/github/data.nix)), forgejo
   ([`data.nix`](../connectors/forgejo/data.nix)) and jira
-  ([`data.nix`](../connectors/jira/data.nix)) register this way; the other
-  first-party Connectors still use a flake module and move over in their own
-  issues, after which the flake-module path is withdrawn.
+  ([`data.nix`](../connectors/jira/data.nix)) register this way, as do the
+  tracker, forge and Driver templates (issue #7561); the other first-party
+  Connectors still use a flake module and move over in their own issues, after
+  which the flake-module path is withdrawn.
 
 - **Row-owned knobs.** A row's `knobs` attrset has the shape of a core row's
   (ADR 0068), keyed by env-schema key with an env-schema entry as value. The
@@ -3611,12 +3605,12 @@ client for a forge.
 tracker's API through `http_request`. `routes.nix` is the whole
 of the Connector's network authority: list every method, host and path subtree
 it requests and no more, with `{base}` for the tracker's base URL and `{repo}`
-for the project. `module.nix` holds the row: the `<name>ConnectorToken` knob
-(env `<NAME>_TOKEN`, the credential variable core derives from the row name),
-the `<name>ConnectorBaseURL` knob, the `scheme` (`bearer` by default; `basic`
-needs an extra identity knob) and the `backend` row that names the wasm and
-the routes. Prompt fragment files go under `fragments/<name>/`, listed in
-`fragments.nix`.
+for the project. `data.nix` declares the Connector as data (below): the
+`<name>ConnectorToken` knob (env `<NAME>_TOKEN`, the credential variable core
+derives from the row name), the `<name>ConnectorBaseURL` knob, the `scheme`
+(`bearer` by default; `basic` needs an extra identity knob) and the backend row
+that names the wasm and the routes. Prompt fragment files go under
+`fragments/<name>/`, listed in `fragments.nix`.
 
 A forge skeleton's `main.go` instead registers the forge reader with
 `forge.Register`, the branch primitives with `forge.RegisterBranches` and the
@@ -3625,6 +3619,85 @@ REST API: make each speak your forge's API and declare the routes it calls. It
 leaves `forge.PRs.Open` unset, so set it to let the host open the PR for a
 branch it pushed itself. Its `<name>ConnectorBaseURL` knob names the forge's
 base URL.
+
+**The data.** `data.nix` is a function of `core` returning a flat attribute
+set. It sets no other spindrift option: core builds the
+`spindrift.connectors.<name>` row and the flake module from it with
+`core.lib.connectorModule core data`, which `default.nix` already calls, so the
+author writes no module. An unknown key, a wrongly typed field or a backend
+field without `module` fails evaluation naming the Connector and the key; the
+deeper checks (Route rules, scheme, credential ownership) stay with the row's
+types ([Connector subflake shape](#connector-subflake-shape) has the
+semantics). The fields:
+
+| field        | type                            | meaning |
+| ------------ | ------------------------------- | ------- |
+| `name`       | string, required                | the row's name in `spindrift.connectors` |
+| `module`     | function of pkgs                | the wasm's path; declares a [backend row](#backend-rows-on-a-connector) |
+| `routes`     | list, with `module`             | the Route table, the Connector's whole network authority |
+| `credential` | string, with `module`           | a first-party row's token knob; a third-party row names none |
+| `scheme`     | string                          | how the token authorizes: `bearer` (default) or `basic` |
+| `identity`   | string or null                  | the knob for the account name a `basic` scheme sends |
+| `base`       | string or null                  | the knob for the backend's base URL, the `{base}` of a Route |
+| `gitRemote`  | string or null                  | a forge's clone origin: a base knob or a literal `https://host` |
+| `knobs`      | attribute set                   | the row's env-schema knobs, keyed by env-schema key |
+| `fragments`  | attribute set or null           | the prompt fragments, by axis |
+| `driver`     | row, function of `lib`, or null | a Driver row, or a function of nixpkgs `lib` returning one |
+
+`routes` is required once `module` is set, and `credential`, `scheme`,
+`identity`, `base` and `gitRemote` belong to the backend row, so they need
+`module`. `driver` takes a function when the row builds on core's
+(`lib: (core.lib.driverEntries { inherit lib; }).<name> // { module = …; }`).
+A tracker's `data.nix`:
+
+```nix
+{ core }:
+{
+  name = "<name>";
+  module = pkgs: "${import ./package.nix { inherit pkgs core; }}/<name>.wasm";
+  routes = import ./routes.nix;
+  scheme = "bearer";
+  base = "<name>ConnectorBaseURL";
+  knobs = {
+    <name>ConnectorToken = {
+      env = "<NAME>_TOKEN";
+      group = "dispatch";
+      secret = true;
+      doc = "API token the backend row authorizes its calls with";
+      flakeOption = false;
+      boxEnv = false;
+    };
+    <name>ConnectorBaseURL = {
+      env = "SPINDRIFT_<NAME>_CONNECTOR_BASE_URL";
+      group = "dispatch";
+      doc = "https base URL of the tracker; the `{base}` host of its Routes";
+      flakeOption = false;
+      boxEnv = false;
+    };
+  };
+  fragments = import ./fragments.nix;
+}
+```
+
+A forge's differs in having no `scheme` (bearer is the default) and in naming
+its clone origin; its `knobs` and `fragments` are the same shape:
+
+```nix
+{ core }:
+{
+  name = "<name>";
+  module = pkgs: "${import ./package.nix { inherit pkgs core; }}/<name>.wasm";
+  routes = import ./routes.nix;
+  base = "<name>ConnectorBaseURL";
+  gitRemote = "<name>ConnectorBaseURL";
+  knobs = { /* the token and base URL knobs, as for a tracker */ };
+  fragments = import ./fragments.nix;
+}
+```
+
+A third-party row names no `credential`: core derives its credential variable,
+`<NAME>_TOKEN` with `-` mapped to `_`, from the row name (issue #7560), and the
+template's `<name>ConnectorToken` knob carries that env.
 
 **Check.** `nix flake check -L` in the generated repository runs
 `core.lib.connectorChecks`: Go fmt, wasip1 vet and unit tests, and
@@ -3654,9 +3727,13 @@ For maintainers: the templates are
 [`templates/connector-forge/`](../templates/connector-forge/), with
 `connectorname` and `CONNECTORNAME` as their placeholder tokens. The
 `connector-scaffold` and `connector-scaffold-forge` checks pin their layouts to
-`connectors/jira` and `connectors/forgejo`, and CI's `connector` lane runs `nix
-run .#connector-dev -- templates/connector-<kind> flake check` for each, which
-generates it under two names and checks each.
+`connectors/jira` and `connectors/forgejo`. All three scaffold checks, the
+Driver template's `connector-scaffold-driver` included, also pin the data form:
+`data.nix` present, no `module.nix`, and a Consumer importing the template's
+`flakeModule` registers the row. The `connector-scaffold-builds` check builds both templates'
+wasm. CI's `connector` lane runs `nix run .#connector-dev --
+templates/connector-<kind> flake check` for each, which generates it under two
+names and checks each.
 
 #### Authoring a Driver Connector
 
@@ -3678,7 +3755,18 @@ final result, `SessionFlags` returns the CLI's session flag and value, and `Resu
 picks the answer text (`driver.LastMessage` by default). The stub decodes every
 line as text; decode the CLI's own stream instead. `row.nix` is the whole
 Driver row, since no core row names it: the CLI `package`, its `bin`, the
-`argvShape` and the `credentials` it needs. `module.nix` registers the row.
+`argvShape` and the `credentials` it needs. `data.nix` registers the row as
+data with only `name` and `driver` (the row `row.nix` returns), so a Driver
+Connector has no backend row and sets none of the other
+[fields](#authoring-a-connector):
+
+```nix
+{ core }:
+{
+  name = "<name>";
+  driver = import ./row.nix { inherit core; };
+}
+```
 
 **Check.** `nix flake check -L` runs `core.lib.connectorChecks`, whose
 `connector-<name>-conformance` runs the Driver Conformance kit over
