@@ -40,9 +40,9 @@ type Resolution struct {
 	Applied func(env string) bool
 }
 
-// reads reports whether this run reads through row: it is the CODE_FORGE or
+// Reads reports whether this run reads through row: it is the CODE_FORGE or
 // ISSUE_TRACKER backend and that backend reads through its Connector.
-func reads(row backendrows.Row, forge, tracker string) bool {
+func Reads(row backendrows.Row, forge, tracker string) bool {
 	return (row.Name == forge && backendkit.ForgeReadsThroughConnector(row.Name)) ||
 		(row.Name == tracker && backendkit.TrackerReadsThroughConnector(row.Name))
 }
@@ -59,7 +59,7 @@ func (r Resolution) Apply(rows []backendrows.Row) ([]Recipe, error) {
 	seen := map[string]bool{}
 	for _, row := range rows {
 		env := row.CredentialEnv
-		if !reads(row, r.Forge, r.Tracker) || seen[env] {
+		if !Reads(row, r.Forge, r.Tracker) || seen[env] {
 			continue
 		}
 		seen[env] = true
