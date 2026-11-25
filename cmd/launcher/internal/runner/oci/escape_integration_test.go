@@ -58,3 +58,8 @@ func TestSandboxRefusesAndAuditsAnUndeclaredRoute(t *testing.T) {
 	r, _ := escapeSandbox(t)
 	escape.RouteRefusal(t, r)
 }
+
+func TestSandboxRefusesAFrameForAnotherConnectorsSession(t *testing.T) {
+	r, _ := escapeSandbox(t)
+	escape.Impersonation(t, r)
+}

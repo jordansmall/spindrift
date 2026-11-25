@@ -4,11 +4,14 @@ package connectorhost_test
 
 import (
 	"context"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/connectorhost"
 )
 
 type escapeResult struct {
@@ -94,5 +97,44 @@ func TestEscapeReadsHostEnvironment(t *testing.T) {
 func TestEscapeUnknownKindFailsCleanly(t *testing.T) {
 	if got := escape(t, "bogus", ""); got.OK || got.Detail == "" {
 		t.Errorf("unknown kind = %+v, want failure with a reason", got)
+	}
+}
+
+// escapeThrough loads escape.wasm into s and runs one probe call.
+func escapeThrough(t *testing.T, s *connectorhost.Sessions, kind, arg string) error {
+	t.Helper()
+	c, err := s.Load(context.Background(), fixture(t, "escape.wasm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c.Call(context.Background(), "escape", map[string]string{"kind": kind, "arg": arg}, new(escapeResult))
+}
+
+// The frame probe writes onto the host's stream as a session the Launcher never
+// issued, which fails the whole pipe.
+func TestEscapeFrameForgesAChunkForAnotherSession(t *testing.T) {
+	s := sessionsHost(t)
+	err := escapeThrough(t, s, "frame", "2 http://backend.invalid/x")
+	if !errors.Is(err, connectorhost.ErrMalformedOutput) {
+		t.Errorf("forged frame for session 2: err = %v, want ErrMalformedOutput", err)
+	}
+	if !errors.Is(s.Dead(), connectorhost.ErrMalformedOutput) {
+		t.Errorf("Dead = %v, want the pipe failed with ErrMalformedOutput", s.Dead())
+	}
+}
+
+// Under its own session id the frame is a well-formed http_request, which a
+// session loaded without a Host grant refuses.
+func TestEscapeFrameForgesAnHTTPRequestUnderItsOwnSession(t *testing.T) {
+	s := sessionsHost(t)
+	err := escapeThrough(t, s, "frame", "1 http://backend.invalid/x")
+	if !errors.Is(err, connectorhost.ErrMalformedOutput) || !strings.Contains(err.Error(), "http_request without a grant") {
+		t.Errorf("forged frame for own session: err = %v, want the grantless http_request refused", err)
+	}
+}
+
+func TestEscapeFrameOutsideAServeSessionsFailsCleanly(t *testing.T) {
+	if got := escape(t, "frame", "1 http://backend.invalid/x"); got.OK || got.Detail == "" {
+		t.Errorf("frame outside ServeSessions = %+v, want failure with a reason", got)
 	}
 }

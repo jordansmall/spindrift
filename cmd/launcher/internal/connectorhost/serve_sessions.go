@@ -20,6 +20,7 @@ import (
 // end. Only the stream's failure is ServeSessions's.
 func ServeSessions(ctx context.Context, r io.Reader, w io.Writer) error {
 	out := &chunkWriter{w: w}
+	ctx = withEscapeOut(ctx, out)
 	if err := out.send(0, nil); err != nil {
 		return err
 	}
