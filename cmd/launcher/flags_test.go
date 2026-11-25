@@ -683,8 +683,8 @@ func TestPrintHelpFull_RepoSlugAndGhTokenNoteLocalExemption(t *testing.T) {
 				t.Errorf("REPO_SLUG doc must note the fully-local exemption, got: %q", line)
 			}
 		case "GH_TOKEN", "--gh-token-file":
-			if !strings.Contains(line, "local") {
-				t.Errorf("GH_TOKEN doc must note the fully-local exemption, got: %q", line)
+			if !strings.Contains(line, "required when CODE_FORGE or ISSUE_TRACKER is github") {
+				t.Errorf("GH_TOKEN doc must state it is required only with a github CODE_FORGE or ISSUE_TRACKER, got: %q", line)
 			}
 		}
 	}
