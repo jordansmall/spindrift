@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 
-	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/butler"
 	"spindrift.dev/launcher/internal/forge"
@@ -115,20 +114,6 @@ func validateIssueRoute(c config) error {
 func (c config) knobLookup(env string) (string, bool) {
 	v, ok := c.RowKnobs[env]
 	return v, ok
-}
-
-// hostTokenValue returns the Launcher's own value of the token env var a row
-// names. The GitHub token is a core config field rather than a row knob, so
-// knobLookup does not serve it. Any other unserved name falls back to the
-// environment, which is empty when the host token came from a _FILE/_CMD form.
-func (c config) hostTokenValue(env string) string {
-	if v, ok := c.knobLookup(env); ok {
-		return v
-	}
-	if env == backend.GitHub.TokenEnvVar {
-		return c.GhToken
-	}
-	return os.Getenv(env)
 }
 
 // hostRepoDir is the host-side repo path the code forge's Strategy resolves
