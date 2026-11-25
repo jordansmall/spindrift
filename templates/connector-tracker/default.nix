@@ -4,13 +4,15 @@
 {
   lib.connector =
     { core }:
+    let
+      data = import ./data.nix { inherit core; };
+    in
     {
-      flakeModule = import ./module.nix { inherit core; };
+      inherit data;
+      flakeModule = core.lib.connectorModule core data;
       # `pkgs` is the caller's, so the build uses its Go toolchain.
       package = pkgs: import ./package.nix { inherit pkgs core; };
-      # The Route table the module registers, for a check that exports it.
-      routes = import ./routes.nix;
-      # The tracker-axis prompt fragments the module contributes (issue #6857).
-      fragments = import ./fragments.nix;
+      # The Route table the row registers, for a check that exports it.
+      routes = data.routes;
     };
 }

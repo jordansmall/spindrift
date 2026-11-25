@@ -1,21 +1,23 @@
-# The connectorname Connector's flake-parts module: the Connector's whole forge
-# path. The row authorizes with a Bearer token (the default `scheme`, so none is
-# set).
+# The connectorname Connector as data: the Connector's whole forge path. Core
+# turns this into the `spindrift.connectors.connectorname` row, confined to the
+# Route table in ./routes.nix. The row authorizes with a Bearer token (the
+# default `scheme`, so none is set).
 { core }:
-{ ... }:
-let
-  routes = import ./routes.nix;
-in
 {
-  # Depends on the core it was handed; the module system dedups by path, so a
-  # Consumer that imports the same core module is unaffected.
-  imports = [ core.flakeModules.default ];
-
+  name = "connectorname";
+  module = pkgs: "${import ./package.nix { inherit pkgs core; }}/connectorname.wasm";
+  routes = import ./routes.nix;
+  # The base is not a secret, so any env-schema knob may carry it; the
+  # Connector's own keeps it beside its token.
+  base = "connectornameConnectorBaseURL";
+  # Core derives the clone URL from the forge's base URL; a forge on a fixed
+  # host declares a literal `https://host` origin instead.
+  gitRemote = "connectornameConnectorBaseURL";
   # Dedicated knobs, not a core token: the Connector is untrusted wasm, so a
   # core secret must never reach it (lib/flakeModule.nix refuses one). The row
   # names no `credential`: core derives CONNECTORNAME_TOKEN from the row name,
   # and this secret knob with that env shows as the row's `credentialKnob`.
-  spindrift.connectors.connectorname.knobs = {
+  knobs = {
     connectornameConnectorToken = {
       env = "CONNECTORNAME_TOKEN";
       group = "dispatch";
@@ -32,19 +34,6 @@ in
       boxEnv = false;
     };
   };
-
-  spindrift.connectors.connectorname.routes = routes;
-
-  spindrift.connectors.connectorname.fragments = import ./fragments.nix;
-
-  spindrift.connectors.connectorname.backend = {
-    module = pkgs: "${import ./package.nix { inherit pkgs core; }}/connectorname.wasm";
-    inherit routes;
-    # The base is not a secret, so any env-schema knob may carry it; the
-    # Connector's own keeps it beside its token.
-    base = "connectornameConnectorBaseURL";
-    # Core derives the clone URL from the forge's base URL; a forge on a fixed
-    # host declares a literal `https://host` origin instead.
-    gitRemote = "connectornameConnectorBaseURL";
-  };
+  # The forge-axis prompt fragments (issue #6867).
+  fragments = import ./fragments.nix;
 }
