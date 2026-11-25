@@ -47,10 +47,6 @@ const (
 // duplicate finding should keep suppressing refiles.
 var notPlannedResolutions = []string{"Won't Do", "Won't Fix", "Declined"}
 
-// send is the HTTP transport; tests swap it because connector.HTTPRequest
-// fails outside wasip1.
-var send = connector.HTTPRequest
-
 // get sends a GET to t.API+path and decodes a 2xx JSON body into out. The host
 // attaches the credential, so none is set here.
 func get(t tracker.Target, path string, out any) error {
@@ -73,7 +69,7 @@ func do(t tracker.Target, method, path string, body, out any) error {
 		req.Headers["Content-Type"] = "application/json"
 		req.Body = string(b)
 	}
-	resp, err := send(req)
+	resp, err := connector.HTTPRequest(req)
 	if err != nil {
 		return connector.Errorf(connector.Transient, "%w", err)
 	}

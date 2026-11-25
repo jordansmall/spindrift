@@ -19,22 +19,17 @@ var (
 	server = tracker.Target{API: site, Repo: "ENG", Dialect: "server"}
 )
 
-// script replaces send with fn and records every request.
+// script answers every request through the fake host with fn and records them.
 func script(t *testing.T, fn func(r connector.Request, u *url.URL) (int, string)) *[]connector.Request {
 	t.Helper()
-	var got []connector.Request
-	old := send
-	send = func(r connector.Request) (connector.Response, error) {
-		got = append(got, r)
+	return host.Serve(t, func(r connector.Request) (connector.Response, error) {
 		u, err := url.Parse(r.URL)
 		if err != nil {
 			t.Fatal(err)
 		}
 		status, body := fn(r, u)
 		return connector.Response{Status: status, Body: []byte(body)}, nil
-	}
-	t.Cleanup(func() { send = old })
-	return &got
+	})
 }
 
 // serve answers path with a fixed 200 body and 404s everything else.
@@ -128,11 +123,17 @@ func TestIssueClosedWithBadDate(t *testing.T) {
 	}
 }
 
+// A key's "?" and "#" are escaped into the path, and one with a "/" is escaped
+// into a path the host's Route match refuses rather than one that climbs out.
 func TestIssueKeyIsPathEscaped(t *testing.T) {
 	got := serve(t, "", `{}`)
-	_, _ = issue(cloud, "ENG-1/../../x?y")
-	if u := (*got)[0].URL; strings.Contains(u, "/../") || strings.Contains(u, "?y") {
+	_, _ = issue(cloud, "ENG-1?y#z")
+	if u := (*got)[0].URL; strings.Contains(u, "?y") {
 		t.Fatalf("key reached the URL raw: %s", u)
+	}
+	climb := connector.Request{Method: "GET", URL: site + issuePath("ENG-1/../../x")}
+	if err := host.Admit(climb); !errors.Is(err, connector.ErrRouteRefused) {
+		t.Fatalf("Admit(%s) = %v, want a refusal", climb.URL, err)
 	}
 }
 
@@ -671,10 +672,7 @@ func TestIssueClassesNon2xx(t *testing.T) {
 }
 
 func TestTransportFailureIsTransient(t *testing.T) {
-	// script cannot yield a transport error, so swap send directly.
-	old := send
-	send = func(connector.Request) (connector.Response, error) { return connector.Response{}, errors.New("dial") }
-	t.Cleanup(func() { send = old })
+	dialFails(t)
 	t.Run("do", func(t *testing.T) {
 		_, err := issue(cloud, "ENG-7")
 		if got := classOf(t, err); got != connector.Transient {
