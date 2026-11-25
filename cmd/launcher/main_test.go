@@ -2394,8 +2394,10 @@ func TestValidate_ForgejoRequiresBaseURLAndToken(t *testing.T) {
 	if err == nil {
 		t.Fatalf("validate() must require FORGEJO_TOKEN when ISSUE_TRACKER=forgejo")
 	}
-	if !strings.Contains(err.Error(), "FORGEJO_TOKEN") || !strings.Contains(err.Error(), "ISSUE_TRACKER=forgejo") {
-		t.Errorf("validate() error = %q, want it to name FORGEJO_TOKEN and ISSUE_TRACKER=forgejo", err.Error())
+	// The backend-credential Required row fires before the cross-knob
+	// validator, so it is the one that names the variable.
+	if !strings.Contains(err.Error(), "set FORGEJO_TOKEN,") {
+		t.Errorf("validate() error = %q, want it to name FORGEJO_TOKEN", err.Error())
 	}
 
 	c = base
@@ -2426,9 +2428,8 @@ func TestValidate_ForgejoCodeForge(t *testing.T) {
 	if err == nil {
 		t.Fatalf("validate() must require FORGEJO_TOKEN when CODE_FORGE=forgejo")
 	}
-	if !strings.Contains(err.Error(), "FORGEJO_TOKEN") || !strings.Contains(err.Error(), "CODE_FORGE=forgejo") ||
-		strings.Contains(err.Error(), "ISSUE_TRACKER") {
-		t.Errorf("validate() error = %q, want it to name FORGEJO_TOKEN and CODE_FORGE=forgejo, not ISSUE_TRACKER", err.Error())
+	if !strings.Contains(err.Error(), "set FORGEJO_TOKEN,") {
+		t.Errorf("validate() error = %q, want it to name FORGEJO_TOKEN", err.Error())
 	}
 
 	c.setRowKnob("FORGEJO_TOKEN", "tok")

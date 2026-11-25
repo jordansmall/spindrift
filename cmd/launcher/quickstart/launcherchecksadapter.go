@@ -9,23 +9,24 @@ import (
 // quickstartCheckConfig converts the wizard's answers into a
 // launcherchecks.Config.
 func quickstartCheckConfig(a answers) launcherchecks.Config {
-	var ghToken string
+	creds := credentialValues(a.credentials)
+	if creds == nil {
+		creds = map[string]string{}
+	}
 	for _, c := range a.chosen() {
-		if harnessEnvTokenEnvVar(c.name) == "GH_TOKEN" {
-			ghToken = a.tokens[c.name]
+		if env := harnessEnvTokenEnvVar(c.name); env != "" {
+			creds[env] = a.tokens[c.name]
 		}
 	}
 	return launcherchecks.Config{
 		RepoSlug:     a.repoSlug,
 		GitUserName:  a.gitUserName,
 		GitUserEmail: a.gitUserEmail,
-		// Set only when harness.env writes a credential as GH_TOKEN, so a
-		// scaffold still needing GH_TOKEN fails here as it would under
-		// `spindrift doctor`.
-		GHToken: ghToken,
 
-		Driver:      a.driver,
-		Credentials: credentialValues(a.credentials),
+		Driver: a.driver,
+		// Each chosen backend's token sits under the env var harness.env writes
+		// it as, so a scaffold missing one fails here as under `spindrift doctor`.
+		Credentials: creds,
 
 		IssueTracker: a.tracker.name,
 		CodeForge:    a.forge.name,

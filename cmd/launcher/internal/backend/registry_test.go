@@ -110,33 +110,6 @@ func TestLabelRegistry(t *testing.T) {
 	}
 }
 
-func TestNeedsGHToken(t *testing.T) {
-	cases := []struct {
-		name           string
-		forge, tracker Descriptor
-		want           bool
-	}{
-		{"github/github", GitHub, GitHub, true},
-		{"forgejo/forgejo", Forgejo, Forgejo, false},
-		{"jira tracker, github forge", GitHub, Jira, true},
-		{"forgejo tracker, github forge", GitHub, Forgejo, true},
-		{"github tracker, forgejo forge", Forgejo, GitHub, true},
-		{"jira tracker, forgejo forge", Forgejo, Jira, false},
-		{"git forge, forgejo tracker", Git, Forgejo, false},
-		{"git forge, jira tracker", Git, Jira, false},
-		{"git forge, github tracker", Git, GitHub, true},
-		{"local forge, forgejo tracker", Local, Forgejo, false},
-		{"local forge, jira tracker", Local, Jira, false},
-		{"local forge, github tracker", Local, GitHub, true},
-		{"unknown forge", Descriptor{}, Forgejo, true},
-	}
-	for _, c := range cases {
-		if got := NeedsGHToken(c.forge, c.tracker); got != c.want {
-			t.Errorf("%s: NeedsGHToken(%q, %q) = %v, want %v", c.name, c.forge.Name, c.tracker.Name, got, c.want)
-		}
-	}
-}
-
 func TestClosesRef(t *testing.T) {
 	closing := map[[2]string]bool{
 		{"github", "github"}:   true,

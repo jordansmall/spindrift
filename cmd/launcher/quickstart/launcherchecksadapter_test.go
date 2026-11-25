@@ -34,8 +34,7 @@ func TestQuickstartCheckConfig_MapsFields(t *testing.T) {
 		RepoSlug:     a.repoSlug,
 		GitUserName:  a.gitUserName,
 		GitUserEmail: a.gitUserEmail,
-		GHToken:      a.tokens["github"],
-		Credentials:  map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"},
+		Credentials:  map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken", "GH_TOKEN": a.tokens["github"]},
 		IssueTracker: a.tracker.name,
 		CodeForge:    "github",
 	}
@@ -142,27 +141,26 @@ func TestRunQuickstart_WiresLauncherChecksIntoDoctorOutput(t *testing.T) {
 	}
 }
 
-// The wizard's doctor step must reach the gh-token verdict `spindrift doctor`
-// reaches against the wizard's harness.env (#3325): a forgejo scaffold writes
-// FORGEJO_TOKEN, leaving GH_TOKEN blank, so the gh-token row passes for a
-// pure forgejo pairing and reports MISSING for a jira tracker on a github
-// forge.
-func TestQuickstartCheckConfig_GHTokenMirrorsHarnessEnvKnob(t *testing.T) {
+// The wizard's doctor step must reach the backend-credential verdict
+// `spindrift doctor` reaches against the wizard's harness.env (#3325): each
+// chosen backend's token is filed under the env var harness.env writes it as,
+// so a scaffold missing a chosen backend's token reports that variable, and a
+// pairing whose rows name none needs no token.
+func TestQuickstartCheckConfig_CredentialsMirrorHarnessEnv(t *testing.T) {
 	for _, tc := range []struct {
 		issueTracker string
 		codeForge    string
 		tokens       map[string]string
-		wantGHToken  string
-		wantMissing  bool
+		wantCreds    map[string]string
+		wantMissing  string
 	}{
-		{issueTracker: "github", codeForge: "github", tokens: map[string]string{"github": "ghp_faketoken"}, wantGHToken: "ghp_faketoken"},
-		{issueTracker: "forgejo", codeForge: "forgejo", tokens: map[string]string{"forgejo": "forgejo-faketoken"}},
+		{issueTracker: "github", codeForge: "github", tokens: map[string]string{"github": "ghp_faketoken"}, wantCreds: map[string]string{"GH_TOKEN": "ghp_faketoken"}},
+		{issueTracker: "forgejo", codeForge: "forgejo", tokens: map[string]string{"forgejo": "forgejo-faketoken"}, wantCreds: map[string]string{"FORGEJO_TOKEN": "forgejo-faketoken"}},
 		// A forgejo tracker on a github forge writes both credentials.
-		{issueTracker: "forgejo", codeForge: "github", tokens: map[string]string{"forgejo": "forgejo-faketoken", "github": "ghp_faketoken"}, wantGHToken: "ghp_faketoken"},
-		// The github forge still reaches GitHub, so a scaffold lacking its
-		// token must report GH_TOKEN missing.
-		{issueTracker: "forgejo", codeForge: "github", tokens: map[string]string{"forgejo": "forgejo-faketoken"}, wantMissing: true},
-		{issueTracker: "local", codeForge: "git"},
+		{issueTracker: "forgejo", codeForge: "github", tokens: map[string]string{"forgejo": "forgejo-faketoken", "github": "ghp_faketoken"}, wantCreds: map[string]string{"GH_TOKEN": "ghp_faketoken", "FORGEJO_TOKEN": "forgejo-faketoken"}},
+		// The github forge's own credential is still required.
+		{issueTracker: "forgejo", codeForge: "github", tokens: map[string]string{"forgejo": "forgejo-faketoken"}, wantCreds: map[string]string{"GH_TOKEN": "", "FORGEJO_TOKEN": "forgejo-faketoken"}, wantMissing: "GH_TOKEN"},
+		{issueTracker: "local", codeForge: "git", wantCreds: map[string]string{}},
 	} {
 		t.Run(tc.issueTracker+"/"+tc.codeForge, func(t *testing.T) {
 			a := validAnswers()
@@ -171,17 +169,19 @@ func TestQuickstartCheckConfig_GHTokenMirrorsHarnessEnvKnob(t *testing.T) {
 			a.tokens = tc.tokens
 
 			c := quickstartCheckConfig(a)
-			if c.GHToken != tc.wantGHToken {
-				t.Errorf("quickstartCheckConfig(...).GHToken = %q, want %q", c.GHToken, tc.wantGHToken)
+			for env, want := range tc.wantCreds {
+				if got := c.Credentials[env]; got != want {
+					t.Errorf("quickstartCheckConfig(...).Credentials[%q] = %q, want %q", env, got, want)
+				}
 			}
 
-			row := launcherRow(t, a, "gh-token")
+			row := launcherRow(t, a, "backend-credential")
 			_, err := row.Probe()
 			switch {
-			case tc.wantMissing && (err == nil || err.Error() != row.Remedy):
-				t.Errorf("gh-token Probe() = %v, want the row's Remedy %q", err, row.Remedy)
-			case !tc.wantMissing && err != nil:
-				t.Errorf("gh-token Probe() unexpected error: %v", err)
+			case tc.wantMissing != "" && (err == nil || !strings.Contains(err.Error(), "set "+tc.wantMissing+",")):
+				t.Errorf("backend-credential Probe() = %v, want an error naming %s", err, tc.wantMissing)
+			case tc.wantMissing == "" && err != nil:
+				t.Errorf("backend-credential Probe() unexpected error: %v", err)
 			}
 		})
 	}
@@ -333,7 +333,8 @@ func TestQuickstartCheckConfig_CarriesDriver(t *testing.T) {
 	if c.Driver != "opencode" {
 		t.Errorf("Driver = %q, want opencode", c.Driver)
 	}
-	if len(c.Credentials) != 0 {
-		t.Errorf("Credentials = %v, want none", c.Credentials)
+	// Only the chosen backend's token remains once the Driver's are cleared.
+	if want := map[string]string{"GH_TOKEN": "ghp_faketoken"}; !reflect.DeepEqual(c.Credentials, want) {
+		t.Errorf("Credentials = %v, want %v", c.Credentials, want)
 	}
 }

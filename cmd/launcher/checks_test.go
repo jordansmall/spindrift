@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -35,7 +36,7 @@ func checkByName(t *testing.T, checks []doctor.Check, name string) doctor.Check 
 // calls.
 func TestLauncherRequiredKnobChecks_ReturnsSevenRows(t *testing.T) {
 	checks := launcherRequiredKnobChecks(minimalValidConfig())
-	want := []string{"removed-knobs", "repo-slug", "git-user-name", "git-user-email", "gh-token", "driver-credentials", "runtime"}
+	want := []string{"removed-knobs", "repo-slug", "git-user-name", "git-user-email", "backend-credential", "driver-credentials", "runtime"}
 	if len(checks) != len(want) {
 		t.Fatalf("launcherRequiredKnobChecks returned %d rows, want %d", len(checks), len(want))
 	}
@@ -80,7 +81,7 @@ func TestLauncherChecks_AllRequiredTier(t *testing.T) {
 // to its validateChoice calls (checks.go's doc comment).
 func TestLauncherChecks_GroupOrder(t *testing.T) {
 	checks := launcherChecks(minimalValidConfig())
-	want := []string{"removed-knobs", "repo-slug", "git-user-name", "git-user-email", "gh-token", "driver-credentials", "runtime", "issue-tracker-config", "code-forge-config", "registry-proxy-routes"}
+	want := []string{"removed-knobs", "repo-slug", "git-user-name", "git-user-email", "backend-credential", "driver-credentials", "runtime", "issue-tracker-config", "code-forge-config", "registry-proxy-routes"}
 	if len(checks) != len(want) {
 		t.Fatalf("launcherChecks returned %d rows, want %d", len(checks), len(want))
 	}
@@ -207,70 +208,88 @@ func TestLauncherChecks_GitUserEmail_FailsAndPasses(t *testing.T) {
 	}
 }
 
-func TestLauncherChecks_GhToken_Fails(t *testing.T) {
+func TestLauncherChecks_BackendCredential_Fails(t *testing.T) {
 	c := minimalValidConfig()
 	c.GhToken = ""
-	ch := checkByName(t, launcherChecks(c), "gh-token")
+	ch := checkByName(t, launcherChecks(c), "backend-credential")
 	_, err := ch.Probe()
-	if err == nil || err.Error() != ch.Remedy {
-		t.Errorf("gh-token Probe() = %v, want the row's Remedy %q", err, ch.Remedy)
+	if err == nil || !strings.Contains(err.Error(), "set GH_TOKEN,") {
+		t.Errorf("backend-credential Probe() = %v, want an error naming GH_TOKEN", err)
 	}
 }
 
-func TestLauncherChecks_GhToken_Passes(t *testing.T) {
+func TestLauncherChecks_BackendCredential_Passes(t *testing.T) {
 	c := minimalValidConfig()
-	ch := checkByName(t, launcherChecks(c), "gh-token")
+	ch := checkByName(t, launcherChecks(c), "backend-credential")
 	if _, err := ch.Probe(); err != nil {
-		t.Errorf("gh-token Probe() unexpected error: %v", err)
+		t.Errorf("backend-credential Probe() unexpected error: %v", err)
 	}
 }
 
-// A pure-Forgejo deployment carries FORGEJO_TOKEN, not GH_TOKEN, so the row
-// must pass; a forgejo tracker on a GitHub forge still reaches GitHub (#3325).
-func TestLauncherChecks_GhToken_ByPairing(t *testing.T) {
+// Each selected row's credential reaches the row through launcherCredentials:
+// GH_TOKEN from the core field, FORGEJO_TOKEN and JIRA_TOKEN from row knobs.
+// Only the unset variable may be named; local rows need none (#3325).
+func TestLauncherChecks_BackendCredential_ByPairing(t *testing.T) {
 	for _, tc := range []struct {
-		name         string
 		issueTracker string
 		codeForge    string
-		wantRequired bool
+		wantEnvs     []string
 	}{
-		{"pure forgejo", "forgejo", "forgejo", false},
-		{"forgejo tracker, github forge", "forgejo", "github", true},
-		{"jira tracker, github forge", "jira", "github", true},
-		{"github tracker, forgejo forge", "github", "forgejo", true},
-		{"jira tracker, forgejo forge", "jira", "forgejo", false},
+		{"github", "github", []string{"GH_TOKEN"}},
+		{"forgejo", "forgejo", []string{"FORGEJO_TOKEN"}},
+		{"forgejo", "github", []string{"GH_TOKEN", "FORGEJO_TOKEN"}},
+		{"jira", "github", []string{"GH_TOKEN", "JIRA_TOKEN"}},
+		{"jira", "forgejo", []string{"FORGEJO_TOKEN", "JIRA_TOKEN"}},
+		{"local", "git", nil},
+		{"local", "local", nil},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			c := minimalValidConfig()
-			c.IssueTracker = tc.issueTracker
-			c.CodeForge = tc.codeForge
-			c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
-			c.setRowKnob("FORGEJO_TOKEN", "tok")
-			c.setRowKnob("JIRA_BASE_URL", "https://example.atlassian.net")
-			c.setRowKnob("JIRA_PROJECT_KEY", "PROJ")
-			c.setRowKnob("JIRA_TOKEN", "tok")
-			c.GhToken = ""
-			ch := checkByName(t, launcherChecks(c), "gh-token")
-			_, err := ch.Probe()
-			if tc.wantRequired && (err == nil || err.Error() != ch.Remedy) {
-				t.Errorf("gh-token Probe() = %v, want the row's Remedy %q", err, ch.Remedy)
+		t.Run(tc.issueTracker+"-"+tc.codeForge, func(t *testing.T) {
+			full := func() config {
+				c := minimalValidConfig()
+				c.IssueTracker = tc.issueTracker
+				c.CodeForge = tc.codeForge
+				c.GhToken = "tok"
+				c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
+				c.setRowKnob("FORGEJO_TOKEN", "tok")
+				c.setRowKnob("JIRA_BASE_URL", "https://example.atlassian.net")
+				c.setRowKnob("JIRA_PROJECT_KEY", "PROJ")
+				c.setRowKnob("JIRA_TOKEN", "tok")
+				return c
 			}
-			if !tc.wantRequired && err != nil {
-				t.Errorf("gh-token Probe() unexpected error: %v", err)
+			probe := func(c config) error {
+				_, err := checkByName(t, launcherChecks(c), "backend-credential").Probe()
+				return err
+			}
+			if err := probe(full()); err != nil {
+				t.Errorf("every credential set: Probe() unexpected error: %v", err)
+			}
+			for _, env := range []string{"GH_TOKEN", "FORGEJO_TOKEN", "JIRA_TOKEN"} {
+				c := full()
+				if env == "GH_TOKEN" {
+					c.GhToken = ""
+				} else {
+					c.setRowKnob(env, "")
+				}
+				err := probe(c)
+				if required := slices.Contains(tc.wantEnvs, env); required != (err != nil) {
+					t.Errorf("%s unset: Probe() = %v, want an error: %v", env, err, required)
+				} else if required && !strings.Contains(err.Error(), "set "+env+",") {
+					t.Errorf("%s unset: error %q does not name %s", env, err, env)
+				}
 			}
 		})
 	}
 }
 
-// The gh-token row shares repo-slug's fully-local exemption.
-func TestLauncherChecks_GhToken_FullyLocalExempt(t *testing.T) {
+// The backend-credential row shares repo-slug's fully-local exemption.
+func TestLauncherChecks_BackendCredential_FullyLocalExempt(t *testing.T) {
 	c := minimalValidLocalConfig()
 	c.IssueTracker = "local"
 	c.RepoSlug = ""
 	c.GhToken = ""
-	ch := checkByName(t, launcherChecks(c), "gh-token")
+	ch := checkByName(t, launcherChecks(c), "backend-credential")
 	if _, err := ch.Probe(); err != nil {
-		t.Errorf("gh-token Probe() should exempt GH_TOKEN for fully-local pairing: %v", err)
+		t.Errorf("backend-credential Probe() should exempt a fully-local pairing: %v", err)
 	}
 }
 

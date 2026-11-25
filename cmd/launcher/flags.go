@@ -10,7 +10,6 @@ import (
 
 	"github.com/charmbracelet/x/term"
 
-	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/driver"
@@ -520,15 +519,9 @@ func secretRequiredThisRun(env string, rules []driver.CredentialRule) bool {
 	codeForge, issueTracker := resolvedKnob("CODE_FORGE"), resolvedKnob("ISSUE_TRACKER")
 	forgeRow, _ := backendkit.ByName(codeForge)
 	trackerRow, _ := backendkit.ByName(issueTracker)
-	switch env {
-	case "GH_TOKEN":
-		sig := resolveCapabilitySignals(codeForge, issueTracker)
-		return !sig.fullyLocal && backend.NeedsGHToken(forgeRow.Descriptor, trackerRow.Descriptor)
-	default:
-		// Any other backend's own token is required exactly when a selected
-		// backend names it as its TokenEnvVar.
-		return env != "" && (forgeRow.TokenEnvVar == env || trackerRow.TokenEnvVar == env)
-	}
+	// A backend's token is required exactly when a selected backend names it as
+	// its TokenEnvVar; local and git name none, so a fully-local run needs none.
+	return env != "" && (forgeRow.TokenEnvVar == env || trackerRow.TokenEnvVar == env)
 }
 
 // printSubcommands renders the listing both help modes share from

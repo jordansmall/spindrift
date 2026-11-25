@@ -1,6 +1,7 @@
 package main
 
 import (
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/doctor"
@@ -9,8 +10,9 @@ import (
 
 // launcherCheckConfig adapts config to launcherchecks.Config. It narrows
 // dispatchKind to the ResearchDispatch bool that launcherchecks'
-// repo-slug/gh-token exemption needs (true when the kind's Tracker axis names
-// the research tracker), since launcherchecks has no dispatch kind string.
+// repo-slug/backend-credential exemption needs (true when the kind's Tracker
+// axis names the research tracker), since launcherchecks has no dispatch kind
+// string.
 func launcherCheckConfig(c config) launcherchecks.Config {
 	researchDispatch := false
 	switch c.kind().Tracker {
@@ -21,7 +23,6 @@ func launcherCheckConfig(c config) launcherchecks.Config {
 		RepoSlug:     c.RepoSlug,
 		GitUserName:  c.GitUserName,
 		GitUserEmail: c.GitUserEmail,
-		GHToken:      c.GhToken,
 
 		Driver: c.driver,
 		// The per-tier models are read from resolvedKnob, as the --secret-cmd
@@ -46,21 +47,31 @@ func launcherCheckConfig(c config) launcherchecks.Config {
 
 // launcherCredentials is the credential env name -> value map launcherchecks
 // evaluates Driver credential rules against. Every env var a Driver's rules
-// name needs an entry (TestLauncherCredentialsCoverDriverRules).
+// name needs an entry (TestLauncherCredentialsCoverDriverRules). The selected
+// forge and tracker rows' TokenEnvVars are added too: the github row's
+// credential is a core field, every other row credential a row knob.
 func launcherCredentials(c config) map[string]string {
-	return map[string]string{
-		"CLAUDE_CODE_OAUTH_TOKEN": c.ClaudeOAuthToken,
-		"ANTHROPIC_API_KEY":       c.AnthropicAPIKey,
-		"OPENCODE_AUTH_CONTENT":   c.OpencodeAuthContent,
-		"PI_AUTH_CONTENT":         c.PiAuthContent,
-		"OPENAI_API_KEY":          c.OpenaiAPIKey,
-		"GEMINI_API_KEY":          c.GeminiAPIKey,
-		"OPENROUTER_API_KEY":      c.OpenrouterAPIKey,
-		"GROQ_API_KEY":            c.GroqAPIKey,
-		"XAI_API_KEY":             c.XaiAPIKey,
-		"MISTRAL_API_KEY":         c.MistralAPIKey,
-		"DEEPSEEK_API_KEY":        c.DeepseekAPIKey,
+	creds := map[string]string{
+		"CLAUDE_CODE_OAUTH_TOKEN":  c.ClaudeOAuthToken,
+		"ANTHROPIC_API_KEY":        c.AnthropicAPIKey,
+		"OPENCODE_AUTH_CONTENT":    c.OpencodeAuthContent,
+		"PI_AUTH_CONTENT":          c.PiAuthContent,
+		"OPENAI_API_KEY":           c.OpenaiAPIKey,
+		"GEMINI_API_KEY":           c.GeminiAPIKey,
+		"OPENROUTER_API_KEY":       c.OpenrouterAPIKey,
+		"GROQ_API_KEY":             c.GroqAPIKey,
+		"XAI_API_KEY":              c.XaiAPIKey,
+		"MISTRAL_API_KEY":          c.MistralAPIKey,
+		"DEEPSEEK_API_KEY":         c.DeepseekAPIKey,
+		backend.GitHub.TokenEnvVar: c.GhToken,
 	}
+	for _, name := range []string{c.CodeForge, c.IssueTracker} {
+		row, _ := backendkit.ByName(name)
+		if v, ok := c.RowKnobs[row.TokenEnvVar]; ok {
+			creds[row.TokenEnvVar] = v
+		}
+	}
+	return creds
 }
 
 // launcherCheckDeps supplies launcherchecks' caller seams. A nil
