@@ -1,24 +1,58 @@
 {
-  "forgejo": [
-    { "method": "GET", "host": "{base}", "path": "/api/v1/repos/{repo}/actions/jobs", "followRedirect": true },
-    { "method": "GET", "host": "{base}", "path": "/api/v1/repos/{repo}" },
-    { "method": "POST", "host": "{base}", "path": "/api/v1/repos/{repo}/pulls" },
-    { "method": "PATCH", "host": "{base}", "path": "/api/v1/repos/{repo}/pulls" },
-    { "method": "POST", "host": "{base}", "path": "/api/v1/repos/{repo}/issues" },
-    { "method": "DELETE", "host": "{base}", "path": "/api/v1/repos/{repo}/branches" },
-    { "method": "PUT", "host": "{base}", "path": "/api/v1/repos/{repo}/issues" },
-    { "method": "PATCH", "host": "{base}", "path": "/api/v1/repos/{repo}/issues" },
-    { "method": "POST", "host": "{base}", "path": "/api/v1/repos/{repo}/labels" },
-    { "method": "GET", "host": "{base}", "path": "/api/v1/orgs" }
-  ],
-  "github": [
-    { "method": "GET", "host": "api.github.com", "path": "/repos/{repo}/issues" },
-    { "method": "GET", "host": "api.github.com", "path": "/repos/{repo}/pulls" },
-    { "method": "POST", "host": "api.github.com", "path": "/graphql" },
-    { "method": "GET", "host": "api.github.com", "path": "/search/issues" }
-  ],
-  "jira": [
-    { "method": "GET", "host": "{base}", "path": "/rest/api/2/search" },
-    { "method": "GET", "host": "{base}", "path": "/rest/api/2/issue" }
-  ]
+  "forgejo": {
+    "credentialEnv": "FORGEJO_TOKEN",
+    "credentialScheme": "bearer",
+    "baseEnv": "FORGEJO_BASE_URL",
+    "gitRemoteEnv": "FORGEJO_BASE_URL",
+    "routes": [
+      {"method":"GET","host":"{base}","path":"/api/v1/repos/{repo}/actions/jobs","followRedirect":true},
+      {"method":"GET","host":"{base}","path":"/api/v1/repos/{repo}"},
+      {"method":"POST","host":"{base}","path":"/api/v1/repos/{repo}/pulls"},
+      {"method":"PATCH","host":"{base}","path":"/api/v1/repos/{repo}/pulls"},
+      {"method":"POST","host":"{base}","path":"/api/v1/repos/{repo}/issues"},
+      {"method":"DELETE","host":"{base}","path":"/api/v1/repos/{repo}/branches"},
+      {"method":"PUT","host":"{base}","path":"/api/v1/repos/{repo}/issues"},
+      {"method":"PATCH","host":"{base}","path":"/api/v1/repos/{repo}/issues"},
+      {"method":"POST","host":"{base}","path":"/api/v1/repos/{repo}/labels"},
+      {"method":"GET","host":"{base}","path":"/api/v1/orgs"}
+    ]
+  },
+  "github": {
+    "credentialEnv": "GH_TOKEN",
+    "credentialScheme": "bearer",
+    "gitRemote": "https://github.com",
+    "routes": [
+      {"method":"GET","host":"api.github.com","path":"/repos/{repo}/issues"},
+      {"method":"GET","host":"api.github.com","path":"/repos/{repo}/pulls"},
+      {"method":"POST","host":"api.github.com","path":"/graphql"},
+      {"method":"GET","host":"api.github.com","path":"/repos/{repo}/actions/jobs","followRedirect":true},
+      {"method":"POST","host":"api.github.com","path":"/repos/{repo}/pulls"},
+      {"method":"PUT","host":"api.github.com","path":"/repos/{repo}/pulls"},
+      {"method":"POST","host":"api.github.com","path":"/repos/{repo}/issues"},
+      {"method":"GET","host":"api.github.com","path":"/repos/{repo}/compare"},
+      {"method":"GET","host":"api.github.com","path":"/repos/{repo}/git/matching-refs/heads"},
+      {"method":"DELETE","host":"api.github.com","path":"/repos/{repo}/git/refs/heads"},
+      {"method":"GET","host":"api.github.com","path":"/repos/{repo}/branches"},
+      {"method":"GET","host":"api.github.com","path":"/repos/{repo}/rules/branches"},
+      {"method":"GET","host":"api.github.com","path":"/repos/{repo}/labels"},
+      {"method":"POST","host":"api.github.com","path":"/repos/{repo}/labels"},
+      {"method":"GET","host":"api.github.com","path":"/installation/repositories"},
+      {"method":"GET","host":"api.github.com","path":"/search/issues"}
+    ]
+  },
+  "jira": {
+    "credentialEnv": "JIRA_TOKEN",
+    "credentialScheme": "basic",
+    "baseEnv": "JIRA_BASE_URL",
+    "routes": [
+      {"method":"GET","host":"{base}","path":"/rest/api/2/search"},
+      {"method":"GET","host":"{base}","path":"/rest/api/2/issue"},
+      {"method":"PUT","host":"{base}","path":"/rest/api/2/issue"},
+      {"method":"POST","host":"{base}","path":"/rest/api/2/issue"},
+      {"method":"GET","host":"{base}","path":"/rest/api/2/label"},
+      {"method":"GET","host":"{base}","path":"/rest/api/2/myself"},
+      {"method":"GET","host":"{base}","path":"/rest/api/2/project/{repo}/statuses"},
+      {"method":"POST","host":"{base}","path":"/rest/api/3/search/approximate-count"}
+    ]
+  }
 }
