@@ -17,6 +17,7 @@ import (
 
 const cloneURLPath = "/" + connectorforgetest.Repo + ".git/"
 
+// Serial: WithGitOverHTTPS -> gitexectest.ServeTLS t.Setenv GIT_SSL_CAINFO.
 func TestSeedMirrorAuthenticatesAtTheCloneURL(t *testing.T) {
 	h := connectorforgetest.NewHostMediation(t, connectorforgetest.WithGitOverHTTPS())
 	dir := filepath.Join(t.TempDir(), "mirror")
@@ -29,6 +30,7 @@ func TestSeedMirrorAuthenticatesAtTheCloneURL(t *testing.T) {
 	gitexectest.RequireAuthOnlyUnder(t, h.GitRequests(), cloneURLPath)
 }
 
+// Serial: WithGitOverHTTPS -> gitexectest.ServeTLS t.Setenv GIT_SSL_CAINFO.
 func TestRelayBundleAuthenticatesAtTheCloneURL(t *testing.T) {
 	h := connectorforgetest.NewHostMediation(t, connectorforgetest.WithGitOverHTTPS())
 	const ref = "agent/issue-9101"
@@ -42,6 +44,7 @@ func TestRelayBundleAuthenticatesAtTheCloneURL(t *testing.T) {
 	gitexectest.RequireAuthOnlyUnder(t, h.GitRequests(), cloneURLPath)
 }
 
+// Serial: WithGitOverHTTPS -> gitexectest.ServeTLS t.Setenv GIT_SSL_CAINFO.
 func TestPushBranchAuthenticatesAtTheCloneURL(t *testing.T) {
 	h := connectorforgetest.NewHostMediation(t, connectorforgetest.WithGitOverHTTPS())
 	src := t.TempDir()
@@ -60,6 +63,7 @@ func TestPushBranchAuthenticatesAtTheCloneURL(t *testing.T) {
 	gitexectest.RequireAuthOnlyUnder(t, h.GitRequests(), cloneURLPath)
 }
 
+// Serial: WithGitOverHTTPS -> gitexectest.ServeTLS t.Setenv GIT_SSL_CAINFO.
 func TestRoutedMergeAndRebaseAuthenticateAtTheCloneURL(t *testing.T) {
 	h := connectorforgetest.New(t, connectorforgetest.WithGitOverHTTPS())
 	ref := h.SeedLandable("9103")
@@ -84,6 +88,7 @@ func TestRoutedMergeAndRebaseAuthenticateAtTheCloneURL(t *testing.T) {
 // Git goes to the repository core derived from the Git remote declaration:
 // its push, bundle relay and mirror seed, and the credential is offered only
 // under that repository's path.
+// Serial: WithGitOverHTTPS -> gitexectest.ServeTLS t.Setenv GIT_SSL_CAINFO.
 func TestGitGoesToTheDerivedCloneURL(t *testing.T) {
 	h := connectorforgetest.NewHostMediation(t, connectorforgetest.WithGitOverHTTPS())
 	_, caps, err := h.Compose()
@@ -126,6 +131,7 @@ func TestGitGoesToTheDerivedCloneURL(t *testing.T) {
 // A forge served under a subpath: git, the bundle relay and the mirror seed all
 // reach <base>/<owner>/<name>.git, the credential goes only there, and that
 // instance's PR URLs and run links are accepted.
+// Serial: WithGitOverHTTPS -> gitexectest.ServeTLS t.Setenv GIT_SSL_CAINFO.
 func TestASubpathForgeKeepsGitAndURLsUnderItsBase(t *testing.T) {
 	const sub = "/forgejo"
 	h := connectorforgetest.NewHostMediation(t, connectorforgetest.WithGitOverHTTPS(), connectorforgetest.WithWebBasePath(sub))

@@ -14,10 +14,12 @@ import (
 )
 
 func TestComposedForgeCodeForgeContract(t *testing.T) {
+	t.Parallel()
 	forgetest.RunCodeForgeContract(t, connectorforgetest.New(t))
 }
 
 func TestComposeResolvesPushOnlyFromTheHandshake(t *testing.T) {
+	t.Parallel()
 	h := connectorforgetest.New(t)
 	caps := h.Capabilities()
 	if caps.PRForge != nil {
@@ -32,6 +34,7 @@ func TestComposeResolvesPushOnlyFromTheHandshake(t *testing.T) {
 }
 
 func TestComposeRequiresTheBranchesCapability(t *testing.T) {
+	t.Parallel()
 	h := connectorforgetest.New(t)
 	saved := h.Conn.Capabilities
 	h.Conn.Capabilities = []string{"forge"}
@@ -51,6 +54,7 @@ func TestComposeRequiresTheBranchesCapability(t *testing.T) {
 }
 
 func TestBranchExistsAndDeleteBranchAgainstTheRealRepo(t *testing.T) {
+	t.Parallel()
 	h := connectorforgetest.New(t)
 	branch := h.SeedLandable("7")
 	cf := h.Forge().(forge.BranchDeleter)
@@ -71,6 +75,7 @@ func TestBranchExistsAndDeleteBranchAgainstTheRealRepo(t *testing.T) {
 }
 
 func TestDeleteBranchRefusesBaseAndEmptyBeforeAnyBackendHit(t *testing.T) {
+	t.Parallel()
 	h := connectorforgetest.New(t)
 	cf := h.Forge().(forge.BranchDeleter)
 	for _, branch := range []string{"main", "refs/heads/main", "", "-f"} {
@@ -84,6 +89,7 @@ func TestDeleteBranchRefusesBaseAndEmptyBeforeAnyBackendHit(t *testing.T) {
 }
 
 func TestComposeHandsPlumbingTheDerivedCloneURLAndCredential(t *testing.T) {
+	t.Parallel()
 	h := connectorforgetest.New(t)
 	calls := h.PlumbingCalls()
 	want := "https://" + h.Backend.Host + "/o/r.git"
@@ -95,6 +101,7 @@ func TestComposeHandsPlumbingTheDerivedCloneURLAndCredential(t *testing.T) {
 // Core derives the clone URL from the Git remote declaration and the Target
 // repository, keeping a subpath.
 func TestComposeDerivesTheCloneURLFromTheDeclaration(t *testing.T) {
+	t.Parallel()
 	h := connectorforgetest.New(t)
 	h.WebBase = "https://forge.example/sub/"
 	if _, _, err := h.Compose(); err != nil {
@@ -107,6 +114,7 @@ func TestComposeDerivesTheCloneURLFromTheDeclaration(t *testing.T) {
 }
 
 func TestComposeRefusesAnUnderivableCloneURL(t *testing.T) {
+	t.Parallel()
 	h := connectorforgetest.New(t)
 	for name, remote := range map[string]string{
 		"empty":       "",
@@ -136,6 +144,7 @@ func TestComposeRefusesAnUnderivableCloneURL(t *testing.T) {
 }
 
 func TestCloneURLRefusesARepositoryThatIsNotOwnerSlashName(t *testing.T) {
+	t.Parallel()
 	for _, repo := range []string{"", "r", "o/", "/r", "o/r/x", "./r", "o/..", "../r"} {
 		if got, err := connectorforge.CloneURL("https://forge.example", repo); !errors.Is(err, connectorforge.ErrGitRemote) {
 			t.Errorf("CloneURL(%q) = %q, %v, want ErrGitRemote", repo, got, err)
@@ -148,6 +157,7 @@ func TestCloneURLRefusesARepositoryThatIsNotOwnerSlashName(t *testing.T) {
 }
 
 func TestComposeRefusesATargetRepositoryThatIsNotOwnerSlashName(t *testing.T) {
+	t.Parallel()
 	h := connectorforgetest.New(t)
 	_, _, err := connectorforge.Compose(h.Conn, connectorforge.Target{Repo: "r"}, connectorforge.Git{
 		WebBase:  "https://" + h.Backend.Host,
@@ -161,6 +171,7 @@ func TestComposeRefusesATargetRepositoryThatIsNotOwnerSlashName(t *testing.T) {
 // Probe reads liveness through forge.probe, one repository request the backend
 // answers, not a branch lookup.
 func TestProbeReachesTheBackend(t *testing.T) {
+	t.Parallel()
 	h := connectorforgetest.New(t)
 	before, branches := h.Backend.Requests(), h.Backend.BranchRequests()
 	repo, err := h.Forge().Probe()
@@ -176,6 +187,7 @@ func TestProbeReachesTheBackend(t *testing.T) {
 }
 
 func TestProbeFailsWhenTheBackendIsUnreachable(t *testing.T) {
+	t.Parallel()
 	h := connectorforgetest.New(t)
 	if _, err := h.Unreachable().Probe(); err == nil {
 		t.Fatal("Probe succeeded against a closed backend")
@@ -185,6 +197,7 @@ func TestProbeFailsWhenTheBackendIsUnreachable(t *testing.T) {
 // The PR URLs are pinned to the host core derived from the Git remote, not to
 // the host the backend serves: an answer on the backend's host is refused.
 func TestComposePinsPRURLsToTheDerivedHostNotTheBackendHost(t *testing.T) {
+	t.Parallel()
 	const derived = "github.example"
 	h := connectorforgetest.NewPR(t)
 	h.WebBase = "https://" + derived
@@ -206,6 +219,7 @@ func TestComposePinsPRURLsToTheDerivedHostNotTheBackendHost(t *testing.T) {
 }
 
 func TestConnectorErrorClassCoreObserves(t *testing.T) {
+	t.Parallel()
 	t.Run("transient is retried", func(t *testing.T) {
 		h := connectorforgetest.New(t)
 		branch := h.SeedLandable("8")
@@ -294,6 +308,7 @@ func TestConnectorErrorClassCoreObserves(t *testing.T) {
 }
 
 func TestComposedForgeCodeForgeContract_RemoteEngine(t *testing.T) {
+	t.Parallel()
 	forgetest.RunCodeForgeContract(t, connectorforgetest.NewRemote(t))
 }
 
@@ -306,6 +321,7 @@ type noted struct {
 // by method; a failure Compose's own remote read hits is the caller's to
 // record, so it is not noted twice.
 func TestComposeNotesFailedCallsByMethod(t *testing.T) {
+	t.Parallel()
 	var got []noted
 	h := connectorforgetest.New(t)
 	h.Note = func(method string, err error) { got = append(got, noted{method, err}) }
@@ -329,6 +345,7 @@ func TestComposeNotesFailedCallsByMethod(t *testing.T) {
 }
 
 func TestComposeNotesNothingForAnUnderivableRemote(t *testing.T) {
+	t.Parallel()
 	var got []noted
 	h := connectorforgetest.New(t)
 	h.Note = func(method string, err error) { got = append(got, noted{method, err}) }
@@ -343,6 +360,7 @@ func TestComposeNotesNothingForAnUnderivableRemote(t *testing.T) {
 }
 
 func TestComposeWithoutANoteStillFailsCalls(t *testing.T) {
+	t.Parallel()
 	h := connectorforgetest.New(t)
 	cf, _, err := h.Compose()
 	if err != nil {

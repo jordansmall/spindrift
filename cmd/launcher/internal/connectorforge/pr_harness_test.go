@@ -18,10 +18,12 @@ import (
 )
 
 func TestComposedForgePRForgeContract(t *testing.T) {
+	t.Parallel()
 	forgetest.RunPRForgeContract(t, connectorforgetest.NewPR(t))
 }
 
 func TestFullCapabilityForgeOffersCIRunAndBranchProtection(t *testing.T) {
+	t.Parallel()
 	h := connectorforgetest.NewPR(t)
 	caps := h.Capabilities()
 	if caps.CIRunReporter == nil || caps.BranchProtectionForge == nil || caps.MergeCommitReader == nil {
@@ -58,6 +60,7 @@ func TestFullCapabilityForgeOffersCIRunAndBranchProtection(t *testing.T) {
 }
 
 func TestMergeLandsARealBranchAndReportsTheMergeCommit(t *testing.T) {
+	t.Parallel()
 	h := connectorforgetest.NewPR(t)
 	url := h.SeedLandablePR("302")
 	if err := h.CodeForge().Merge(url); err != nil {
@@ -73,6 +76,7 @@ func TestMergeLandsARealBranchAndReportsTheMergeCommit(t *testing.T) {
 }
 
 func TestComposeResolvesAForgeWithoutTheUndeclaredCapabilities(t *testing.T) {
+	t.Parallel()
 	h := connectorforgetest.NewPRVariant(t, connectorforgetest.MinimalPRWasm)
 	for _, c := range []string{"forge.autoMerge", "forge.ciRun", "forge.branchProtection", "forge.draftPRs"} {
 		for _, have := range h.Conn.Capabilities {
@@ -113,6 +117,7 @@ func TestComposeResolvesAForgeWithoutTheUndeclaredCapabilities(t *testing.T) {
 }
 
 func TestUndeclaredMergeIsRefusedUnsentAndAudited(t *testing.T) {
+	t.Parallel()
 	h := connectorforgetest.NewPRVariant(t, connectorforgetest.UndeclaredMergeWasm)
 	url := h.SeedLandablePR("304")
 	h.Audit.Reset()
@@ -149,6 +154,7 @@ func TestUndeclaredMergeIsRefusedUnsentAndAudited(t *testing.T) {
 	}
 }
 
+// Serial: gitCredentialLog puts a git shim on PATH via t.Setenv.
 func TestFullCapabilityForgeHostMediatesWithCoresCredential(t *testing.T) {
 	h := connectorforgetest.NewPR(t)
 	caps := h.Capabilities()
@@ -206,6 +212,7 @@ func TestFullCapabilityForgeHostMediatesWithCoresCredential(t *testing.T) {
 
 // gitCredentialLog puts a git shim on PATH and returns the file it appends the
 // GITEXEC_USERNAME:GITEXEC_PASSWORD core's git ran with to.
+// The PATH shim is process-global, so callers stay serial.
 func gitCredentialLog(t *testing.T) string {
 	t.Helper()
 	realGit, err := exec.LookPath("git")
@@ -222,9 +229,11 @@ func gitCredentialLog(t *testing.T) string {
 }
 
 func TestComposedForgeHostMediationContract(t *testing.T) {
+	t.Parallel()
 	forgetest.RunHostMediationContract(t, connectorforgetest.NewHostMediation(t))
 }
 
+// Serial: gitCredentialLog puts a git shim on PATH via t.Setenv.
 func TestBoxRelaysAndOpensTheDraftWithoutTheConnectorSeeingGit(t *testing.T) {
 	h := connectorforgetest.NewHostMediation(t)
 	caps := h.Capabilities()
@@ -281,6 +290,7 @@ func TestBoxRelaysAndOpensTheDraftWithoutTheConnectorSeeingGit(t *testing.T) {
 }
 
 func TestBundleRelayIsOfferedOnlyOnADraftPRForge(t *testing.T) {
+	t.Parallel()
 	full := connectorforgetest.NewPR(t).Capabilities()
 	if full.BundleRelay == nil || full.BundleCommitSubjects == nil || full.DraftPRCreator == nil || full.BranchPusher == nil {
 		t.Errorf("capabilities = %+v, want the host-mediated surface on a forge.draftPRs forge", full)
@@ -292,6 +302,7 @@ func TestBundleRelayIsOfferedOnlyOnADraftPRForge(t *testing.T) {
 }
 
 func TestAutoMergeAllowedNeedsTheCapability(t *testing.T) {
+	t.Parallel()
 	h := connectorforgetest.NewPRVariant(t, connectorforgetest.MinimalPRWasm)
 	before := h.Backend.Requests()
 	if _, err := connectorforge.AutoMergeAllowed(h.Conn, connectorforge.Target{}); !errors.Is(err, connectorforge.ErrNoAutoMerge) {
@@ -303,10 +314,12 @@ func TestAutoMergeAllowedNeedsTheCapability(t *testing.T) {
 }
 
 func TestComposedForgePRForgeContract_RemoteEngine(t *testing.T) {
+	t.Parallel()
 	forgetest.RunPRForgeContract(t, connectorforgetest.NewPRRemote(t))
 }
 
 func TestEveryComposedForgeOffersTheMirrorSeed(t *testing.T) {
+	t.Parallel()
 	for name, caps := range map[string]forge.Capabilities{
 		"pr":         connectorforgetest.NewPR(t).Capabilities(),
 		"pr-minimal": connectorforgetest.NewPRVariant(t, connectorforgetest.MinimalPRWasm).Capabilities(),
@@ -318,6 +331,7 @@ func TestEveryComposedForgeOffersTheMirrorSeed(t *testing.T) {
 	}
 }
 
+// Serial: gitCredentialLog puts a git shim on PATH via t.Setenv.
 func TestSeedMirrorClonesTheRepoBareWithCoresCredential(t *testing.T) {
 	h := connectorforgetest.NewHostMediation(t)
 	seen := gitCredentialLog(t)
@@ -338,6 +352,7 @@ func TestSeedMirrorClonesTheRepoBareWithCoresCredential(t *testing.T) {
 }
 
 func TestRelayCloneFailureNamesGitsCauseWithoutTheCredential(t *testing.T) {
+	t.Parallel()
 	h := connectorforgetest.NewHostMediation(t)
 	const ref = "agent/issue-9003"
 	outbox := h.SeedBundle(ref)
@@ -355,6 +370,7 @@ func TestRelayCloneFailureNamesGitsCauseWithoutTheCredential(t *testing.T) {
 }
 
 func TestSeedMirrorFailureNamesGitsCauseWithoutTheCredential(t *testing.T) {
+	t.Parallel()
 	h := connectorforgetest.NewHostMediation(t)
 	h.PointGitAt(filepath.Join(t.TempDir(), "missing.git"))
 	err := h.Capabilities().MirrorSeeder.SeedMirror(filepath.Join(t.TempDir(), "mirror"))

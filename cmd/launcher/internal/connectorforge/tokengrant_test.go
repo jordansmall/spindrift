@@ -15,6 +15,7 @@ import (
 )
 
 func TestTokenPrefix(t *testing.T) {
+	t.Parallel()
 	for token, want := range map[string]string{
 		"ghp_abc123":      "ghp_",
 		"github_pat_abc":  "github_",
@@ -32,6 +33,7 @@ func TestTokenPrefix(t *testing.T) {
 }
 
 func TestIntrospectTokenSendsOnlyThePrefix(t *testing.T) {
+	t.Parallel()
 	var method string
 	var sent []byte
 	call := func(_ context.Context, m string, params, result any) error {
@@ -59,6 +61,7 @@ func TestIntrospectTokenSendsOnlyThePrefix(t *testing.T) {
 }
 
 func TestIntrospectTokenCarriesTheReason(t *testing.T) {
+	t.Parallel()
 	call := func(_ context.Context, _ string, _, result any) error {
 		return json.Unmarshal([]byte(`{"introspectable":false,"writeCapable":false,"reason":"why"}`), result)
 	}
@@ -69,6 +72,7 @@ func TestIntrospectTokenCarriesTheReason(t *testing.T) {
 }
 
 func TestIntrospectTokenUnadvertisedIsErrNoTokenGrant(t *testing.T) {
+	t.Parallel()
 	call := func(context.Context, string, any, any) error {
 		t.Fatal("called a Connector that does not declare forge.tokenGrant")
 		return nil
@@ -80,6 +84,7 @@ func TestIntrospectTokenUnadvertisedIsErrNoTokenGrant(t *testing.T) {
 }
 
 func TestIntrospectTokenPassesTheConnectorsErrorThrough(t *testing.T) {
+	t.Parallel()
 	boom := errors.New("boom")
 	call := func(context.Context, string, any, any) error { return boom }
 	_, err := introspectToken(checked(call), []string{capTokenGrant}, testTarget, "ghp_x")
@@ -95,6 +100,7 @@ func grantCall(raw string) guestCall {
 }
 
 func TestIntrospectTokenRefusesAnInconsistentGrant(t *testing.T) {
+	t.Parallel()
 	for name, raw := range map[string]string{
 		"write without introspectable":  `{"introspectable":false,"writeCapable":true}`,
 		"scopes without introspectable": `{"introspectable":false,"scopes":["repo"]}`,
@@ -114,6 +120,7 @@ func TestIntrospectTokenRefusesAnInconsistentGrant(t *testing.T) {
 }
 
 func TestIntrospectTokenAcceptsRealScopes(t *testing.T) {
+	t.Parallel()
 	raw := `{"introspectable":true,"writeCapable":true,"scopes":["repo","public_repo","write:repository","read:org","admin:repo_hook"]}`
 	got, err := introspectToken(checked(grantCall(raw)), []string{capTokenGrant}, testTarget, "ghp_x")
 	if err != nil || len(got.Scopes) != 5 || !got.WriteCapable {
@@ -122,6 +129,7 @@ func TestIntrospectTokenAcceptsRealScopes(t *testing.T) {
 }
 
 func TestIntrospectTokenSanitisesAndCapsTheReason(t *testing.T) {
+	t.Parallel()
 	raw := `{"introspectable":false,"reason":"\u001b[2Jfine\nINJECTED\u0007‮ ` + strings.Repeat("x", 2*maxReasonLen) + `"}`
 	got, err := introspectToken(checked(grantCall(raw)), []string{capTokenGrant}, testTarget, "ghp_x")
 	if err != nil {

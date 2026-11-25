@@ -76,6 +76,7 @@ func coreForgeNames(t *testing.T) (caps, methods []string) {
 }
 
 func TestProtocolForgeAxisAgrees(t *testing.T) {
+	t.Parallel()
 	coreCaps, coreMethods := coreForgeNames(t)
 	var methods, caps []string
 	for name, m := range connectorprotocol.Methods {
