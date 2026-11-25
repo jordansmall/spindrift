@@ -7,6 +7,7 @@ import (
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorruntime"
+	"spindrift.dev/launcher/internal/credsource"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -39,13 +40,7 @@ func introspect(row backendrows.Row, o backendrows.Options, token, repoSlug stri
 	if err != nil {
 		return got, err
 	}
-	o.Getenv = func(k string) string {
-		if k == row.CredentialEnv {
-			return token
-		}
-		return ""
-	}
-	rt := connectorruntime.New([]backendrows.Row{row}, nil)
+	rt := connectorruntime.New([]backendrows.Row{row}, map[string]credsource.Row{row.Name: {Secret: credsource.Static(token)}}, nil)
 	defer func() { _ = rt.Close() }()
 	// introspectToken notes a failure once, under its own verb.
 	conn, err := rt.Connector(row, connectorruntime.SessionSpec{Target: target, Record: backend.GitHub.Name, Options: o, NotesOperations: true})

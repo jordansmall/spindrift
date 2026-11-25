@@ -1235,7 +1235,7 @@ var daemonKnobEnvVars = []string{
 	"DAEMON_SELF_APP", "SPINDRIFT_DAEMON_PROGRAM", "DAEMON_PROBE_INTERVAL",
 	"ISSUE_TRACKER", "ISSUE_ROUTE", "LABEL", "IN_PROGRESS_LABEL",
 	"COMPLETE_LABEL", "FAILED_LABEL", "REPO_SLUG",
-	"GH_TOKEN_REFRESH_FILE", "SECRET_CMD",
+	"SECRET_CMD",
 	"CODE_FORGE", "BOX_FORGE_AND_ISSUE_ACCESS", "DRIVER",
 }
 
@@ -1264,8 +1264,20 @@ func clearKnobEnvT(t *testing.T) {
 			keys = append(keys, s.TokenEnvVar+"_CMD")
 		}
 	}
+	// Not in daemonKnobEnvVars: the daemon reads it through rowcredential, not at
+	// a literal call site the guard test pins.
+	keys = append(keys, "GH_TOKEN_REFRESH_FILE")
 	for _, v := range keys {
 		t.Setenv(v, "")
+	}
+}
+
+// An ambient GH_TOKEN_REFRESH_FILE would stand in for the github row's credential.
+func TestClearKnobEnvT_ClearsTheRowRefreshFile(t *testing.T) {
+	t.Setenv("GH_TOKEN_REFRESH_FILE", "/some/file")
+	clearKnobEnvT(t)
+	if got := os.Getenv("GH_TOKEN_REFRESH_FILE"); got != "" {
+		t.Errorf("GH_TOKEN_REFRESH_FILE = %q after clearKnobEnvT, want it cleared", got)
 	}
 }
 

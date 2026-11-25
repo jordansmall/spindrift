@@ -1,6 +1,6 @@
 // Package connectorruntime owns what a Launcher process needs to host
-// Connectors: the backend rows, the sandbox it loads them into, and the live
-// sessions, closed together.
+// Connectors: the backend rows, each row's credential source, the sandbox it
+// loads them into, and the live sessions, closed together.
 //
 // A session is the one Connector a (row, Target) pair keeps alive, whichever
 // axis (tracker, Code Forge or read-only forge view) or direct request for the
@@ -26,6 +26,7 @@ import (
 	"spindrift.dev/launcher/internal/connectorrecord"
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/connectortracker"
+	"spindrift.dev/launcher/internal/credsource"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/gitexec"
 	"spindrift.dev/launcher/internal/retry"
@@ -46,9 +47,14 @@ const (
 	loadRetryAfter  = time.Minute
 )
 
-// Runtime is the rows, the sandbox and the live sessions, with one Close.
+// Runtime is the rows, their credential sources, the sandbox and the live
+// sessions, with one Close. A Connector request and core's own git both read a
+// row's credential from its source at the moment of use.
 type Runtime struct {
-	lookup  func(string) (backendrows.Row, bool)
+	lookup func(string) (backendrows.Row, bool)
+	// creds is each row's credential source by row name; a row without one has
+	// an unset credential, never an environment fallback.
+	creds   map[string]credsource.Row
 	sandbox connectorsandbox.Loader
 	// now is the cooldown's clock, a test seam.
 	now func() time.Time
@@ -63,22 +69,69 @@ type sessionKey struct {
 	target connectortracker.Target
 }
 
-// New is a runtime over rows that loads Connectors into sandbox; a nil sandbox
-// is the installed one.
-func New(rows []backendrows.Row, sandbox connectorsandbox.Loader) *Runtime {
+// New is a runtime over rows and their credential sources that loads
+// Connectors into sandbox; a nil sandbox is the installed one.
+func New(rows []backendrows.Row, creds map[string]credsource.Row, sandbox connectorsandbox.Loader) *Runtime {
 	byName := make(map[string]backendrows.Row, len(rows))
 	for _, row := range rows {
 		byName[row.Name] = row
 	}
-	return newRuntime(func(name string) (backendrows.Row, bool) { row, ok := byName[name]; return row, ok }, sandbox)
+	return newRuntime(func(name string) (backendrows.Row, bool) { row, ok := byName[name]; return row, ok }, creds, sandbox)
 }
 
-// FromRegistries is a runtime over the applied backend rows and the installed
-// sandbox.
-func FromRegistries() *Runtime { return newRuntime(backendrows.Lookup, nil) }
+// FromRegistries is a runtime over the applied backend rows, their credential
+// sources and the installed sandbox.
+func FromRegistries(creds map[string]credsource.Row) *Runtime {
+	return newRuntime(backendrows.Lookup, creds, nil)
+}
 
-func newRuntime(lookup func(string) (backendrows.Row, bool), sandbox connectorsandbox.Loader) *Runtime {
-	return &Runtime{lookup: lookup, sandbox: sandbox, now: time.Now, sessions: map[sessionKey]*session{}}
+func newRuntime(lookup func(string) (backendrows.Row, bool), creds map[string]credsource.Row, sandbox connectorsandbox.Loader) *Runtime {
+	return &Runtime{lookup: lookup, creds: creds, sandbox: sandbox, now: time.Now, sessions: map[sessionKey]*session{}}
+}
+
+// gitUsername is the username core's git presents with a row's token: GitHub
+// and Forgejo/Gitea both authenticate on the token as password and ignore it.
+const gitUsername = "x-access-token"
+
+// secret is row's secret source; an unset one yields "".
+func (r *Runtime) secret(row backendrows.Row) credsource.Source {
+	if s := r.creds[row.Name].Secret; s != nil {
+		return s
+	}
+	return credsource.Static("")
+}
+
+// getenv answers a row's credential and identity envs from its sources and
+// every other name with "", so a Connector request never reads the process
+// environment.
+func (r *Runtime) getenv(row backendrows.Row) func(string) string {
+	cr := r.creds[row.Name]
+	return func(env string) string {
+		switch {
+		case env == row.CredentialEnv && cr.Secret != nil:
+			return cr.Secret.Value()
+		case env == row.IdentityEnv && cr.Identity != nil:
+			return cr.Identity.Value()
+		}
+		return ""
+	}
+}
+
+// CredentialSet is whether row's source holds a token now.
+func (r *Runtime) CredentialSet(row backendrows.Row) bool { return r.secret(row).Value() != "" }
+
+// GitCredential is core's git credential for row, read from the row's source at
+// each use so a rotated token reaches the next git call. An unset token fails
+// by name instead of reaching git as an empty password.
+func (r *Runtime) GitCredential(row backendrows.Row) gitexec.CredentialSource {
+	secret := r.secret(row)
+	return func() (gitexec.Credential, error) {
+		token := secret.Value()
+		if token == "" {
+			return gitexec.Credential{}, errors.New(row.CredentialEnv + " is not set")
+		}
+		return gitexec.Credential{Username: gitUsername, Password: token}, nil
+	}
 }
 
 // Row is the named backend row.
@@ -114,8 +167,8 @@ type SessionSpec struct {
 	// Record names the connectorrecord files the failure note goes to; empty
 	// means the row's name.
 	Record string
-	// Options are the host's Client and Getenv for the load; the runtime
-	// supplies the sandbox.
+	// Options are the host's Client for the load; the runtime supplies the
+	// sandbox and the row's credential.
 	Options backendrows.Options
 	// NotesOperations is a backend that notes each failed operation itself,
 	// under its own name, so the session notes only the reload, which the
@@ -156,14 +209,14 @@ func (r *Runtime) Tracker(row backendrows.Row, spec TrackerSpec) (forge.IssueTra
 }
 
 // ForgeSpec is what a Code Forge needs of its backend beyond the row. Its
-// fields are those of connectorforge.Git but Note, which the session supplies:
+// fields are those of connectorforge.Git but Credential, which the runtime
+// reads from the row's source, and Note, which the session supplies:
 // it already notes every failed guest call by method.
 type ForgeSpec struct {
 	SessionSpec
-	Credential gitexec.Credential
-	Plumbing   func(cloneURL string, cred gitexec.Credential) forge.CodeForge
-	Clock      retry.Clock
-	WebBase    string
+	Plumbing func(cloneURL string, cred gitexec.Credential) forge.CodeForge
+	Clock    retry.Clock
+	WebBase  string
 }
 
 // CodeForge is a live Code Forge for row and spec.Target, sharing the
@@ -182,7 +235,7 @@ func (r *Runtime) CodeForge(row backendrows.Row, spec ForgeSpec) (forge.CodeForg
 	}
 	// Dialect is tracker-only: the forge axis keys on API and Repo.
 	target := connectorforge.Target{API: spec.Target.API, Repo: spec.Target.Repo}
-	git := connectorforge.Git{Credential: spec.Credential, Plumbing: spec.Plumbing, Clock: spec.Clock, WebBase: spec.WebBase}
+	git := connectorforge.Git{Credential: gitexec.TokenCredential(gitUsername, r.secret(row)), Plumbing: spec.Plumbing, Clock: spec.Clock, WebBase: spec.WebBase}
 	cf, _, err := connectorforge.ComposeCalling(c, s.call, s, target, git)
 	if err != nil {
 		// Compose reads the loaded manifest and host configuration and makes no
@@ -246,6 +299,7 @@ func (r *Runtime) session(row backendrows.Row, spec SessionSpec) (*session, erro
 	if !ok {
 		s = &session{rt: r, row: row, requires: spec.Requires, record: cmp.Or(spec.Record, row.Name), opts: spec.Options, backendNotes: spec.NotesOperations}
 		s.opts.Sandbox = r.sandbox
+		s.opts.Getenv = r.getenv(row)
 		r.sessions[key] = s
 	}
 	return s, nil

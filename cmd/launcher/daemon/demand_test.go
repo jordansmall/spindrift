@@ -16,6 +16,7 @@ import (
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/connectorruntime"
+	"spindrift.dev/launcher/internal/credsource/credsourcetest"
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
@@ -161,7 +162,7 @@ func TestBuildDemandSources_JiraWithoutAConnectorRowHasNoSource(t *testing.T) {
 	if err := backendrows.Use(nil, func(string) string { return "" }); err != nil {
 		t.Fatal(err)
 	}
-	connectors := connectorruntime.FromRegistries()
+	connectors := connectorruntime.FromRegistries(credsourcetest.Applied())
 	t.Cleanup(func() { _ = connectors.Close() })
 	src, missing := buildDemandSources(connectors, demandDocT(map[string]string{
 		"ISSUE_TRACKER":       "jira",
@@ -407,7 +408,7 @@ func TestBuildDemandSources_ForgejoWithoutAConnectorRowHasNoSource(t *testing.T)
 	if err := backendrows.Use(nil, func(string) string { return "" }); err != nil {
 		t.Fatal(err)
 	}
-	src, missing := buildDemandSources(connectorruntime.FromRegistries(), demandDocT(map[string]string{
+	src, missing := buildDemandSources(connectorruntime.FromRegistries(credsourcetest.Applied()), demandDocT(map[string]string{
 		"ISSUE_TRACKER": "forgejo",
 		"REPO_SLUG":     "owner/repo",
 		"FORGEJO_TOKEN": "tok",
@@ -931,7 +932,7 @@ func TestBuildDemandSources_ForgejoConnectorRowBuildsProbeSource(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	connectors := connectorruntime.FromRegistries()
+	connectors := connectorruntime.FromRegistries(credsourcetest.Applied())
 	t.Cleanup(func() { _ = connectors.Close() })
 	src, missing := buildDemandSources(connectors, demandDocT(map[string]string{
 		"ISSUE_TRACKER": "forgejo", "REPO_SLUG": "owner/repo", "FORGEJO_TOKEN": "tok", "LABEL": "ready-for-agent",
@@ -1147,7 +1148,7 @@ func TestProbeRoute_NoCategoryCapabilityIsSilent(t *testing.T) {
 // test.
 func demandRuntime(t *testing.T) *connectorruntime.Runtime {
 	t.Helper()
-	rt := connectorruntime.FromRegistries()
+	rt := connectorruntime.FromRegistries(credsourcetest.Applied())
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt
 }

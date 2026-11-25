@@ -1032,6 +1032,9 @@ func TestConfigServesTuningKnobsToTheDigest(t *testing.T) {
 // is not this test's concern.
 func TestCmdButler_PatchFindingCarriesPatchLabel(t *testing.T) {
 	setKnob(t, "FILER_MODEL", "test-model")
+	// The forgejo Ledger site reads its credential from the row's source, so a
+	// row and a runtime stand behind it; the git remote below is the fixture's.
+	useForgejoFixtureRow(t)
 	repo := ledgertest.NewRepo(t, "a.md")
 	// CommitPatch needs the launcher identity, which only the remote Ledger
 	// row stamps (the local row's GitTree has none), so run against a forgejo
@@ -1080,7 +1083,7 @@ func TestCmdButler_PatchFindingCarriesPatchLabel(t *testing.T) {
 			sc.ButlerMaxPatchesPerDay = 1
 			sc.GitUserName = "Test Bot"
 			sc.GitUserEmail = "bot@example.com"
-		}), dispatchKind: dispatchkind.Butler},
+		}), dispatchKind: dispatchkind.Butler, connectors: forgejoFixtureRuntime(t)},
 		factory:      testFactory(t, t.TempDir(), fr),
 		issueTracker: fc.AsIssueFiler(),
 		codeForge:    cf,

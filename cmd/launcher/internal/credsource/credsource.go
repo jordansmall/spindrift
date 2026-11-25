@@ -4,6 +4,7 @@
 package credsource
 
 import (
+	"os"
 	"sync"
 
 	"spindrift.dev/launcher/internal/secretcmd"
@@ -89,4 +90,22 @@ func (c *Command) Value() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.value
+}
+
+type env string
+
+func (e env) Value() string { return os.Getenv(string(e)) }
+
+// Env reads the named process environment variable at each Value. Only a host
+// that exports the token itself, as the quickstart wizard does for the gh CLI,
+// has a use for it; every other source keeps its token out of the environment.
+func Env(name string) Source { return env(name) }
+
+// EnvRow is Env for a row's secret and, when identityEnv is set, its identity.
+func EnvRow(secretEnv, identityEnv string) Row {
+	r := Row{Secret: Env(secretEnv)}
+	if identityEnv != "" {
+		r.Identity = Env(identityEnv)
+	}
+	return r
 }

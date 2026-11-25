@@ -8,6 +8,7 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorruntime"
+	"spindrift.dev/launcher/internal/credsource/credsourcetest"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -21,7 +22,7 @@ func mustStrategy(t *testing.T, name string) backendkit.Strategy {
 }
 
 func TestBuildForge_GithubTracker_BuildsBothSeams(t *testing.T) {
-	sh := backendkit.Shared{RepoSlug: "owner/repo", Labels: defaultDispatchLabels, Connectors: connectorruntime.FromRegistries()}
+	sh := backendkit.Shared{RepoSlug: "owner/repo", Labels: defaultDispatchLabels, Connectors: connectorruntime.FromRegistries(credsourcetest.Applied())}
 	it, cf, err := buildForge(mustStrategy(t, "github"), mustStrategy(t, "github"), sh, knobLookup(nil, nil))
 	if err != nil {
 		t.Fatalf("buildForge: %v", err)
@@ -48,7 +49,7 @@ func TestBuildForge_BuildsEachSeamFromItsOwnRow(t *testing.T) {
 			},
 		}
 	}
-	sh := backendkit.Shared{RepoSlug: "owner/repo", Labels: defaultDispatchLabels, Connectors: connectorruntime.FromRegistries()}
+	sh := backendkit.Shared{RepoSlug: "owner/repo", Labels: defaultDispatchLabels, Connectors: connectorruntime.FromRegistries(credsourcetest.Applied())}
 
 	if _, _, err := buildForge(stub("a"), stub("b"), sh, knobLookup(nil, nil)); err != nil {
 		t.Fatalf("buildForge: %v", err)

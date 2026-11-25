@@ -1,19 +1,28 @@
 package connectorforge_test
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"spindrift.dev/launcher/internal/connectorforge/connectorforgetest"
+	"spindrift.dev/launcher/internal/credsource"
 )
 
 // One token authorizes Connector requests and core's git alike, and both read
-// it at each use: a token rotated mid-run reaches the next request and the
-// next push, and the stale one no longer does.
-// Serial: WithGitOverHTTPS -> gitexectest.ServeTLS t.Setenv GIT_SSL_CAINFO, and the token env.
+// it at each use: a token rotated through the refresh file mid-run reaches the
+// next request and the next push, and the stale one no longer does.
+// Serial: WithGitOverHTTPS -> gitexectest.ServeTLS t.Setenv GIT_SSL_CAINFO.
 func TestRotatedTokenReachesTheNextConnectorRequestAndPush(t *testing.T) {
-	const env = "FORGEJO_TOKEN"
-	t.Setenv(env, "token-a")
-	h := connectorforgetest.New(t, connectorforgetest.WithGitOverHTTPS(), connectorforgetest.WithTokenEnv(env))
+	path := filepath.Join(t.TempDir(), "token")
+	rotate := func(token string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(token+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rotate("token-a")
+	h := connectorforgetest.New(t, connectorforgetest.WithGitOverHTTPS(), connectorforgetest.WithToken(credsource.File(path, nil)))
 	first, second := h.SeedLandable("9201"), h.SeedLandable("9202")
 	h.AdvanceBase()
 
@@ -36,7 +45,7 @@ func TestRotatedTokenReachesTheNextConnectorRequestAndPush(t *testing.T) {
 		t.Fatal("a push with the stale token reached the repository")
 	}
 
-	t.Setenv(env, "token-b")
+	rotate("token-b")
 	if _, err := h.Forge().BranchExists(second); err != nil {
 		t.Errorf("BranchExists after the rotation: %v", err)
 	}

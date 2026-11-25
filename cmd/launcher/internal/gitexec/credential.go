@@ -11,33 +11,38 @@ import (
 	"strings"
 )
 
+// Token yields a live token value. gitexec declares its own one-method
+// interface, so it need not import the package that supplies one: the in-box
+// box binary links gitexec but not credsource.
+type Token interface{ Value() string }
+
 // Credential is the forge username and password git presents to an http(s)
 // remote; either may carry the token. The zero value means no credential: Apply
 // is a no-op on it.
 type Credential struct {
 	Username, Password string
 
-	// tokenEnv, when set, names the environment variable holding the token and
-	// overrides Password; only EnvCredential sets it.
-	tokenEnv string
+	// token, when set, is the live token and overrides Password; only
+	// TokenCredential sets it. A Token, not a func, so Credential stays
+	// comparable.
+	token Token
 }
 
-// EnvCredential returns a credential whose password is read from the tokenEnv
-// environment variable at each Apply and Explain, so a token rotated in the
-// process environment reaches the next git call. An unset or empty variable
-// makes it behave as the zero Credential.
-func EnvCredential(username, tokenEnv string) Credential {
-	return Credential{Username: username, tokenEnv: tokenEnv}
+// TokenCredential returns a credential whose password is token's value at each
+// Apply and Explain, so a token rotated in the source reaches the next git
+// call. An empty value makes it behave as the zero Credential.
+func TokenCredential(username string, token Token) Credential {
+	return Credential{Username: username, token: token}
 }
 
-// resolved is c with an env-backed password read from the environment now. An
-// env-backed credential whose variable is empty resolves to the zero value,
+// resolved is c with a source-backed password read now. A source-backed
+// credential whose token is empty resolves to the zero value,
 // so no half-credential reaches git.
 func (c Credential) resolved() Credential {
-	if c.tokenEnv == "" {
+	if c.token == nil {
 		return c
 	}
-	pass := os.Getenv(c.tokenEnv)
+	pass := c.token.Value()
 	if pass == "" {
 		return Credential{}
 	}
@@ -49,7 +54,7 @@ func (c Credential) resolved() Credential {
 // nil source is the zero Credential.
 type CredentialSource func() (Credential, error)
 
-// StaticCredential is the source that always yields c; an env-backed c still
+// StaticCredential is the source that always yields c; a source-backed c still
 // reads its token at each use.
 func StaticCredential(c Credential) CredentialSource {
 	return func() (Credential, error) { return c, nil }

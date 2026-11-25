@@ -232,7 +232,7 @@ func tryProductionHarness(t *testing.T, cloud bool, tr dispatchkind.Tracker, map
 	t.Cleanup(jira.ConnectorClientForTest(h.srv.Client()))
 
 	h.tr, err = jira.Strategy.NewIssueTracker(
-		backendkit.Shared{Labels: testLabels, VerdictLabels: forge.ResearchVerdictLabels(), Tracker: tr, Connectors: newRuntime(t)},
+		backendkit.Shared{Labels: testLabels, VerdictLabels: forge.ResearchVerdictLabels(), Tracker: tr, Connectors: newRuntime(t, env)},
 		func(k string) (string, bool) { v, ok := env[k]; return v, ok })
 	if err != nil {
 		return nil, err

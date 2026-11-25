@@ -11,6 +11,7 @@ import (
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/connectorsandbox"
+	"spindrift.dev/launcher/internal/credsource/credsourcetest"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -57,7 +58,7 @@ func newClient(t *testing.T, repo string, labels forge.DispatchLabels, opts ...E
 // sandbox, closed with the test.
 func testRuntime(t *testing.T) *connectorruntime.Runtime {
 	t.Helper()
-	rt := connectorruntime.FromRegistries()
+	rt := connectorruntime.FromRegistries(credsourcetest.Applied())
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt
 }

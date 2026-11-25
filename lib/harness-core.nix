@@ -79,6 +79,7 @@ let
     "connectorrecord"
     "connectorruntime"
     "connectortracker"
+    "credsource"
     "dedupmarker"
     "flock"
     "forge/bundlerelay"
@@ -92,6 +93,7 @@ let
     "gitremote"
     "hostpaths"
     "seambundle"
+    "secretcmd"
   ];
   # connectorforgetest and connectortrackertest are test kits importing
   # forge/forgetest, which the Box does not carry; `go mod vendor` would fail

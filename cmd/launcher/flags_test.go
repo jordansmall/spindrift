@@ -18,6 +18,7 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/secretcmd"
@@ -2723,7 +2724,7 @@ func credentialRowDoc(name, extra string) string {
 func TestApplyRowCredentials_TemplateSkipsRowNothingReads(t *testing.T) {
 	ran := useCredentialRows(t, credentialRowDoc("jira", ""), "vault get {name}", failingVault)
 	setKnob(t, "ISSUE_TRACKER", "local")
-	if err := applyRowCredentials(); err != nil {
+	if _, err := applyRowCredentials(); err != nil {
 		t.Fatal(err)
 	}
 	if got := ran(); len(got) != 0 {
@@ -2736,7 +2737,7 @@ func TestApplyRowCredentials_TemplateSkipsRowNothingReads(t *testing.T) {
 func TestApplyRowCredentials_TemplateRunsForJiraRow(t *testing.T) {
 	ran := useCredentialRows(t, credentialRowDoc("jira", ""), "vault get {name}", failingVault)
 	setKnob(t, "ISSUE_TRACKER", "jira")
-	err := applyRowCredentials()
+	_, err := applyRowCredentials()
 	if err == nil || !strings.Contains(err.Error(), "SHADOW_TEST_TOKEN") {
 		t.Fatalf("err = %v, want the template failure naming the env var", err)
 	}
@@ -2756,7 +2757,7 @@ func TestApplyRowCredentials_TemplateRunsForForgejoRow(t *testing.T) {
 			ran := useCredentialRows(t, credentialRowDoc("forgejo", ""), "vault get {name}", func(string) (string, error) { return "tok", nil })
 			setKnob(t, "CODE_FORGE", axis.forge)
 			setKnob(t, "ISSUE_TRACKER", axis.tracker)
-			if err := applyRowCredentials(); err != nil {
+			if _, err := applyRowCredentials(); err != nil {
 				t.Fatal(err)
 			}
 			if want := []string{"vault get shadow-test-token"}; !reflect.DeepEqual(ran(), want) {
@@ -2770,7 +2771,7 @@ func TestApplyRowCredentials_TemplateSkipsInactiveBackend(t *testing.T) {
 	ran := useCredentialRows(t, credentialRowDoc("github", ""), "vault get {name}", failingVault)
 	setKnob(t, "CODE_FORGE", "local")
 	setKnob(t, "ISSUE_TRACKER", "jira")
-	if err := applyRowCredentials(); err != nil {
+	if _, err := applyRowCredentials(); err != nil {
 		t.Fatal(err)
 	}
 	if got := ran(); len(got) != 0 {
@@ -2785,7 +2786,7 @@ func TestApplyRowCredentials_ExplicitCmdSkipsUnreadRow(t *testing.T) {
 	setKnob(t, "CODE_FORGE", "local")
 	setKnob(t, "ISSUE_TRACKER", "local")
 	t.Setenv("SHADOW_TEST_TOKEN_CMD", "vault get tok")
-	if err := applyRowCredentials(); err != nil {
+	if _, err := applyRowCredentials(); err != nil {
 		t.Fatal(err)
 	}
 	if got := ran(); len(got) != 0 {
@@ -2799,7 +2800,7 @@ func TestApplyRowCredentials_UnsetReadRowIsNotAnError(t *testing.T) {
 	ran := useCredentialRows(t, credentialRowDoc("github", ""), "", failingVault)
 	setKnob(t, "CODE_FORGE", "github")
 	setKnob(t, "ISSUE_TRACKER", "github")
-	if err := applyRowCredentials(); err != nil {
+	if _, err := applyRowCredentials(); err != nil {
 		t.Fatalf("err = %v, want nil for an unset credential", err)
 	}
 	if got := ran(); len(got) != 0 {
@@ -2844,14 +2845,15 @@ func TestGHTokenCmd_GithubRunResolvesOnce(t *testing.T) {
 	if _, err := parseResolved(t, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := applyRowCredentials(); err != nil {
-		t.Fatal(err)
-	}
 	if err := applySecretCmdFallback(); err != nil {
 		t.Fatal(err)
 	}
-	if got := os.Getenv("GH_TOKEN"); got != "from-cmd" {
-		t.Errorf("GH_TOKEN = %q, want from-cmd", got)
+	sourced, err := applyRowCredentials()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sourced.Rows["github"].Secret.Value(); got != "from-cmd" {
+		t.Errorf("github row credential = %q, want from-cmd", got)
 	}
 	if want := []string{"vault get gh"}; !reflect.DeepEqual(ran(), want) {
 		t.Errorf("ran %q, want exactly %q", ran(), want)
@@ -2863,14 +2865,15 @@ func TestSecretCmdTemplate_GithubRunSuppliesGHTokenOnce(t *testing.T) {
 	if _, err := parseResolved(t, []string{"--secret-cmd", "vault get {name}"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := applyRowCredentials(); err != nil {
-		t.Fatal(err)
-	}
 	if err := applySecretCmdFallback(); err != nil {
 		t.Fatal(err)
 	}
-	if got := os.Getenv("GH_TOKEN"); got != "from-template" {
-		t.Errorf("GH_TOKEN = %q, want from-template", got)
+	sourced, err := applyRowCredentials()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sourced.Rows["github"].Secret.Value(); got != "from-template" {
+		t.Errorf("github row credential = %q, want from-template", got)
 	}
 	if want := []string{"vault get gh-token"}; !reflect.DeepEqual(ran(), want) {
 		t.Errorf("ran %q, want exactly %q", ran(), want)
@@ -2892,7 +2895,7 @@ func TestApplyRowCredentials_SkipsRowCredentialACoreSecretResolved(t *testing.T)
 	t.Setenv("FORGEJO_TOKEN", "already-resolved")
 	t.Setenv("FORGEJO_TOKEN_CMD", "vault get forgejo")
 	ran := stubSecretCmd(t, "", failingVault)
-	if err := applyRowCredentials(); err != nil {
+	if _, err := applyRowCredentials(); err != nil {
 		t.Fatal(err)
 	}
 	if got := ran(); len(got) != 0 {
@@ -2916,17 +2919,17 @@ func TestRowCredentials_ResolveOnceThroughLauncherSequence(t *testing.T) {
 		name, forge, tracker string
 		args                 []string
 		env                  map[string]string
-		token, wantRan       string
+		row, wantRan         string
 	}{
-		{"GH_TOKEN_CMD", "github", "github", nil, map[string]string{"GH_TOKEN_CMD": "vault get gh"}, "GH_TOKEN", "vault get gh"},
-		{"FORGEJO_TOKEN_CMD", "forgejo", "forgejo", nil, map[string]string{"FORGEJO_TOKEN_CMD": "vault get fj"}, "FORGEJO_TOKEN", "vault get fj"},
-		{"JIRA_TOKEN_CMD", "local", "jira", nil, map[string]string{"JIRA_TOKEN_CMD": "vault get jt"}, "JIRA_TOKEN", "vault get jt"},
-		{"--secret-cmd github", "github", "github", []string{"--secret-cmd", "vault get {name}"}, nil, "GH_TOKEN", "vault get gh-token"},
-		{"--secret-cmd forgejo", "forgejo", "forgejo", []string{"--secret-cmd", "vault get {name}"}, nil, "FORGEJO_TOKEN", "vault get forgejo-token"},
-		{"--secret-cmd jira", "local", "jira", []string{"--secret-cmd", "vault get {name}"}, nil, "JIRA_TOKEN", "vault get jira-token"},
-		{"SECRET_CMD github", "github", "github", nil, map[string]string{"SECRET_CMD": "vault get {name}"}, "GH_TOKEN", "vault get gh-token"},
-		{"SECRET_CMD forgejo", "forgejo", "forgejo", nil, map[string]string{"SECRET_CMD": "vault get {name}"}, "FORGEJO_TOKEN", "vault get forgejo-token"},
-		{"SECRET_CMD jira", "local", "jira", nil, map[string]string{"SECRET_CMD": "vault get {name}"}, "JIRA_TOKEN", "vault get jira-token"},
+		{"GH_TOKEN_CMD", "github", "github", nil, map[string]string{"GH_TOKEN_CMD": "vault get gh"}, "github", "vault get gh"},
+		{"FORGEJO_TOKEN_CMD", "forgejo", "forgejo", nil, map[string]string{"FORGEJO_TOKEN_CMD": "vault get fj"}, "forgejo", "vault get fj"},
+		{"JIRA_TOKEN_CMD", "local", "jira", nil, map[string]string{"JIRA_TOKEN_CMD": "vault get jt"}, "jira", "vault get jt"},
+		{"--secret-cmd github", "github", "github", []string{"--secret-cmd", "vault get {name}"}, nil, "github", "vault get gh-token"},
+		{"--secret-cmd forgejo", "forgejo", "forgejo", []string{"--secret-cmd", "vault get {name}"}, nil, "forgejo", "vault get forgejo-token"},
+		{"--secret-cmd jira", "local", "jira", []string{"--secret-cmd", "vault get {name}"}, nil, "jira", "vault get jira-token"},
+		{"SECRET_CMD github", "github", "github", nil, map[string]string{"SECRET_CMD": "vault get {name}"}, "github", "vault get gh-token"},
+		{"SECRET_CMD forgejo", "forgejo", "forgejo", nil, map[string]string{"SECRET_CMD": "vault get {name}"}, "forgejo", "vault get forgejo-token"},
+		{"SECRET_CMD jira", "local", "jira", nil, map[string]string{"SECRET_CMD": "vault get {name}"}, "jira", "vault get jira-token"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2948,17 +2951,63 @@ func TestRowCredentials_ResolveOnceThroughLauncherSequence(t *testing.T) {
 			if _, err := parseResolved(t, tc.args); err != nil {
 				t.Fatal(err)
 			}
-			if err := applyRowCredentials(); err != nil {
-				t.Fatal(err)
-			}
 			if err := applySecretCmdFallback(); err != nil {
 				t.Fatal(err)
 			}
-			if got := os.Getenv(tc.token); got != "resolved" {
-				t.Errorf("%s = %q, want resolved", tc.token, got)
+			sourced, err := applyRowCredentials()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := sourced.Rows[tc.row].Secret.Value(); got != "resolved" {
+				t.Errorf("%s row credential = %q, want resolved", tc.row, got)
 			}
 			if want := []string{tc.wantRan}; !reflect.DeepEqual(ran(), want) {
 				t.Errorf("ran %q, want exactly %q", ran(), want)
+			}
+		})
+	}
+}
+
+// GH_TOKEN_REFRESH_FILE reaches the Connector runtime from the Launcher input,
+// whether the flag or the document sets it (the environment is no tier): a
+// token rewritten into the file is the next git credential of the github row,
+// with no GH_TOKEN of its own.
+func TestApplyRowCredentials_RefreshFileFromLauncherInputRotatesGitCredential(t *testing.T) {
+	for _, tier := range []string{"document", "flag"} {
+		t.Run(tier, func(t *testing.T) {
+			useGithubGHTokenRow(t, failingVault)
+			path := filepath.Join(t.TempDir(), "gh-token")
+			var argv []string
+			if tier == "document" {
+				useDoc(t, &inputdoc.Document{Settings: map[string]string{"GH_TOKEN_REFRESH_FILE": path}})
+			} else {
+				argv = []string{"--gh-token-refresh-file", path}
+			}
+			if _, err := parseResolved(t, argv); err != nil {
+				t.Fatal(err)
+			}
+			sourced, err := applyRowCredentials()
+			if err != nil {
+				t.Fatalf("a refresh file stands in for an unset GH_TOKEN: %v", err)
+			}
+			rt := connectorruntime.FromRegistries(sourced.Rows)
+			t.Cleanup(func() { _ = rt.Close() })
+			row, ok := rt.Row("github")
+			if !ok {
+				t.Fatal("no github row")
+			}
+			git := rt.GitCredential(row)
+
+			for _, token := range []string{"tok-one", "tok-two"} {
+				if err := os.WriteFile(path, []byte(token+"\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if cred, err := git(); err != nil || cred.Password != token {
+					t.Fatalf("after writing %s: GitCredential = (%v, %v), want password %s", token, cred, err, token)
+				}
+			}
+			if os.Getenv("GH_TOKEN") != "" {
+				t.Error("GH_TOKEN was exported to the process environment")
 			}
 		})
 	}

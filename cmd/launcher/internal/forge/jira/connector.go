@@ -2,7 +2,6 @@ package jira
 
 import (
 	"net/http"
-	"os"
 	"strings"
 
 	"spindrift.dev/launcher/internal/backend"
@@ -57,7 +56,7 @@ func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (for
 			},
 			Requires: connectorCapabilities,
 			Record:   backend.Jira.Name,
-			Options:  backendrows.Options{Client: connectorClient, Getenv: identityGetenv(row, k)},
+			Options:  backendrows.Options{Client: connectorClient},
 		},
 		Lifecycle: connectortracker.Lifecycle{
 			Labels:        s.Labels,
@@ -75,17 +74,4 @@ func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (for
 		return nil, err
 	}
 	return connectorTracker{it}, nil
-}
-
-// identityGetenv serves the identity env var from k, since a flake option or
-// flag reaches the launcher only through the document, never the process env.
-// Unlike the token it is a config-time snapshot, not read per request; that is
-// safe because JIRA_EMAIL has no _CMD form to refresh mid-process.
-func identityGetenv(row backendrows.Row, k Knobs) func(string) string {
-	return func(name string) string {
-		if name == row.IdentityEnv && k.JiraEmail != "" {
-			return k.JiraEmail
-		}
-		return os.Getenv(name)
-	}
 }
