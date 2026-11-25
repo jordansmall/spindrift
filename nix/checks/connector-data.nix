@@ -228,13 +228,14 @@ let
     msg != null && builtins.all (s: hasInfix s msg) r.says;
   # A `lib.connector { core }` entry in each of its two forms: the data one,
   # and the entry-level one a Connector not yet moved to data still returns.
-  # `module` and `driver.module` throw, so a helper that forced either fails.
-  trap = _: throw "a helper forced a wasm module";
+  # `module` is a lambda that throws when applied, and `driver.module` throws when
+  # forced, so a helper that applied the one or forced the other fails.
+  trap = _: throw "a helper applied a wasm module";
   dataEntry = {
     data = good // {
       module = trap;
       driver = good.driver // {
-        module = trap;
+        module = throw "a helper forced driver.module";
       };
     };
   };
@@ -247,9 +248,43 @@ let
         spindrift.connectors = lib.mapAttrs (_: _: { inherit (good) knobs; }) { datafixture = null; };
       };
   };
+  badNames = [
+    (removeAttrs good [ "name" ])
+    (good // { name = 3; })
+  ];
   bare = {
     flakeModule = _: { };
   };
+  # A Driver row built from core's own rows, as the opencode, pi and claude
+  # Connectors do: it needs nixpkgs `lib`, so `driver` is a function of it.
+  coreDerivedData =
+    { core }:
+    {
+      name = "corederived";
+      knobs = {
+        coreDerivedToken = knob "COREDERIVED_TOKEN" true;
+      };
+      module = _: wasm;
+      inherit routes;
+      credential = "coreDerivedToken";
+      driver =
+        lib:
+        (core.lib.driverEntries { inherit lib; }).opencode
+        // {
+          name = "corederived";
+          module = _: wasm;
+        };
+    };
+  coreDerivedViaModule = consumerWith [
+    (core.lib.connectorModule core (coreDerivedData {
+      inherit core;
+    }))
+  ];
+  coreDerivedRow = (configOf coreDerivedViaModule).connectors.corederived;
+  # What nix/connector-knobs.nix does: a stub core `{ }`, then the backend filter.
+  stubRows = pkgs.lib.filterAttrs (_: r: r ? backend) (
+    connectorData.rowsOf { inherit (pkgs) lib; } { data = coreDerivedData { core = { }; }; }
+  );
 in
 {
   connector-data-readers-both-forms =
@@ -285,9 +320,9 @@ in
     ) "rowsOf must be empty for a module that registers no row";
     assert assertMsg (
       (connectorData.rowsOf { } dataEntry).datafixture.fragments == good.fragments
-    ) "rowsOf must read a data entry's row, without module args";
+    ) "rowsOf must read a data entry's set-valued row, without module args";
     assert assertMsg (builtins.seq (connectorData.driverRowOf pkgs.lib dataEntry).name true)
-      "no reader may force a data entry's wasm modules";
+      "no reader may apply a data entry's wasm module or force its driver.module";
     pkgs.runCommand "connector-data-readers-both-forms" { } "touch $out";
 
   connector-data-registers-row =
@@ -385,9 +420,41 @@ in
     assert assertMsg (hasInfix "'name'" (
       connectorData.problem (removeAttrs good [ "name" ])
     )) "data with no name is refused by name";
-    assert assertMsg (builtins.all (d: throws (connectorData.rowsOf { } { data = d; })) [
-      (removeAttrs good [ "name" ])
-      (good // { name = 3; })
-    ]) "rowsOf must throw the named problem on a bad name, not a raw Nix error";
+    assert assertMsg (builtins.all (
+      d: throws (connectorData.rowsOf { } { data = d; })
+    ) badNames) "rowsOf must throw on a bad name";
+    assert assertMsg (
+      map connectorData.problem badNames == [
+        "Connector data needs a 'name': a non-empty string, the row's name in spindrift.connectors"
+        "Connector data needs a 'name': a non-empty string, the row's name in spindrift.connectors ('name' is int)"
+      ]
+    ) "a bad name must be refused with the named problem, not a raw Nix error";
     pkgs.runCommand "connector-data-refusals" { } "touch $out";
+
+  # A Driver row derived from core (`driverEntries`) needs `lib`: it must read
+  # through the knob reader's stub core, and build the same row through the
+  # module system and the entry-level reader.
+  connector-data-core-derived-driver =
+    let
+      entry = {
+        data = coreDerivedData { inherit core; };
+      };
+      opencode = (core.lib.driverEntries { inherit (pkgs) lib; }).opencode;
+    in
+    assert assertMsg (
+      (builtins.tryEval (builtins.deepSeq (builtins.attrNames stubRows) true)).success
+      && builtins.attrNames stubRows == [ "corederived" ]
+    ) "a core-derived driver must not force the stub core when only the backend filter reads the row";
+    assert assertMsg (
+      let
+        d = connectorData.driverRowOf pkgs.lib entry;
+      in
+      d.name == "corederived" && d.bin == opencode.bin && d.argvShape == opencode.argvShape
+    ) "driverRowOf must apply a function driver to the lib it is given";
+    assert assertMsg (
+      coreDerivedRow.driver.name == "corederived" && coreDerivedRow.driver.bin == opencode.bin
+    ) "a function driver must reach the row through the flake module";
+    assert assertMsg (evaluates coreDerivedViaModule)
+      "a Consumer importing a core-derived data Connector must evaluate";
+    pkgs.runCommand "connector-data-core-derived-driver" { } "touch $out";
 }

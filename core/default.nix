@@ -17,7 +17,7 @@
   # when a Consumer's Connector input follows it), so the Connector ships no
   # module and never names core's path itself.
   lib.connectorModule =
-    core: data: (import ../lib/connector-data.nix).module core.flakeModules.default data;
+    core: data: (import ../lib/connector-data.nix).toFlakeModule core.flakeModules.default data;
 
   # The core Driver rows (ADR 0073): a Connector contributes its Driver's row
   # through `core`, never a relative path out of its own directory.

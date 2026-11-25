@@ -6,10 +6,10 @@
 # lib/env-schema.nix. Only Connectors that declare a `backend` row are kept.
 #
 # Laziness protects the stub core: neither reader forces it. A data reader never
-# forces `module`, and a module's uses of the core (`imports` and the
-# `backend.module` lambda) are not forced either, since `filterAttrs` only tests
-# `backend` presence and `module` is never applied. Forcing either would break
-# against the `{ }` core.
+# applies `module` and leaves a function `driver` (whose body may use the core)
+# an unforced thunk, and a module's uses of the core (`imports` and the `backend.module` lambda) are not
+# forced either, since `filterAttrs` only tests `backend` presence and `module`
+# is never applied. Forcing either would break against the `{ }` core.
 { lib }:
 let
   stubCore = { };

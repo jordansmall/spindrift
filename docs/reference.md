@@ -2371,10 +2371,12 @@ mean at runtime is issue #6751. The worked example is the fixture Connector in
   `module`, `routes`, `credential`, `scheme`, `identity`, `base` and
   `gitRemote` (the [backend row](#backend-rows-on-a-connector), declared by
   `module`, which also needs `routes` and `credential`), and `knobs`,
-  `fragments` and `driver` (the row's own fields). Core builds the
-  `spindrift.connectors.<name>` row and the module's `key`
-  (`spindrift-connector-<name>`) itself, so the data declares only its own
-  row and sets no other option. An unknown key, a wrongly typed field, or a
+  `fragments` and `driver` (the row's own fields). `driver` may be a row or a
+  function of nixpkgs `lib` returning one, for a row built from core's
+  (`lib: (core.lib.driverEntries { inherit lib; }).<name> // { module = …; }`).
+  Core builds the `spindrift.connectors.<name>` row and the module's `key`
+  (`spindrift-connector-<name>`) itself, so the data declares only its own row
+  and sets no other option. An unknown key, a wrongly typed field, or a
   backend field without `module` fails evaluation with a message naming the
   Connector and the key; the deeper checks (Route rules, scheme, credential
   ownership) stay with the row's types and validators. Core's own readers, such
