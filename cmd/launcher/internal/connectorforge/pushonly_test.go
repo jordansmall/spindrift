@@ -85,16 +85,12 @@ func TestComposeHandsPlumbingTheDerivedCloneURLAndCredential(t *testing.T) {
 	if len(calls) != 1 || calls[0].CloneURL != want || calls[0].Credential != h.Credential {
 		t.Fatalf("plumbing calls = %v, want one for %q with the configured credential", calls, want)
 	}
-	if n := h.Backend.RemoteRequests(); n != 0 {
-		t.Errorf("Compose asked the Connector for its remote %d times, want 0", n)
-	}
 }
 
 // Core derives the clone URL from the Git remote declaration and the Target
-// repository, keeping a subpath, and never takes the Connector's answer.
+// repository, keeping a subpath.
 func TestComposeDerivesTheCloneURLFromTheDeclaration(t *testing.T) {
 	h := connectorforgetest.New(t)
-	h.Backend.SetRemote("https://evil.example/x/y.git", "https://evil.example/x/y")
 	h.WebBase = "https://forge.example/sub/"
 	if _, _, err := h.Compose(); err != nil {
 		t.Fatalf("Compose = %v", err)
@@ -102,9 +98,6 @@ func TestComposeDerivesTheCloneURLFromTheDeclaration(t *testing.T) {
 	calls := h.PlumbingCalls()
 	if got, want := calls[len(calls)-1].CloneURL, "https://forge.example/sub/o/r.git"; got != want {
 		t.Errorf("plumbing clone URL = %q, want %q", got, want)
-	}
-	if n := h.Backend.RemoteRequests(); n != 0 {
-		t.Errorf("Compose asked the Connector for its remote %d times, want 0", n)
 	}
 }
 
@@ -160,9 +153,8 @@ func TestComposeRefusesATargetRepositoryThatIsNotOwnerSlashName(t *testing.T) {
 	}
 }
 
-// Probe reads liveness through a request the backend answers, never through
-// the Connector's own remote.
-func TestProbeReachesTheBackendWithoutAskingForTheRemote(t *testing.T) {
+// Probe reads liveness through a request the backend answers.
+func TestProbeReachesTheBackend(t *testing.T) {
 	h := connectorforgetest.New(t)
 	before := h.Backend.BranchRequests()
 	repo, err := h.Forge().Probe()
@@ -171,9 +163,6 @@ func TestProbeReachesTheBackendWithoutAskingForTheRemote(t *testing.T) {
 	}
 	if n := h.Backend.BranchRequests() - before; n != 1 {
 		t.Errorf("Probe sent %d backend branch requests, want 1", n)
-	}
-	if n := h.Backend.RemoteRequests(); n != 0 {
-		t.Errorf("Probe asked the Connector for its remote %d times, want 0", n)
 	}
 }
 
@@ -200,7 +189,7 @@ func TestComposePinsPRURLsToTheDerivedHostNotTheBackendHost(t *testing.T) {
 		t.Fatalf("OpenPRForBranch = %+v, %v, want an answer on %s refused", pr, ok, h.Backend.Host)
 	}
 
-	h.Backend.SetRemote("https://"+derived+"/"+connectorforgetest.Repo+".git", "https://"+derived+"/"+connectorforgetest.Repo)
+	h.Backend.SetWeb("https://" + derived + "/" + connectorforgetest.Repo)
 	pr, ok, err := caps.PRForge.OpenPRForBranch(branch)
 	if err != nil || !ok || pr.URL != h.Backend.PRURL(7) {
 		t.Errorf("OpenPRForBranch = %+v, %v, %v, want the PR on %s accepted", pr, ok, err, derived)

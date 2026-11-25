@@ -83,8 +83,7 @@ type Git struct {
 	Clock retry.Clock
 	// WebBase is the forge's https web base from its row's Git remote
 	// declaration. Compose derives the clone URL and the web host and subpath
-	// the PR URLs are pinned to from it and Target.Repo; the Connector's own
-	// answer to forge.remote is never asked for.
+	// the PR URLs are pinned to from it and Target.Repo.
 	WebBase string
 	// Note, when set, sees each guest call of the composed forge that fails
 	// after retries and classification, by method. Compose's own refusals are
@@ -127,7 +126,7 @@ type pushOnly struct {
 // so any later type probe agrees with them. The clone URL and the web host PR
 // URLs are pinned to are derived from Git.WebBase and the Target repository
 // (CloneURL), so the git credential never reaches a host the Connector merely
-// named; Compose does not ask the Connector for a remote.
+// named.
 func Compose(c *connectorhost.Connector, target Target, g Git) (forge.CodeForge, forge.Capabilities, error) {
 	has := func(capName string) bool { return slices.Contains(c.Capabilities, capName) }
 	isPushOnly := has(CapPushOnly)

@@ -44,7 +44,7 @@ let
       ];
       forge = [
         (entry "forge" "Serves forge.prsForBranch, forge.pr and forge.checks, and optionally forge.jobLog.")
-        (entry "forge.branches" "Serves forge.remote, forge.branchExists and forge.deleteBranch.")
+        (entry "forge.branches" "Serves forge.branchExists and forge.deleteBranch.")
         (entry "forge.pushOnly" "The forge has no pull-request concept, so core composes a push-only Code Forge.")
         (entry "forge.prs" "Serves the PR primitives: forge.behind, forge.prFiles, forge.setDraft, forge.comment and forge.merge.")
         (entry "forge.autoMerge" "Serves forge.autoMergeAllowed and forge.enqueueAutoMerge.")
@@ -314,7 +314,6 @@ let
       prShape = "connectorforge's body refuses a PR whose number is not a canonical positive integer, whose URL is not a plain https URL on the forge's web host, under its web base's path, naming the target repository and that same number, or whose state and merged pair is impossible (anything but open and unmerged, closed and merged, or closed and unmerged).";
       prAnswer = "connectorforge's body applies prShape and refuses a PR other than the one asked for; the callers go on to refuse a mergeable value outside MERGEABLE, CONFLICTING and UNKNOWN (Mergeable), a merge commit that is not a full lowercase hex id (MergeCommit), an empty head commit (HeadCommitSHA), and, before a rebase, a head other than the agent branch core derived (RebasePRHead).";
       rollupState = "connectorforge's body, which runs on every forge.checks answer (CheckState and FailureDetail both read it), fails closed on a rollup state outside SUCCESS, PENDING, EXPECTED, FAILURE and ERROR; an empty state reads as no checks.";
-      remoteURLs = "Core never calls forge.remote: it derives the clone URL and web base from the forge's Git remote declaration, so the body only decodes.";
       behindCount = "connectorforge's body refuses a negative behindBy.";
       prFiles = "connectorforge's body refuses a missing or empty list, and an entry that is not a clean repository-relative path (cleanRepoPath), because the merge guard reads it.";
       runLink = "connectorforge's body drops, rather than fails on, a URL that is not a plain https URL on the web host under the web base's path and the target repository's; a backslash is refused.";
@@ -470,10 +469,6 @@ let
           "ERROR"
         ];
         checks = t.list (t.ref "check");
-      };
-      remote = t.open {
-        cloneUrl = t.string;
-        webUrl = t.string;
       };
       grant = t.open {
         introspectable = t.optional t.boolean;

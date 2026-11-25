@@ -60,7 +60,7 @@ const (
 	CapTrackerIdsProjectKey = "tracker.ids.projectKey"
 	// CapForge: Serves forge.prsForBranch, forge.pr and forge.checks, and optionally forge.jobLog.
 	CapForge = "forge"
-	// CapForgeBranches: Serves forge.remote, forge.branchExists and forge.deleteBranch.
+	// CapForgeBranches: Serves forge.branchExists and forge.deleteBranch.
 	CapForgeBranches = "forge.branches"
 	// CapForgePushOnly: The forge has no pull-request concept, so core composes a push-only Code Forge.
 	CapForgePushOnly = "forge.pushOnly"
@@ -349,8 +349,6 @@ const (
 	CheckProbeRepo = "probeRepo"
 	// CheckProbeStatus: connectortracker's body reads the status: 2xx proves the repository, 401 and 403 are an auth failure, any other status means the repository is unreachable.
 	CheckProbeStatus = "probeStatus"
-	// CheckRemoteURLs: Core never calls forge.remote: it derives the clone URL and web base from the forge's Git remote declaration, so the body only decodes.
-	CheckRemoteURLs = "remoteURLs"
 	// CheckResolveExitGuard: connectorhost.DriverStrategy refuses an answer that resolves a non-zero exit to 0.
 	CheckResolveExitGuard = "resolveExitGuard"
 	// CheckRollupState: connectorforge's body, which runs on every forge.checks answer (CheckState and FailureDetail both read it), fails closed on a rollup state outside SUCCESS, PENDING, EXPECTED, FAILURE and ERROR; an empty state reads as no checks.
@@ -405,8 +403,6 @@ const (
 	MethodForgeChecks = "forge.checks"
 	// MethodForgeJobLog: The last `tail` bytes of a job's log, preceded by the error lines of the head it cut, up to `errorLines` bytes; optional, and a failed read only costs failure detail its logs.
 	MethodForgeJobLog = "forge.jobLog"
-	// MethodForgeRemote: The repository's git identity: the clone URL core's git pushes to and the web URL.
-	MethodForgeRemote = "forge.remote"
 	// MethodForgeBranchExists: Whether `branch` exists on the forge.
 	MethodForgeBranchExists = "forge.branchExists"
 	// MethodForgeDeleteBranch: Deletes `branch` from the forge; core refuses the base branch and an option-shaped name before the call.
@@ -520,7 +516,6 @@ var Methods = map[string]Method{
 	MethodForgePr:                {Name: MethodForgePr, Axis: AxisForge, Capability: CapForge, Retry: Retry{Safe: true}, ResultCheck: CheckPrAnswer},
 	MethodForgeChecks:            {Name: MethodForgeChecks, Axis: AxisForge, Capability: CapForge, Retry: Retry{Safe: true}, ResultCheck: CheckRollupState},
 	MethodForgeJobLog:            {Name: MethodForgeJobLog, Axis: AxisForge, Capability: CapForge, Retry: Retry{Safe: true}, ResultCheck: CheckDecode},
-	MethodForgeRemote:            {Name: MethodForgeRemote, Axis: AxisForge, Capability: CapForgeBranches, Retry: Retry{Safe: true}, ResultCheck: CheckRemoteURLs},
 	MethodForgeBranchExists:      {Name: MethodForgeBranchExists, Axis: AxisForge, Capability: CapForgeBranches, Retry: Retry{Safe: true}, ResultCheck: CheckDecode},
 	MethodForgeDeleteBranch:      {Name: MethodForgeDeleteBranch, Axis: AxisForge, Capability: CapForgeBranches, Retry: Retry{Safe: true, DoneOn: []string{ClassNotFound}}, ResultCheck: CheckDecode},
 	MethodForgeBehind:            {Name: MethodForgeBehind, Axis: AxisForge, Capability: CapForgePrs, Retry: Retry{Safe: true}, ResultCheck: CheckBehindCount},
@@ -598,7 +593,6 @@ var WireFields = map[string][]string{
 	"forge.prFiles.params":           []string{"number", "target"},
 	"forge.probe.params":             []string{"target"},
 	"forge.prsForBranch.params":      []string{"branch", "target"},
-	"forge.remote.params":            []string{"target"},
 	"forge.setDraft.params":          []string{"draft", "number", "target"},
 	"forge.tokenGrant.params":        []string{"target", "tokenPrefix"},
 	"grant":                          []string{"introspectable", "reason", "scopes", "writeCapable"},
@@ -607,7 +601,6 @@ var WireFields = map[string][]string{
 	"issueRequest":                   []string{"body", "dedupMarker", "issueType", "labels", "route", "title"},
 	"pattern":                        []string{"reason", "substr"},
 	"pr":                             []string{"crossRepo", "draft", "head", "headSha", "mergeCommit", "mergeable", "merged", "number", "state", "url"},
-	"remote":                         []string{"cloneUrl", "webUrl"},
 	"rollup":                         []string{"checks", "state"},
 	"route":                          []string{"kind", "value"},
 	"statusTarget":                   []string{"resolution", "status"},

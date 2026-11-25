@@ -30,7 +30,6 @@ func init() {
 		JobLog:       jobLog,
 	})
 	forge.RegisterBranches(forge.Branches{
-		Remote:       remote,
 		BranchExists: branchExists,
 		DeleteBranch: deleteBranch,
 	})
@@ -156,11 +155,6 @@ func getRepo(t forge.Target) (repoInfo, error) {
 	var r repoInfo
 	err := get(repoURL(t), &r)
 	return r, err
-}
-
-func remote(t forge.Target) (forge.Remote, error) {
-	r, err := getRepo(t)
-	return forge.Remote{CloneURL: r.CloneURL, WebURL: r.HTMLURL}, err
 }
 
 func probe(t forge.Target) (string, error) {

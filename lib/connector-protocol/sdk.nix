@@ -306,20 +306,6 @@ in
       ];
     }
     {
-      name = "Remote";
-      type = "remote";
-      doc = ''
-        Remote is a repository's git identity. CloneURL is what core's git plumbing
-        pushes to and WebURL is the repository's web page. Neither may carry
-        credentials: core refuses one that does, and one naming a host outside the
-        Connector's declared routes.
-      '';
-      fields = [
-        "cloneUrl"
-        "webUrl"
-      ];
-    }
-    {
       name = "Grant";
       type = "grant";
       doc = ''
