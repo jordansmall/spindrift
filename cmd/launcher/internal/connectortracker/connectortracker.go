@@ -20,7 +20,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
 
@@ -679,8 +678,9 @@ var (
 )
 
 // labeledAnswer is a tracker.labeled reply. It decodes inside the call, so a
-// malformed one passes through the reloader's note like any other Connector
-// failure, and records the answer's size for the walk's byte budget.
+// malformed one passes through the Connector runtime's failure note like any
+// other Connector failure, and records the answer's size for the walk's byte
+// budget.
 type labeledAnswer struct {
 	Issues []wireIssue `json:"issues"`
 	Next   string      `json:"next"`
@@ -818,87 +818,6 @@ func NewCalling(c *connectorhost.Connector, call connectorcall.Call, lifecycle L
 		return nil, fmt.Errorf("%w: capabilities %v lack \"tracker\"", ErrNotTracker, c.Capabilities)
 	}
 	return newTracker(connectorcall.Classify(call, clock, c.Capabilities), lifecycle, target, c.Capabilities, speaksV02(c.ProtocolVersion))
-}
-
-// NewReloading is New for a tracker that lives as long as its process. A
-// Connector closes itself on a failed call, so a daemon holding one
-// tracker would fail every later operation; here a call finding the Connector
-// dead reloads it first. Capabilities come from the first handshake. A load
-// error on the first load is returned as is. A non-nil note sees every later
-// failure the Connector causes, by the method that met it: the retry wraps
-// outside the reloader, so that includes a failed attempt a later retry
-// recovers. clock is as for New.
-func NewReloading(load func() (*connectorhost.Connector, error), note func(method string, err error), lifecycle Lifecycle, target Target, clock retry.Clock) (forge.IssueTracker, error) {
-	c, err := load()
-	if err != nil {
-		return nil, err
-	}
-	r := &reloader{load: func() (conn, error) { return load() }, cur: c, note: note}
-	return NewCalling(c, r.call, lifecycle, target, clock)
-}
-
-// conn is the part of a Connector the reloader drives, a seam for its tests.
-type conn interface {
-	Call(ctx context.Context, method string, params, result any) error
-	Err() error
-}
-
-const (
-	maxLoadFailures = 3
-	loadRetryAfter  = time.Minute
-)
-
-// loadClock is a test seam for the reload cooldown.
-var loadClock = time.Now
-
-// reloader reloads a dead Connector before the call that finds it. The failing
-// call is not retried, and a failed reload fails the call that needed it with
-// the load error. After maxLoadFailures failed reloads in a row a Connector
-// that cannot load is retried at most once per loadRetryAfter, so a broken
-// module is not recompiled on every call.
-type reloader struct {
-	load func() (conn, error)
-	mu   sync.Mutex
-	cur  conn
-	// failures counts consecutive failed reloads; lastErr and lastFail
-	// describe the latest.
-	failures int
-	lastErr  error
-	lastFail time.Time
-	note     func(method string, err error)
-}
-
-// call passes every failure the Connector causes to note, by method: a failed
-// reload, a refused retry, or a failed call. Errors core raises itself, such as
-// a refused lifecycle transition, never reach it.
-func (r *reloader) call(ctx context.Context, method string, params, result any) error {
-	err := r.callOnce(ctx, method, params, result)
-	if err != nil && r.note != nil {
-		r.note(method, err)
-	}
-	return err
-}
-
-func (r *reloader) callOnce(ctx context.Context, method string, params, result any) error {
-	r.mu.Lock()
-	if r.cur.Err() != nil {
-		if r.failures >= maxLoadFailures && loadClock().Sub(r.lastFail) < loadRetryAfter {
-			err := fmt.Errorf("connector load failed %d times in a row; next retry allowed %s after the last failure: %w", r.failures, loadRetryAfter, r.lastErr)
-			r.mu.Unlock()
-			return err
-		}
-		next, err := r.load()
-		if err != nil {
-			r.failures, r.lastErr, r.lastFail = r.failures+1, err, loadClock()
-			r.mu.Unlock()
-			return err
-		}
-		r.failures, r.lastErr = 0, nil
-		r.cur = next
-	}
-	cur := r.cur
-	r.mu.Unlock()
-	return cur.Call(ctx, method, params, result)
 }
 
 // speaksV02 reports whether a protocol version is 0.2 or later; one the

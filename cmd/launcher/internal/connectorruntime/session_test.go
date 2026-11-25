@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -67,11 +68,12 @@ func (s *sandbox) loads() []*connectorhost.Connector {
 func (s *sandbox) killGuest() { s.loads()[len(s.loads())-1].Abort() }
 
 type env struct {
-	rt   *connectorruntime.Runtime
-	sb   *sandbox
-	row  backendrows.Row
-	spec connectorruntime.TrackerSpec
-	now  time.Time
+	rt     *connectorruntime.Runtime
+	sb     *sandbox
+	row    backendrows.Row
+	spec   connectorruntime.TrackerSpec
+	now    time.Time
+	err503 *atomic.Int32 // backend requests still to answer 503
 }
 
 // newEnv is a runtime over the fixture tracker Connector served by an
@@ -84,7 +86,12 @@ func newEnv(t *testing.T, wasmFile string) *env {
 		t.Fatal(err)
 	}
 	t.Chdir(t.TempDir())
+	err503 := new(atomic.Int32)
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err503.Add(-1) >= 0 {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		if r.URL.Path != apiPath+"/repos/"+connectorforgetest.Repo+"/issues/1" {
 			http.NotFound(w, r)
 			return
@@ -93,7 +100,8 @@ func newEnv(t *testing.T, wasmFile string) *env {
 	}))
 	t.Cleanup(srv.Close)
 	e := &env{
-		sb: &sandbox{Loader: connectorsandboxtest.InProcess()},
+		err503: err503,
+		sb:     &sandbox{Loader: connectorsandboxtest.InProcess()},
 		row: backendrows.Row{
 			Name:          "fixture",
 			Module:        filepath.Join(dir, wasmFile),
@@ -356,5 +364,82 @@ func TestConnectorThatIsNotATrackerIsWrittenToTheFailureNote(t *testing.T) {
 	}
 	if log := connectorLog(t); !strings.Contains(log, `"op":"load the Connector"`) {
 		t.Errorf("log = %q, want the load op", log)
+	}
+	loaded := e.sb.loads()
+	if len(loaded) != 1 {
+		t.Fatalf("loads = %d, want one", len(loaded))
+	}
+	if err := loaded[0].Call(context.Background(), "tracker.issue", nil, nil); !errors.Is(err, connectorhost.ErrUnusable) {
+		t.Errorf("useless Connector's call = %v, want it dropped and closed (ErrUnusable)", err)
+	}
+}
+
+func TestFailedRetryRestartsTheCooldownAndASuccessResetsTheCount(t *testing.T) {
+	e := newEnv(t, "tracker.wasm")
+	tr := e.tracker(t)
+	e.sb.killGuest()
+	_ = readFirst(t, tr)
+	boom := errors.New("compile module")
+	e.sb.failLoads(boom)
+	for range 3 {
+		_ = readFirst(t, tr)
+	}
+
+	e.now = e.now.Add(time.Minute)
+	e.sb.failLoads(boom)
+	if err := readFirst(t, tr); !errors.Is(err, boom) {
+		t.Fatalf("after the cooldown: err = %v, want the load error from one more attempt", err)
+	}
+	e.sb.failLoads(nil)
+	err := readFirst(t, tr)
+	if !errors.Is(err, boom) || !strings.Contains(err.Error(), "4 times in a row") {
+		t.Fatalf("after a failed retry: err = %v, want the cooldown restarted", err)
+	}
+	if n := len(e.sb.loads()); n != 1 {
+		t.Fatalf("loads = %d, want none during the restarted cooldown", n)
+	}
+
+	e.now = e.now.Add(time.Minute)
+	if err := readFirst(t, tr); err != nil {
+		t.Fatalf("recovery: %v", err)
+	}
+	e.sb.killGuest()
+	_ = readFirst(t, tr)
+	e.sb.failLoads(boom)
+	for i := range 3 {
+		if err := readFirst(t, tr); !errors.Is(err, boom) || strings.Contains(err.Error(), "times in a row") {
+			t.Fatalf("call %d after recovery: err = %v, want a load attempt, not the cooldown", i, err)
+		}
+	}
+}
+
+// The retry wraps outside the session, so the failed first attempt reaches the
+// failure note even though a later attempt recovers.
+func TestRetriedReadNotesTheFailedAttempt(t *testing.T) {
+	e := newEnv(t, "tracker.wasm")
+	e.spec.Record = "fixture"
+	tr := e.tracker(t)
+	e.err503.Store(1)
+	if err := readFirst(t, tr); err != nil {
+		t.Fatalf("read over one 503: %v, want the retry to succeed", err)
+	}
+	if log := connectorLog(t); strings.Count(log, `"op":"tracker.issue"`) != 1 {
+		t.Errorf("log = %q, want the failed first attempt noted once", log)
+	}
+}
+
+func TestTrackerAfterCloseFailsAndLoadsNothing(t *testing.T) {
+	e := newEnv(t, "tracker.wasm")
+	if err := e.rt.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.rt.Tracker(e.row, e.spec); !errors.Is(err, connectorruntime.ErrClosed) {
+		t.Fatalf("Tracker after Close = %v, want ErrClosed", err)
+	}
+	if n := len(e.sb.loads()); n != 0 {
+		t.Errorf("loads = %d, want none after Close", n)
+	}
+	if err := e.rt.Close(); err != nil {
+		t.Errorf("second Close = %v, want nil", err)
 	}
 }
