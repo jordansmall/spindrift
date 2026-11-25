@@ -17,6 +17,7 @@ let
   };
 
   rosterLib = import ../lib/roster.nix { inherit (pkgs) lib; };
+  connectorData = import ../lib/connector-data.nix;
 
   dogfoodShadow = import ./dogfood-shadow.nix;
   dogfoodPrimary = import ./dogfood-primary.nix;
@@ -31,9 +32,9 @@ let
     builtins.concatMap (
       dir:
       let
-        c = (import dir).lib.connector { core = import ../core; };
+        row = connectorData.driverRowOf pkgs.lib ((import dir).lib.connector { core = import ../core; });
       in
-      pkgs.lib.optional (c ? driverRow) (pkgs.lib.nameValuePair (baseNameOf dir) (c.driverRow pkgs.lib))
+      pkgs.lib.optional (row != null) (pkgs.lib.nameValuePair (baseNameOf dir) row)
     ) (import ./connector-dirs.nix)
   );
 

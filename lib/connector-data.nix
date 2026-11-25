@@ -11,7 +11,8 @@
 # and `driver` are the row's own fields. Deep checks (Route rules, scheme enum,
 # credential ownership) stay with core's row types and validators; this file
 # only refuses what those would let through silently, because the row type is
-# freeform: an unknown key or a wrongly typed field.
+# freeform: an unknown key, a wrongly typed field, backend fields without
+# `module`, or a backend row missing `routes` or `credential`.
 #
 # Builtins only, and it never forces `module` or `driver.module`, so a reader
 # that hands the Connector a stub core `{ }` can still read a row.
@@ -73,7 +74,7 @@ let
     if !builtins.isAttrs data then
       "Connector data must be an attribute set, got ${builtins.typeOf data}"
     else if !(data ? name) || !builtins.isString data.name || data.name == "" then
-      "Connector data needs a `name`: a non-empty string, the row's name in spindrift.connectors"
+      "Connector data needs a 'name': a non-empty string, the row's name in spindrift.connectors"
       + (if data ? name then " ('name' is ${builtins.typeOf data.name})" else "")
     else
       let
@@ -158,19 +159,44 @@ let
       spindrift.connectors.${d.name} = row d;
     };
 
-  # For readers that take no module: `{ <name> = <row>; }`, the shape of a
-  # flake module's `spindrift.connectors`, from a `lib.connector` entry's
-  # `data`, or null for an entry without one so the reader falls back to its
-  # module.
-  rowOf = entry: if entry ? data then { ${entry.data.name} = row (validate entry.data); } else null;
+  # The readers below take a `lib.connector` entry in either form: a data
+  # Connector's `data`, or the entry-level declarations (`flakeModule`,
+  # `fragments`, `driverRow`) of one not yet moved to data. No caller branches
+  # on the form. None forces a wasm `module`.
+
+  # `{ <name> = <row>; }`, the shape of a flake module's `spindrift.connectors`.
+  # `moduleArgs` is what the flake module is applied to when there is no data.
+  rowsOf =
+    moduleArgs: entry:
+    if entry ? data then
+      let
+        d = validate entry.data;
+      in
+      {
+        ${d.name} = row d;
+      }
+    else
+      (entry.flakeModule moduleArgs).spindrift.connectors or { };
+
+  fragmentsOf =
+    entry: if entry ? data then (validate entry.data).fragments or null else entry.fragments or null;
+
+  driverRowOf =
+    lib: entry:
+    if entry ? data then
+      (validate entry.data).driver or null
+    else if entry ? driverRow then
+      entry.driverRow lib
+    else
+      null;
 in
 {
   inherit
-    fields
     problem
     validate
-    row
     module
-    rowOf
+    rowsOf
+    fragmentsOf
+    driverRowOf
     ;
 }

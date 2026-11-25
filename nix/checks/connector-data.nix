@@ -226,8 +226,70 @@ let
       msg = connectorData.problem r.data;
     in
     msg != null && builtins.all (s: hasInfix s msg) r.says;
+  # A `lib.connector { core }` entry in each of its two forms: the data one,
+  # and the entry-level one a Connector not yet moved to data still returns.
+  # `module` and `driver.module` throw, so a helper that forced either fails.
+  trap = _: throw "a helper forced a wasm module";
+  dataEntry = {
+    data = good // {
+      module = trap;
+      driver = good.driver // {
+        module = trap;
+      };
+    };
+  };
+  entryForm = {
+    inherit (good) fragments;
+    driverRow = _lib: good.driver;
+    flakeModule =
+      { lib }:
+      {
+        spindrift.connectors = lib.mapAttrs (_: _: { inherit (good) knobs; }) { datafixture = null; };
+      };
+  };
+  bare = {
+    flakeModule = _: { };
+  };
 in
 {
+  connector-data-readers-both-forms =
+    assert assertMsg (
+      connectorData.fragmentsOf dataEntry == good.fragments
+    ) "fragmentsOf must read a data entry's fragments";
+    assert assertMsg (
+      connectorData.fragmentsOf entryForm == good.fragments
+    ) "fragmentsOf must read an entry-form Connector's fragments";
+    assert assertMsg (
+      connectorData.fragmentsOf bare == null
+    ) "fragmentsOf must be null for a Connector with no fragments";
+    assert assertMsg (
+      connectorData.fragmentsOf { data.name = "knobonly"; } == null
+    ) "fragmentsOf must be null for data with no fragments";
+    assert assertMsg (
+      (connectorData.driverRowOf pkgs.lib dataEntry).name == "datafixture"
+    ) "driverRowOf must read a data entry's driver";
+    assert assertMsg (
+      (connectorData.driverRowOf pkgs.lib entryForm).name == "datafixture"
+    ) "driverRowOf must read an entry-form Connector's driverRow";
+    assert assertMsg (
+      connectorData.driverRowOf pkgs.lib bare == null
+    ) "driverRowOf must be null for a Connector with no Driver row";
+    assert assertMsg (
+      connectorData.driverRowOf pkgs.lib { data.name = "knobonly"; } == null
+    ) "driverRowOf must be null for data with no driver";
+    assert assertMsg (
+      (connectorData.rowsOf { inherit (pkgs) lib; } entryForm).datafixture.knobs == good.knobs
+    ) "rowsOf must read an entry-form Connector's module row, given its module args";
+    assert assertMsg (
+      connectorData.rowsOf { inherit (pkgs) lib; } bare == { }
+    ) "rowsOf must be empty for a module that registers no row";
+    assert assertMsg (
+      (connectorData.rowsOf { } dataEntry).datafixture.fragments == good.fragments
+    ) "rowsOf must read a data entry's row, without module args";
+    assert assertMsg (builtins.seq (connectorData.driverRowOf pkgs.lib dataEntry).name true)
+      "no reader may force a data entry's wasm modules";
+    pkgs.runCommand "connector-data-readers-both-forms" { } "touch $out";
+
   connector-data-registers-row =
     assert assertMsg (row.knobs == good.knobs) "a data Connector's knobs must reach its row unchanged";
     assert assertMsg (
@@ -320,5 +382,12 @@ in
     assert assertMsg (hasInfix "attribute set" (
       connectorData.problem [ ]
     )) "data that is no set is refused";
+    assert assertMsg (hasInfix "'name'" (
+      connectorData.problem (removeAttrs good [ "name" ])
+    )) "data with no name is refused by name";
+    assert assertMsg (builtins.all (d: throws (connectorData.rowsOf { } { data = d; })) [
+      (removeAttrs good [ "name" ])
+      (good // { name = 3; })
+    ]) "rowsOf must throw the named problem on a bad name, not a raw Nix error";
     pkgs.runCommand "connector-data-refusals" { } "touch $out";
 }
