@@ -60,6 +60,15 @@ type HopStats struct {
 	Hop time.Duration
 }
 
+// Add is the sum of h and o, field by field.
+func (h HopStats) Add(o HopStats) HopStats {
+	return HopStats{
+		Calls:     h.Calls + o.Calls,
+		HostCalls: h.HostCalls + o.HostCalls,
+		Hop:       h.Hop + o.Hop,
+	}
+}
+
 // hopMeter accumulates HopStats; safe for concurrent use.
 type hopMeter struct {
 	calls, hostCalls, hop atomic.Int64
