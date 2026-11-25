@@ -3,7 +3,8 @@
 // sessions, closed together.
 //
 // A session is the one Connector a (row, Target) pair keeps alive, whichever
-// axis (tracker or Code Forge) asks for it. It owns, for every backend, the
+// axis (tracker, Code Forge or read-only forge view) or direct request for the
+// Connector asks for it. It owns, for every backend, the
 // load, the reload of a Connector that died, the cooldown after repeated load
 // failures, the failure note, and the one-time check of the capabilities the
 // backend requires.
@@ -187,6 +188,47 @@ func (r *Runtime) CodeForge(row backendrows.Row, spec ForgeSpec) (forge.CodeForg
 		return nil, err
 	}
 	return cf, nil
+}
+
+// ForgeReader is a read-only Code Forge view of row and spec.Target for a host
+// that reads through the Connector alone (connectorforge.NewReader). It shares
+// the (row, Target) session with Trackers and Code Forges, so it survives a
+// reload.
+func (r *Runtime) ForgeReader(row backendrows.Row, spec SessionSpec, webHost string) (forge.CodeForge, error) {
+	s, err := r.session(row, spec)
+	if err != nil {
+		return nil, err
+	}
+	c, err := s.live()
+	if err != nil {
+		_ = connectorrecord.Note(s.record, "load the Connector", err)
+		return nil, err
+	}
+	target := connectorforge.Target{API: spec.Target.API, Repo: spec.Target.Repo}
+	cf, err := connectorforge.NewReaderCalling(c, s.call, s, target, webHost)
+	if err != nil {
+		// As with the Code Forge's compose, building makes no guest call and
+		// this Connector may be serving the tracker too: do not drop it.
+		_ = connectorrecord.Note(s.record, "compose the Code Forge reader", err)
+		return nil, err
+	}
+	return cf, nil
+}
+
+// Connector is the (row, Target) session's live Connector, loaded or reloaded
+// as needed. Do not hold it across operations: a dead one is replaced on the
+// next request.
+func (r *Runtime) Connector(row backendrows.Row, spec SessionSpec) (*connectorhost.Connector, error) {
+	s, err := r.session(row, spec)
+	if err != nil {
+		return nil, err
+	}
+	c, err := s.live()
+	if err != nil {
+		_ = connectorrecord.Note(s.record, "load the Connector", err)
+		return nil, err
+	}
+	return c, nil
 }
 
 func (r *Runtime) session(row backendrows.Row, spec SessionSpec) (*session, error) {

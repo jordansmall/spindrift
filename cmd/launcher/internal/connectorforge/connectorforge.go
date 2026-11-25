@@ -119,13 +119,20 @@ type reads struct {
 // case-insensitively, with the port as written ("github.com:443" does not
 // match "github.com"). PR URLs sit at the host root.
 func NewReader(c *connectorhost.Connector, target Target, webHost string) (forge.CodeForge, error) {
+	return NewReaderCalling(c, c.Call, c, target, webHost)
+}
+
+// NewReaderCalling is NewReader with guest calls routed through call and core's
+// refusals audited through policy, for a caller that owns the Connector's
+// lifetime and reloads it behind both; c supplies the handshake.
+func NewReaderCalling(c *connectorhost.Connector, call connectorcall.Call, policy HostPolicy, target Target, webHost string) (forge.CodeForge, error) {
 	if !slices.Contains(c.Capabilities, capForge) {
 		return nil, fmt.Errorf("%w: capabilities %v lack \"forge\"", ErrNotForge, c.Capabilities)
 	}
 	if webHost == "" {
 		return nil, ErrNoWebHost
 	}
-	p := newPushOnly(c.Call, c.Capabilities, c, target, retry.Clock{})
+	p := newPushOnly(call, c.Capabilities, policy, target, retry.Clock{})
 	return composePR(p, c.Capabilities, webHost, ""), nil
 }
 
