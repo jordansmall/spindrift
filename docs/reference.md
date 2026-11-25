@@ -195,7 +195,8 @@ For the network Connector row the configured `CODE_FORGE` or `ISSUE_TRACKER`
 reads through, a `connector-routes[<name>]` row listing the credential knob it
 attaches, that knob's env var and the Route table, and a `connector-routes-widened[<name>]`
 row diffing the grant against the accepted baseline. Both are always Advisory
-and never affect the exit code; see
+and never affect the exit code (a refused third-party Connector fails
+evaluation before doctor runs); see
 [Reviewing a widened grant](#reviewing-a-widened-grant).
 
 **Output conventions**
@@ -2683,8 +2684,9 @@ credential variable, the authorization scheme, the base and the Git remote. A
 part the row declares absent is skipped, so a narrowing is silent, as it is for
 routes. Its remedy reads `review the widened grant, then run "spindrift
 connectors accept" in the Consumer flake's root and commit the
-spindrift-connector-routes.json diff (ADR 0073)`. It is a report only: it never
-makes `validateConfig` exit 2.
+spindrift-connector-routes.json diff (ADR 0073)`. For a first-party Connector
+it is a report only: it never makes `validateConfig` exit 2. A third-party
+backend Connector is refused at evaluation instead, below.
 
 The baseline is `spindrift-connector-routes.json` at the Consumer flake's root.
 It is read from the flake's own source, never from an option, so a Connector's
@@ -2722,18 +2724,30 @@ the routes and none of the other parts until the entry is regenerated. An
 unknown key, a non-string value, a `credentialScheme` other than `bearer` or
 `basic`, or both `gitRemote` and `gitRemoteEnv` fails evaluation.
 
-A missing file or key accepts nothing, so every route shows as added. That is
-how a Connector newly arriving, or an existing one whose table grew in a
-`flake.lock` bump, reaches the operator. A Connector with no entry has no
-accepted grant to diff, so doctor lists its added routes but names no other
-part until the first `connectors accept`. A live route is covered when an
-accepted one has the same method and host (compared literally) and its path is
-equal or an ancestor of the live path, and it sets `followRedirect` whenever
+For a first-party Connector, a missing file or key accepts nothing, so every
+route shows as added. That is how a first-party Connector newly arriving, or an
+existing one whose table grew in a `flake.lock` bump, reaches the operator. With
+no entry, doctor lists its added routes but names no other part until the first
+`connectors accept`. A live route is covered when an accepted one has the same
+method and host (compared literally) and its path is equal or an ancestor of
+the live path, and it sets `followRedirect` whenever
 the live one does. A new host, method or path, a new `followRedirect`,
 or a broader path (accepted `/repos/x`, live `/repos`), is a widening. A
 narrower or unchanged table shows nothing, and stale baseline entries are
 harmless. A non-empty `routes` must pass the Route-table rules above, so `/`
 or a non-canonical path fails evaluation; an empty list is fine.
+
+A third-party backend Connector, one whose wasm is not the batteries build,
+gets no such advisory: one that declares more than its entry, or has no entry,
+fails evaluation of the `spindrift` package (`apps.default`) and of
+`apps.daemon`, so nothing from it runs before the Operator accepts it. The
+error names the Connector and lists each added Route (`added Route GET host
+/path`, with `(followRedirect)` where set) and each added or changed credential
+variable, authorization scheme, base or Git remote (`added <part> <value>`, or
+`changed <part> <value> (accepted: <value>)`).
+The compare is stricter than doctor's: an entry in the legacy Routes-only
+shape records no grant, so every grant part the row declares counts as added.
+A first-party Connector is never refused; doctor reports its widening as above.
 
 To accept a widening, review the doctor lines, then run `spindrift connectors
 accept [<baseline-file>]` in the Consumer flake's root and commit the diff. The
@@ -2742,10 +2756,15 @@ verb writes every backend row of the Launcher input document into the file
 wiring the rows declare now, with the scheme always written. It replaces the
 whole file, so a hand-added entry or a stale one is dropped, and it prints
 `wrote <file>; review its diff, then commit it`. Doctor then reports `within
-the accepted baseline`. The file is on the default merge guard paths ([Merge
-guard](#merge-guard)), so an Agent cannot land an acceptance: a human merges
-it. A direct `mkHarness` caller passes `acceptedRoutes` and `acceptedGrant` on
-its `backendRows` entry; a row without them accepts nothing.
+the accepted baseline`, and a refused third-party Connector evaluates again.
+The CLI itself will not evaluate while a Connector is refused, so the same
+verb runs through an ungated flake app, `nix run .#connectors-accept --
+[<baseline-file>]`, over the same input document; the refusal's last line names
+it. The file is on the default merge guard paths ([Merge guard](#merge-guard)),
+so an Agent cannot land an acceptance: a human merges it. A direct `mkHarness`
+caller passes `acceptedRoutes` and `acceptedGrant` on its `backendRows` entry.
+A row without `acceptedRoutes` has no entry, which a third-party row is refused
+for; `acceptedRoutes = [ ]` is an entry accepting no routes.
 
 #### The github Connector
 
