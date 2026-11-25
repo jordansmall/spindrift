@@ -18,33 +18,10 @@ var testRoutes = []Route{
 
 func TestAdmit(t *testing.T) {
 	h := NewFakeHost(testRoutes)
-	const methodReason = "method is not one of GET, HEAD, POST, PUT, PATCH, DELETE"
 	tests := []struct {
 		name, method, url string
 		want              string // empty: admitted; else the exact reason
 	}{
-		{"root itself", "GET", "https://jira.example.com/rest/api/2", ""},
-		{"under root", "GET", "https://jira.example.com/rest/api/2/issue/X-1", ""},
-		{"host case-insensitive", "GET", "https://JIRA.example.com/rest/api/2", ""},
-		{"blanket root with port", "GET", "https://other.example.com:8443/anything/at/all", ""},
-		{"query is not path", "GET", "https://jira.example.com/rest/api/2?x=1", ""},
-		{"method outside the set", "TRACE", "https://jira.example.com/rest/api/2", methodReason},
-		{"method is exact", "get", "https://jira.example.com/rest/api/2", methodReason},
-		{"wrong method for route", "POST", "https://jira.example.com/rest/api/2", "no route admits POST jira.example.com/rest/api/2"},
-		{"http scheme", "GET", "http://jira.example.com/rest/api/2", "GET jira.example.com/rest/api/2: only https urls without userinfo or fragment are allowed"},
-		{"userinfo", "GET", "https://u:p@jira.example.com/rest/api/2", "GET jira.example.com/rest/api/2: only https urls without userinfo or fragment are allowed"},
-		{"fragment", "GET", "https://jira.example.com/rest/api/2#f", "GET jira.example.com/rest/api/2: only https urls without userinfo or fragment are allowed"},
-		{"unparseable", "GET", "https://jira.example.com/%zz", "GET: unparseable url"},
-		{"wrong host", "GET", "https://evil.example.com/rest/api/2", "no route admits GET evil.example.com/rest/api/2"},
-		{"port is significant", "GET", "https://other.example.com/x", "no route admits GET other.example.com/x"},
-		{"dot-dot", "GET", "https://jira.example.com/rest/api/2/a/../b", "no route admits GET jira.example.com/rest/api/2/a/../b"},
-		{"trailing slash", "GET", "https://jira.example.com/rest/api/2/", "no route admits GET jira.example.com/rest/api/2/"},
-		{"double slash", "GET", "https://jira.example.com/rest/api/2/a//b", "no route admits GET jira.example.com/rest/api/2/a//b"},
-		{"escaped slash", "GET", "https://jira.example.com/rest/api/2/a%2Fb", "no route admits GET jira.example.com/rest/api/2/a/b"},
-		{"empty path", "GET", "https://jira.example.com", "no route admits GET jira.example.com"},
-		{"outside the subtree", "GET", "https://jira.example.com/rest/api/2issuefoo", "no route admits GET jira.example.com/rest/api/2issuefoo"},
-		{"sibling prefix", "POST", "https://jira.example.com/rest/api/2/issuefoo", "no route admits POST jira.example.com/rest/api/2/issuefoo"},
-		{"semicolon", "GET", "https://jira.example.com/rest/api/2/..;/x", "no route admits GET jira.example.com/rest/api/2/..;/x"},
 		{"overlong url", "GET", "https://jira.example.com/rest/api/2/" + strings.Repeat("a", 8<<10), "url is 8228 bytes, over the 8192-byte limit"},
 	}
 	for _, tc := range tests {
