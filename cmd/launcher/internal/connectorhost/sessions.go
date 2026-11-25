@@ -116,13 +116,19 @@ func streamError(err error) error {
 	return err
 }
 
-// deliver hands body to session id, which a host may have ended or never been
-// given, in which case it is dropped. An error is the host's to answer for.
+// deliver hands body to session id. A session that has ended is dropped
+// silently, since a Connector may abort; one the Launcher never issued on this
+// stream is refused, so a frame can address nothing but this host's own
+// sessions. An error is the host's to answer for.
 func (s *Sessions) deliver(id uint32, body []byte) error {
 	s.mu.Lock()
 	ss := s.open[id]
 	if ss == nil {
+		issued := id <= s.last
 		s.mu.Unlock()
+		if !issued {
+			return fmt.Errorf("%w: chunk for session %d, never opened on this pipe", ErrMalformedOutput, id)
+		}
 		return nil
 	}
 	if len(body) == 0 {
