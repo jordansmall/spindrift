@@ -51,12 +51,21 @@ var _ engine = (*wasmEngine)(nil)
 // Host calls it is granted, nil for none.
 type engineFactory func(ctx context.Context, wasm []byte, host hostCalls) (engine, error)
 
+// interpreterCache is nil in production, where every load builds its own
+// engine. A test sets it so loads of one module share the interpreter's
+// compiled form; it outlives each load, so no engine owns or closes it.
+var interpreterCache wazero.CompilationCache
+
 // interpretedEngine is the engine under wazero's interpreter, not its
 // compiler: its per-line cost is well inside the heartbeat's line rate (ADR
 // 0073, amendment for #6798).
 func interpretedEngine() engineFactory {
 	return func(ctx context.Context, wasm []byte, host hostCalls) (engine, error) {
-		return newWasmEngine(ctx, wasm, wazero.NewRuntimeConfigInterpreter(), nil, host)
+		cfg := wazero.NewRuntimeConfigInterpreter()
+		if interpreterCache != nil {
+			cfg = cfg.WithCompilationCache(interpreterCache)
+		}
+		return newWasmEngine(ctx, wasm, cfg, nil, host)
 	}
 }
 

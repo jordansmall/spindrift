@@ -61,7 +61,7 @@ func TestDriverStrategyDescribe(t *testing.T) {
 // A handle nothing else holds is unreachable once its decoder reads h.id, so a
 // collection mid-call must not free the guest decoder under it.
 func TestDriverOneShotDecoderOutlivesItsCall(t *testing.T) {
-	c, err := connectorhost.LoadCompiled(context.Background(), fixture(t, "driver.wasm"), t.TempDir())
+	c, err := connectorhost.LoadCompiled(context.Background(), fixture(t, "driver.wasm"), sharedCache)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestDriverResolveExitReadsLog(t *testing.T) {
 // A log whose request would pass the cap still resolves: the host sends the
 // newest whole lines that fit, skipping any single line too large to fit alone.
 func TestDriverResolveExitSendsTheTailOfAnOversizedLog(t *testing.T) {
-	c, err := connectorhost.LoadCompiled(context.Background(), fixture(t, "driver.wasm"), t.TempDir())
+	c, err := connectorhost.LoadCompiled(context.Background(), fixture(t, "driver.wasm"), sharedCache)
 	if err != nil {
 		t.Fatal(err)
 	}

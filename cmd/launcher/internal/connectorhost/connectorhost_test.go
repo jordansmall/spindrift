@@ -19,6 +19,26 @@ import (
 
 const fixturesEnv = "SPINDRIFT_CONNECTOR_FIXTURES_DIR"
 
+// sharedCache is one compilation cache dir for the whole test binary. The
+// compiler spends over a second on each multi-megabyte fixture; wazero keys
+// the cache on the module's hash, so tests loading different modules share it
+// safely and each module is compiled once.
+var sharedCache string
+
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "connectorhost-cache-")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	sharedCache = dir
+	restore := connectorhost.SetInterpreterCache(true)
+	code := m.Run()
+	restore()
+	_ = os.RemoveAll(dir)
+	os.Exit(code)
+}
+
 func fixture(t *testing.T, name string) []byte {
 	t.Helper()
 	dir := os.Getenv(fixturesEnv)
@@ -45,6 +65,16 @@ func loadUsing(t *testing.T, ld loader, name string) (*connectorhost.Connector, 
 		t.Cleanup(func() { _ = c.Close(context.Background()) })
 	}
 	return c, err
+}
+
+// TestLoadWithoutInterpreterCache runs the production load, which TestMain's
+// shared cache otherwise hides. It stays serial: top-level serial tests finish
+// before the paused parallel ones resume, so none loads under the nil cache.
+func TestLoadWithoutInterpreterCache(t *testing.T) {
+	t.Cleanup(connectorhost.SetInterpreterCache(false))
+	if _, err := load(t, "current.wasm"); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestLoadCurrentYieldsHandshake(t *testing.T) {

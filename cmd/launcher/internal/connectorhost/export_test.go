@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tetratelabs/wazero"
+
 	"spindrift.dev/launcher/internal/driver/driverkit"
 )
 
@@ -296,5 +298,24 @@ func TapExchanges(c *Connector) func() []Exchange {
 		tap.mu.Lock()
 		defer tap.mu.Unlock()
 		return slices.Clone(tap.exchanges)
+	}
+}
+
+// SetInterpreterCache makes every later interpreter load in this process share
+// one compiled form per module when shared, and run uncached (the production
+// path) when not; it returns the restore. The interpreter recompiles a
+// multi-megabyte fixture on each load otherwise.
+func SetInterpreterCache(shared bool) (restore func()) {
+	old := interpreterCache
+	var mine wazero.CompilationCache
+	if shared {
+		mine = wazero.NewCompilationCache()
+	}
+	interpreterCache = mine
+	return func() {
+		if mine != nil {
+			_ = mine.Close(context.Background())
+		}
+		interpreterCache = old
 	}
 }

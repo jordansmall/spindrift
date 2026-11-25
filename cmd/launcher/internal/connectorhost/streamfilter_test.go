@@ -217,7 +217,7 @@ func TestDriverStreamFilterFlushWaitsForAnInFlightWrite(t *testing.T) {
 // The flood is compiled because under the interpreter writing it takes most of
 // the 5 s call budget, so a loaded machine fails it on time, not on output.
 func TestDriverStreamFilterFailsClosedOnOversizedOutput(t *testing.T) {
-	c, err := connectorhost.LoadCompiled(context.Background(), fixture(t, "driver.wasm"), "")
+	c, err := connectorhost.LoadCompiled(context.Background(), fixture(t, "driver.wasm"), sharedCache)
 	if err != nil {
 		t.Fatal(err)
 	}
