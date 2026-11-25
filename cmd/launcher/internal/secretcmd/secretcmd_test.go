@@ -2,7 +2,6 @@ package secretcmd
 
 import (
 	"errors"
-	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -79,44 +78,6 @@ func TestTemplate_SubstitutesKebabName(t *testing.T) {
 		if got := Template("rbw get spindrift-{name}", env); got != "rbw get spindrift-"+want {
 			t.Errorf("Template(%q) = %q, want name %q", env, got, want)
 		}
-	}
-}
-
-func TestCommand(t *testing.T) {
-	const env = "GH_TOKEN"
-	tests := []struct {
-		name, plain, cmd, tmpl, want string
-	}{
-		{name: "cmd form wins over plain and template", plain: "p", cmd: "c", tmpl: "t-{name}", want: "c"},
-		{name: "template when nothing is set", tmpl: "t-{name}", want: "t-gh-token"},
-		{name: "plain value beats the template", plain: "p", tmpl: "t-{name}", want: ""},
-		{name: "nothing set and no template", want: ""},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv(env, tc.plain)
-			t.Setenv(env+"_CMD", tc.cmd)
-			if got := Command(env, tc.tmpl); got != tc.want {
-				t.Errorf("Command = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestExport_SetsEnvOrFailsValueFree(t *testing.T) {
-	t.Setenv("GH_TOKEN", "")
-	if err := Export("GH_TOKEN", "cmd", func(string) (string, error) { return "tok\n", nil }); err != nil {
-		t.Fatal(err)
-	}
-	if got := os.Getenv("GH_TOKEN"); got != "tok" {
-		t.Errorf("GH_TOKEN = %q, want tok", got)
-	}
-	err := Export("GH_TOKEN", "cmd", func(string) (string, error) { return "leak", errors.New("boom leak") })
-	if err == nil || strings.Contains(err.Error(), "leak") {
-		t.Errorf("err = %v, want a value-free failure", err)
-	}
-	if got := os.Getenv("GH_TOKEN"); got != "tok" {
-		t.Errorf("a failed Export changed GH_TOKEN to %q", got)
 	}
 }
 

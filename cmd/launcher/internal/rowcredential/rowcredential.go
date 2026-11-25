@@ -1,7 +1,7 @@
 // Package rowcredential resolves a backend row's credential: the one
 // implementation the Launcher and the Daemon share (#7503). It is value-free
 // like secretcmd; each caller supplies its runner and decides what an unset
-// credential means and whether to pin the result.
+// credential means. It never writes the process environment.
 package rowcredential
 
 import (
@@ -25,9 +25,6 @@ type unsetError string
 func (e unsetError) Error() string        { return string(e) }
 func (e unsetError) Is(target error) bool { return target == ErrUnset }
 
-// Recipe is the command a credential was resolved from; a refresh re-runs it.
-type Recipe struct{ Env, Cmd string }
-
 // Resolution is one run's inputs to resolving row credentials.
 type Resolution struct {
 	// Forge and Tracker are this run's CODE_FORGE and ISSUE_TRACKER.
@@ -37,12 +34,11 @@ type Resolution struct {
 	Run      func(cmd string) (string, error)
 	// Applied reports an env whose `<env>_CMD`/--*-cmd/--*-file forms the caller
 	// already applied this run (the Launcher's parseFlags, for every core
-	// secret), so Apply takes its value as final and never runs its `_CMD`
+	// secret), so Sources takes its value as final and never runs its `_CMD`
 	// again. nil: none.
 	Applied func(env string) bool
 	// Lookup is the plain value for an env: the Launcher input's document, then
-	// the process environment. nil: os.Getenv. Sources never writes the process
-	// environment.
+	// the process environment. nil: os.Getenv.
 	Lookup func(env string) string
 }
 
@@ -64,60 +60,6 @@ func (r Resolution) refreshFile(env string) string {
 func Reads(row backendrows.Row, forge, tracker string) bool {
 	return (row.Name == forge && backendkit.ForgeReadsThroughConnector(row.Name)) ||
 		(row.Name == tracker && backendkit.TrackerReadsThroughConnector(row.Name))
-}
-
-// Apply fills the credential env of each row this run reads, from `_CMD`
-// (which wins over a plain value) or else the SECRET_CMD template, and returns
-// the recipes that sourced them. For an Applied env a set value is final and
-// only the template may run. A command failure returns at once. An unset
-// row does not: the rest still resolve and the error joins every unset row
-// under ErrUnset. It does not Pin; the caller decides.
-func (r Resolution) Apply(rows []backendrows.Row) ([]Recipe, error) {
-	var recipes []Recipe
-	var unset []error
-	seen := map[string]bool{}
-	for _, row := range rows {
-		env := row.CredentialEnv
-		if !Reads(row, r.Forge, r.Tracker) || seen[env] {
-			continue
-		}
-		seen[env] = true
-		var cmd string
-		if r.Applied != nil && r.Applied(env) {
-			// A set value is final; only an unset one may take the template.
-			if !secretcmd.IsSet(env) && r.Template != "" {
-				cmd = secretcmd.Template(r.Template, env)
-			}
-		} else {
-			cmd = secretcmd.Command(env, r.Template)
-		}
-		if cmd != "" {
-			if err := secretcmd.Export(env, cmd, r.Run); err != nil {
-				return recipes, fmt.Errorf("the %s Connector row's credential comes from %s_CMD or the SECRET_CMD template: %w", row.Name, env, err)
-			}
-			recipes = append(recipes, Recipe{env, cmd})
-			continue
-		}
-		if secretcmd.IsSet(env) {
-			continue
-		}
-		msg := fmt.Sprintf("the %s Connector row is read through its Connector this run but its credential is unset: set %s, %s_CMD, or SECRET_CMD", row.Name, env, env)
-		if row.CredentialKnob != "" {
-			msg += fmt.Sprintf(" (knob %s)", row.CredentialKnob)
-		}
-		unset = append(unset, unsetError(msg))
-	}
-	return recipes, errors.Join(unset...)
-}
-
-// Refresh re-runs each recipe through r.Run. A failed re-run keeps the previous
-// value and is passed to warn.
-func (r Resolution) Refresh(recipes []Recipe, warn func(env string, err error)) {
-	for _, rc := range recipes {
-		if err := secretcmd.Export(rc.Env, rc.Cmd, r.Run); err != nil {
-			warn(rc.Env, err)
-		}
-	}
 }
 
 func (r Resolution) lookup(env string) string {
@@ -146,16 +88,12 @@ func (s Sourced) Refresh(warn func(env string, err error)) {
 	}
 }
 
-// Sources chooses the credential source of every row without touching the
-// process environment. Of the rows this run reads, `_CMD` (which wins over a
-// plain value) or else the SECRET_CMD template becomes a command source, else
-// a plain value a static one. For an Applied env a set value is final and only
-// the template may run. A command failure returns at once. An unset row does
-// not: the rest still resolve and the error joins every unset row under
-// ErrUnset, the row keeping an empty source. A refresh file (see
-// refreshFileKnobs) wraps the chosen source, so a row with one is never unset.
-// Rows this run does not read keep a plain-value source. It does not Pin; the
-// caller decides.
+// Sources chooses the credential source of every row. Of the rows this run
+// reads, `_CMD` wins over a plain value, which wins over the SECRET_CMD
+// template; an Applied env's set value is final. A command failure returns at
+// once, but unset rows join under ErrUnset without stopping the rest. A
+// refresh file (see refreshFileKnobs) wraps the chosen source, so such a row is
+// never unset. Rows this run does not read keep a plain-value source.
 func (r Resolution) Sources(rows []backendrows.Row) (Sourced, error) {
 	out := Sourced{Rows: map[string]credsource.Row{}}
 	byEnv := map[string]credsource.Source{}
@@ -207,7 +145,7 @@ func (r Resolution) Sources(rows []backendrows.Row) (Sourced, error) {
 	// Read rows choose first so a shared env takes the command a read row runs.
 	for _, read := range []bool{true, false} {
 		for _, row := range rows {
-			if reads(row, r.Forge, r.Tracker) != read {
+			if Reads(row, r.Forge, r.Tracker) != read {
 				continue
 			}
 			if err := choose(row, read); err != nil {

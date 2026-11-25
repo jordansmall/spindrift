@@ -92,9 +92,9 @@ func warnConnectorWriteUndetermined(w io.Writer, c config, env, reason string) {
 // only after the claim. A credential whose capability cannot be read (a
 // fine-grained PAT, an installation token, an unsupported hook) warns rather
 // than refuses. An unset env passes silently: the Required backend-credential
-// row refuses it first. The env is final here: mainRun resolves the _CMD form
-// of each row this run reads before any verb runs, so an empty value is not
-// set.
+// row refuses it first. It reads the launch-time env, which parseFlags and
+// applySecretCmdFallback fill for every core secret before any verb runs; a
+// credential only a refresh file supplies is not seen, and so not introspected.
 func checkConnectorWriteGate(c config, w io.Writer) error {
 	row, ok := backendrows.Lookup(backend.GitHub.Name)
 	if !ok {

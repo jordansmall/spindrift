@@ -5,10 +5,10 @@ package credsource
 
 import (
 	"os"
+	"strings"
 	"sync"
 
 	"spindrift.dev/launcher/internal/secretcmd"
-	"spindrift.dev/launcher/internal/tokenrefresh"
 )
 
 // Source yields a secret on demand. "" means unset. Value is safe for
@@ -43,7 +43,11 @@ func File(path string, fallback Source) Source {
 
 func (f *file) Value() string {
 	f.mu.Lock()
-	f.last, _ = tokenrefresh.ReadIfChanged(f.path, f.last)
+	if data, err := os.ReadFile(f.path); err == nil {
+		if token := strings.TrimSpace(string(data)); token != "" {
+			f.last = token
+		}
+	}
 	last := f.last
 	f.mu.Unlock()
 	if last == "" && f.fallback != nil {

@@ -39,7 +39,6 @@ import (
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/stopsignal"
-	"spindrift.dev/launcher/internal/tokenrefresh"
 )
 
 // installStopSignal is a test seam, like cmd/launcher/main.go's: tests drive
@@ -842,8 +841,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 
 	// Before the lock and preflight: a freshly built successor smoke-tests
 	// itself this way beside the live daemon. Keep it ahead of the demand
-	// build and token watchers too; only the Connector credential watcher has
-	// a test seam.
+	// build too; only the Connector credential watcher has a test seam.
 	if args.CheckOnly {
 		fmt.Fprintln(stderr, "daemon: check-only: input and config are valid")
 		return 0
@@ -854,11 +852,6 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	}
 
 	demand, demandMissing := buildDemandSources(connectors, doc, args.Kinds)
-	// The github Demand probe runs gh in this process: an expired token fails
-	// every probe, and probe failures feed the breaker.
-	if f := childKnob(doc, "GH_TOKEN_REFRESH_FILE", os.Getenv("GH_TOKEN_REFRESH_FILE")); f != "" {
-		go tokenrefresh.WatchGHToken(f, tokenrefresh.Interval, nil)
-	}
 
 	wd, err := os.Getwd()
 	if err != nil {
@@ -923,8 +916,9 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		featureBranch: args.FeatureBranch,
 		selfAttr:      selfAttr,
 		nixSystem:     nixSystem,
-		// Captured once, not per-child; the token watcher's later os.Setenv calls
-		// miss it.
+		// A child inherits the Consumer's `<env>_CMD`, SECRET_CMD and
+		// GH_TOKEN_REFRESH_FILE and resolves its own credential sources; the
+		// daemon exports no row credential.
 		env:         append(os.Environ(), driverEnv...),
 		knobs:       stripped,
 		doctorFlags: doctorFlags,

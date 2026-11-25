@@ -462,7 +462,11 @@ func applySecretCmdFallback() error {
 		fetched := false
 		for _, env := range envs {
 			cmd := secretcmd.Template(globalSecretCmdTemplate, env)
-			if err := secretcmd.Export(env, cmd, secretCmdRunner); err != nil {
+			value, err := secretcmd.Resolve(env, cmd, secretCmdRunner)
+			if err == nil {
+				err = os.Setenv(env, value)
+			}
+			if err != nil {
 				errs = append(errs, err)
 				continue
 			}

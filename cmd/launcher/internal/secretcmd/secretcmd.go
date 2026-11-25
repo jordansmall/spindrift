@@ -43,43 +43,6 @@ func Template(tmpl, env string) string {
 	return strings.ReplaceAll(tmpl, "{name}", kebab)
 }
 
-// Command is the command that sources env, or "" when none does: `<env>_CMD`
-// first, then tmpl rendered for env when env is unset and tmpl is non-empty.
-// A plain env value is left alone.
-func Command(env, tmpl string) string {
-	if cmd := os.Getenv(env + "_CMD"); cmd != "" {
-		return cmd
-	}
-	if os.Getenv(env) != "" || tmpl == "" {
-		return ""
-	}
-	return Template(tmpl, env)
-}
-
-// IsSet reports whether env already holds a plain value.
-func IsSet(env string) bool {
-	return os.Getenv(env) != ""
-}
-
-// Pin records cmd as `<env>_CMD` unless one is already set, so a process that
-// inherits the environment re-resolves env instead of freezing its value.
-func Pin(env, cmd string) error {
-	if os.Getenv(env+"_CMD") != "" {
-		return nil
-	}
-	return os.Setenv(env+"_CMD", cmd)
-}
-
-// Export resolves cmd through run and sets env to the result; env is
-// untouched on failure.
-func Export(env, cmd string, run func(string) (string, error)) error {
-	value, err := Resolve(env, cmd, run)
-	if err != nil {
-		return err
-	}
-	return os.Setenv(env, value)
-}
-
 // Run runs cmd through the shell and returns its raw stdout, which the caller
 // treats as the secret and never prints. Interactively the command inherits
 // stdin and stderr so a vault tool's unlock prompt reaches the operator;
