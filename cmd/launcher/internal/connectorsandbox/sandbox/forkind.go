@@ -39,12 +39,13 @@ func (l *lazyStarter) Kill(name string) error {
 	return r.Kill(name)
 }
 
-// ForKind returns a Sandbox that starts through the runner family kind names,
-// built on the first load. It is the one way a host process outside a Box (the
-// Launcher, the daemon) arms the sandbox its Connector loads go through; the
-// caller supplies the config, artifacts and knob lookup its own runner would use.
-func ForKind(kind string, rc runner.Config, art inputdoc.Artifacts, l runner.KnobLookup, pwd string) *Sandbox {
-	return New(&lazyStarter{build: func() (runner.Runner, error) {
+// ForKind returns a Pool that starts its sandboxes through the runner family
+// kind names, built on the first load. It is the one way a host process outside
+// a Box (the Launcher, the daemon) arms the sandboxes its Connector loads go
+// through; the caller supplies the config, artifacts and knob lookup its own
+// runner would use.
+func ForKind(kind string, rc runner.Config, art inputdoc.Artifacts, l runner.KnobLookup, pwd string) *Pool {
+	return NewPool(&lazyStarter{build: func() (runner.Runner, error) {
 		s, err := runner.Lookup(kind)
 		if err != nil {
 			return nil, err
