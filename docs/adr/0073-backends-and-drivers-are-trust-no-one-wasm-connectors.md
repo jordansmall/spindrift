@@ -1433,8 +1433,9 @@ same day. This amendment records what was decided. Some of it has landed
 since: core's git credential answers only for the exact repository URL
 (#7466), tracker and forge calls share one retry path (#7457), an unopenable
 audit file fails the load (#7461, above), the Route baseline and the
-first-party Connectors' declarations are merge-guarded (#7465), and the backend
-row's shadow and primary switches and the read shadow are deleted (#7456).
+first-party Connectors' declarations are merge-guarded (#7465), the backend
+row's shadow and primary switches and the read shadow are deleted (#7456),
+and each credential-holding Connector has its own sandbox (#7550, below).
 Until the rest lands, the decisions and amendments above describe the code.
 
 **Git's remote is core's, declared and disclosed (decision 6).** Core's git
@@ -1542,7 +1543,11 @@ not load, first-party or not. It used to run with its audit discarded
 in a run and stamped each frame's session itself, so an escaped module could
 speak as a sibling and spend its credential. "Nothing to steal" was true of the
 host only. Each credential-holding Connector now has its own sandbox, Driver
-Connectors share one, and the pipe a frame arrives on identifies the speaker.
+Connectors share one, and the pipe a frame arrives on identifies the speaker
+(built by #7550, below). One gap stays: the Drivers share a pipe, so there the
+frame's session id still picks among the Driver sessions, and an escaped Driver
+could feed a sibling Driver's session forged results, though it holds no
+credential and gets no Host call.
 
 **Smaller decisions.** The backend row's shadow and primary switches and the
 read shadow are deleted (#7456); the Driver shadow goes with #6879. One module
@@ -1575,3 +1580,25 @@ request and push; `FORGEJO_TOKEN_CMD` and `SECRET_CMD` run once at launch.
 fails evaluation and launch. This supersedes the earlier wording that has
 `FORGEJO_TOKEN` stay git's credential beside a separate Connector token. See
 [MIGRATING.md](../../MIGRATING.md).
+
+## Amendment (issue #7550): a sandbox per credential, as built
+
+Decision 14 is built. The Launcher and the daemon install a sandbox pool: its
+own sandbox is the one every Driver Connector shares, and it starts a sandbox
+of its own for each credential-holding Connector. The Connector runtime asks
+it for one per backend row, on that row's first load, and reuses it across the
+row's Targets and reloads; closing the runtime stops every sandbox it started,
+including one whose row failed to load. Token introspection loads its row under
+the token it inspects in a short-lived runtime, so that load has its own
+sandbox as well. A network Connector never loads into the shared sandbox: the
+pool refuses it.
+
+The session id in a frame now only picks among the sessions of the pipe it
+arrives on. A frame for a session the Launcher never opened on that pipe fails
+the pipe as malformed output; one for a session that already ended is still
+dropped, since a Connector may abort. The escape battery forges an
+`http_request` frame under the id a sibling would hold on a shared pipe, on
+podman and bwrap, and asserts the Launcher refuses it with neither credential
+attached. Each extra sandbox costs one runner start, which the #7018 amendment
+measured at about 20 ms under bwrap and 200 ms under podman. See [the
+reference](../reference.md#connector-sandbox).
