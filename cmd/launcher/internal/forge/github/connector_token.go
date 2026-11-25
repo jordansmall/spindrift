@@ -1,14 +1,12 @@
 package github
 
 import (
-	"context"
-	"fmt"
 	"net/http"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/connectorforge"
-	"spindrift.dev/launcher/internal/connectorhost"
-	"spindrift.dev/launcher/internal/connectortracker"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -30,46 +28,29 @@ func introspectToken(token, repoSlug string) (forge.TokenIntrospection, error) {
 	return got, noteRouted("introspect the token", err)
 }
 
-// loadConnector loads row's Connector bound to repoSlug, and returns it with
-// the API base URL its first Route names.
-func loadConnector(row backendrows.Row, o backendrows.Options, repoSlug string) (*connectorhost.Connector, string, error) {
-	if len(row.Routes) == 0 {
-		return nil, "", fmt.Errorf("the %s backend row has no Route, so its API host is unknown", row.Name)
-	}
-	row.Routes = connectortracker.Routes(row.Routes, repoSlug)
-	conn, err := loadRowConnector(context.Background(), row, o)
-	if err != nil {
-		return nil, "", err
-	}
-	return conn, "https://" + row.Routes[0].Host, nil
-}
-
-// withConnector loads row's Connector, hands it and its API base URL to fn, and
-// closes it after.
-func withConnector(row backendrows.Row, o backendrows.Options, repoSlug string, fn func(conn *connectorhost.Connector, api string) error) error {
-	conn, api, err := loadConnector(row, o, repoSlug)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = conn.Close(context.Background()) }()
-	return fn(conn, api)
-}
-
 // introspect loads row's Connector with token as its credential,
-// never the host's own, and reads the grant through it. A Connector that does
-// not declare forge.tokenGrant cannot introspect: the error wraps
+// never the host's own, and reads the grant through it. The load is a
+// short-lived runtime of its own, as a session keeps the Options of the call
+// that opened it and the host's would carry the host's credential. A Connector
+// that does not declare forge.tokenGrant cannot introspect: the error wraps
 // backendkit.ErrUnsupported.
 func introspect(row backendrows.Row, o backendrows.Options, token, repoSlug string) (got forge.TokenIntrospection, err error) {
+	row, target, err := routeTarget(row, repoSlug)
+	if err != nil {
+		return got, err
+	}
 	o.Getenv = func(k string) string {
 		if k == row.CredentialEnv {
 			return token
 		}
 		return ""
 	}
-	err = withConnector(row, o, repoSlug, func(conn *connectorhost.Connector, api string) error {
-		var rerr error
-		got, rerr = connectorforge.IntrospectToken(conn, connectorforge.Target{API: api, Repo: repoSlug}, token)
-		return rerr
-	})
+	rt := connectorruntime.New([]backendrows.Row{row}, nil)
+	defer func() { _ = rt.Close() }()
+	// introspectToken notes a failure once, under its own verb.
+	conn, err := rt.Connector(row, connectorruntime.SessionSpec{Target: target, Record: backend.GitHub.Name, Options: o, NotesOperations: true})
+	if err == nil {
+		got, err = connectorforge.IntrospectToken(conn, connectorforge.Target{API: target.API, Repo: repoSlug}, token)
+	}
 	return got, unsupportedWithout(err, "introspect the token", connectorforge.ErrNoTokenGrant)
 }

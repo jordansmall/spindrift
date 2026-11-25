@@ -1,16 +1,13 @@
 package github
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"slices"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
-	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectortracker"
@@ -34,40 +31,31 @@ func harnessWithRow(t *testing.T, useRow func(t *testing.T, host string)) (h *co
 	connectorClient = h.backend.Client()
 	t.Cleanup(func() { connectorClient = old })
 	t.Setenv(tokenCredentialEnv, connectorToken)
-	t.Cleanup(closeSharedConnectors)
 	calls = countGH(t)
-	return h, NewExecClient(connectorRepo, testLabels), calls
+	return h, newClient(t, connectorRepo, testLabels), calls
 }
 
 // withoutCapability makes the row's Connector load as one whose handshake lacks
 // capName.
 func withoutCapability(t *testing.T, capName string) {
 	t.Helper()
-	old := loadRowConnector
-	t.Cleanup(func() { loadRowConnector = old })
-	loadRowConnector = func(ctx context.Context, row backendrows.Row, o backendrows.Options) (*connectorhost.Connector, error) {
-		conn, err := old(ctx, row, o)
+	hookLoads(t, func(load func() (*connectorhost.Connector, error)) (*connectorhost.Connector, error) {
+		conn, err := load()
 		if conn != nil {
 			conn.Capabilities = slices.DeleteFunc(slices.Clone(conn.Capabilities), func(c string) bool { return c == capName })
 		}
 		return conn, err
-	}
+	})
 }
 
-// countLoads counts the row Connector loads. A non-nil failWith makes each load
-// fail with it instead of reaching the real loader.
-func countLoads(t *testing.T, failWith error) *int {
+// countLoads counts the row Connector loads.
+func countLoads(t *testing.T) *int {
 	t.Helper()
 	loads := new(int)
-	old := loadRowConnector
-	t.Cleanup(func() { loadRowConnector = old })
-	loadRowConnector = func(ctx context.Context, row backendrows.Row, o backendrows.Options) (*connectorhost.Connector, error) {
+	hookLoads(t, func(load func() (*connectorhost.Connector, error)) (*connectorhost.Connector, error) {
 		*loads++
-		if failWith != nil {
-			return nil, failWith
-		}
-		return old(ctx, row, o)
-	}
+		return load()
+	})
 	return loads
 }
 
@@ -163,80 +151,6 @@ func TestExecClient_ConfiguredRowWithoutTheCapabilityIsUnsupported(t *testing.T)
 				t.Errorf("the read ran gh %d times", n)
 			}
 		})
-	}
-}
-
-// Every routed read, from every client, shares one loaded Connector per
-// repository, and a failed load is retried rather than remembered.
-func TestExecClient_ConfiguredRowLoadsTheConnectorOnce(t *testing.T) {
-	_, _, _ = routedHarness(t)
-	var loads, failFirst atomic.Int32
-	failFirst.Store(1)
-	old := loadRowConnector
-	t.Cleanup(func() { loadRowConnector = old })
-	loadRowConnector = func(ctx context.Context, row backendrows.Row, o backendrows.Options) (*connectorhost.Connector, error) {
-		loads.Add(1)
-		if failFirst.Add(-1) >= 0 {
-			return nil, errors.New("load failed")
-		}
-		return old(ctx, row, o)
-	}
-
-	if _, err := NewExecClient(connectorRepo, testLabels).ListLabels(); err == nil || errors.Is(err, backendkit.ErrUnsupported) {
-		t.Fatalf("ListLabels with a failing load = %v, want the load error", err)
-	}
-	for range 2 {
-		c := NewExecClient(connectorRepo, testLabels)
-		if _, err := c.ListLabels(); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := c.Probe(); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := c.BranchProtected("main"); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if n := loads.Load(); n != 2 {
-		t.Errorf("Connector loaded %d times, want 2 (the failed attempt, then one shared load)", n)
-	}
-}
-
-// A Connector that fails on every load is not recompiled on every read: after
-// maxLoadFailures failed loads the reads fail with the last load error without
-// calling the loader, until loadRetryAfter has passed.
-func TestExecClient_RepeatedLoadFailuresStopReloading(t *testing.T) {
-	_, _, _ = routedHarness(t)
-	clock := time.Now()
-	oldClock := loadClock
-	t.Cleanup(func() { loadClock = oldClock })
-	loadClock = func() time.Time { return clock }
-	boom := errors.New("load failed")
-	loads := countLoads(t, boom)
-
-	c := NewExecClient(connectorRepo, testLabels)
-	for i := range 10 {
-		if _, err := c.ListLabels(); !errors.Is(err, boom) {
-			t.Fatalf("read %d = %v, want the load error", i, err)
-		}
-	}
-
-	if *loads != maxLoadFailures {
-		t.Errorf("loader called %d times over 10 reads, want %d", *loads, maxLoadFailures)
-	}
-
-	clock = clock.Add(loadRetryAfter + time.Second)
-	if _, err := c.ListLabels(); !errors.Is(err, boom) {
-		t.Fatalf("read after the cooldown = %v, want the load error", err)
-	}
-	if *loads != maxLoadFailures+1 {
-		t.Errorf("loader called %d times after the cooldown, want one more attempt (%d)", *loads, maxLoadFailures+1)
-	}
-	if _, err := c.ListLabels(); !errors.Is(err, boom) {
-		t.Fatalf("read right after the retry = %v, want the load error", err)
-	}
-	if *loads != maxLoadFailures+1 {
-		t.Errorf("loader called %d times, want the retry to restart the cooldown (%d)", *loads, maxLoadFailures+1)
 	}
 }
 

@@ -70,7 +70,7 @@ func TestExecClientProbe_ConfiguredRowGoesThroughTheConnector(t *testing.T) {
 			t.Setenv(tokenCredentialEnv, "ghp_host")
 			calls := countGH(t)
 
-			slug, err := NewExecClient(connectorRepo, testLabels).Probe()
+			slug, err := newClient(t, connectorRepo, testLabels).Probe()
 
 			if n := calls(); n != 0 {
 				t.Errorf("Probe ran gh %d times", n)

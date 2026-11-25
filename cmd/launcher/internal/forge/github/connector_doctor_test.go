@@ -20,7 +20,7 @@ func TestDoctorRun_ConfiguredRowRunsNoGh(t *testing.T) {
 	h.SeedProtection("main", 200, 0)
 	h.SeedIssue(forge.Issue{Number: "7", Title: "stranded", Labels: []string{labels.Recoverable}})
 	h.SeedIssue(forge.Issue{Number: "8", Title: "other", Labels: []string{labels.Dispatchable}})
-	c := NewExecClient(connectorRepo, labels)
+	c := newClient(t, connectorRepo, labels)
 
 	var out bytes.Buffer
 	err := doctor.Run(c, c, doctor.Config{

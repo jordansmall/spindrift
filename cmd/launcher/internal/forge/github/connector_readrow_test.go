@@ -86,12 +86,12 @@ func TestCalls_WithoutARoutedRowFailNamedAndNeverRunGh(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Setenv("GH_HOST", "")
-			return NewExecClient(connectorRepo, testLabels), countGH(t)
+			return newClient(t, connectorRepo, testLabels), countGH(t)
 		}, "no github backend row"},
 		{"GHEHost", func(t *testing.T) (*execClient, func() int) {
 			useGithubRowUnderHost(t, "ghe.example.com")
 			t.Setenv("GH_HOST", "ghe.example.com")
-			return NewExecClient(connectorRepo, testLabels), countGH(t)
+			return newClient(t, connectorRepo, testLabels), countGH(t)
 		}, "GH_HOST"},
 	} {
 		for _, rd := range callsNeedingARow {

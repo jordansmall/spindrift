@@ -107,7 +107,9 @@ func TestConnector_CountReadyReloadDropsTheCachedETag(t *testing.T) {
 	countVia(t, c, false)
 	h.backend.listReads()
 
-	closeSharedConnectors()
+	// A fresh runtime loads a fresh guest, as a reload does; a real guest kill
+	// replaces this.
+	c = newClient(t, connectorRepo, testLabels)
 
 	if got := countVia(t, c, false); got != 2 {
 		t.Fatalf("count after reload = %d, want 2", got)

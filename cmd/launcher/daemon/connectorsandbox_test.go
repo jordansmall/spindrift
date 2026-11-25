@@ -72,7 +72,7 @@ func TestInstallConnectorSandbox_DemandTrackerLoadGoesToTheSandbox(t *testing.T)
 	t.Setenv(ghTokenEnv, "tok")
 
 	defer installConnectorSandbox(doc, t.TempDir())()
-	sources, missing := buildDemandSources(nil, doc, workKinds)
+	sources, missing := buildDemandSources(demandRuntime(t), doc, workKinds)
 	if len(missing) != 0 {
 		t.Fatalf("missing sources: %v", missing)
 	}

@@ -14,8 +14,11 @@ import (
 
 const routeLabel = "orders-api"
 
-func setTrackerRoute(c *execClient) {
-	c.route = forge.Route{{Kind: "label", Value: routeLabel}}
+// routedClient is a client whose tracker carries the Issue route, set at
+// construction because the tracker view is built once.
+func routedClient(t *testing.T) *execClient {
+	t.Helper()
+	return newClient(t, connectorRepo, testLabels, WithRoute(forge.Route{{Kind: "label", Value: routeLabel}}))
 }
 
 // An Issue route reaches the Connector on every tracker read and filing, which
@@ -34,7 +37,7 @@ func TestExecClient_IssueRouteNarrowsReadsAndFilesWithItsLabel(t *testing.T) {
 		t.Fatalf("unrouted count reads = %+v; want the dispatch label alone", got)
 	}
 
-	setTrackerRoute(c)
+	c = routedClient(t)
 	if n, err := c.CountReady(true); err != nil || n != 1 {
 		t.Errorf("routed CountReady = %d, %v; want 1", n, err)
 	}
@@ -70,7 +73,7 @@ func TestExecClient_IssueRouteNarrowsReadsAndFilesWithItsLabel(t *testing.T) {
 }
 
 func TestStrategy_RouteReachesTheTrackerNotTheCodeForge(t *testing.T) {
-	s := backendkit.Shared{RepoSlug: "o/r", Route: forge.Route{{Kind: "label", Value: routeLabel}}}
+	s := backendkit.Shared{Connectors: testRuntime(t), RepoSlug: "o/r", Route: forge.Route{{Kind: "label", Value: routeLabel}}}
 	tr, err := Strategy.NewIssueTracker(s, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -97,7 +100,7 @@ func TestExecClient_MatchesRouteReadsOneIssueAgainstTheRoute(t *testing.T) {
 	if ok, err := c.MatchesRoute("2"); err != nil || !ok {
 		t.Errorf("unrouted MatchesRoute(2) = %v, %v; want true", ok, err)
 	}
-	setTrackerRoute(c)
+	c = routedClient(t)
 	for num, want := range map[string]bool{"1": true, "2": false} {
 		if ok, err := c.MatchesRoute(num); err != nil || ok != want {
 			t.Errorf("routed MatchesRoute(%s) = %v, %v; want %v", num, ok, err, want)
@@ -114,7 +117,7 @@ func TestExecClient_MatchesRouteRefusedWithoutTheRouteCapability(t *testing.T) {
 	if ok, err := c.MatchesRoute("1"); err != nil || !ok {
 		t.Errorf("unrouted MatchesRoute = %v, %v; want true", ok, err)
 	}
-	setTrackerRoute(c)
+	c = routedClient(t)
 	if _, err := c.MatchesRoute("1"); !errors.Is(err, connectorhost.ErrProtocolUnsupported) {
 		t.Errorf("routed MatchesRoute err = %v; want ErrProtocolUnsupported", err)
 	}

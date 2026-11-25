@@ -435,7 +435,7 @@ func TestDemandProbe_CountsThroughTheConnectorWithACmdCredential(t *testing.T) {
 	if _, err := resolveConnectorCredentials(doc, workKinds, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
-	sources, missing := buildDemandSources(nil, doc, workKinds)
+	sources, missing := buildDemandSources(demandRuntime(t), doc, workKinds)
 	if len(missing) != 0 {
 		t.Fatalf("missing sources: %v", missing)
 	}

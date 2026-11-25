@@ -210,7 +210,7 @@ func TestGateRegistry_EnforceOrderEqualsReportOrder(t *testing.T) {
 	setKnob(t, "BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
 
 	var enforceBuf bytes.Buffer
-	if _, err := newGatedContext(nil, &enforceBuf, dispatchkind.Work, false); err != nil {
+	if _, err := newGatedContext(connectorRuntime(t), &enforceBuf, dispatchkind.Work, false); err != nil {
 		t.Fatalf("newGatedContext() unexpected error: %v", err)
 	}
 

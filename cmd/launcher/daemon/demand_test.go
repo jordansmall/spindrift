@@ -125,7 +125,7 @@ func TestBuildDemandSources_GitHubBuildsProbeSource(t *testing.T) {
 	t.Setenv("GH_TOKEN", "test-token")
 	for name, tracker := range map[string]string{"github": "github", "blank": ""} {
 		t.Run(name, func(t *testing.T) {
-			src, _ := buildDemandSources(nil, demandDocT(map[string]string{
+			src, _ := buildDemandSources(demandRuntime(t), demandDocT(map[string]string{
 				"ISSUE_TRACKER": tracker, "REPO_SLUG": "o/r", "LABEL": "ready-for-agent",
 			}), allDemandKinds)
 			if len(src) != 2 {
@@ -144,7 +144,7 @@ func TestBuildDemandSources_GitHubReadsAmbientRepoSlug(t *testing.T) {
 	clearKnobEnvT(t)
 	t.Setenv("GH_TOKEN", "test-token")
 	t.Setenv("REPO_SLUG", "o/r")
-	src, _ := buildDemandSources(nil, demandDocT(map[string]string{
+	src, _ := buildDemandSources(demandRuntime(t), demandDocT(map[string]string{
 		"ISSUE_TRACKER": "github", "LABEL": "ready-for-agent",
 	}), allDemandKinds)
 	if len(src) != 2 {
@@ -392,7 +392,7 @@ func TestBuildDemandSources_UnsetKnobsResolveToSchemaDefaults(t *testing.T) {
 		if got := issueTrackerName(doc); got != "github" {
 			t.Fatalf("issueTrackerName() = %q, want github", got)
 		}
-		src, _ := buildDemandSources(nil, doc, allDemandKinds)
+		src, _ := buildDemandSources(demandRuntime(t), doc, allDemandKinds)
 		if len(src) != 2 {
 			t.Fatalf("sources = %v, want work and research over the default github tracker", src)
 		}
@@ -554,7 +554,7 @@ func TestBuildDemandSources_EmptyDocumentValueFallsBackToAmbient(t *testing.T) {
 				t.Setenv(k, v)
 			}
 			tt.doc["LABEL"] = "ready-for-agent"
-			src, _ := buildDemandSources(nil, demandDocT(tt.doc), allDemandKinds)
+			src, _ := buildDemandSources(demandRuntime(t), demandDocT(tt.doc), allDemandKinds)
 			if len(src) != 2 {
 				t.Errorf("sources = %v, want work and research", src)
 			}
@@ -1141,4 +1141,13 @@ func TestProbeRoute_NoCategoryCapabilityIsSilent(t *testing.T) {
 	if strings.Contains(stderr.String(), "warning") || strings.Contains(stderr.String(), "could not check") {
 		t.Errorf("stderr = %q, want no warning", stderr.String())
 	}
+}
+
+// demandRuntime is a Connector runtime over the applied rows, closed with the
+// test.
+func demandRuntime(t *testing.T) *connectorruntime.Runtime {
+	t.Helper()
+	rt := connectorruntime.FromRegistries()
+	t.Cleanup(func() { _ = rt.Close() })
+	return rt
 }

@@ -44,7 +44,7 @@ func TestGithubRow_GHEHostAppliesNoRow(t *testing.T) {
 		t.Fatal("routedRow reports a routed row under GH_HOST=ghe.example.com")
 	}
 	calls := countGH(t)
-	c := NewExecClient(connectorRepo, forge.DispatchLabels{})
+	c := newClient(t, connectorRepo, forge.DispatchLabels{})
 	if _, err := c.ListOpenIssues(); !errors.Is(err, ErrNoRoute) {
 		t.Errorf("ListOpenIssues error = %v, want ErrNoRoute", err)
 	}

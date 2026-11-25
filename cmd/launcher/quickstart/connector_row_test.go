@@ -17,6 +17,7 @@ import (
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/driver/drivertest"
 	"spindrift.dev/launcher/internal/forge"
@@ -336,7 +337,7 @@ func TestQuickstartProbe_GoesThroughTheConnectorWithTheWizardsToken(t *testing.T
 			t.Setenv("GH_TOKEN", "ghp_wizardtoken")
 			before := ghCalls()
 
-			it, _, err := buildForge(githubStrategy(t), githubStrategy(t), quickstartShared(nil, probeSlug, "Ada", "ada@example.com"),
+			it, _, err := buildForge(githubStrategy(t), githubStrategy(t), quickstartShared(testRuntime(t), probeSlug, "Ada", "ada@example.com"),
 				knobLookup(nil, map[string]string{"GH_TOKEN": "ghp_wizardtoken"}))
 			if err != nil {
 				t.Fatal(err)
@@ -420,7 +421,7 @@ func TestQuickstartDoctorPass_RunsNoGh(t *testing.T) {
 	api := requireConnector(t)
 	t.Setenv("GH_TOKEN", "ghp_wizardtoken")
 	before := ghCalls()
-	it, cf, err := buildForge(githubStrategy(t), githubStrategy(t), quickstartShared(nil, probeSlug, "Ada", "ada@example.com"),
+	it, cf, err := buildForge(githubStrategy(t), githubStrategy(t), quickstartShared(testRuntime(t), probeSlug, "Ada", "ada@example.com"),
 		knobLookup(nil, map[string]string{"GH_TOKEN": "ghp_wizardtoken"}))
 	if err != nil {
 		t.Fatal(err)
@@ -448,4 +449,13 @@ func TestQuickstartDoctorPass_RunsNoGh(t *testing.T) {
 	if len(api.unexpectedQ) != 0 {
 		t.Errorf("the backend saw unscripted requests: %v", api.unexpectedQ)
 	}
+}
+
+// testRuntime is a Connector runtime over the applied rows, closed with the
+// test.
+func testRuntime(t *testing.T) *connectorruntime.Runtime {
+	t.Helper()
+	rt := connectorruntime.FromRegistries()
+	t.Cleanup(func() { _ = rt.Close() })
+	return rt
 }

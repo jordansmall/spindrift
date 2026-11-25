@@ -1,7 +1,6 @@
 package github
 
 import (
-	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -22,8 +21,8 @@ import (
 
 // routedGitClient is the production execClient for a routed row, with the
 // base branch and committer identity core's own git needs.
-func routedGitClient(opts ...ExecOption) *execClient {
-	return NewExecClient(connectorRepo, testLabels, append([]ExecOption{
+func routedGitClient(t *testing.T, opts ...ExecOption) *execClient {
+	return newClient(t, connectorRepo, testLabels, append([]ExecOption{
 		WithBaseBranch("main"), WithCommitIdentity("Test Bot", "bot@example.com"),
 	}, opts...)...)
 }
@@ -66,7 +65,7 @@ func requireNoCoreGit(t *testing.T, seen string) {
 func TestConnectorRow_BundleRelayRunsInCoreGit(t *testing.T) {
 	h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
 	seen := gitCredentialLog(t)
-	f := routedGitClient()
+	f := routedGitClient(t)
 	const ref = "agent/issue-9002"
 	outbox := t.TempDir()
 	want := forgetest.SeedRelayBundle(t, h.backend.repo.Bare, "main", outbox, ref)
@@ -88,7 +87,7 @@ func TestConnectorRow_BundleRelayRunsInCoreGit(t *testing.T) {
 // A Box that wrote no bundle is the benign case under a routed row too.
 func TestConnectorRow_RelayOfNoBundleIsBenign(t *testing.T) {
 	routedLogHarness(t, useGithubRowAt)
-	f := routedGitClient()
+	f := routedGitClient(t)
 
 	if err := f.RelayBundle(t.TempDir(), "agent/issue-1"); !errors.Is(err, forge.ErrBundleNotFound) {
 		t.Errorf("RelayBundle(empty outbox) = %v, want forge.ErrBundleNotFound", err)
@@ -108,7 +107,7 @@ func TestConnectorRow_PushBranchRunsInCoreGit(t *testing.T) {
 	forgetest.WriteFile(t, filepath.Join(src, "feature.txt"), "feature\n")
 	forgetest.Run(t, src, "add", "feature.txt")
 	forgetest.Run(t, src, "commit", "-m", "feature")
-	c := routedGitClient()
+	c := routedGitClient(t)
 
 	if err := c.PushBranch(src, "work", landingBranch, "main"); err != nil {
 		t.Fatalf("PushBranch: %v", err)
@@ -135,7 +134,7 @@ func TestConnectorRow_SeedMirrorRunsInCoreGit(t *testing.T) {
 	seen := gitCredentialLog(t)
 	dir := filepath.Join(t.TempDir(), "mirror")
 
-	if err := routedGitClient().SeedMirror(dir); err != nil {
+	if err := routedGitClient(t).SeedMirror(dir); err != nil {
 		t.Fatalf("SeedMirror: %v", err)
 	}
 
@@ -161,7 +160,7 @@ func TestConnectorRow_SeedMirrorIgnoresTheConnectorsRemote(t *testing.T) {
 	h.backend.mu.Unlock()
 	dir := filepath.Join(t.TempDir(), "mirror")
 
-	if err := routedGitClient().SeedMirror(dir); err != nil {
+	if err := routedGitClient(t).SeedMirror(dir); err != nil {
 		t.Fatalf("SeedMirror: %v", err)
 	}
 	if got, want := forgetest.RevParse(t, dir, "main"), forgetest.RevParse(t, h.backend.repo.Bare, "main"); got != want {
@@ -193,7 +192,7 @@ func TestConnectorRow_RebasePRHeadRunsInCoreGit(t *testing.T) {
 			h.backend.repo.AdvanceBase()
 			branch := forge.AgentBranchName(h.BranchPrefix(), "11")
 
-			if err := routedGitClient(WithSyncMethod(tc.method)).RebasePRHead(url, branch); err != nil {
+			if err := routedGitClient(t, WithSyncMethod(tc.method)).RebasePRHead(url, branch); err != nil {
 				t.Fatalf("RebasePRHead: %v", err)
 			}
 
@@ -217,7 +216,7 @@ func TestConnectorRow_RebasePRHeadConflictIsErrMergeConflict(t *testing.T) {
 			url := h.SeedLandablePR("12")
 			h.backend.repo.ConflictBase("12")
 
-			if err := routedGitClient(WithSyncMethod(method)).RebasePRHead(url, forge.AgentBranchName(h.BranchPrefix(), "12")); !errors.Is(err, forge.ErrMergeConflict) {
+			if err := routedGitClient(t, WithSyncMethod(method)).RebasePRHead(url, forge.AgentBranchName(h.BranchPrefix(), "12")); !errors.Is(err, forge.ErrMergeConflict) {
 				t.Errorf("RebasePRHead = %v, want forge.ErrMergeConflict", err)
 			}
 			if n := calls(); n != 0 {
@@ -239,22 +238,22 @@ var routedGitOps = []struct {
 	{"RelayBundle", false, func(h *connectorHarness, t *testing.T) error {
 		outbox := t.TempDir()
 		forgetest.SeedRelayBundle(t, h.backend.repo.Bare, "main", outbox, landingBranch)
-		return routedGitClient().RelayBundle(outbox, landingBranch)
+		return routedGitClient(t).RelayBundle(outbox, landingBranch)
 	}},
 	{"CommitSubjects", false, func(h *connectorHarness, t *testing.T) error {
 		outbox := t.TempDir()
 		forgetest.SeedRelayBundle(t, h.backend.repo.Bare, "main", outbox, landingBranch)
-		_, err := routedGitClient().CommitSubjects(outbox, "main", landingBranch)
+		_, err := routedGitClient(t).CommitSubjects(outbox, "main", landingBranch)
 		return err
 	}},
 	{"PushBranch", false, func(h *connectorHarness, t *testing.T) error {
-		return routedGitClient().PushBranch(t.TempDir(), "work", landingBranch, "main")
+		return routedGitClient(t).PushBranch(t.TempDir(), "work", landingBranch, "main")
 	}},
 	{"RebasePRHead", true, func(h *connectorHarness, t *testing.T) error {
-		return routedGitClient().RebasePRHead(h.SeedLandablePR("13"), forge.AgentBranchName(h.BranchPrefix(), "13"))
+		return routedGitClient(t).RebasePRHead(h.SeedLandablePR("13"), forge.AgentBranchName(h.BranchPrefix(), "13"))
 	}},
 	{"SeedMirror", false, func(h *connectorHarness, t *testing.T) error {
-		return routedGitClient().SeedMirror(filepath.Join(t.TempDir(), "mirror"))
+		return routedGitClient(t).SeedMirror(filepath.Join(t.TempDir(), "mirror"))
 	}},
 }
 
@@ -265,11 +264,7 @@ func TestConnectorRow_GitOpsFailByName(t *testing.T) {
 	for _, op := range routedGitOps {
 		t.Run(op.name+"/load", func(t *testing.T) {
 			h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
-			old := loadRowConnector
-			t.Cleanup(func() { loadRowConnector = old })
-			loadRowConnector = func(context.Context, backendrows.Row, backendrows.Options) (*connectorhost.Connector, error) {
-				return nil, boom
-			}
+			hookLoads(t, func(func() (*connectorhost.Connector, error)) (*connectorhost.Connector, error) { return nil, boom })
 
 			if err := op.run(h, t); !errors.Is(err, boom) {
 				t.Errorf("err = %v, want the load error", err)
@@ -310,7 +305,7 @@ func TestConnectorRow_GitOpsNameAnUnsetCredential(t *testing.T) {
 	_, _, calls, _ := routedLogHarness(t, useGithubRowAt)
 	t.Setenv(tokenCredentialEnv, "")
 
-	err := routedGitClient().SeedMirror(filepath.Join(t.TempDir(), "mirror"))
+	err := routedGitClient(t).SeedMirror(filepath.Join(t.TempDir(), "mirror"))
 
 	if err == nil || !strings.Contains(err.Error(), tokenCredentialEnv+" is not set") {
 		t.Errorf("SeedMirror = %v, want the unset credential named", err)
@@ -349,7 +344,8 @@ func TestPlainRow_HostMediationContract(t *testing.T) {
 		relayedSHA:       map[string]string{}, seeded: map[string]bool{}, prSeq: 1500,
 	}
 	s := backendkit.Shared{
-		RepoSlug: connectorRepo, Labels: testLabels, BaseBranch: "main", GitUserName: "Test Bot", GitUserEmail: "bot@example.com",
+		Connectors: testRuntime(t),
+		RepoSlug:   connectorRepo, Labels: testLabels, BaseBranch: "main", GitUserName: "Test Bot", GitUserEmail: "bot@example.com",
 	}
 	tr, err := Strategy.NewIssueTracker(s, nil)
 	if err != nil {
@@ -374,7 +370,7 @@ func TestConnectorRow_LedgerSiteIsConnectorCloneURLAndCoreCredential(t *testing.
 	h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
 	seen := gitCredentialLog(t)
 
-	site, err := Strategy.NewLedger(backendkit.Shared{RepoSlug: connectorRepo, Labels: testLabels}, nil)
+	site, err := Strategy.NewLedger(backendkit.Shared{RepoSlug: connectorRepo, Labels: testLabels, Connectors: testRuntime(t)}, nil)
 	if err != nil {
 		t.Fatalf("NewLedger: %v", err)
 	}
@@ -411,7 +407,7 @@ func TestConnectorRow_LedgerSiteNamesAnUnsetCredential(t *testing.T) {
 	routedLogHarness(t, useGithubRowAt)
 	t.Setenv(tokenCredentialEnv, "")
 
-	_, err := Strategy.NewLedger(backendkit.Shared{RepoSlug: connectorRepo, Labels: testLabels}, nil)
+	_, err := Strategy.NewLedger(backendkit.Shared{RepoSlug: connectorRepo, Labels: testLabels, Connectors: testRuntime(t)}, nil)
 
 	if err == nil || !strings.Contains(err.Error(), tokenCredentialEnv+" is not set") {
 		t.Errorf("NewLedger = %v, want the unset credential named", err)
@@ -427,7 +423,7 @@ func TestConnectorRow_RebasePRHeadMatchRebases(t *testing.T) {
 	h.backend.repo.AdvanceBase()
 	branch := forge.AgentBranchName(h.BranchPrefix(), "14")
 
-	if err := routedGitClient().RebasePRHead(url, branch); err != nil {
+	if err := routedGitClient(t).RebasePRHead(url, branch); err != nil {
 		t.Fatalf("RebasePRHead: %v", err)
 	}
 	if !h.backend.repo.Rebased(branch) {
@@ -445,7 +441,7 @@ func TestConnectorRow_RebasePRHeadMismatchIsRefusedBeforeGit(t *testing.T) {
 	seen := gitCredentialLog(t)
 	branch := forge.AgentBranchName(h.BranchPrefix(), "15")
 
-	err := routedGitClient().RebasePRHead(url, forge.AgentBranchName(h.BranchPrefix(), "999"))
+	err := routedGitClient(t).RebasePRHead(url, forge.AgentBranchName(h.BranchPrefix(), "999"))
 	if !errors.Is(err, connectorforge.ErrAnswer) {
 		t.Fatalf("RebasePRHead = %v, want connectorforge.ErrAnswer", err)
 	}
@@ -461,7 +457,7 @@ func TestConnectorRow_RebasePRHeadMismatchIsRefusedBeforeGit(t *testing.T) {
 // The production github Code Forge exposes the head-pinned rebase, so the
 // Lander finds it through forge.ResolveCodeForge.
 func TestExecClient_ResolvesPRHeadRebaser(t *testing.T) {
-	if forge.ResolveCodeForge(routedGitClient()).PRHeadRebaser == nil {
+	if forge.ResolveCodeForge(routedGitClient(t)).PRHeadRebaser == nil {
 		t.Error("ResolveCodeForge found no PRHeadRebaser on the github Code Forge")
 	}
 }
@@ -475,7 +471,7 @@ func TestConnectorRow_PlainRebaseIsRefused(t *testing.T) {
 	seen := gitCredentialLog(t)
 	branch := forge.AgentBranchName(h.BranchPrefix(), "16")
 
-	if err := routedGitClient().Rebase(url); !errors.Is(err, connectorforge.ErrAnswer) || !strings.Contains(err.Error(), "unpinned") {
+	if err := routedGitClient(t).Rebase(url); !errors.Is(err, connectorforge.ErrAnswer) || !strings.Contains(err.Error(), "unpinned") {
 		t.Fatalf("Rebase = %v, want connectorforge.ErrAnswer naming the unpinned refusal", err)
 	}
 	if _, serr := os.Stat(seen); serr == nil {
@@ -496,7 +492,7 @@ func TestConnectorRow_SeedMirrorAuthenticatesAtTheCloneURL(t *testing.T) {
 	git := h.backend.serveGitOverHTTPS(t)
 	dir := filepath.Join(t.TempDir(), "mirror")
 
-	if err := routedGitClient().SeedMirror(dir); err != nil {
+	if err := routedGitClient(t).SeedMirror(dir); err != nil {
 		t.Fatalf("SeedMirror: %v", err)
 	}
 
@@ -513,7 +509,7 @@ func TestConnectorRow_RebasePRHeadAuthenticatesAtTheCloneURL(t *testing.T) {
 	h.backend.repo.AdvanceBase()
 	branch := forge.AgentBranchName(h.BranchPrefix(), "21")
 
-	if err := routedGitClient().RebasePRHead(url, branch); err != nil {
+	if err := routedGitClient(t).RebasePRHead(url, branch); err != nil {
 		t.Fatalf("RebasePRHead: %v", err)
 	}
 
@@ -532,7 +528,7 @@ func requireLedgerPushReadsRotatedToken(t *testing.T, rotate func()) {
 	t.Helper()
 	const chore, rotated = "chore-rotated", "rotated-token"
 	seen := gitCredentialLog(t)
-	site, err := Strategy.NewLedger(backendkit.Shared{RepoSlug: connectorRepo, Labels: testLabels}, nil)
+	site, err := Strategy.NewLedger(backendkit.Shared{RepoSlug: connectorRepo, Labels: testLabels, Connectors: testRuntime(t)}, nil)
 	if err != nil {
 		t.Fatalf("NewLedger: %v", err)
 	}
