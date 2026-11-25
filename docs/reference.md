@@ -2417,7 +2417,17 @@ mean at runtime is issue #6751. The worked example is the fixture Connector in
   can know. The option is a declaration only: the host validates the table when
   it loads the Connector, and no binary loads one from this option yet. A
   backend row's table is `backend.routes` instead ([Backend rows on a
-  Connector](#backend-rows-on-a-connector)).
+  Connector](#backend-rows-on-a-connector)), and there a route may also carry
+  `requestHeaders` and `responseHeaders`, lists of header names that widen the
+  fixed header sets (see Network Connectors under [Connector
+  protocol](#connector-protocol)):
+
+  ```nix
+  { method = "GET"; host = "{base}"; path = "/api/v1/repos/{repo}";
+    requestHeaders = [ "X-Api-Version" ];   # a header the guest may send
+    responseHeaders = [ "X-Total-Count" ];  # a header the guest may read
+  }
+  ```
 - **`flake.nix`.** The Connector's own flake pins core with
   `inputs.core.url = "github:jordansmall/spindrift?dir=core"` and exposes the
   module as `flakeModules.default`. That pin is for building the Connector
@@ -2618,6 +2628,11 @@ Evaluation fails, naming the Connector and the route, on a Route table the host
 would refuse at load: a method outside `GET`, `HEAD`, `POST`, `PUT`, `PATCH`
 and `DELETE`, a bad `host[:port]`, or a path that is not canonical, is the
 blanket `/`, or holds `?` or `#` (the registry-route rules). It also fails on a
+declared header the host never admits (a request `Host`, `Cookie`,
+`Authorization`, `Forwarded`, `Via`, `X-Real-IP`, `X-Forwarded-*` or `Proxy-*`;
+a response `Set-Cookie` or `Set-Cookie2`), on a header name that is not a valid
+token, and on a name declared twice on one route, naming the header. It also
+fails on a
 row named `git` or
 `local`, which stay built in, on a third-party row that names a `credential`,
 on a derived credential variable (`<NAME>_TOKEN`) that is a core knob's env
@@ -2715,7 +2730,7 @@ an object recording the whole grant:
 | `baseEnv` | the variable the `{base}` route host resolves from; omit for a fixed-host row |
 | `gitRemote` | the fixed Git remote URL; omit when the row has none |
 | `gitRemoteEnv` | the variable the Git remote URL is read from; omit when the row has none |
-| `routes` | the Route table, one `{method, host, path}` per route, `followRedirect` where set |
+| `routes` | the Route table, one `{method, host, path}` per route, `followRedirect`, `requestHeaders` and `responseHeaders` where set |
 
 Every key is a string except `routes`. A part the entry omits is accepted as
 absent, so a row that declares it shows the part as widened. The older shape,
@@ -2731,8 +2746,11 @@ no entry, doctor lists its added routes but names no other part until the first
 `connectors accept`. A live route is covered when an accepted one has the same
 method and host (compared literally) and its path is equal or an ancestor of
 the live path, and it sets `followRedirect` whenever
-the live one does. A new host, method or path, a new `followRedirect`,
-or a broader path (accepted `/repos/x`, live `/repos`), is a widening. A
+the live one does, and it names every `requestHeaders` and `responseHeaders`
+entry the live one does (names compared case-insensitively). A new host,
+method or path, a new `followRedirect`, a newly declared request or response
+header, or a broader path (accepted `/repos/x`, live `/repos`), is a widening;
+doctor shows a route's declarations as `(sends <names>)` and `(reads <names>)`. A
 narrower or unchanged table shows nothing, and stale baseline entries are
 harmless. A non-empty `routes` must pass the Route-table rules above, so `/`
 or a non-canonical path fails evaluation; an empty list is fine.
@@ -4087,7 +4105,7 @@ description and a regen.
   registry-route rules (`registryvocab.CheckPathPattern`): canonical absolute
   paths, no blanket `/`, no `?` or `#`. The host sends only an `https` URL
   whose canonical, unescaped path a route admits. It attaches the credential
-  itself, never follows a redirect (unless the route sets `followRedirect`:
+  itself, admits only allowed request headers (see Header sets below), never follows a redirect (unless the route sets `followRedirect`:
   GET only, one hop, sent without the credential or the guest's headers,
   asking for the tail with a `Range` suffix and bounded to half of what
   remains of that request's 60-second timeout (or of the caller's deadline, if
@@ -4095,7 +4113,8 @@ description and a regen.
   `redirect_host`), and caps the body at 4 MiB (or `respCap`, if smaller;
   a `followRedirect` route keeps the last bytes of a larger body instead
   of failing). An unmatched or malformed request is refused unsent with
-  `ErrRouteRefused`, naming the Connector, method, host and path. A refusal,
+  `ErrRouteRefused`, naming the Connector, method, host and path. A request
+  header outside the allowed set is refused the same way, and audited. A refusal,
   an oversized body (`ErrResponseTooLarge`) and a pointer outside module
   memory fail closed: the call fails and the Connector is closed. A transport
   failure is not fatal: status `0` hands the guest a fixed reason, never
@@ -4108,7 +4127,10 @@ description and a regen.
   writes one JSON line to the audit log, with `connector`,
   `route`, `method`, `host`, `path`, `query`, `status`, `size` and `decision`
   (`sent`, `refused` or `failed`), plus `reason` on a refusal or failure, and,
-  when set, `rate_limit` (`primary` or `secondary`, on a 403 that carries a
+  when set, `headers` (the sorted canonical names of every header the host set
+  on the request, the guest's plus the credential's `Authorization`, never a
+  value; headers the transport adds, such as `User-Agent`, are not listed),
+  `rate_limit` (`primary` or `secondary`, on a 403 that carries a
   rate-limit signal or on any 429) and `retry_after` (the `Retry-After` header, on a 403 or
   429; [Backend Connectors](#backend-connectors) has the classification); a
   request the log cannot record fails closed (`ErrAudit`) and leaves no line.
@@ -4123,7 +4145,22 @@ description and a regen.
   present) and 0 for an absent one, `n` is the value's full length, and at
   most `outCap` bytes are written at `outPtr`, so a short buffer asks again.
   `Set-Cookie` is never served, and a refused, failed or oversized request
-  leaves every name absent. A credential taken from
+  leaves every name absent. A guest reads only the fixed response headers
+  and the matched route's `responseHeaders`; any other name is absent (the
+  host's own rate-limit classification still sees the whole response).
+  **Header sets.** A guest may send, on any route, `Accept`,
+  `Accept-Language`, `Cache-Control`, `Content-Type`, `If-Match`,
+  `If-Modified-Since`, `If-None-Match` and `If-Unmodified-Since`, and read
+  `Content-Type`, `Content-Length`, `Content-Range`, `Date`, `ETag`,
+  `Last-Modified`, `Link`, `Location` and `Retry-After`. A route declares an
+  extra with `requestHeaders` or `responseHeaders` (names, any case). Never
+  declarable, since the host owns the credential and the connection's
+  identity: request `Host`, `Cookie`, `Authorization`, `Forwarded`, `Via`,
+  `X-Real-IP`, `X-Forwarded-*` and `Proxy-*`; response `Set-Cookie` and
+  `Set-Cookie2`. Evaluation fails on one, and the host refuses such a table
+  at load. The github Connector declares `X-GitHub-Api-Version` on every
+  route and `X-OAuth-Scopes` (response) on `POST /graphql`; forgejo declares
+  `X-Total-Count` (response) on its repository route. A credential taken from
   `GH_TOKEN_REFRESH_FILE` reaches a request without touching `GH_TOKEN`: the
   Connector runtime's credential source for the github row re-reads the file
   on every request, so the first request after a rotation
@@ -4448,7 +4485,7 @@ description and a regen.
   generated `protocol_gen.go`, rendered from the description (see above), not
   hand-kept in step with core.
   For native `go test`, `connector.NewFakeHost(routes)` stands in for the
-  `http_request` Host call: it applies the Route admit rule to the table
+  `http_request` Host call: it applies the Route admit rule, request headers included, to the table
   `connector.LoadRoutes` reads from `SPINDRIFT_BACKEND_CONNECTOR_ROUTES` (which
   a Connector's checks export), refusing with core's reason, records each
   request sent, and reports the declared Routes no test used. It is a test

@@ -748,7 +748,9 @@ returns one named header of the last `http_request`'s response. A guest sees
 only status and body otherwise, so it cannot read a header such as
 `X-OAuth-Scopes`. The call is additive: a Connector that never imports it, and
 protocol 0.3, are unchanged. It exposes only response headers (`Set-Cookie`
-excluded), nothing of the request or the credential. The reference's
+excluded), nothing of the request or the credential. (Amended by issue #7565:
+a guest reads only a fixed set of response headers plus those the matched Route
+declares in `responseHeaders`; any other name reads as absent.) The reference's
 Network Connectors entry has the ABI.
 
 ## Amendment (issue #7019): first-party marks gate only the Box
