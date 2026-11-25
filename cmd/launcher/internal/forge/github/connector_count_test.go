@@ -1,10 +1,12 @@
 package github
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -102,17 +104,24 @@ func TestConnector_CountReadyRelabelledOldIssueIsCounted(t *testing.T) {
 // Core reloads a Connector after a failed call, which empties the guest's ETag
 // cache: the next poll is a full read, not a 304.
 func TestConnector_CountReadyReloadDropsTheCachedETag(t *testing.T) {
-	h, c, _ := routedHarness(t)
+	h, _, _ := routedHarness(t)
 	seedReadyRange(h, 1, 2)
+	rt, rec := recordingRuntime(t)
+	c := NewExecClient(connectorRepo, testLabels, WithConnectors(rt))
 	countVia(t, c, false)
 	h.backend.listReads()
 
-	// A fresh runtime loads a fresh guest, as a reload does; a real guest kill
-	// replaces this.
-	c = newClient(t, connectorRepo, testLabels)
+	rec.loads()[0].Abort()
+	if _, err := c.CountReady(false); !errors.Is(err, connectorhost.ErrTrap) {
+		t.Fatalf("count on the killed guest = %v, want ErrTrap", err)
+	}
+	h.backend.listReads()
 
 	if got := countVia(t, c, false); got != 2 {
 		t.Fatalf("count after reload = %d, want 2", got)
+	}
+	if n := len(rec.loads()); n != 2 {
+		t.Fatalf("%d loads after the reload, want two", n)
 	}
 	reads := h.backend.listReads()
 	if len(reads) != 1 || reads[0].ifNoneMatch != "" || reads[0].status != 200 {
