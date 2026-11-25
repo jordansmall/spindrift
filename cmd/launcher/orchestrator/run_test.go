@@ -239,7 +239,7 @@ exit 0
 	cfg := config{
 		handoffFile: handoffFile,
 		promptFile:  filepath.Join(dir, "prompt.txt"),
-		sessionFile: filepath.Join(dir, "session.txt"),
+		sessionFile: filepath.Join(dir, "session.json"),
 		logPath:     filepath.Join(dir, "stream.log"),
 	}
 
@@ -495,8 +495,8 @@ exit 0
 		if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		sessionFile := filepath.Join(dir, "session.txt")
-		if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+		sessionFile := filepath.Join(dir, "session.json")
+		if err := os.WriteFile(sessionFile, []byte(`["--session-id","fake-id"]`), 0o644); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1549,8 +1549,8 @@ func runReviewLoopFixture(t *testing.T, round1Decisions, round2Decisions string)
 	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+	sessionFile := filepath.Join(dir, "session.json")
+	if err := os.WriteFile(sessionFile, []byte(`["--session-id","fake-id"]`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	stateFile = filepath.Join(dir, "run-state.json")
@@ -1832,8 +1832,8 @@ func TestRunWithReviewPassSequenceOnBlockThenApprove(t *testing.T) {
 	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+	sessionFile := filepath.Join(dir, "session.json")
+	if err := os.WriteFile(sessionFile, []byte(`["--session-id","fake-id"]`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	stateFile := filepath.Join(dir, "run-state.json")
@@ -1962,8 +1962,8 @@ func TestRunWithReviewPassWritesPassManifest(t *testing.T) {
 	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+	sessionFile := filepath.Join(dir, "session.json")
+	if err := os.WriteFile(sessionFile, []byte(`["--session-id","fake-id"]`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	stateFile := filepath.Join(dir, "run-state.json")
@@ -2070,8 +2070,8 @@ func TestRunWithReviewPassLandDeltaNonZero(t *testing.T) {
 	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+	sessionFile := filepath.Join(dir, "session.json")
+	if err := os.WriteFile(sessionFile, []byte(`["--session-id","fake-id"]`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	stateFile := filepath.Join(dir, "run-state.json")
@@ -2144,8 +2144,8 @@ func TestRunWithReviewPassLandDeltaUnknownAnchor(t *testing.T) {
 	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+	sessionFile := filepath.Join(dir, "session.json")
+	if err := os.WriteFile(sessionFile, []byte(`["--session-id","fake-id"]`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	stateFile := filepath.Join(dir, "run-state.json")
@@ -2213,8 +2213,8 @@ func TestRunManifestPathEmptyWritesNoFile(t *testing.T) {
 	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+	sessionFile := filepath.Join(dir, "session.json")
+	if err := os.WriteFile(sessionFile, []byte(`["--session-id","fake-id"]`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	stateFile := filepath.Join(dir, "run-state.json")
@@ -2421,8 +2421,8 @@ func TestRunWithReviewPassNudgeResumeContinuesManifestNumbering(t *testing.T) {
 	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+	sessionFile := filepath.Join(dir, "session.json")
+	if err := os.WriteFile(sessionFile, []byte(`["--session-id","fake-id"]`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	stateFile := filepath.Join(dir, "run-state.json")
@@ -2676,8 +2676,8 @@ func TestRunWithReviewPassSeedsRoundTwoWithDeltaFocusFromRecordedAnchor(t *testi
 	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+	sessionFile := filepath.Join(dir, "session.json")
+	if err := os.WriteFile(sessionFile, []byte(`["--session-id","fake-id"]`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	stateFile := filepath.Join(dir, "run-state.json")
@@ -2757,8 +2757,8 @@ func TestRunWithReviewPassRoundOneNeverSeededEvenWithPriorState(t *testing.T) {
 	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+	sessionFile := filepath.Join(dir, "session.json")
+	if err := os.WriteFile(sessionFile, []byte(`["--session-id","fake-id"]`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	stateFile := filepath.Join(dir, "run-state.json")
@@ -2817,8 +2817,8 @@ func TestRunWithReviewPassSeedsRoundTwoWithDispositions(t *testing.T) {
 	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+	sessionFile := filepath.Join(dir, "session.json")
+	if err := os.WriteFile(sessionFile, []byte(`["--session-id","fake-id"]`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	stateFile := filepath.Join(dir, "run-state.json")
@@ -2910,8 +2910,8 @@ func TestRunWithReviewPassSeedsPassThreeWithDecisionsRecord(t *testing.T) {
 	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+	sessionFile := filepath.Join(dir, "session.json")
+	if err := os.WriteFile(sessionFile, []byte(`["--session-id","fake-id"]`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	stateFile := filepath.Join(dir, "run-state.json")
@@ -3022,8 +3022,8 @@ func TestRunWithReviewPassPersistsDecisionsPathWhenTheFinalPassWritesIt(t *testi
 	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+	sessionFile := filepath.Join(dir, "session.json")
+	if err := os.WriteFile(sessionFile, []byte(`["--session-id","fake-id"]`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	stateFile := filepath.Join(dir, "run-state.json")
@@ -3169,8 +3169,8 @@ func TestRunWithReviewPassFirstPassPromptUnseededWhenStateStartsEmpty(t *testing
 	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+	sessionFile := filepath.Join(dir, "session.json")
+	if err := os.WriteFile(sessionFile, []byte(`["--session-id","fake-id"]`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	stateFile := filepath.Join(dir, "run-state.json")
@@ -3223,8 +3223,8 @@ func TestRunWithReviewPassRemovesPriorRoundSeededReviewPromptButKeepsTheLast(t *
 	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+	sessionFile := filepath.Join(dir, "session.json")
+	if err := os.WriteFile(sessionFile, []byte(`["--session-id","fake-id"]`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	stateFile := filepath.Join(dir, "run-state.json")
@@ -3299,8 +3299,8 @@ func TestRunWithReviewPassAccumulatesDispositionsAcrossRoundsInDispositionsLog(t
 	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+	sessionFile := filepath.Join(dir, "session.json")
+	if err := os.WriteFile(sessionFile, []byte(`["--session-id","fake-id"]`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	stateFile := filepath.Join(dir, "run-state.json")
@@ -3387,8 +3387,8 @@ func TestRunWithReviewPassEmitsRunStateErrorWhenDispositionsLogAppendFails(t *te
 	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+	sessionFile := filepath.Join(dir, "session.json")
+	if err := os.WriteFile(sessionFile, []byte(`["--session-id","fake-id"]`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	stateFile := filepath.Join(dir, "run-state.json")
@@ -3443,8 +3443,8 @@ func TestRunWithReviewPassEmitsRunStateErrorWhenDispositionsTokenBudgetExceeded(
 	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+	sessionFile := filepath.Join(dir, "session.json")
+	if err := os.WriteFile(sessionFile, []byte(`["--session-id","fake-id"]`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	stateFile := filepath.Join(dir, "run-state.json")
@@ -3490,8 +3490,8 @@ func TestRunWithReviewPassEmitsRunStateErrorWhenDecisionsLogAppendFails(t *testi
 	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+	sessionFile := filepath.Join(dir, "session.json")
+	if err := os.WriteFile(sessionFile, []byte(`["--session-id","fake-id"]`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	stateFile := filepath.Join(dir, "run-state.json")
@@ -3546,8 +3546,8 @@ func TestRunWithReviewPassEmitsRunStateErrorWhenDecisionsTokenBudgetExceeded(t *
 	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+	sessionFile := filepath.Join(dir, "session.json")
+	if err := os.WriteFile(sessionFile, []byte(`["--session-id","fake-id"]`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	stateFile := filepath.Join(dir, "run-state.json")
@@ -3599,8 +3599,8 @@ func TestRunWithReviewPassAccumulatesFindingsAcrossRoundsInFindingsLog(t *testin
 	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+	sessionFile := filepath.Join(dir, "session.json")
+	if err := os.WriteFile(sessionFile, []byte(`["--session-id","fake-id"]`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	stateFile := filepath.Join(dir, "run-state.json")
@@ -3704,8 +3704,8 @@ func TestRunWithReviewPassEmitsRunStateErrorWhenFindingsLogAppendFails(t *testin
 	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+	sessionFile := filepath.Join(dir, "session.json")
+	if err := os.WriteFile(sessionFile, []byte(`["--session-id","fake-id"]`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	stateFile := filepath.Join(dir, "run-state.json")
@@ -3755,8 +3755,8 @@ func TestRunWithReviewPassSendsTopLevelRoleReviewerForReviewPassAndImplementorFo
 	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+	sessionFile := filepath.Join(dir, "session.json")
+	if err := os.WriteFile(sessionFile, []byte(`["--session-id","fake-id"]`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	stateFile := filepath.Join(dir, "run-state.json")
@@ -3828,8 +3828,8 @@ func TestRunWithReviewPassStopsWhenLandPassProducesNoOutcomeAfterApprove(t *test
 	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+	sessionFile := filepath.Join(dir, "session.json")
+	if err := os.WriteFile(sessionFile, []byte(`["--session-id","fake-id"]`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	stateFile := filepath.Join(dir, "run-state.json")
@@ -4722,13 +4722,13 @@ func TestRunLoopsOnBlockThenApproveWithFreshSessionPerPass(t *testing.T) {
 	stateFile := filepath.Join(dir, "run-state.json")
 	cfg := config{
 		promptFile:      promptFile,
-		sessionFile:     filepath.Join(dir, "session.txt"),
+		sessionFile:     filepath.Join(dir, "session.json"),
 		logPath:         filepath.Join(dir, "stream.log"),
 		stateFile:       stateFile,
 		maxReviewRounds: 3,
 		maxSlices:       5,
 	}
-	if err := os.WriteFile(cfg.sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+	if err := os.WriteFile(cfg.sessionFile, []byte(`["--session-id","fake-id"]`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

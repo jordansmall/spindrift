@@ -83,11 +83,11 @@ func TestRunWithReviewPassSequenceOpencodeBlockThenApprove(t *testing.T) {
 
 	promptFile := filepath.Join(dir, "prompt.txt")
 	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
-	sessionFile := filepath.Join(dir, "session.txt")
+	sessionFile := filepath.Join(dir, "session.json")
 	for path, content := range map[string]string{
 		promptFile:       "ORIGINAL PROMPT TEXT",
 		reviewPromptFile: "REVIEW PROMPT TEXT",
-		sessionFile:      "--session-id fake-id",
+		sessionFile:      `["--session-id","fake-id"]`,
 	} {
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 			t.Fatal(err)
