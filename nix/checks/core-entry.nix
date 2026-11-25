@@ -18,7 +18,6 @@ let
   inherit (pkgs.lib)
     assertMsg
     filterAttrs
-    hasInfix
     isDerivation
     ;
   names = import ../../lib/connector-names.nix;
@@ -51,8 +50,7 @@ let
   # builtins.tryEval cannot read a thrown message.
   rootConfigWith =
     modules: (fixtures.connectorConsumerVia ([ rootFlakeModule ] ++ modules)).debug.config.spindrift;
-  hasAll = msg: builtins.all (s: hasInfix s msg);
-  fails = v: !(builtins.tryEval (builtins.deepSeq v true)).success;
+  inherit (fixtures) fails hasAll;
   rootAndConnectorDataRefused =
     {
       name,

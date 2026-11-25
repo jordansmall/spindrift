@@ -10,6 +10,7 @@
 }:
 let
   inherit (pkgs.lib) assertMsg hasInfix;
+  inherit (fixtures) fails hasAll;
   core = import ../../core;
   connectorData = import ../../lib/connector-data.nix;
   names = import ../../lib/connector-names.nix;
@@ -55,7 +56,6 @@ let
   viaData = consumerWith [ (fixtures.registerData good) ];
   configOf = consumer: consumer.debug.config.spindrift;
   programOf = c: c.apps.${system}.connectors-accept.program;
-  throws = v: !(builtins.tryEval (builtins.deepSeq v v)).success;
   evaluates = c: (builtins.tryEval (builtins.deepSeq (programOf c) true)).success;
   row = (configOf viaData).connectors.datafixture;
 
@@ -201,7 +201,7 @@ let
     let
       msg = connectorData.problem r.data;
     in
-    msg != null && builtins.all (s: hasInfix s msg) r.says;
+    msg != null && hasAll msg r.says;
   # A `lib.connector { core }` entry. `module` is a lambda that throws when
   # applied, and `driver.module` throws when forced, so a helper that applied
   # the one or forced the other fails.
@@ -271,7 +271,7 @@ in
     ) "rowsOf must read a data entry's set-valued row, without forcing a driver";
     assert assertMsg (builtins.seq (connectorData.driverRowOf pkgs.lib dataEntry).name true)
       "no reader may apply a data entry's wasm module or force its driver.module";
-    assert assertMsg (builtins.all throws [
+    assert assertMsg (builtins.all fails [
       (connectorData.rowsOf pkgs.lib noData)
       (connectorData.fragmentsOf noData)
       (connectorData.driverRowOf pkgs.lib noData)
@@ -323,9 +323,9 @@ in
       ];
     in
     assert assertMsg (
-      !(throws (configOf (consumerWith [ (fixtures.registerData good) ])).connectors)
+      !(fails (configOf (consumerWith [ (fixtures.registerData good) ])).connectors)
     ) "control: one registration of a data Connector must evaluate";
-    assert assertMsg (throws
+    assert assertMsg (fails
       (configOf (consumerWith [
         (fixtures.registerData good)
         (fixtures.registerData good)
@@ -364,10 +364,10 @@ in
     assert assertMsg (builtins.all refusedWithMessage refusals)
       "every refusal must name the Connector, the offending key or field and its types";
     assert assertMsg (builtins.all (
-      r: throws (connectorData.validate r.data)
+      r: fails (connectorData.validate r.data)
     ) refusals) "validate must throw on every refused data set";
     assert assertMsg (builtins.all (
-      r: throws (configOf (consumerWith [ (fixtures.registerData r.data) ])).connectors
+      r: fails (configOf (consumerWith [ (fixtures.registerData r.data) ])).connectors
     ) refusals) "registering data in spindrift.connectorData must throw on every refused data set";
     assert assertMsg (
       !(evaluates (consumerWith [ (fixtures.registerData (good // { shadow = true; })) ]))
@@ -379,7 +379,7 @@ in
       connectorData.problem (removeAttrs good [ "name" ])
     )) "data with no name is refused by name";
     assert assertMsg (builtins.all (
-      d: throws (connectorData.rowsOf pkgs.lib { data = d; })
+      d: fails (connectorData.rowsOf pkgs.lib { data = d; })
     ) badNames) "rowsOf must throw on a bad name";
     assert assertMsg (
       map connectorData.problem badNames == [

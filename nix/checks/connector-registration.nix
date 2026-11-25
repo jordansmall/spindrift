@@ -12,7 +12,6 @@
 let
   inherit (pkgs.lib)
     assertMsg
-    hasInfix
     mkForce
     mkIf
     mkMerge
@@ -33,10 +32,9 @@ let
   definitionsOf =
     modules: (consumerWith modules).debug.options.spindrift.connectorData.definitionsWithLocations;
   batteries = rootFlakeModule;
-  fails = v: !(builtins.tryEval (builtins.deepSeq v true)).success;
+  inherit (fixtures) fails hasAll registerData;
   rowsFail = modules: fails (configOf (consumerWith modules)).connectors;
   inFile = file: mod: mod // { _file = file; };
-  registers = data: { spindrift.connectorData = [ data ]; };
 
   # What a hostile module would set on github's row to replace it.
   hostileRow = {
@@ -48,7 +46,6 @@ let
       boxEnv = false;
     };
   };
-  hasAll = msg: builtins.all (s: hasInfix s msg);
 in
 {
   # Hole 1: a whole-row mkForce discarded the lower-priority definitions
@@ -57,8 +54,8 @@ in
   connector-registration-refuses-row-override =
     let
       both = [
-        (registers githubData)
-        (registers forgejoData)
+        (registerData githubData)
+        (registerData forgejoData)
       ];
       keepsBoth =
         override:
@@ -68,14 +65,14 @@ in
           "github"
         ];
       override = row: [
-        (registers githubData)
+        (registerData githubData)
         (inFile "hostile.nix" { spindrift.connectors.github = mkForce row; })
       ];
       message = names.rowOutsideDataError "github" "hostile.nix" [ "knobs" ];
       dischargedSwitch = both ++ [ { spindrift.connectors.nosuch = mkIf false { primary = true; }; } ];
     in
     assert assertMsg (
-      !(rowsFail [ (registers githubData) ])
+      !(rowsFail [ (registerData githubData) ])
     ) "control: the github Connector alone must evaluate";
     assert assertMsg (rowsFail (
       override hostileRow
@@ -181,7 +178,7 @@ in
         _file = "hostile.nix";
         spindrift.connectorData = [ hostileGithub ];
       };
-      real = inFile "real.nix" (registers githubData);
+      real = inFile "real.nix" (registerData githubData);
       byHostileThenReal = [
         hostile
         real
@@ -234,10 +231,10 @@ in
   connector-registration-refuses-two-data-registrations =
     let
       twice = [
-        (inFile "a.nix" (registers githubData))
-        (inFile "b.nix" (registers githubData))
+        (inFile "a.nix" (registerData githubData))
+        (inFile "b.nix" (registerData githubData))
       ];
-      sameModule = inFile "a.nix" (registers githubData);
+      sameModule = inFile "a.nix" (registerData githubData);
       message = names.registrationError (definitionsOf twice);
       batteriesTwice = names.registrationError (definitionsOf [
         batteries
@@ -250,8 +247,8 @@ in
     in
     assert assertMsg (
       !(rowsFail [
-        (registers githubData)
-        (registers forgejoData)
+        (registerData githubData)
+        (registerData forgejoData)
       ])
     ) "control: two Connectors registered as data must evaluate";
     assert assertMsg (rowsFail twice) "two data registrations of one name must fail evaluation";
@@ -282,7 +279,7 @@ in
       "import it once"
     ]) "the batteries module imported twice must say so; got ${batteriesTwice}";
     assert assertMsg (
-      names.registrationError (definitionsOf [ (inFile "a.nix" (registers githubData)) ]) == null
+      names.registrationError (definitionsOf [ (inFile "a.nix" (registerData githubData)) ]) == null
     ) "a single registration must not be reported as a duplicate";
     pkgs.runCommand "connector-registration-refuses-two-data-registrations" { } "touch $out";
 
@@ -293,12 +290,14 @@ in
       foreign = key: githubData // { ${key} = { }; };
       message = connectorData.problem (foreign "hooks");
     in
-    assert assertMsg (!(rowsFail [ (registers githubData) ])) "control: well-formed data must evaluate";
+    assert assertMsg (
+      !(rowsFail [ (registerData githubData) ])
+    ) "control: well-formed data must evaluate";
     assert assertMsg (rowsFail [
-      (registers (foreign "hooks"))
+      (registerData (foreign "hooks"))
     ]) "data setting another spindrift option must fail evaluation";
     assert assertMsg (rowsFail [
-      (registers (foreign "spindrift"))
+      (registerData (foreign "spindrift"))
     ]) "data nesting a `spindrift` set must fail evaluation";
     assert assertMsg (hasAll message [
       "Connector 'github'"
@@ -313,14 +312,14 @@ in
       message = names.dataOverrideError [ "github" ];
     in
     assert assertMsg (rowsFail [
-      (registers forgejoData)
+      (registerData forgejoData)
       { spindrift.connectorData = mkForce [ githubData ]; }
     ]) "mkForce on spindrift.connectorData must fail evaluation";
     assert assertMsg (rowsFail [
       { spindrift.connectorData = mkOverride 90 [ githubData ]; }
     ]) "mkOverride below the default priority on spindrift.connectorData must fail evaluation";
     assert assertMsg (rowsFail [
-      (registers forgejoData)
+      (registerData forgejoData)
       { spindrift.connectorData = mkForce [ ]; }
     ]) "mkForce of an empty list must fail evaluation";
     assert assertMsg (hasAll message [
