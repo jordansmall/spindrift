@@ -69,14 +69,13 @@ var (
 
 // fixedRequestHeaders is what a guest may send on any route: content
 // negotiation and caching. A route declares anything else in RequestHeaders.
-// lib/connector-routes.nix mirrors it.
 var fixedRequestHeaders = []string{
 	"Accept", "Accept-Language", "Cache-Control", "Content-Type",
 	"If-Match", "If-Modified-Since", "If-None-Match", "If-Unmodified-Since",
 }
 
 // fixedResponseHeaders is what a guest may read on any route; a route declares
-// anything else in ResponseHeaders. lib/connector-routes.nix mirrors it.
+// anything else in ResponseHeaders.
 var fixedResponseHeaders = []string{
 	"Content-Type", "Content-Length", "Content-Range", "Date", "ETag",
 	"Last-Modified", "Link", "Location", "Retry-After",
@@ -84,7 +83,7 @@ var fixedResponseHeaders = []string{
 
 // neverRequestHeader reports a request header no route may declare: the host
 // owns the credential and the connection's identity, so a guest never sets
-// them. name is canonical.
+// them. name is canonical. lib/connector-routes.nix mirrors it.
 func neverRequestHeader(name string) bool {
 	switch name {
 	case "Authorization", "Cookie", "Host", "Forwarded", "Via", "X-Real-Ip":
@@ -95,6 +94,7 @@ func neverRequestHeader(name string) bool {
 
 // neverResponseHeader reports a response header no route may declare: a
 // cookie is a credential the host keeps. name is canonical.
+// lib/connector-routes.nix mirrors it.
 func neverResponseHeader(name string) bool {
 	return name == "Set-Cookie" || name == "Set-Cookie2"
 }

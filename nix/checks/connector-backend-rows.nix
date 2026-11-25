@@ -203,6 +203,64 @@ let
       route = removeAttrs goodRoute [ "path" ];
       why = "exactly";
     }
+    {
+      route = goodRoute // {
+        requestHeaders = [ "Cookie" ];
+      };
+      why = ''requestHeaders: "Cookie" can never be declared'';
+    }
+    {
+      route = goodRoute // {
+        requestHeaders = [ "X-Forwarded-For" ];
+      };
+      why = ''requestHeaders: "X-Forwarded-For" can never be declared'';
+    }
+    {
+      route = goodRoute // {
+        requestHeaders = [ "proxy-authorization" ];
+      };
+      why = ''requestHeaders: "proxy-authorization" can never be declared'';
+    }
+    {
+      route = goodRoute // {
+        requestHeaders = [ "X-Trace" ];
+        responseHeaders = [ "Set-Cookie" ];
+      };
+      why = ''responseHeaders: "Set-Cookie" can never be declared'';
+    }
+    {
+      route = goodRoute // {
+        responseHeaders = [ "set-cookie2" ];
+      };
+      why = ''responseHeaders: "set-cookie2" can never be declared'';
+    }
+    {
+      route = goodRoute // {
+        requestHeaders = [ "X Bad" ];
+      };
+      why = ''requestHeaders: "X Bad" is not a valid header name'';
+    }
+    {
+      route = goodRoute // {
+        requestHeaders = [
+          "X-Trace"
+          "x-TRACE"
+        ];
+      };
+      why = ''requestHeaders: "x-TRACE" is declared twice'';
+    }
+    {
+      route = goodRoute // {
+        requestHeaders = "X-Trace";
+      };
+      why = "exactly";
+    }
+    {
+      route = goodRoute // {
+        responseHeaders = [ 1 ];
+      };
+      why = "exactly";
+    }
   ];
   goodRoutes = [
     goodRoute
@@ -220,6 +278,27 @@ let
     (goodRoute // { host = "{base}"; })
     (goodRoute // { followRedirect = true; })
     (goodRoute // { followRedirect = false; })
+    (goodRoute // { requestHeaders = [ "X-Trace" ]; })
+    (
+      goodRoute
+      // {
+        requestHeaders = [
+          "X-Trace"
+          "If-Match"
+        ];
+        responseHeaders = [
+          "X-RateLimit-Remaining"
+          "Link"
+        ];
+      }
+    )
+    (
+      goodRoute
+      // {
+        requestHeaders = [ ];
+        responseHeaders = [ ];
+      }
+    )
   ];
   problemsOf = r: routes.problems "fixture" [ r ];
   has = sub: s: builtins.match ".*${pkgs.lib.escapeRegex sub}.*" s != null;
@@ -260,6 +339,15 @@ in
     assert assertMsg (
       !(evaluates (withRoute (goodRoute // { path = "/a/"; })))
     ) "a non-canonical route must fail evaluation";
+    assert assertMsg (evaluates (
+      withRoute (goodRoute // { requestHeaders = [ "X-Trace" ]; })
+    )) "control: a route declaring an ordinary request header must evaluate";
+    assert assertMsg (
+      !(evaluates (withRoute (goodRoute // { requestHeaders = [ "Cookie" ]; })))
+    ) "a route declaring a never-declarable request header must fail evaluation";
+    assert assertMsg (
+      !(evaluates (withRoute (goodRoute // { responseHeaders = [ "Set-Cookie" ]; })))
+    ) "a route declaring a never-declarable response header must fail evaluation";
     assert assertMsg (
       !(evaluates (withRows {
         fixture = row // {
