@@ -13,6 +13,8 @@ import (
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorruntime"
+	"spindrift.dev/launcher/internal/credsource"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/gitexec/gitexectest"
@@ -400,7 +402,23 @@ func TestConnectorRow_LedgerSiteIsConnectorCloneURLAndCoreCredential(t *testing.
 // Ledger push presents the row env's token as it stands then.
 func TestConnectorRow_LedgerPushReadsTheRowTokenAtEachPush(t *testing.T) {
 	routedLogHarness(t, useGithubRowAt)
-	requireLedgerPushReadsRotatedToken(t, func() { t.Setenv(tokenCredentialEnv, "rotated-token") })
+	requireLedgerPushReadsRotatedToken(t, testRuntime(t), func() { t.Setenv(tokenCredentialEnv, "rotated-token") })
+}
+
+// Production reads the row's token from a refresh file the minter rewrites, not
+// from the environment: the same per-push read must follow a rewritten file.
+func TestConnectorRow_LedgerPushReadsTheRefreshFileAtEachPush(t *testing.T) {
+	routedLogHarness(t, useGithubRowAt)
+	path := filepath.Join(t.TempDir(), "gh-token")
+	write := func(token string) {
+		if err := os.WriteFile(path, []byte(token+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(connectorToken)
+	rt := connectorruntime.FromRegistries(map[string]credsource.Row{"github": {Secret: credsource.File(path, nil)}})
+	t.Cleanup(func() { _ = rt.Close() })
+	requireLedgerPushReadsRotatedToken(t, rt, func() { write("rotated-token") })
 }
 
 func TestConnectorRow_LedgerSiteNamesAnUnsetCredential(t *testing.T) {
@@ -520,15 +538,15 @@ func TestConnectorRow_RebasePRHeadAuthenticatesAtTheCloneURL(t *testing.T) {
 }
 
 // requireLedgerPushReadsRotatedToken pushes a Ledger entry through a routed
-// row's Ledger site, calls rotate to move the row's credential to
+// row's Ledger site over rt, calls rotate to move the row's credential to
 // "rotated-token", and pushes again: git must present the original token on
 // the first push and the rotated one on the second, though the site was built
 // once before either.
-func requireLedgerPushReadsRotatedToken(t *testing.T, rotate func()) {
+func requireLedgerPushReadsRotatedToken(t *testing.T, rt *connectorruntime.Runtime, rotate func()) {
 	t.Helper()
 	const chore, rotated = "chore-rotated", "rotated-token"
 	seen := gitCredentialLog(t)
-	site, err := Strategy.NewLedger(backendkit.Shared{RepoSlug: connectorRepo, Labels: testLabels, Connectors: testRuntime(t)}, nil)
+	site, err := Strategy.NewLedger(backendkit.Shared{RepoSlug: connectorRepo, Labels: testLabels, Connectors: rt}, nil)
 	if err != nil {
 		t.Fatalf("NewLedger: %v", err)
 	}

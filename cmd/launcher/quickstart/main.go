@@ -9,7 +9,9 @@ import (
 
 	"github.com/charmbracelet/x/term"
 
+	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/connectorruntime"
+	"spindrift.dev/launcher/internal/credsource"
 	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers
 )
 
@@ -102,7 +104,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	connectors := connectorruntime.FromRegistries()
+	connectors := connectorruntime.FromRegistries(hostExportedCredentials())
 	interactive := term.IsTerminal(os.Stdin.Fd())
 
 	err = runQuickstart(connectors, dir, hostEnvironment{}, hostCommandRunner{}, buildForge, os.Stdout, os.Stdin, interactive, *force)
@@ -111,4 +113,15 @@ func main() {
 		fmt.Fprintf(os.Stderr, "quickstart: %s\n", err)
 		os.Exit(1)
 	}
+}
+
+// hostExportedCredentials is each applied row's credential read from the
+// process environment at each use: the wizard exports every token it collects
+// (the gh CLI reads it there too) after the runtime is built.
+func hostExportedCredentials() map[string]credsource.Row {
+	creds := map[string]credsource.Row{}
+	for _, row := range backendrows.All() {
+		creds[row.Name] = credsource.EnvRow(row.CredentialEnv, row.IdentityEnv)
+	}
+	return creds
 }

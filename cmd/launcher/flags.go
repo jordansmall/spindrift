@@ -410,20 +410,26 @@ func isCoreSecretKnob(env string) bool {
 	return slices.ContainsFunc(inputdoc.SecretKnobs, func(k inputdoc.SecretKnob) bool { return k.Env == env })
 }
 
-// applyRowCredentials fills the credential env of each backend row this run
-// reads through, via the resolver the Daemon shares. Applied is isCoreSecretKnob
-// because parseFlags already ran each core secret's `_CMD`, so running it here
-// would resolve the credential twice. An unset credential is tolerated: doctor
-// must run without one, and validate and the launch gates refuse it per verb.
-func applyRowCredentials() error {
-	_, err := rowcredential.Resolution{
+// applyRowCredentials chooses the credential source of each backend row, via
+// the resolver the Daemon shares, for the Connector runtime to read at each
+// use. A schema knob such as GH_TOKEN_REFRESH_FILE is read from the flag or
+// document only; the environment applies to the non-schema keys alone, as
+// backendRowSetting reads them.
+// Applied is isCoreSecretKnob because parseFlags already ran each core secret's
+// `_CMD`, so running it here would resolve the credential twice. An unset
+// credential is tolerated: doctor must run without one, and validate and the
+// launch gates refuse it per verb.
+func applyRowCredentials() (rowcredential.Sourced, error) {
+	res := rowcredential.Resolution{
 		Forge: resolvedKnob("CODE_FORGE"), Tracker: resolvedKnob("ISSUE_TRACKER"),
 		Template: globalSecretCmdTemplate, Run: secretCmdRunner, Applied: isCoreSecretKnob,
-	}.Apply(backendrows.All())
-	if errors.Is(err, rowcredential.ErrUnset) {
-		return nil
+		Lookup: backendRowSetting(launcherInput, processEnv()),
 	}
-	return err
+	sourced, err := res.Sources(backendrows.All())
+	if errors.Is(err, rowcredential.ErrUnset) {
+		return sourced, nil
+	}
+	return sourced, err
 }
 
 // applySecretCmdFallback resolves globalSecretCmdTemplate, substituting

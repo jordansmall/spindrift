@@ -17,18 +17,6 @@ import (
 	"spindrift.dev/launcher/internal/gitexec"
 )
 
-// gitCredential is the credential core's own git presents to the Connector's
-// clone URL under row. It is read from the row's env at each operation, so a
-// rotated token is honoured (the Ledger site reads it per git call), and an
-// unset one fails here by name rather than reaching git as an empty password.
-func gitCredential(row backendrows.Row) (gitexec.Credential, error) {
-	token := os.Getenv(row.CredentialEnv)
-	if token == "" {
-		return gitexec.Credential{}, errors.New(row.CredentialEnv + " is not set")
-	}
-	return gitexec.Credential{Username: "x-access-token", Password: token}, nil
-}
-
 // coreGit is the plumbing a routed row composes over the Connector's clone
 // URL: the stock git adapter, except that Rebase honours SYNC_METHOD. It keeps
 // the validated URL and credential so core's own clones (the Box's mirror, the
@@ -88,7 +76,7 @@ func (e *execClient) forgeGit(row backendrows.Row, verb string, fn func(forge.Co
 	return e.connectorOp(row, connectorforge.ErrNotForge, verb, func(routed backendrows.Row, spec connectorruntime.SessionSpec) error {
 		// The composed forge reads the token at each use; an unset one fails here
 		// by name instead.
-		if _, err := gitCredential(routed); err != nil {
+		if _, err := e.connectors.GitCredential(routed).Get(); err != nil {
 			return err
 		}
 		c, err := e.composedView(routed, spec)
@@ -108,14 +96,13 @@ type composedForge struct {
 }
 
 // composedView is the full Code Forge, composed by the first write that needs
-// it. Its credential reads the row's env at each use, so a rotated token
+// it. Its credential reads the row's source at each use, so a rotated token
 // reaches the next git call.
 func (e *execClient) composedView(row backendrows.Row, spec connectorruntime.SessionSpec) (composedForge, error) {
 	return memo(&e.mu, &e.composed, func() bool { return e.composed.cf != nil }, func() (composedForge, error) {
 		var plumbing *coreGit
 		cf, err := e.connectors.CodeForge(row, connectorruntime.ForgeSpec{
 			SessionSpec: spec,
-			Credential:  gitexec.EnvCredential("x-access-token", row.CredentialEnv),
 			// The Routes name only api.github.com; git and the web are on the row's
 			// declared Git remote, which core derives the clone URL and web host from.
 			WebBase: row.GitRemote,
@@ -231,7 +218,7 @@ func (e *execClient) ledgerSite(row backendrows.Row) (backendkit.LedgerSite, err
 	err := e.forgeGit(row, "reach the Ledger", func(_ forge.CodeForge, _ forge.Capabilities, g *coreGit) error {
 		// forgeGit already resolved the credential once, so an unset one fails
 		// here at build; each Ledger git call resolves it afresh.
-		site = backendkit.LedgerSite{URL: g.cloneURL, Credential: func() (gitexec.Credential, error) { return gitCredential(row) }}
+		site = backendkit.LedgerSite{URL: g.cloneURL, Credential: e.connectors.GitCredential(row)}
 		return nil
 	})
 	return site, err

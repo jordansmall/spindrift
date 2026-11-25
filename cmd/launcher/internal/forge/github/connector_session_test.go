@@ -12,6 +12,7 @@ import (
 	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
+	"spindrift.dev/launcher/internal/credsource/credsourcetest"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -48,7 +49,7 @@ func recordingRuntime(t *testing.T) (*connectorruntime.Runtime, *loadRecorder) {
 		t.Fatal("no github backend row applied")
 	}
 	rec := &loadRecorder{Loader: connectorsandboxtest.InProcess()}
-	rt := connectorruntime.New([]backendrows.Row{row}, rec)
+	rt := connectorruntime.New([]backendrows.Row{row}, credsourcetest.EnvRows(row), rec)
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt, rec
 }

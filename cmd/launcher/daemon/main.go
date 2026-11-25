@@ -722,10 +722,6 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return refuse(err)
 	}
 	defer installConnectorSandbox(doc, sandboxWD)()
-	// Deferred after the sandbox so it closes first: a Connector closes through
-	// the sandbox that hosts it.
-	connectors := connectorruntime.FromRegistries()
-	defer func() { _ = connectors.Close() }()
 
 	// Reused for the runner config, so the warning and the strip agree.
 	stripped := strippedKeys(doc)
@@ -832,13 +828,17 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	// A Connector-routed tracker row's probe reads its credential from this
-	// process's env. Resolved ahead of the check-only return so a successor's
+	// A Connector-routed tracker row's probe reads its credential from the
+	// runtime's source. Resolved ahead of the check-only return so a successor's
 	// smoke test also catches a missing or failing credential.
-	refreshConnectorCreds, err := resolveConnectorCredentials(doc, args.Kinds, stderr)
+	connectorCreds, refreshConnectorCreds, err := resolveConnectorCredentials(doc, args.Kinds, stderr)
 	if err != nil {
 		return refuse(err)
 	}
+	// Deferred after the sandbox so it closes first: a Connector closes through
+	// the sandbox that hosts it.
+	connectors := connectorruntime.FromRegistries(connectorCreds)
+	defer func() { _ = connectors.Close() }()
 
 	// Before the lock and preflight: a freshly built successor smoke-tests
 	// itself this way beside the live daemon. Keep it ahead of the demand
@@ -923,8 +923,8 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		featureBranch: args.FeatureBranch,
 		selfAttr:      selfAttr,
 		nixSystem:     nixSystem,
-		// Captured once, not per-child, after resolveConnectorCredentials's
-		// exports and `_CMD` pins; the watchers' later os.Setenv calls miss it.
+		// Captured once, not per-child; the token watcher's later os.Setenv calls
+		// miss it.
 		env:         append(os.Environ(), driverEnv...),
 		knobs:       stripped,
 		doctorFlags: doctorFlags,

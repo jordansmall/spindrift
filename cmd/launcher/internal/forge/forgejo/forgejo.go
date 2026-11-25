@@ -1,20 +1,11 @@
 // Package forgejo is the Forgejo adapter. The IssueTracker, CodeForge and
 // PRForge seams are all served by the Connector (connector_tracker.go,
-// connector_forge.go); this file holds the git and env helpers around it.
+// connector_forge.go); this file holds the merge-style and env helpers around it.
 package forgejo
 
 import (
 	"fmt"
-
-	"spindrift.dev/launcher/internal/gitexec"
 )
-
-// gitCredential is the credential git presents to a Forgejo instance. Forgejo
-// and Gitea basic auth takes a non-empty password as an access token, so the
-// username is a placeholder, the same oauth2:<token> shape the git backend
-// documents. It reads FORGEJO_TOKEN at each use; an unset token is the zero
-// (anonymous) Credential.
-var gitCredential = gitexec.EnvCredential("oauth2", ForgejoTokenEnv)
 
 // MergeStyle resolves MergeMethod to a merge style. An unset method resolves
 // to "rebase", matching the github adapter's default; the forge build gates on

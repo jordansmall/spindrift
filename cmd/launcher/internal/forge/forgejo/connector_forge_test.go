@@ -23,6 +23,7 @@ import (
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
 	"spindrift.dev/launcher/internal/connectortracker"
+	"spindrift.dev/launcher/internal/credsource/credsourcetest"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgejo"
 	"spindrift.dev/launcher/internal/hostpaths"
@@ -234,7 +235,7 @@ func TestPlainRow_BuildsTheConnectorForgeAndTracker(t *testing.T) {
 func TestNoConnectorRow_RefusesTheCodeForgeAndTheTracker(t *testing.T) {
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
-	rt := connectorruntime.New(nil, &failingSandbox{Loader: connectorsandboxtest.InProcess(), err: errors.New("unexpected load"), onLoad: func() {
+	rt := connectorruntime.New(nil, nil, &failingSandbox{Loader: connectorsandboxtest.InProcess(), err: errors.New("unexpected load"), onLoad: func() {
 		t.Error("a Connector loaded without a usable row")
 	}})
 	t.Cleanup(func() { _ = rt.Close() })
@@ -333,7 +334,7 @@ func TestConnectorForge_SelfHostedUnderASubpath(t *testing.T) {
 // sandbox TestMain installed, closed with the test.
 func newRuntime(t *testing.T) *connectorruntime.Runtime {
 	t.Helper()
-	rt := connectorruntime.FromRegistries()
+	rt := connectorruntime.FromRegistries(credsourcetest.Applied())
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt
 }
@@ -393,7 +394,7 @@ func TestConnectorTracker_RefusesAConnectorMissingACapability(t *testing.T) {
 		t.Fatal("no forgejo row")
 	}
 	sb := &strippedSandbox{Loader: connectorsandboxtest.InProcess(), drop: []string{connectortracker.CapLabeled, connectortracker.CapProbe}}
-	rt := connectorruntime.New([]backendrows.Row{row}, sb)
+	rt := connectorruntime.New([]backendrows.Row{row}, credsourcetest.EnvRows(row), sb)
 	t.Cleanup(func() { _ = rt.Close() })
 	t.Setenv(connectorCredentialEnv, connectorToken)
 	t.Cleanup(forgejo.SetConnectorClient(srv.Client()))
@@ -491,7 +492,7 @@ func runtimeOver(t *testing.T, sb connectorsandbox.Loader) *connectorruntime.Run
 	if !ok {
 		t.Fatal("no forgejo row")
 	}
-	rt := connectorruntime.New([]backendrows.Row{row}, sb)
+	rt := connectorruntime.New([]backendrows.Row{row}, credsourcetest.EnvRows(row), sb)
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt
 }

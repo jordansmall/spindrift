@@ -2220,18 +2220,20 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return configErrorCode(verb, int(exitcode.ConfigInvalid))
 	}
 	launcherInput = resolved
-	connectors := connectorruntime.FromRegistries()
-	defer func() { _ = connectors.Close() }()
 	// Both run after launcherInput is in place: CODE_FORGE and ISSUE_TRACKER may
-	// be set through the document alone.
-	if err := applyRowCredentials(); err != nil {
-		fmt.Fprintf(stderr, "%s\n", err)
-		return 1
-	}
+	// be set through the document alone. The fallback runs first: it exports a
+	// core secret the row sources then read, so the template runs once.
 	if err := applySecretCmdFallback(); err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
 	}
+	sourced, err := applyRowCredentials()
+	if err != nil {
+		fmt.Fprintf(stderr, "%s\n", err)
+		return 1
+	}
+	connectors := connectorruntime.FromRegistries(sourced.Rows)
+	defer func() { _ = connectors.Close() }()
 	_, driverWarning := resolveDriver()
 	fmt.Fprint(stderr, driverWarning)
 	if verb == "" {

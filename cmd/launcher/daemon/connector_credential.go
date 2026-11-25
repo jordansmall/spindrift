@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
+	"spindrift.dev/launcher/internal/credsource"
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/inputdoc"
@@ -26,18 +27,17 @@ var secretCmdRunner = func(cmd string) (string, error) {
 	return secretcmd.Run(cmd, false)
 }
 
-// resolveConnectorCredentials fills the credential env of each Connector row
-// the Daemon reads through (see rowcredential for precedence). refresh
-// re-resolves them, keeping the old value on failure; it is nil when none were
-// sourced, and only a kind that probes the tracker resolves at all.
+// resolveConnectorCredentials chooses the credential source of every Connector
+// row for the runtime (see rowcredential for precedence); nothing is exported
+// to the process environment. refresh re-runs the `_CMD` sources, keeping the
+// old value on failure; it is nil when none exist. Only a kind that probes the
+// tracker resolves rows through their `_CMD`, or refuses an unset credential:
+// otherwise no row is read this run, and each keeps a plain-value source.
 //
-// A template value is pinned as `_CMD` too, or a restart-in-place successor
-// would inherit a frozen Setenv'd token. A Launcher child's parseFlags runs a
-// pinned core secret's `_CMD` whatever row it reads, harmless while it shares
-// the Daemon's ISSUE_TRACKER and CODE_FORGE. The CODE_FORGE row is resolved
-// though the probe reads only the tracker: children inherit its pinned `_CMD`,
-// and refusing here fails fast.
-func resolveConnectorCredentials(doc *inputdoc.Document, kinds []daemon.Kind, stderr io.Writer) (refresh func(), err error) {
+// Values come from the document, then the process environment, as a Launcher
+// child reads them. The CODE_FORGE row is resolved though the probe reads only
+// the tracker, so that refusing here fails fast.
+func resolveConnectorCredentials(doc *inputdoc.Document, kinds []daemon.Kind, stderr io.Writer) (creds map[string]credsource.Row, refresh func(), err error) {
 	probes := false
 	for _, k := range kinds {
 		d, ok := dispatchkind.ByVerb(string(k))
@@ -53,27 +53,22 @@ func resolveConnectorCredentials(doc *inputdoc.Document, kinds []daemon.Kind, st
 			panic(fmt.Sprintf("daemon: kind %s has unhandled DemandSource %d", k, d.DemandSource))
 		}
 	}
-	if !probes {
-		return nil, nil
-	}
 	res := rowcredential.Resolution{
-		Forge: codeForgeName(doc), Tracker: issueTrackerName(doc),
 		Template: os.Getenv("SECRET_CMD"), Run: secretCmdRunner,
+		Lookup: func(env string) string { v, _ := childEnvValue(doc, env); return v },
 	}
-	recipes, err := res.Apply(backendrows.All())
+	if probes {
+		res.Forge, res.Tracker = codeForgeName(doc), issueTrackerName(doc)
+	}
+	sourced, err := res.Sources(backendrows.All())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	for _, r := range recipes {
-		if err := secretcmd.Pin(r.Env, r.Cmd); err != nil {
-			return nil, err
-		}
+	if len(sourced.Commands) == 0 {
+		return sourced.Rows, nil, nil
 	}
-	if len(recipes) == 0 {
-		return nil, nil
-	}
-	return func() {
-		res.Refresh(recipes, func(env string, err error) {
+	return sourced.Rows, func() {
+		sourced.Refresh(func(env string, err error) {
 			fmt.Fprintf(stderr, "daemon: connector credential %s refresh failed, keeping the previous value: %v\n", env, err)
 		})
 	}, nil

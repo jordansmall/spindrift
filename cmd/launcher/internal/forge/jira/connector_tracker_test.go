@@ -20,6 +20,8 @@ import (
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
 	"spindrift.dev/launcher/internal/connectortracker"
+	"spindrift.dev/launcher/internal/credsource"
+	"spindrift.dev/launcher/internal/credsource/credsourcetest"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/jira"
@@ -48,7 +50,7 @@ func newJiraTracker(t *testing.T) (forge.IssueTracker, error) {
 	t.Helper()
 	t.Chdir(t.TempDir()) // the audit file lands under the host log dir
 	env := map[string]string{"JIRA_BASE_URL": "https://jira.example", "JIRA_PROJECT_KEY": "PROJ", "JIRA_TOKEN": "tok"}
-	return jira.Strategy.NewIssueTracker(backendkit.Shared{Connectors: newRuntime(t)}, func(k string) (string, bool) {
+	return jira.Strategy.NewIssueTracker(backendkit.Shared{Connectors: newRuntime(t, env)}, func(k string) (string, bool) {
 		v, ok := env[k]
 		return v, ok
 	})
@@ -341,10 +343,20 @@ func TestConnectorTracker_FailedIssueReadReportsTransient(t *testing.T) {
 }
 
 // newRuntime is the Connector runtime over the rows the test applied and the
-// sandbox TestMain installed, closed with the test.
-func newRuntime(t *testing.T) *connectorruntime.Runtime {
+// sandbox TestMain installed, closed with the test. Credentials read the
+// process environment but for the identity, which comes from the knobs, as the
+// launcher's lookup does.
+func newRuntime(t *testing.T, knobs map[string]string) *connectorruntime.Runtime {
 	t.Helper()
-	rt := connectorruntime.FromRegistries()
+	creds := credsourcetest.Applied()
+	for _, row := range backendrows.All() {
+		if row.IdentityEnv != "" {
+			cr := creds[row.Name]
+			cr.Identity = credsource.Static(knobs[row.IdentityEnv])
+			creds[row.Name] = cr
+		}
+	}
+	rt := connectorruntime.FromRegistries(creds)
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt
 }

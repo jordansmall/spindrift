@@ -1,13 +1,17 @@
 package connectorforgetest
 
-import "strings"
+import (
+	"strings"
+
+	"spindrift.dev/launcher/internal/credsource"
+)
 
 // Option tunes how a harness is built.
 type Option func(*options)
 
 type options struct {
 	gitOverHTTPS bool
-	tokenEnv     string
+	token        credsource.Source
 	webPath      string
 }
 
@@ -24,10 +28,9 @@ func WithWebBasePath(path string) Option {
 	return func(o *options) { o.webPath = strings.TrimRight(path, "/") }
 }
 
-// WithTokenEnv makes the harness's one credential the value of the tokenEnv
-// environment variable, read at each use as production does: the Connector
-// bearer is read at each request and core's git credential at each git call.
-// The backend and the git server then accept only the value the variable held
-// when the harness was built, until Backend.SetToken changes it. Pair it with
-// WithGitOverHTTPS to gate git too.
-func WithTokenEnv(tokenEnv string) Option { return func(o *options) { o.tokenEnv = tokenEnv } }
+// WithToken makes the harness's one credential token's value, read at each use
+// as production does: the Connector bearer is read at each request and core's
+// git credential at each git call. The backend and the git server then accept
+// only the value token held when the harness was built, until Backend.SetToken
+// changes it. Pair it with WithGitOverHTTPS to gate git too.
+func WithToken(token credsource.Source) Option { return func(o *options) { o.token = token } }

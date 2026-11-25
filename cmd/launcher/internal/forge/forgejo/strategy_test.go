@@ -7,11 +7,11 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgejo"
-	"spindrift.dev/launcher/internal/gitexec"
 )
 
 func mapLookup(m map[string]string) backendkit.Lookup {
@@ -39,7 +39,8 @@ func TestStrategyValidateTrackerNamesBlankBaseURL(t *testing.T) {
 
 func TestStrategyLedgerURLUsesLookupBaseURL(t *testing.T) {
 	l := mapLookup(map[string]string{"FORGEJO_BASE_URL": "https://forge.example/forgejo/", "FORGEJO_TOKEN": "tok"})
-	site, err := forgejo.Strategy.NewLedger(backendkit.Shared{RepoSlug: "o/r"}, l)
+	useForgejoRow(t, "https://forge.example/forgejo/", func(*backendrows.Row) {})
+	site, err := forgejo.Strategy.NewLedger(backendkit.Shared{RepoSlug: "o/r", Connectors: newRuntime(t)}, l)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,15 +130,17 @@ func TestStrategyValidateRejectsBlankBaseURL(t *testing.T) {
 func TestStrategyLedgerSiteCarriesCredentialNotUserinfo(t *testing.T) {
 	const token = "tok-6860"
 	l := mapLookup(map[string]string{"FORGEJO_BASE_URL": "https://forge.example", "FORGEJO_TOKEN": token})
-	site, err := forgejo.Strategy.NewLedger(backendkit.Shared{RepoSlug: "o/r"}, l)
+	useForgejoRow(t, "https://forge.example", func(*backendrows.Row) {})
+	t.Setenv(connectorCredentialEnv, token)
+	site, err := forgejo.Strategy.NewLedger(backendkit.Shared{RepoSlug: "o/r", Connectors: newRuntime(t)}, l)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(site.URL, "@") || strings.Contains(site.URL, token) {
 		t.Errorf("URL = %q, want no userinfo and no token", site.URL)
 	}
-	if cred, err := site.Credential.Get(); err != nil || cred != gitexec.EnvCredential("oauth2", forgejo.ForgejoTokenEnv) {
-		t.Errorf("Credential is not the oauth2 credential read from FORGEJO_TOKEN")
+	if cred, err := site.Credential.Get(); err != nil || cred.Password != token {
+		t.Errorf("Credential = (%v, %v), want the row's token as the password", cred, err)
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
+	"spindrift.dev/launcher/internal/credsource/credsourcetest"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/inputdoc"
@@ -333,7 +334,7 @@ func (c *config) setRowKnob(env, value string) {
 // mainRun builds one, closed with the test.
 func connectorRuntime(t *testing.T) *connectorruntime.Runtime {
 	t.Helper()
-	rt := connectorruntime.FromRegistries()
+	rt := connectorruntime.FromRegistries(credsourcetest.Applied())
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt
 }
@@ -364,7 +365,7 @@ func forgejoFixtureRuntime(t *testing.T) *connectorruntime.Runtime {
 	if row, ok := backendrows.Lookup("forgejo"); ok {
 		rows = append(rows, row)
 	}
-	rt := connectorruntime.New(rows, capPadSandbox{connectorsandboxtest.InProcess()})
+	rt := connectorruntime.New(rows, credsourcetest.EnvRows(rows...), capPadSandbox{connectorsandboxtest.InProcess()})
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt
 }

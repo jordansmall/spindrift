@@ -58,7 +58,6 @@ func newConnectorCodeForge(row backendrows.Row, s backendkit.Shared, k Knobs) (f
 	row.Routes = connectortracker.Routes(row.Routes, s.RepoSlug)
 	return s.Connectors.CodeForge(row, connectorruntime.ForgeSpec{
 		SessionSpec: sessionSpec(s, k),
-		Credential:  gitCredential,
 		WebBase:     row.GitRemote,
 		Plumbing: func(cloneURL string, cred gitexec.Credential) forge.CodeForge {
 			return git.NewGitClient(cloneURL, s.BaseBranch, s.GitUserName, s.GitUserEmail, git.WithCredential(cred))

@@ -22,6 +22,7 @@ import (
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
 	"spindrift.dev/launcher/internal/connectortracker"
+	"spindrift.dev/launcher/internal/credsource"
 	"spindrift.dev/launcher/internal/fixturebuild"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/gitexec"
@@ -76,6 +77,8 @@ type env struct {
 	spec   connectorruntime.TrackerSpec
 	now    time.Time
 	err503 *atomic.Int32 // backend requests still to answer 503
+	// auth is the Authorization header of the backend's latest request.
+	auth atomic.Value
 }
 
 // newEnv is a runtime over a fixture Connector served by an httptest backend
@@ -83,13 +86,21 @@ type env struct {
 // working directory, where the audit file and the .log land.
 func newEnv(t *testing.T, wasmFile string) *env {
 	t.Helper()
+	return newEnvWith(t, wasmFile, map[string]credsource.Row{"fixture": {Secret: credsource.Static("tok")}})
+}
+
+// newEnvWith is newEnv over the given credential sources.
+func newEnvWith(t *testing.T, wasmFile string, creds map[string]credsource.Row) *env {
+	t.Helper()
 	dir, err := fixturebuild.ConnectorDir() // resolves the flake from the working directory, so before the Chdir
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(t.TempDir())
 	err503 := new(atomic.Int32)
+	e := &env{err503: err503}
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		e.auth.Store(r.Header.Get("Authorization"))
 		if err503.Add(-1) >= 0 {
 			http.Error(w, "unavailable", http.StatusServiceUnavailable)
 			return
@@ -104,25 +115,22 @@ func newEnv(t *testing.T, wasmFile string) *env {
 		}
 	}))
 	t.Cleanup(srv.Close)
-	e := &env{
-		err503: err503,
-		sb:     &sandbox{Loader: connectorsandboxtest.InProcess()},
-		row: backendrows.Row{
-			Name:          "fixture",
-			Module:        filepath.Join(dir, wasmFile),
-			Routes:        []connectorhost.Route{{Method: http.MethodGet, Host: srv.Listener.Addr().String(), Path: apiPath + "/repos/" + connectorforgetest.Repo}},
-			CredentialEnv: "FIXTURE_TOKEN",
-		},
-		now: time.Unix(1000, 0),
+	e.sb = &sandbox{Loader: connectorsandboxtest.InProcess()}
+	e.row = backendrows.Row{
+		Name:          "fixture",
+		Module:        filepath.Join(dir, wasmFile),
+		Routes:        []connectorhost.Route{{Method: http.MethodGet, Host: srv.Listener.Addr().String(), Path: apiPath + "/repos/" + connectorforgetest.Repo}},
+		CredentialEnv: "FIXTURE_TOKEN",
 	}
+	e.now = time.Unix(1000, 0)
 	e.spec = connectorruntime.TrackerSpec{
 		SessionSpec: connectorruntime.SessionSpec{
 			Target:  connectortracker.Target{API: srv.URL + apiPath, Repo: connectorforgetest.Repo},
-			Options: backendrows.Options{Client: srv.Client(), Getenv: func(string) string { return "tok" }},
+			Options: backendrows.Options{Client: srv.Client()},
 		},
 		Clock: retry.NoSleepClock(),
 	}
-	e.rt = connectorruntime.New([]backendrows.Row{e.row}, e.sb)
+	e.rt = connectorruntime.New([]backendrows.Row{e.row}, creds, e.sb)
 	e.rt.SetClock(func() time.Time { return e.now })
 	t.Cleanup(func() { _ = e.rt.Close() })
 	return e

@@ -367,28 +367,6 @@ func TestConnectorRow_MergeWithTheHeadAlreadyGoneRecordsNothing(t *testing.T) {
 	}
 }
 
-// The git credential is read from the row's env at each operation, and an
-// unset one is named instead of sending git an empty password.
-func TestGitCredential_ReadsTheRowEnvAtUse(t *testing.T) {
-	row := backendrows.Row{Name: "github", CredentialEnv: tokenCredentialEnv}
-
-	t.Setenv(tokenCredentialEnv, "ghp_one")
-	cred, err := gitCredential(row)
-	if err != nil || cred.Username != "x-access-token" || cred.Password != "ghp_one" {
-		t.Fatalf("gitCredential = (%+v, %v), want x-access-token / ghp_one", cred, err)
-	}
-
-	t.Setenv(tokenCredentialEnv, "ghp_rotated")
-	if cred, _ := gitCredential(row); cred.Password != "ghp_rotated" {
-		t.Errorf("gitCredential after rotation = %q, want ghp_rotated", cred.Password)
-	}
-
-	t.Setenv(tokenCredentialEnv, "")
-	if _, err := gitCredential(row); err == nil || !strings.Contains(err.Error(), tokenCredentialEnv+" is not set") {
-		t.Errorf("gitCredential with the env unset = %v, want %q", err, tokenCredentialEnv+" is not set")
-	}
-}
-
 // The PR-body Closes gate is core policy; the Connector carries the body to the
 // backend byte for byte, so the keyword survives the host-side open.
 func TestConnectorRow_CreateDraftPRCarriesTheClosesBodyIntact(t *testing.T) {

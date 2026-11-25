@@ -103,9 +103,10 @@ func buildTrackerSources(connectors *connectorruntime.Runtime, doc *inputdoc.Doc
 	// without it NewIssueTracker fails with a Connector-construction error that
 	// never names the knob. In production resolveConnectorCredentials already
 	// refused an unset credential for every Connector-routed row, so this is the
-	// fallback that keeps the probe's reason naming the knob.
+	// fallback that keeps the probe's reason naming the knob. A row whose
+	// runtime source holds a token (a `_CMD` form) is set whatever the knob says.
 	if env := strat.TokenEnvVar; env != "" {
-		if v, _ := lookup(env); v == "" {
+		if v, _ := lookup(env); v == "" && !rowCredentialSet(connectors, strat.Name) {
 			return nil, allMissing(probed, fmt.Sprintf("set %s, the credential of the %s backend%s", env, strat.Name, tokenFormHint(env, lookup)))
 		}
 	}
@@ -510,4 +511,14 @@ func repoURL(doc *inputdoc.Document) string {
 		return ""
 	}
 	return s.WebURL(backendkit.Shared{RepoSlug: slug}, childLookup(doc))
+}
+
+// rowCredentialSet is whether the runtime holds a credential for the named
+// backend row.
+func rowCredentialSet(connectors *connectorruntime.Runtime, name string) bool {
+	if connectors == nil {
+		return false
+	}
+	row, ok := connectors.Row(name)
+	return ok && connectors.CredentialSet(row)
 }

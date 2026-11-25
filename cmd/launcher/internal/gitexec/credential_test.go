@@ -425,21 +425,20 @@ func TestApplyAndExplainStripUserinfoWithQueryCharsInPassword(t *testing.T) {
 	}
 }
 
-// An env-backed credential reads its token at each Apply, so a rotated token
+// A source-backed credential reads its token at each Apply, so a rotated token
 // reaches the next git call without rebuilding whatever holds the credential.
-func TestEnvCredentialReadsTokenAtEachUse(t *testing.T) {
-	const env = "GITEXEC_TEST_TOKEN"
-	cred := EnvCredential(testUser, env)
+func TestTokenCredentialReadsTokenAtEachUse(t *testing.T) {
+	tok := &liveToken{v: "first"}
+	cred := TokenCredential(testUser, tok)
 	password := func() string {
 		cmd := cred.Apply(exec.Command("git", "status"), testRepoURL)
 		return lastEnv(cmd.Env)[passwordEnv]
 	}
 
-	t.Setenv(env, "first")
 	if got := password(); got != "first" {
 		t.Fatalf("Apply password = %q, want first", got)
 	}
-	t.Setenv(env, "second")
+	tok.v = "second"
 	if got := password(); got != "second" {
 		t.Fatalf("Apply after rotation = %q, want second", got)
 	}
@@ -449,14 +448,12 @@ func TestEnvCredentialReadsTokenAtEachUse(t *testing.T) {
 	}
 }
 
-func TestEnvCredentialWithEmptyEnvIsNoOp(t *testing.T) {
-	const env = "GITEXEC_TEST_TOKEN"
-	t.Setenv(env, "")
-	cred := EnvCredential(testUser, env)
+func TestTokenCredentialWithEmptyTokenIsNoOp(t *testing.T) {
+	cred := TokenCredential(testUser, &liveToken{v: ""})
 	cmd := exec.Command("git", "status")
 	cmd.Env = []string{"A=1"}
 	if got := cred.Apply(cmd, testRepoURL); got != cmd || len(cmd.Env) != 1 {
-		t.Fatalf("empty-env credential changed the command: env=%v", cmd.Env)
+		t.Fatalf("empty-token credential changed the command: env=%v", cmd.Env)
 	}
 	plain, redirect := errors.New("exit status 128"), []byte("fatal: could not read Username")
 	if got := cred.Explain(plain, redirect, testRepoURL); got != plain {
@@ -464,24 +461,26 @@ func TestEnvCredentialWithEmptyEnvIsNoOp(t *testing.T) {
 	}
 }
 
-func TestEnvCredentialExplainFollowsTheLiveToken(t *testing.T) {
-	const env = "GITEXEC_TEST_TOKEN"
-	cred := EnvCredential(testUser, env)
+func TestTokenCredentialExplainFollowsTheLiveToken(t *testing.T) {
+	cred := TokenCredential(testUser, &liveToken{v: testToken})
 	plain, redirect := errors.New("exit status 128"), []byte("fatal: could not read Username")
 
-	t.Setenv(env, testToken)
 	got := cred.Explain(plain, redirect, testRepoURL)
 	if !strings.Contains(got.Error(), "configured Target repo") || strings.Contains(got.Error(), testToken) {
 		t.Errorf("Explain = %v, want the redirect explanation without the token", got)
 	}
 }
 
-func TestEnvCredentialDoesNotFormatPassword(t *testing.T) {
-	t.Setenv("GITEXEC_TEST_TOKEN", testToken)
-	c := EnvCredential(testUser, "GITEXEC_TEST_TOKEN")
+func TestTokenCredentialDoesNotFormatPassword(t *testing.T) {
+	c := TokenCredential(testUser, &liveToken{v: testToken})
 	for _, s := range []string{fmt.Sprintf("%v", c), fmt.Sprintf("%+v", c), fmt.Sprintf("%#v", c)} {
 		if strings.Contains(s, testToken) {
 			t.Fatalf("formatted Credential leaks the password: %s", s)
 		}
 	}
 }
+
+// liveToken is a source a test rotates between uses.
+type liveToken struct{ v string }
+
+func (l *liveToken) Value() string { return l.v }

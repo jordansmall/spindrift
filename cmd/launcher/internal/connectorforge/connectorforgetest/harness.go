@@ -24,6 +24,7 @@ import (
 	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectortracker"
+	"spindrift.dev/launcher/internal/credsource"
 	"spindrift.dev/launcher/internal/fixturebuild"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
@@ -282,7 +283,7 @@ var (
 
 // load starts a backend and loads the Connector against it, its declared routes
 // rebound to the backend's host.
-func load(t *testing.T, eng Engine, bare string, c Connector, tokenEnv string) *stack {
+func load(t *testing.T, eng Engine, bare string, c Connector, token credsource.Source) *stack {
 	t.Helper()
 	b := newBackend(t, bare)
 	b.script = c.Script
@@ -291,10 +292,10 @@ func load(t *testing.T, eng Engine, bare string, c Connector, tokenEnv string) *
 		r.Header.Set("Authorization", "Bearer "+Token)
 		return nil
 	}
-	if tokenEnv != "" {
+	if token != nil {
 		// The production authorizer, so the rotation test exercises the
 		// read-at-use the launcher ships rather than a copy of it.
-		authorizer = backendrows.Row{CredentialEnv: tokenEnv}.Authorizer(os.Getenv)
+		authorizer = backendrows.Row{CredentialEnv: "TOKEN"}.Authorizer(func(string) string { return token.Value() })
 	}
 	conn, err := eng(context.Background(), c.Wasm, connectorhost.Network{
 		Name:      "fixture-forge",
@@ -359,11 +360,11 @@ func newBase(t *testing.T, eng Engine, c Connector, opts ...Option) *base {
 	useGitEnv(t)
 
 	repo := forgetest.NewGitRepoFixture(t, "main")
-	s := load(t, eng, repo.Bare, c, o.tokenEnv)
+	s := load(t, eng, repo.Bare, c, o.token)
 	user, pass := "bot", "git-secret"
 	cred := gitexec.Credential{Username: user, Password: pass}
-	if o.tokenEnv != "" {
-		pass, cred = os.Getenv(o.tokenEnv), gitexec.EnvCredential(user, o.tokenEnv)
+	if o.token != nil {
+		pass, cred = o.token.Value(), gitexec.TokenCredential(user, o.token)
 		s.backend.SetToken(pass)
 	}
 	s.backend.underWebPath(o.webPath)
@@ -478,7 +479,7 @@ func (h *Harness) Forge() forge.CodeForge { return h.cf }
 // Unreachable composes against a second backend, then closes it so Probe fails.
 func (h *Harness) Unreachable() forge.CodeForge {
 	h.t.Helper()
-	s := load(h.t, h.eng, h.Repo.Bare, h.connector, "")
+	s := load(h.t, h.eng, h.Repo.Bare, h.connector, nil)
 	cf, _, err := connectorforge.Compose(s.conn, s.target, h.git())
 	if err != nil {
 		h.t.Fatal(err)

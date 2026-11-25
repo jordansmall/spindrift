@@ -6708,8 +6708,10 @@ func TestMainRun_InputDocument_BackendRowCredentialFromCmd(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	mainRunT(t, []string{"--input", docPath, "--issue-tracker", "jira", "research"}, &stdout, &stderr)
-	if got := os.Getenv("PROBE_TOKEN"); got != "from-cmd" {
-		t.Errorf("PROBE_TOKEN = %q, want from-cmd; stderr=%s", got, stderr.String())
+	// The credential lives in the row's source for the runtime to read; it is
+	// never exported.
+	if got := os.Getenv("PROBE_TOKEN"); got != "" {
+		t.Errorf("PROBE_TOKEN = %q, want the process environment untouched; stderr=%s", got, stderr.String())
 	}
 	if !reflect.DeepEqual(ran(), []string{"vault get probe"}) {
 		t.Errorf("ran %q", ran())
