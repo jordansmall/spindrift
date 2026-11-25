@@ -2553,6 +2553,13 @@ canonical path, leaves the row unapplied; every backend is Connector-only, so th
 naming the https requirement, and github's reads fail with `ErrNoRoute` (issue
 #6811).
 
+A Code Forge row (github, forgejo, or a forge Connector) also declares
+`gitRemote`, where core derives the clone URL from: a literal https origin with
+no path (github's `https://github.com`) or the env-schema key of a knob holding
+the forge's https web base URL (forgejo's `forgejoBaseURL`). It renders as
+`gitRemote` or `gitRemoteEnv`; evaluation fails naming the Connector on a forge
+row with none, or one in neither form. A tracker-only row may omit it.
+
 Evaluation fails, naming the Connector and the route, on a Route table the host
 would refuse at load: a method outside `GET`, `HEAD`, `POST`, `PUT`, `PATCH`
 and `DELETE`, a bad `host[:port]`, or a path that is not canonical, is the
@@ -2571,16 +2578,16 @@ that backend's own token knob as its `credential`, such as github's `GH_TOKEN`
 
 `mkHarness` renders each row into the Launcher input document's `backends`
 section as `{name, module, routes, acceptedRoutes, credentialEnv,
-credentialKnob, credentialScheme, identityEnv, baseEnv}` (the last three
-optional); `credentialKnob` is the Consumer knob that names `credentialEnv`,
-and doctor shows it. The launcher and the daemon validate and
-store the rows (the `backendrows` package: `Use` validates the rows whole and
-exits `config-invalid` on a bad one). `Lookup` finds a row and `Load` binds its
-module to its Route table through the Connector host. The routed backends
-([Backend Connectors](#backend-connectors)) call them. The host reads the
-credential from its own environment at each request and attaches it on a route
-match; the module never sees it. The Box's binaries read no backend rows,
-since the Box never brokers a forge credential.
+credentialKnob, credentialScheme, identityEnv, baseEnv, gitRemote,
+gitRemoteEnv}` (the last five optional); `credentialKnob` is the Consumer knob
+that names `credentialEnv`, and doctor shows it. The launcher and the daemon
+validate and store the rows (the `backendrows` package: `Use` validates the
+rows whole and exits `config-invalid` on a bad one). `Lookup` finds a row and
+`Load` binds its module to its Route table through the Connector host. The
+routed backends ([Backend Connectors](#backend-connectors)) call them. The host
+reads the credential from its own environment at each request and attaches it
+on a route match; the module never sees it. The Box's binaries read no backend
+rows, since the Box never brokers a forge credential.
 
 A backend without a row is built from the generated registry as before, except
 jira, which has no native backend and needs its Connector row, and a

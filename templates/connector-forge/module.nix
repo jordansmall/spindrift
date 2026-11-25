@@ -42,5 +42,8 @@ in
     # The base is not a secret, so any env-schema knob may carry it; the
     # Connector's own keeps it beside its credential.
     base = "connectornameConnectorBaseURL";
+    # Core derives the clone URL from the forge's base URL; a forge on a fixed
+    # host declares a literal `https://host` origin instead.
+    gitRemote = "connectornameConnectorBaseURL";
   };
 }
