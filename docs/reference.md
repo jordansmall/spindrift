@@ -2347,6 +2347,43 @@ mean at runtime is issue #6751. The worked example is the fixture Connector in
   shadows the Connectors in `nix/dogfood-shadow.nix` (opencode, issue #6874,
   and pi, issue #6876) and runs those in `nix/dogfood-primary.nix` (none
   today) as primary, each until cut-over.
+- **Registering as data.** A Connector may skip the hand-written flake module
+  and declare itself as plain data (ADR 0073, decision 11; issue #7557). Its
+  `lib.connector` entry exposes `data`, a flat attribute set, and derives
+  `flakeModule` from it with `core.lib.connectorModule core data`, which
+  imports the `core` it is handed:
+
+  ```nix
+  {
+    lib.connector =
+      { core }:
+      let
+        data = import ./data.nix { inherit core; };
+      in
+      {
+        inherit data;
+        flakeModule = core.lib.connectorModule core data;
+      };
+  }
+  ```
+
+  The keys are `name` (required, the row's name in `spindrift.connectors`),
+  `module`, `routes`, `credential`, `scheme`, `identity`, `base` and
+  `gitRemote` (the [backend row](#backend-rows-on-a-connector), declared by
+  `module`, which also needs `routes` and `credential`), and `knobs`,
+  `fragments` and `driver` (the row's own fields). Core builds the
+  `spindrift.connectors.<name>` row and the module's `key`
+  (`spindrift-connector-<name>`) itself, so the data declares only its own
+  row and sets no other option. An unknown key, a wrongly typed field, or a
+  backend field without `module` fails evaluation with a message naming the
+  Connector and the key; the deeper checks (Route rules, scheme, credential
+  ownership) stay with the row's types and validators. Core's own readers, such
+  as the knob and fragment folds, read `data` directly and need no module. The
+  fixture Connector ([`data.nix`](../nix/fixtures/connector/data.nix)) and
+  github ([`data.nix`](../connectors/github/data.nix)) register this way; the
+  other first-party Connectors still use a flake module and move over in their
+  own issues, after which the flake-module path is withdrawn.
+
 - **Row-owned knobs.** A row's `knobs` attrset has the shape of a core row's
   (ADR 0068), keyed by env-schema key with an env-schema entry as value. The
   knobs fold into `spindrift.envSchema` on top of lib/env-schema.nix. Only that
@@ -2519,7 +2556,7 @@ with `+`, or symlinks that point outside the Connector.
 #### Backend rows on a Connector
 
 A Connector row may carry `backend`, a network backend's row (ADR 0073). The
-fixture Connector's, declared as data in
+fixture Connector's, as the row core builds from its
 [`nix/fixtures/connector/data.nix`](../nix/fixtures/connector/data.nix):
 
 ```nix
