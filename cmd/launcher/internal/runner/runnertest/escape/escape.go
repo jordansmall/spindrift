@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -168,8 +169,8 @@ func defaultGateway(t *testing.T) string {
 	return ""
 }
 
-// escapeProber loads escape.wasm into s and returns the call it answers.
-func escapeProber(ctx context.Context, t *testing.T, s *connectorhost.Sessions) func(kind, arg string) escapeResult {
+// escapeWasm is the escape fixture Connector's module.
+func escapeWasm(t *testing.T) []byte {
 	t.Helper()
 	dir, err := fixturebuild.ConnectorDir()
 	if err != nil {
@@ -179,7 +180,13 @@ func escapeProber(ctx context.Context, t *testing.T, s *connectorhost.Sessions) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := s.Load(ctx, wasm)
+	return wasm
+}
+
+// escapeProber loads escape.wasm into s and returns the call it answers.
+func escapeProber(ctx context.Context, t *testing.T, s *connectorhost.Sessions) func(kind, arg string) escapeResult {
+	t.Helper()
+	c, err := s.Load(ctx, escapeWasm(t))
 	if err != nil {
 		t.Fatalf("Load escape.wasm: %v", err)
 	}
@@ -391,5 +398,93 @@ func RouteRefusal(t *testing.T, r runner.Runner) {
 	}
 	if hits.Load() != 0 {
 		t.Errorf("the backend saw %d requests, want none", hits.Load())
+	}
+}
+
+// Impersonation has a Connector whose sandbox is compromised forge an
+// http_request frame for a Connector that is not its own, through r's
+// per-Connector sandboxes (connectorsandbox pool), and asserts no credential is
+// attached. Two cases, both against one backend that records every request:
+//
+//   - A backend row A, in its own sandbox, forges the frame under session 2, the
+//     id the Connector B would hold had A and B shared a pipe. A is session 1 of
+//     its own pipe, so the Launcher refuses the frame, which names a session
+//     it never opened (ErrMalformedOutput), and fails A's pipe; B, in its own
+//     sandbox, still serves and reaches the backend with its credential alone.
+//   - A Driver Connector, in the pool's shared Driver sandbox with no Host grant,
+//     forges the frame under its own session: the Launcher refuses a Host call
+//     the session was never granted (ErrMalformedOutput).
+//
+// It changes the working directory (t.Chdir), so callers must not run in
+// parallel.
+func Impersonation(t *testing.T, r sandbox.Starter) {
+	const credA, credB = escapeCredentialEnv + "_A", escapeCredentialEnv + "_B"
+	t.Setenv(credA, "sentinel-a")
+	t.Setenv(credB, "sentinel-b")
+	var (
+		mu    sync.Mutex
+		auths []string
+	)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(_ http.ResponseWriter, req *http.Request) {
+		mu.Lock()
+		auths = append(auths, req.Header.Get("Authorization"))
+		mu.Unlock()
+	}))
+	defer srv.Close()
+	seen := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(auths)
+	}
+
+	pool := sandbox.NewPool(r, "escape")
+	t.Cleanup(func() { _ = pool.Close(context.Background()) })
+	dir, err := fixturebuild.ConnectorDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), escapeTimeout)
+	defer cancel()
+	// Load opens each row's audit file under the working directory's log directory.
+	t.Chdir(t.TempDir())
+	routes := []connectorhost.Route{{Method: "GET", Host: srv.Listener.Addr().String(), Path: "/repos"}}
+	loadRow := func(name, module, credential string) *connectorhost.Connector {
+		t.Helper()
+		row := backendrows.Row{Name: name, Module: filepath.Join(dir, module), Routes: routes, CredentialEnv: credential}
+		c, err := backendrows.Load(ctx, row, backendrows.Options{Sandbox: pool.Own(name), Client: srv.Client()})
+		if err != nil {
+			t.Fatalf("Load %s through its sandbox: %v", name, err)
+		}
+		t.Cleanup(func() { _ = c.Close(context.Background()) })
+		return c
+	}
+	attacker := loadRow("escape-a", "escape.wasm", credA)
+	victim := loadRow("escape-b", "network.wasm", credB)
+	driver, err := pool.Load(ctx, escapeWasm(t))
+	if err != nil {
+		t.Fatalf("Load escape.wasm into the Driver sandbox: %v", err)
+	}
+	t.Cleanup(func() { _ = driver.Close(context.Background()) })
+
+	forgeFrame := func(c *connectorhost.Connector, session int) error {
+		arg := fmt.Sprintf("%d %s/repos/x", session, srv.URL)
+		return c.Call(ctx, "escape", map[string]string{"kind": "frame", "arg": arg}, new(escapeResult))
+	}
+	if err := forgeFrame(attacker, 2); !errors.Is(err, connectorhost.ErrMalformedOutput) {
+		t.Errorf("a frame for a session of another Connector: err = %v, want ErrMalformedOutput", err)
+	}
+	if err := forgeFrame(driver, 1); !errors.Is(err, connectorhost.ErrMalformedOutput) {
+		t.Errorf("an http_request from a Driver Connector: err = %v, want ErrMalformedOutput", err)
+	}
+	if got := seen(); len(got) != 0 {
+		t.Fatalf("the backend saw requests with Authorization %q, want none", got)
+	}
+
+	params := map[string]string{"url": srv.URL + "/repos/x", "method": "GET"}
+	if err := victim.Call(ctx, "fetch", params, new(struct{})); err != nil {
+		t.Fatalf("the other Connector after the forgery: %v, want it to serve", err)
+	}
+	if got := seen(); !slices.Equal(got, []string{"Bearer sentinel-b"}) {
+		t.Errorf("the backend saw Authorization %q, want one request with the other Connector's own credential", got)
 	}
 }
