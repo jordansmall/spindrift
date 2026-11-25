@@ -25,18 +25,17 @@
 
 # An omitted bool means false. An omitted trackerAxisRead or trackerAxisWrite
 # means "GITHUB"; an omitted trackerAxisFiler or forgeBackend means "GH"; an
-# omitted doctorTokenHint or doctorSlugHint means doctor's github-shaped
-# default. Omission is the only way to ask for a default:
-# renderBackendRegistryGo throws on an explicit "" for tokenEnvVar or any of
-# those defaulted string fields except trackerAxisWrite, because the generated
-# Go cannot tell "" from omitted, and lib/mkHarness.nix defaults on absence
-# while cmd/launcher defaults on emptiness (issue #3487). trackerAxisWrite = ""
-# is legal (see local) because cmd/launcher reads it as-is. trackerAxisRead
-# and trackerAxisWrite must be set together or neither, and trackerAxisFiler
-# requires trackerAxisRead, else renderBackendRegistryGo throws:
-# backend.TrackerAxisSignals drops write and filer for a row that omits read
-# (issue #4183), and reads an omitted write as "" where mkHarness.nix says
-# "GITHUB" (issue #2673).
+# omitted doctorSlugHint means doctor's github-shaped default. Omission is the
+# only way to ask for a default: renderBackendRegistryGo throws on an explicit
+# "" for tokenEnvVar or any of those defaulted string fields except
+# trackerAxisWrite, because the generated Go cannot tell "" from omitted, and
+# lib/mkHarness.nix defaults on absence while cmd/launcher defaults on
+# emptiness (issue #3487). trackerAxisWrite = "" is legal (see local) because
+# cmd/launcher reads it as-is. trackerAxisRead and trackerAxisWrite must be set
+# together or neither, and trackerAxisFiler requires trackerAxisRead, else
+# renderBackendRegistryGo throws: backend.TrackerAxisSignals drops write and
+# filer for a row that omits read (issue #4183), and reads an omitted write as
+# "" where mkHarness.nix says "GITHUB" (issue #2673).
 
 # displayName (required) is the prompt's ${FORGE_DISPLAY_NAME} (issue #5647),
 # so a fragment shared by several backends need not fork per backend. It is not

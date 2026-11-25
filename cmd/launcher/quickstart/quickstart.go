@@ -805,14 +805,14 @@ flake.nix.bak*
 const quickstartEnvrc = "use flake\n"
 
 // doctorHints resolves doctor.Config's TokenHint, SlugHint, and NoLabelRegistry.
-// Empty hints mean "use doctor.Run's github-shaped default"; an unknown
-// tracker keeps the label check.
+// The token hint is the row's TokenEnvVar and an empty slug hint means
+// doctor.Run's github-shaped default; an unknown tracker keeps the label check.
 func doctorHints(issueTracker string) (tokenHint, slugHint string, noLabelRegistry bool) {
 	row, ok := backend.ByName(issueTracker)
 	if !ok {
 		return "", "", false
 	}
-	return row.DoctorTokenHint, row.DoctorSlugHint, !row.LabelRegistry
+	return row.TokenEnvVar, row.DoctorSlugHint, !row.LabelRegistry
 }
 
 // backendChoice is the backend the wizard settled on, its Strategy row (set

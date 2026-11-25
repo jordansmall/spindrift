@@ -16,6 +16,7 @@ import (
 func defaultDoctorConfig() Config {
 	return Config{
 		IssueTracker:    "github",
+		TokenHint:       "GH_TOKEN",
 		Label:           "ready-for-agent",
 		InProgressLabel: "agent-in-progress",
 		FailedLabel:     "agent-failed",
@@ -1473,5 +1474,35 @@ func TestRun_RepoNameRow(t *testing.T) {
 				t.Errorf("output must not contain %q, got:\n%s", tc.wantNot, out)
 			}
 		})
+	}
+}
+
+func TestRun_AuthFailure_HintNamesRowCredential(t *testing.T) {
+	it := forge.NewFake()
+	it.ProbeErr = forge.ErrAuthFailure
+	c := defaultDoctorConfig()
+	c.TokenHint = "FORGEJO_TOKEN"
+
+	err := Run(it, forge.NewFake(), c, NewReporter(&bytes.Buffer{}, true), bufio.NewScanner(strings.NewReader("")), false, nil)
+	if err == nil || !strings.Contains(err.Error(), "check FORGEJO_TOKEN is set and valid") {
+		t.Errorf("want hint naming FORGEJO_TOKEN, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "GH_TOKEN") {
+		t.Errorf("want no GH_TOKEN in a forgejo hint, got: %v", err)
+	}
+}
+
+func TestRun_AuthFailure_NoCredentialNamesNoVariable(t *testing.T) {
+	it := forge.NewFake()
+	it.ProbeErr = forge.ErrAuthFailure
+	c := defaultDoctorConfig()
+	c.TokenHint = ""
+
+	err := Run(it, forge.NewFake(), c, NewReporter(&bytes.Buffer{}, true), bufio.NewScanner(strings.NewReader("")), false, nil)
+	if err == nil || !errors.Is(err, ErrConnectivity) || !errors.Is(err, forge.ErrAuthFailure) {
+		t.Fatalf("want ErrConnectivity wrapping ErrAuthFailure, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "GH_TOKEN") || strings.Contains(err.Error(), "is set and valid") {
+		t.Errorf("want no credential named for a backend without one, got: %v", err)
 	}
 }

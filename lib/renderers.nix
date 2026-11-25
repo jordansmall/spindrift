@@ -1232,7 +1232,6 @@ rec {
   # reads it as-is, so local's "" round-trips.
   backendRegistryForbiddenEmptyFields = [
     "tokenEnvVar"
-    "doctorTokenHint"
     "doctorSlugHint"
     "trackerAxisRead"
     "trackerAxisFiler"
@@ -1257,7 +1256,6 @@ rec {
         (optional "validAsCodeForge" "ValidAsCodeForge" false)
         (optional "connectorOnly" "ConnectorOnly" false)
         (optional "tokenEnvVar" "TokenEnvVar" "")
-        (optional "doctorTokenHint" "DoctorTokenHint" "")
         (optional "doctorSlugHint" "DoctorSlugHint" "")
         (optional "hostMediatedRemote" "HostMediatedRemote" false)
         (optional "hostSeededMirror" "HostSeededMirror" false)

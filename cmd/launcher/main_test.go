@@ -4531,8 +4531,8 @@ func TestDoctor_AuthFailure_Local(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "GH_TOKEN") {
-		t.Errorf("want error to mention GH_TOKEN, got: %v", err)
+	if strings.Contains(err.Error(), "GH_TOKEN") {
+		t.Errorf("a local tracker has no credential; want no GH_TOKEN in the error, got: %v", err)
 	}
 }
 

@@ -18,7 +18,6 @@
     flakeInput = null;
     moduleImport = null;
   };
-  doctorTokenHint = "FORGEJO_TOKEN";
   doctorSlugHint = "FORGEJO_BASE_URL";
   outboxRelayCapable = true;
   relayCapable = true;

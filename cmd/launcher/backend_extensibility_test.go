@@ -21,7 +21,6 @@ func fakeGitlabRow() backendkit.Strategy {
 			ValidAsTracker:   true,
 			ValidAsCodeForge: true,
 			TokenEnvVar:      "GITLAB_TOKEN",
-			DoctorTokenHint:  "GITLAB_TOKEN",
 			DoctorSlugHint:   "GITLAB_BASE_URL",
 		},
 		ValidateTracker: func(s backendkit.Shared, _ backendkit.Lookup) error {
@@ -88,8 +87,8 @@ func TestBackendRegistry_NewBackendNeedsOnlyRowAndNoOtherChanges(t *testing.T) {
 	if !ok {
 		t.Fatal("backendkit.ByName(c.issueTracker) ok = false, want true")
 	}
-	if hintRow.DoctorTokenHint != "GITLAB_TOKEN" {
-		t.Errorf("doctorTokenHint = %q, want %q", hintRow.DoctorTokenHint, "GITLAB_TOKEN")
+	if hintRow.TokenEnvVar != "GITLAB_TOKEN" {
+		t.Errorf("tokenEnvVar = %q, want %q", hintRow.TokenEnvVar, "GITLAB_TOKEN")
 	}
 	if hintRow.DoctorSlugHint != "GITLAB_BASE_URL" {
 		t.Errorf("doctorSlugHint = %q, want %q", hintRow.DoctorSlugHint, "GITLAB_BASE_URL")
