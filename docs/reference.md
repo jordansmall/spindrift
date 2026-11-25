@@ -2668,7 +2668,7 @@ network Connector: it serves `tracker.listIssues`, `tracker.issue`,
 one GraphQL rollup query, through `http_request`;
 the host attaches the credential. It also serves the forge branch and PR
 primitives (open, merge, compare, comment, branch lookup and delete, branch
-protection), declared as protocol 0.3.x, through eight further write-half
+protection), declared as protocol 0.4.x, through eight further write-half
 routes, each pinned to `{repo}`: `POST` and `PUT /pulls`, `POST /issues`,
 `GET /compare`, `/git/matching-refs/heads`, `/branches` and `/rules/branches`,
 and `DELETE /git/refs/heads`. The tracker write primitives (add and remove a
@@ -2765,7 +2765,7 @@ to `spindrift doctor` instead of loading the Connector.
 #### The jira Connector
 
 `connectors/jira` is the jira backend's tracker path as a network
-Connector on protocol 0.2: it serves `tracker.listIssues`, `tracker.issue`,
+Connector on protocol 0.4: it serves `tracker.listIssues`, `tracker.issue`,
 `tracker.comments`, `tracker.nativeDeps`, `tracker.blocks`, and doctor's and
 the daemon's reads (`tracker.probe`, `tracker.statuses`, `tracker.createMeta`
 and `tracker.count`, re-asked every five minutes) over Jira REST
@@ -2803,7 +2803,7 @@ The Connector also ships jira's tracker-axis fragment folder,
 #### The forgejo Connector
 
 `connectors/forgejo` is the forgejo backend's forge and tracker paths as a
-network Connector on protocol 0.3. Its forge half serves `forge.prsForBranch`,
+network Connector on protocol 0.4. Its forge half serves `forge.prsForBranch`,
 `forge.pr`, `forge.checks` and `forge.jobLog` over Forgejo's REST API through
 `http_request`, plus the branch and PR primitives (branch lookup and delete,
 open, merge, compare, files, draft flip, comment, auto-merge, branch
@@ -3612,7 +3612,7 @@ generates the scaffold under two names and checks each.
 
 The protocol, not the SDK, is the contract between core and a Connector
 ([ADR 0073](adr/0073-backends-and-drivers-are-trust-no-one-wasm-connectors.md)).
-This is protocol version **0.3.0**. The host is
+This is protocol version **0.4.0**. The host is
 [`connectorhost`](../cmd/launcher/internal/connectorhost/connectorhost.go).
 
 The protocol is described once as data, in
@@ -3651,7 +3651,7 @@ description and a regen.
   bytes in the module's memory export named `memory`. The result is:
 
   ```json
-  {"protocolVersion": "0.3.0", "capabilities": []}
+  {"protocolVersion": "0.4.0", "capabilities": []}
   ```
 
   `capabilities` is an array of strings, `[]` when empty; both fields are
@@ -4080,7 +4080,7 @@ description and a regen.
 
   | Method | Params | Result |
   |---|---|---|
-  | `forge.remote` | `{target}` | `{cloneUrl, webUrl}`, the repository's git identity |
+  | `forge.probe` | `{target}` | `{repo}`, the repository's `owner/name`: one cheap authenticated read |
   | `forge.branchExists` | `{target, branch}` | `{exists}` |
   | `forge.deleteBranch` | `{target, branch}` | `{}`; deletes `branch` from the forge |
 
@@ -4089,15 +4089,16 @@ description and a regen.
   merge, rebase) stays in core's own git plumbing against the derived clone URL
   below, with core's credential, which the Connector never sees.
   [`connectorforge.Compose`](../cmd/launcher/internal/connectorforge/pushonly.go)
-  builds the Code Forge and refuses a Connector without `"forge.branches"`, or
-  declaring neither `"forge.pushOnly"` nor `"forge.prs"`. Core derives the clone
-  URL `<web base>/<owner>/<name>.git` from the forge's Git remote declaration
-  (its backend row's `gitRemote`) and the Target repository, and the web host
-  PR URLs are pinned to from the same declaration, subpath included; core never
-  calls `forge.remote`, so the git credential goes only to the derived
-  repository URL. A Probe with no `forge.probe` asks `forge.branchExists` as a
-  liveness check that reaches the backend, and ignores the answer. The SDK's
-  `forge.RegisterBranches(forge.Branches{...})` serves the methods.
+  builds the Code Forge and refuses a Connector without `"forge.branches"` or
+  `"forge.probe"`, or declaring neither `"forge.pushOnly"` nor `"forge.prs"`.
+  Core derives the clone URL `<web base>/<owner>/<name>.git` from the forge's
+  Git remote declaration (its backend row's `gitRemote`) and the Target
+  repository, and the web host PR URLs are pinned to from the same declaration,
+  subpath included; core never asks the Connector for either, so the git
+  credential goes only to the derived repository URL. A Probe calls
+  `forge.probe`, which reaches the backend. The SDK's
+  `forge.RegisterBranches(forge.Branches{...})` serves the methods, and its
+  `Probe` is required.
 
   **PR primitives.** A forge Connector that advertises `"forge"`,
   `"forge.branches"` and `"forge.prs"`, and not `"forge.pushOnly"`, is
@@ -4114,7 +4115,7 @@ description and a regen.
   | `forge.comment` | `{target, number, body}` | `{}` |
   | `forge.merge` | `{target, number}` | `{}` |
 
-  Five more are optional, each declared by its own capability. Without one,
+  Four more are optional, each declared by its own capability. Without one,
   the composed forge lacks that surface, exactly as a native forge without the
   API does: no capability lookup or type probe finds it.
 
@@ -4123,7 +4124,6 @@ description and a regen.
   | `forge.autoMerge` | `forge.autoMergeAllowed` (`{target}` → `{allowed}`), `forge.enqueueAutoMerge` (`{target, number}` → `{}`) | auto-merge reads as disallowed |
   | `forge.ciRun` | `forge.ciRun` (`{target, number}` → `{url}`) | no CI run link |
   | `forge.branchProtection` | `forge.branchProtected` (`{target, branch}` → `{protected}`) | doctor's `branch-protection` row is not applicable |
-  | `forge.probe` | `forge.probe` (`{target}` → `{repo}`) | Probe asks `forge.branchExists` as a liveness check |
   | `forge.draftPRs` | `forge.openPR` (`{target, pr: {title, body, base, head, draft}}` → a PR) | no draft-PR creation, host-side branch push, bundle relay or commit subjects: the forge cannot host-mediate a read-only Box (see Host mediation) |
 
   Core pins every PR URL to the remote's web host, fails closed on an unknown
@@ -4172,9 +4172,9 @@ description and a regen.
 
   The forge axis is final at these methods and capabilities: `forge`
   (`prsForBranch`, `pr`, `checks`, optional `jobLog`), `forge.branches`
-  (`remote`, `branchExists`, `deleteBranch`), `forge.pushOnly` or `forge.prs`
+  (`probe`, `branchExists`, `deleteBranch`), `forge.pushOnly` or `forge.prs`
   (`behind`, `prFiles`, `setDraft`, `comment`, `merge`), and the optional
-  `forge.autoMerge`, `forge.ciRun`, `forge.branchProtection`, `forge.probe`
+  `forge.autoMerge`, `forge.ciRun`, `forge.branchProtection`
   and `forge.draftPRs`. A new forge surface would be a new optional
   capability, an additive protocol bump.
 
@@ -4198,27 +4198,30 @@ description and a regen.
   giving `tracker.listIssues`, `tracker.count`, `tracker.labeled` and
   `tracker.fileIssue` an optional `route` behind `tracker.route`, adding
   `tracker.matchesRoute` behind `tracker.route`, giving a
-  PR an optional `crossRepo`, changing the `driver.sessionFlags` result from
-  `{flags}` to `{flag, value}`, or adding the `not-mergeable` error class
-  within 0.3 takes no bump. An older Connector ignores `cursor` and sends no
-  `next`, so core reads its one page as before. A 0.3 Driver Connector built
-  before the `driver.sessionFlags` change still answers `{flags}`, which
-  decodes to the zero answer, so core pins no session and raises no error
-  until the 0.4.0 handshake refuses a 0.3 Driver Connector. An older Connector
-  advertises no `tracker.route`, so core refuses a route rather than send
-  it. An older Connector that reports a real not-mergeable refusal as
+  PR an optional `crossRepo`, or adding the `not-mergeable` error class within
+  0.3 takes no bump. An older Connector ignores `cursor` and sends no
+  `next`, so core reads its one page as before. An older Connector advertises
+  no `tracker.route`, so core refuses a route rather than send it. An older
+  Connector that reports a real not-mergeable refusal as
   `permanent` now fails the merge at once instead of polling for checks,
   which fails fast and loses nothing. The `tracker.statuses` reply also gained
   an optional `categories` map (status name to category); an older Connector
   sends none, so core reads an empty category and the routed daemon's
   Done-category warning stays silent. Core
-  accepts its current `0.y` and the one before it, so today 0.3.z and 0.2.z.
+  accepts its current `0.y` and the one before it, so today 0.4.z and 0.3.z,
+  except that a 0.3 Connector declaring a forge-axis or Driver-axis
+  capability is refused at the handshake: the 0.4.0 forge axis dropped
+  `forge.remote` and requires `forge.probe` with `forge.branches`, and a
+  Driver answers `driver.sessionFlags` as `{flag, value}`. A 0.3 tracker
+  Connector still loads.
   That overlap is what protects a third-party Connector, not core's CI, which
   runs only first-party Connectors' conformance: a third-party Connector has
   one `0.y` bump to move before core refuses it.
   Any other version is refused at load with
-  `connector protocol "<version>" is outside core's supported range 0.2.x to 0.3.x (core speaks 0.3.0)`,
-  naming the Connector's version, core's range and core's own version. A
+  `connector protocol "<version>" is outside core's supported range 0.3.x to 0.4.x (core speaks 0.4.0); rebuild it against the current SDK or upgrade core to match`,
+  naming the Connector's version, core's range and core's own version; a
+  Connector loaded from a row is named `connector "<name>"`. The
+  refused 0.3 forge or Driver Connector gets `connector "<name>" declares protocol "<version>" on the <axis> axis, which changed in 0.4.0: core needs 0.4.x; rebuild it against the current SDK`. A
   module that is not valid wasm, imports something ungranted, declares sizes
   over the caps above, lacks the export or the `memory` export, has the wrong
   signature, returns malformed JSON or runs past its time budget (its own
