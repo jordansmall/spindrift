@@ -72,14 +72,13 @@ func TestDriverDecodesALargeLineWithoutWedging(t *testing.T) {
 // again survives, so a collect-once regression fails too.
 func TestDriverDecodesALongRunWithoutExhaustingMemory(t *testing.T) {
 	t.Cleanup(connectorhost.SetGuestEnv(map[string]string{"GOGC": "off"}))
-	cache := t.TempDir() // compiling driver.wasm is most of a short subtest
 	line := strings.Repeat("a", 4<<10)
 	// The cap goes in before the load: applyLimits only raises the guest's
 	// allocator ceiling, so a cap lowered after the load never takes effect.
 	load := func(t *testing.T, memoryCap uint64) (*connectorhost.Connector, driverkit.Strategy) {
 		t.Helper()
 		t.Cleanup(connectorhost.SetMemoryCap(memoryCap))
-		c, err := connectorhost.LoadCompiled(context.Background(), fixture(t, "driver.wasm"), cache)
+		c, err := connectorhost.LoadCompiled(context.Background(), fixture(t, "driver.wasm"), sharedCache)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -132,7 +131,7 @@ func TestDriverDecodesALongRunWithoutExhaustingMemory(t *testing.T) {
 // correct decode of such a line answers with about 6 times the line, past the
 // base cap. The host sends the line raw, so the request stays near 1.5 MiB.
 func TestDriverDecodeOutputMayExceedTheBaseCap(t *testing.T) {
-	c, err := connectorhost.LoadCompiled(context.Background(), fixture(t, "driver.wasm"), t.TempDir())
+	c, err := connectorhost.LoadCompiled(context.Background(), fixture(t, "driver.wasm"), sharedCache)
 	if err != nil {
 		t.Fatal(err)
 	}

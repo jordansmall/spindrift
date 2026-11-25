@@ -137,7 +137,7 @@ func netLoadersFor(t testing.TB) map[string]netLoader {
 		"process":     networkProcessLoader(t),
 		"interpreter": connectorhost.LoadNetwork,
 		"compiled": func(ctx context.Context, wasm []byte, n connectorhost.Network) (*connectorhost.Connector, error) {
-			return connectorhost.LoadNetworkCompiled(ctx, wasm, n, "")
+			return connectorhost.LoadNetworkCompiled(ctx, wasm, n, sharedCache)
 		},
 	}
 }
