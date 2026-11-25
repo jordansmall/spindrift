@@ -183,6 +183,7 @@ let
   # Single source of truth for the vendorHash values and the nix-builder
   # digest otherwise duplicated across build sites (issue #784 / #2523).
   buildConstants = import ./build-constants.nix;
+  connectorData = import ./connector-data.nix;
 
   nixpkgsShared = import ./nixpkgs-shared.nix;
 
@@ -542,14 +543,9 @@ let
     lib.concatMap (
       dir:
       let
-        connector = (import dir).lib.connector { core = import ../core; };
+        row = connectorData.driverRowOf lib ((import dir).lib.connector { core = import ../core; });
       in
-      lib.optional (connector ? driverRow) (
-        let
-          row = connector.driverRow lib;
-        in
-        lib.nameValuePair row.name row
-      )
+      lib.optional (row != null) (lib.nameValuePair row.name row)
     ) (import ../nix/connector-dirs.nix)
   );
   wasmOf = p: r: builtins.unsafeDiscardStringContext (r.module p);

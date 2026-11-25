@@ -16,15 +16,7 @@ let
   connectorData = import ../lib/connector-data.nix;
   # One entry per Connector: { <name> = { knobs; backend; ... }; }.
   connectorRows = map (
-    dir:
-    let
-      entry = (import dir).lib.connector { core = stubCore; };
-      fromData = connectorData.rowOf entry;
-    in
-    if fromData != null then
-      fromData
-    else
-      (entry.flakeModule { inherit lib; }).spindrift.connectors or { }
+    dir: connectorData.rowsOf { inherit lib; } ((import dir).lib.connector { core = stubCore; })
   ) (import ./connector-dirs.nix);
   rows = lib.foldl' (acc: r: acc // r) { } connectorRows;
   backendRows = lib.filterAttrs (_: r: r ? backend) rows;

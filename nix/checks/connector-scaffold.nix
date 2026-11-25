@@ -48,6 +48,7 @@ let
   core = import ../../core // {
     inputs.nixpkgs = nixpkgs;
   };
+  connectorData = import ../../lib/connector-data.nix;
   registry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
   inherit (import ../../lib/fragment-paths.nix) declaredBy;
 
@@ -96,6 +97,22 @@ let
     namesProblems what want want got;
 
   load = dir: f: import (dir + "/${f}");
+  # A Connector registers in `data.nix` once it has moved to data, else in
+  # `module.nix`; the scaffold compares the two forms as one skeleton file.
+  registrationFile =
+    dir: if builtins.pathExists (dir + "/data.nix") then "data.nix" else "module.nix";
+  asModuleFile = map (r: if r == "data.nix" then "module.nix" else r);
+  # `data` stands for the `fragments` and `driverRow` a module-form entry carries.
+  registrationAttrs = subtractLists [
+    "data"
+    "fragments"
+    "driverRow"
+  ];
+  # The `spindrift.connectors.<name>` row a Connector registers: from its
+  # `data` once it has moved there, else from its module.nix.
+  registeredRow =
+    dir: name: modArgs:
+    (connectorData.rowsOf modArgs ((load dir "default.nix").lib.connector { inherit core; })).${name};
   argNames = v: attrNames (builtins.functionArgs v);
   expect = ok: msg: if ok then [ ] else [ msg ];
 
@@ -128,13 +145,13 @@ let
       # The reference's and the template's `f` must take the same arguments.
       sameArgs = what: f: sameNames what (argNames (f refDir)) (argNames (f tmplDir));
 
-      tmplSet = sorted (map toRef (tmplFiles (relFiles tmplDir)));
+      tmplSet = sorted (asModuleFile (map toRef (tmplFiles (relFiles tmplDir))));
       # Guarded: a Driver reference carries no fragments.nix.
       omittedFiles = optionals (omitsFragments != [ ]) (
         omittedFragmentFiles omitsFragments (load refDir "fragments.nix").shipped
       );
       fileSet = fileSetProblems ref tmplSet (
-        sorted (subtractLists omittedFiles (skeletonOf (relFiles refDir)))
+        sorted (asModuleFile (subtractLists omittedFiles (skeletonOf (relFiles refDir))))
       );
 
       flakes = forBoth (d: load d "flake.nix");
@@ -151,10 +168,15 @@ let
         ++ sameNames "flake.nix checks" (attrNames outputs.ref.checks.${system}) (
           sorted (map toRef (attrNames outputs.tmpl.checks.${system}))
         )
-        ++ sameNames "default.nix connector attrs" (attrNames entries.ref) (attrNames entries.tmpl)
+        ++ sameNames "default.nix connector attrs" (registrationAttrs (attrNames entries.ref)) (
+          registrationAttrs (attrNames entries.tmpl)
+        )
+        ++ expect (
+          (connectorData.fragmentsOf entries.ref == null) == (connectorData.fragmentsOf entries.tmpl == null)
+        ) "default.nix: exactly one of the template and ${ref} declares fragments"
         ++ sameArgs "default.nix lib.connector args" (d: (load d "default.nix").lib.connector)
         ++ sameArgs "package.nix args" (d: load d "package.nix")
-        ++ sameArgs "module.nix args" (d: load d "module.nix")
+        ++ sameArgs "module.nix or data.nix args" (d: load d (registrationFile d))
         ++ (
           let
             lines = d: filter (l: l != "") (pkgs.lib.splitString "\n" (builtins.readFile (d + "/go.mod")));
@@ -237,7 +259,7 @@ let
     }:
     let
       frag = d: load d "fragments.nix";
-      rowOf = dir: name: ((load dir "module.nix") { inherit core; } { }).spindrift.connectors.${name};
+      rowOf = dir: name: registeredRow dir name { };
       rows = {
         tmpl = rowOf tmplDir token;
         ref = rowOf refDir ref;
@@ -248,18 +270,18 @@ let
     # A first-party reference may name its own backend's core credential and
     # declare no knobs (issues #7500 and #7501); a third-party row cannot name a core
     # knob, so the template always declares its own credential knob.
-    sameNames "module.nix row attrs" (subtractLists [ "knobs" ] (attrNames rows.ref)) (
+    sameNames "registered row attrs" (subtractLists [ "knobs" ] (attrNames rows.ref)) (
       subtractLists [ "knobs" ] (attrNames rows.tmpl)
     )
     # The template's backend and knobs may use fewer of the reference's options
     # (token auth, not Basic), never one it does not.
-    ++ namesProblems "module.nix backend" [
+    ++ namesProblems "registered row backend" [
       "module"
       "routes"
       "credential"
       "base"
     ] (attrNames rows.ref.backend) (attrNames rows.tmpl.backend)
-    ++ namesProblems "module.nix knob fields" [ "env" "group" "doc" ] (
+    ++ namesProblems "registered row knob fields" [ "env" "group" "doc" ] (
       if rows.ref ? knobs then
         allKnobFields rows.ref
       else
@@ -296,9 +318,7 @@ let
         inherit core;
         inherit (pkgs) lib;
       };
-      registered =
-        ((load tmplDir "module.nix") { inherit core; } { inherit (pkgs) lib; })
-        .spindrift.connectors.${token};
+      registered = registeredRow tmplDir token { inherit (pkgs) lib; };
       valid = builtins.tryEval (builtins.deepSeq (registry.assertRow token row) true);
     in
     namesProblems "row.nix row attrs" (registry.requiredAttrs ++ [ "module" ]) registry.knownAttrs (
@@ -307,7 +327,7 @@ let
     ++ expect valid.success "row.nix: refused by the Driver registry's validators (assertRow in lib/drivers/default.nix)"
     ++ expect (
       registered ? driver && attrNames registered.driver == attrNames row
-    ) "module.nix: spindrift.connectors.${token}.driver is not row.nix's row";
+    ) "registered row: spindrift.connectors.${token}.driver is not row.nix's row";
 
   trackerScaffold = scaffold {
     tmplDir = ../../templates/connector-tracker;
@@ -338,6 +358,22 @@ let
   };
 
   controls = {
+    dataFileIsModuleFile =
+      fileSetProblems "r"
+        (sorted (asModuleFile [
+          "data.nix"
+          "a.nix"
+        ]))
+        (
+          sorted (asModuleFile [
+            "a.nix"
+            "module.nix"
+          ])
+        ) == [ ];
+    registrationFilePrefersData = registrationFile ../fixtures/connector == "data.nix";
+    # nix/checks itself holds no data.nix, so no Connector's own move can flip this.
+    registrationFileDefaultsToModule = registrationFile ./. == "module.nix";
+    dataFormRowRead = (registeredRow ../fixtures/connector "fixture" { }) ? backend;
     refGainsAFile = fileSetProblems "r" [ "a.nix" ] [ "a.nix" "foo.nix" ] != [ ];
     templateGainsAFile = fileSetProblems "r" [ "a.nix" "foo.nix" ] [ "a.nix" ] != [ ];
     sameFiles = fileSetProblems "r" [ "a.nix" ] [ "a.nix" ] == [ ];
