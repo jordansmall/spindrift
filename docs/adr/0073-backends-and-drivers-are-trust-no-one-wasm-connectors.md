@@ -1355,7 +1355,9 @@ first-party included, loads into it on every runner family (podman, docker,
 rancher and bwrap), and the `CONNECTOR_SANDBOX` knob and its flake option
 `infra.connector.sandbox` are gone: a leftover setting fails through the
 removed-knobs registry. The sandbox still starts lazily on the first Connector
-load, so a command that loads none starts none. This supersedes the earlier
+load, so a command that loads none starts none. (Amended by issue #7551: a
+sandbox whose host died, or whose start failed, is started again by the next
+load; a closed one never is.) This supersedes the earlier
 sentence that the mandatory sandbox "has not landed", and the opt-in rollout it
 ran under (the knob, and the dogfood check that held it on).
 
