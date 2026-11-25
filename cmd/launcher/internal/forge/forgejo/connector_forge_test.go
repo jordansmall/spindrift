@@ -57,7 +57,12 @@ func useForgejoRow(t *testing.T, baseURL string, adjust func(*backendrows.Row)) 
 // buildForge runs the production constructor; git and the Connector both read
 // FORGEJO_TOKEN from the environment.
 func buildForge(srv *httptest.Server, mergeMethod string) (forge.CodeForge, error) {
-	l := mapLookup(map[string]string{forgejo.ForgejoBaseURLEnv: srv.URL, forgejo.ForgejoTokenEnv: connectorToken})
+	return buildForgeAt(srv, srv.URL, mergeMethod)
+}
+
+// buildForgeAt is buildForge for an instance served under base, which may carry a subpath.
+func buildForgeAt(srv *httptest.Server, base, mergeMethod string) (forge.CodeForge, error) {
+	l := mapLookup(map[string]string{forgejo.ForgejoBaseURLEnv: base, forgejo.ForgejoTokenEnv: connectorToken})
 	s := backendkit.Shared{RepoSlug: connectorRepo, BaseBranch: "main", GitUserName: "Test Bot", GitUserEmail: "bot@example.com", MergeMethod: mergeMethod}
 	return forgejo.Strategy.NewCodeForge(s, l, forge.SanitizedParent{}, nil)
 }
@@ -67,12 +72,18 @@ func buildForge(srv *httptest.Server, mergeMethod string) (forge.CodeForge, erro
 // resolved Route table and the Connector's audit file.
 func productionForge(t *testing.T, srv *httptest.Server) (forge.CodeForge, []connectorhost.Route, string, error) {
 	t.Helper()
-	useForgejoRow(t, srv.URL, func(*backendrows.Row) {})
+	return productionForgeAt(t, srv, srv.URL)
+}
+
+// productionForgeAt is productionForge for an instance served under base.
+func productionForgeAt(t *testing.T, srv *httptest.Server, base string) (forge.CodeForge, []connectorhost.Route, string, error) {
+	t.Helper()
+	useForgejoRow(t, base, func(*backendrows.Row) {})
 	t.Setenv(connectorCredentialEnv, connectorToken)
 	t.Cleanup(forgejo.SetConnectorClient(srv.Client()))
 	dir := t.TempDir()
 	t.Chdir(dir)
-	cf, err := buildForge(srv, "")
+	cf, err := buildForgeAt(srv, base, "")
 	row, _ := backendrows.Lookup("forgejo")
 	return cf, connectortracker.Routes(row.Routes, connectorRepo), filepath.Join(hostpaths.LogDir(dir), connectorrecord.Name("forgejo", ".audit.jsonl")), err
 }
@@ -284,6 +295,28 @@ func TestConnectorForge_RebasePRHeadIsPinnedToTheAgentBranch(t *testing.T) {
 	}
 	if !h.repo.Rebased(branch) {
 		t.Error("the matching head was not rebased")
+	}
+}
+
+// A self-hosted forgejo under a subpath: the production constructor reads the
+// PR the instance answers under the base's path, its html_url keeps that path,
+// and the composed forge accepts the URL it handed back.
+func TestConnectorForge_SelfHostedUnderASubpath(t *testing.T) {
+	h := newConnectorHarnessAt(t, true, "/forgejo")
+	want := h.srv.URL + "/forgejo/" + connectorRepo + "/pulls/21"
+	if got := h.seedLandable("21"); got != want {
+		t.Fatalf("seeded html_url = %q, want %q", got, want)
+	}
+
+	pr, ok, err := h.caps.PRForge.OpenPRForBranch(forge.AgentBranchName(h.BranchPrefix(), "21"))
+	if err != nil || !ok || pr.URL != want {
+		t.Fatalf("OpenPRForBranch = (%+v, %v, %v), want the PR at %s", pr, ok, err, want)
+	}
+	if err := h.cf.Merge(pr.URL); err != nil {
+		t.Fatalf("Merge(%s) = %v", pr.URL, err)
+	}
+	if !h.merged(pr.URL) {
+		t.Error("the PR was not merged")
 	}
 }
 
