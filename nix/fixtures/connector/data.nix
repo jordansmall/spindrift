@@ -16,8 +16,9 @@
       boxEnv = false;
     };
 
-    # Credential knob for the backend row below; secret and host-only, like
-    # core's GH_TOKEN.
+    # The backend row's credential knob: the row names none, core derives
+    # FIXTURE_TOKEN from the row name; this knob's env matches it, so it shows
+    # as the row's `credentialKnob`.
     fixtureToken = {
       env = "FIXTURE_TOKEN";
       group = "dispatch";
@@ -63,7 +64,8 @@
   };
 
   # A network Connector's backend row (issue #6805): the Route table the host
-  # enforces, and the knob whose value authorizes the requests.
+  # enforces. It names no credential; core derives FIXTURE_TOKEN (see
+  # fixtureToken).
   module = pkgs: "${import ./package.nix { inherit pkgs core; }}/network.wasm";
   routes = [
     {
@@ -72,5 +74,4 @@
       path = "/repos";
     }
   ];
-  credential = "fixtureToken";
 }

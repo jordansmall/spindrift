@@ -2374,6 +2374,7 @@ in
         "imageAttrName"
         "runInputDocumentFile"
         "backendBundleDirs"
+        "backendFirstParty"
         "roster"
         "launcherCurrencyFileset"
         "readOnlyReachableFragmentRows"

@@ -49,6 +49,7 @@ let
     inputs.nixpkgs = nixpkgs;
   };
   connectorData = import ../../lib/connector-data.nix;
+  connectorNames = import ../../lib/connector-names.nix;
   registry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
   inherit (import ../../lib/fragment-paths.nix) declaredBy;
 
@@ -269,7 +270,8 @@ let
     in
     # A first-party reference may name its own backend's core credential and
     # declare no knobs (issues #7500 and #7501); a third-party row cannot name a core
-    # knob, so the template always declares its own credential knob.
+    # knob, and names no `credential` at all (core derives `<NAME>_TOKEN`, issue
+    # #7560), so the template always declares its own `<NAME>_TOKEN` knob.
     sameNames "registered row attrs" (subtractLists [ "knobs" ] (attrNames rows.ref)) (
       subtractLists [ "knobs" ] (attrNames rows.tmpl)
     )
@@ -278,9 +280,11 @@ let
     ++ namesProblems "registered row backend" [
       "module"
       "routes"
-      "credential"
       "base"
-    ] (attrNames rows.ref.backend) (attrNames rows.tmpl.backend)
+    ] (subtractLists [ "credential" ] (attrNames rows.ref.backend)) (attrNames rows.tmpl.backend)
+    ++ expect (
+      rows.tmpl.knobs.${token + "ConnectorToken"}.env == connectorNames.derivedCredentialEnv token
+    ) "registered row knobs: the template's ${token}ConnectorToken knob must carry the derived env"
     ++ namesProblems "registered row knob fields" [ "env" "group" "doc" ] (
       if rows.ref ? knobs then
         allKnobFields rows.ref

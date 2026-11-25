@@ -6,16 +6,17 @@
 #     knobs; fragments; driver; }
 #
 # `name` is required. `module` (a function of pkgs returning the wasm path)
-# declares a backend row and needs `routes` and `credential`; `scheme`,
-# `identity`, `base` and `gitRemote` belong to that row. `knobs`, `fragments`
-# and `driver` are the row's own fields. `driver` is a row set, or a function of
+# declares a backend row and needs `routes`; `scheme`, `identity`, `base` and
+# `gitRemote` belong to that row. Only a first-party row names a `credential`;
+# a third-party row's is derived from `name`. `knobs`, `fragments` and `driver`
+# are the row's own fields. `driver` is a row set, or a function of
 # nixpkgs `lib` returning one: a core-derived row
 # (`(core.lib.driverEntries { inherit lib; }).opencode // { module }`) needs a
 # `lib` a data file does not have in scope. Deep checks (Route rules, scheme
 # enum, credential ownership) stay with core's row types and validators; this
 # file only refuses what those would let through silently, because the row
 # type is freeform: an unknown key, a wrongly typed field, backend fields
-# without `module`, or a backend row missing `routes` or `credential`.
+# without `module`, or a backend row missing `routes`.
 #
 # Builtins only. No reader applies `module` or touches `driver.module`, and
 # `rowsOf` leaves a function `driver` an unforced thunk, so a reader that hands
@@ -59,10 +60,7 @@ let
     "base"
     "gitRemote"
   ];
-  backendRequired = [
-    "routes"
-    "credential"
-  ];
+  backendRequired = [ "routes" ];
 
   display = {
     set = "attribute set";
@@ -139,9 +137,10 @@ let
           # hand-written Connector module sets both.
           inherit (data) routes;
           backend = {
-            inherit (data) module routes credential;
+            inherit (data) module routes;
           }
           // pick [
+            "credential"
             "scheme"
             "identity"
             "base"

@@ -22,7 +22,8 @@ rec {
   # of the core backend of the row's own name, matched by the `tokenEnvVar` its
   # descriptor declares in `backends` (the core registry), and an identity its
   # `identityEnvVar` knob (issue #7501); that entry is then checked as an own
-  # knob is.
+  # knob is. The name match is only a pre-filter, as there is no pkgs here to
+  # tell a first-party row from a third-party one (see `derivedCredentialEnv`).
   backendKnobError =
     {
       backends,
@@ -127,6 +128,68 @@ rec {
       null
     else
       "Connector '${name}': `${builtins.concatStringsSep "`, `" set}` cannot be set on a backend row: ${name} is Connector-only, with no native backend to shadow or replace. Delete the setting from spindrift.connectors.${name}.";
+
+  # The credential variable core derives for a third-party backend row from its
+  # name alone: `my-thing` -> `MY_THING_TOKEN` (issue #7560). Only a row mkHarness
+  # marks first-party (its wasm is the batteries build of that name) names its
+  # own credential; `backendCredentialError` refuses any other row's.
+  derivedCredentialEnv =
+    name:
+    let
+      chars = s: builtins.genList (i: builtins.substring i 1 s) (builtins.stringLength s);
+      lower = chars "abcdefghijklmnopqrstuvwxyz-";
+      upper = chars "ABCDEFGHIJKLMNOPQRSTUVWXYZ_";
+    in
+    builtins.replaceStrings lower upper name + "_TOKEN";
+
+  # Why a mkHarness backend row's credential cannot stand, or null; the rule is
+  # on `derivedCredentialEnv`. `coreEnvs` maps each core knob's env to its
+  # env-schema key; `otherEnvs` lists `{ row; field; env; }` for every other
+  # backend row's credential, identity, base and Git remote variable.
+  backendCredentialError =
+    {
+      name,
+      firstParty,
+      row,
+      coreEnvs,
+      otherEnvs,
+    }:
+    let
+      fail = why: "mkHarness: backendRows.${name} ${why}";
+      derived = derivedCredentialEnv name;
+      clash = builtins.filter (o: o.env == derived) otherEnvs;
+    in
+    if row ? firstParty then
+      fail "sets `firstParty`; mkHarness derives the mark itself from the batteries flake's own Connector wasm, so no row may set it"
+    else if firstParty then
+      if builtins.isString (row.credentialEnv or null) && row.credentialEnv != "" then
+        null
+      else
+        fail "must carry a non-empty string `credentialEnv` (a first-party row names its own backend's credential)"
+    else if row ? credentialEnv then
+      fail "is third-party and cannot name its own `credentialEnv` (a Connector's `backend.credential`); core derives its credential variable as `${derived}`"
+    else if builtins.match "[A-Z_][A-Z0-9_]*" derived == null then
+      fail "is third-party and its derived credential variable `${derived}` is not a valid environment variable name; rename the row"
+    else if coreEnvs ? ${derived} then
+      fail "is third-party and its derived credential variable `${derived}` is core knob `${coreEnvs.${derived}}`'s env; rename the row"
+    else if clash != [ ] then
+      fail "is third-party and its derived credential variable `${derived}` is already backendRows.${(builtins.head clash).row}'s `${(builtins.head clash).field}`; rename the row"
+    else
+      null;
+
+  # Why a derived credential variable is refused because another Connector's
+  # knob carries it (the host would attach that value to the row's routes), or
+  # null.
+  derivedCredentialClashError =
+    {
+      name,
+      derived,
+      owner,
+    }:
+    if owner == null then
+      null
+    else
+      "Connector '${name}': its derived credential variable `${derived}` is already a knob of Connector '${owner}'; rename the row";
 
   duplicateError =
     name: defs:

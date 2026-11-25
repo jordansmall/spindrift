@@ -52,15 +52,16 @@ let
     lib.filterAttrs (_: r: r.driver != null) config.spindrift.connectors
   );
   # The backend rows network Connectors register (ADR 0073, issue #6805), keyed
-  # by Connector name. `credential` names one of the Connector's own `knobs`, or
-  # its own backend's core token (github's ghToken, forgejo's forgejoToken),
-  # resolved to its env var here; any other core knob or a Box-visible one is
-  # refused, since the host attaches it to the Connector's routes and a core
-  # secret would leak to it. The env is read through `envSchema`, whose
-  # collision fold refuses a knob aliasing a core env var. `identity` (the Basic
-  # username) follows the same rule but is no secret; `base` (the URL `{base}`
-  # route hosts resolve from) is no secret either, so any env-schema knob may
-  # carry it.
+  # by Connector name. `credential` (first-party rows only: forwarded here, but
+  # mkHarness refuses a third-party row's, see `derivedCredentialEnv`) names one
+  # of the row's `knobs`, or its own backend's core token (github's ghToken,
+  # forgejo's forgejoToken), resolved to its env var here; any other core knob
+  # or a Box-visible one is refused, since the host attaches it to the
+  # Connector's routes and a core secret would leak to it.
+  # The env is read through `envSchema`, whose collision fold refuses a knob
+  # aliasing a core env var. `identity` (the Basic username) follows the same
+  # rule but is no secret; `base` (the URL `{base}` route hosts resolve from) is
+  # no secret either, so any env-schema knob may carry it.
   #
   # `acceptedRoutes` is the Consumer's reviewed Route-table baseline, read from
   # its own tree, never an option: a Connector's module cannot set its own, and
@@ -129,6 +130,26 @@ let
           };
         in
         if err != null then throw err else config.spindrift.envSchema.${key}.env;
+      derived = names.derivedCredentialEnv name;
+      # The row's own knob carrying the derived variable, if any; without one
+      # the credential has no doctor-visible knob.
+      derivedKnob = lib.findFirst (k: (r.knobs.${k}.env or null) == derived) null (lib.attrNames r.knobs);
+      derivedKnobChecked =
+        if derivedKnob == null then
+          null
+        else
+          builtins.seq (ownKnobEnv "credential" derivedKnob true) derivedKnob;
+      derivedOwner = lib.findFirst (
+        o:
+        o != name
+        && lib.any (k: (config.spindrift.connectors.${o}.knobs.${k}.env or null) == derived) (
+          lib.attrNames config.spindrift.connectors.${o}.knobs
+        )
+      ) null (lib.attrNames config.spindrift.connectors);
+      clashErr = names.derivedCredentialClashError {
+        inherit name derived;
+        owner = if b.credential == null then derivedOwner else null;
+      };
       baseEnv =
         config.spindrift.envSchema.${b.base}.env
           or (throw "Connector '${name}': backend base '${b.base}' is not an env-schema knob");
@@ -138,7 +159,9 @@ let
         knobKnown = b.gitRemote != null && config.spindrift.envSchema ? ${b.gitRemote};
       };
     in
-    if gitRemoteErr != null then
+    if clashErr != null then
+      throw clashErr
+    else if gitRemoteErr != null then
       throw gitRemoteErr
     else if b.scheme == "basic" && b.identity == null then
       throw "Connector '${name}': backend scheme 'basic' needs an `identity` (the knob holding the Basic username)"
@@ -147,10 +170,17 @@ let
     else
       {
         inherit (b) module routes;
-        credentialEnv = ownKnobEnv "credential" b.credential true;
-        credentialKnob = b.credential;
         acceptedRoutes = acceptedRoutesBaseline.${name} or [ ];
       }
+      // (
+        if b.credential != null then
+          {
+            credentialEnv = ownKnobEnv "credential" b.credential true;
+            credentialKnob = b.credential;
+          }
+        else
+          lib.optionalAttrs (derivedKnobChecked != null) { credentialKnob = derivedKnobChecked; }
+      )
       // lib.optionalAttrs (b.scheme != "bearer") { credentialScheme = b.scheme; }
       // lib.optionalAttrs (b.identity != null) { identityEnv = ownKnobEnv "identity" b.identity false; }
       // lib.optionalAttrs (b.base != null) { inherit baseEnv; }
@@ -577,8 +607,9 @@ in
                           description = "The Connector's Route table, a list of `{ method; host; path; }`, each with an optional GET-only boolean `followRedirect`.";
                         };
                         credential = mkOption {
-                          type = types.str;
-                          description = "Env-schema key of the knob holding the Connector's secret: its bearer token, or the Basic password under `scheme = \"basic\"`.";
+                          type = types.nullOr types.str;
+                          default = null;
+                          description = "A first-party row's own: the env-schema key of the knob holding its backend's secret (bearer token, or the Basic password under `scheme = \"basic\"`). A third-party row leaves it null: core derives `<NAME>_TOKEN` from the row name, and a row naming one is refused.";
                         };
                         scheme = mkOption {
                           type = types.enum [
@@ -615,11 +646,16 @@ in
                     list of `{ method; host; path; }` validated at evaluation
                     with the registry-route rules, so a blanket or non-canonical
                     route fails the build naming this Connector), and
-                    `credential` the env-schema key of the knob
-                    holding its secret: one of this Connector's own `knobs`,
+                    `credential`, a first-party row's only, the env-schema key
+                    of the knob holding its secret: one of its own `knobs`,
                     or its own backend's core token (github's `ghToken`,
                     forgejo's `forgejoToken`), secret and host-only
-                    (`boxEnv = false`); any other core knob is refused.
+                    (`boxEnv = false`); any other core knob is refused. A
+                    third-party row (a wasm that is not the batteries build
+                    of that name) names none and is refused if it does: core
+                    derives its credential variable `<NAME>_TOKEN` from the
+                    row name, and a knob of its own with that env, secret and
+                    host-only, becomes its doctor-visible credential knob.
                     `scheme` is "bearer"
                     (default) or "basic"; basic needs `identity`, the key of
                     one of the Connector's own host-only knobs holding the

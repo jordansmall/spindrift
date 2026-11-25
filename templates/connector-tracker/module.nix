@@ -13,13 +13,15 @@ in
   imports = [ core.flakeModules.default ];
 
   # Dedicated knobs, not a core token: the Connector is untrusted wasm, so a
-  # core secret must never reach it (lib/flakeModule.nix refuses one).
+  # core secret must never reach it (lib/flakeModule.nix refuses one). The row
+  # names no `credential`: core derives CONNECTORNAME_TOKEN from the row name,
+  # and this secret knob with that env shows as the row's `credentialKnob`.
   spindrift.connectors.connectorname.knobs = {
     connectornameConnectorToken = {
-      env = "SPINDRIFT_CONNECTORNAME_CONNECTOR_TOKEN";
+      env = "CONNECTORNAME_TOKEN";
       group = "dispatch";
       secret = true;
-      doc = "API token the connectorname Connector's backend row authorizes its calls with; host-only, never reaches the Box; read on every ISSUE_TRACKER=connectorname run";
+      doc = "API token the connectorname Connector's backend row authorizes its calls with, the credential core derives from the row name; host-only, never reaches the Box; read on every ISSUE_TRACKER=connectorname run";
       flakeOption = false;
       boxEnv = false;
     };
@@ -39,10 +41,9 @@ in
   spindrift.connectors.connectorname.backend = {
     module = pkgs: "${import ./package.nix { inherit pkgs core; }}/connectorname.wasm";
     inherit routes;
-    credential = "connectornameConnectorToken";
     scheme = "bearer";
     # The base is not a secret, so any env-schema knob may carry it; the
-    # Connector's own keeps it beside its credential.
+    # Connector's own keeps it beside its token.
     base = "connectornameConnectorBaseURL";
   };
 }

@@ -1,5 +1,41 @@
 # Migration Guide
 
+## A third-party backend Connector's credential variable is derived from its name (issue #7560)
+
+**A third-party Connector's backend row no longer names its credential: core
+derives it as `<NAME>_TOKEN`, the row name upper-cased with `-` mapped to
+`_`.** A row that still sets `backend.credential`, or a direct `mkHarness`
+`backendRows` row that sets `credentialEnv`, fails evaluation. A row can no
+longer set `firstParty` either: `mkHarness` derives that mark from the wasm.
+
+- **Drop `credential` / `credentialEnv`.** The template-scaffolded
+  `connectornameConnectorToken` knob with env
+  `SPINDRIFT_<NAME>_CONNECTOR_TOKEN` was named by `backend.credential`.
+- **Export the token as `<NAME>_TOKEN`.** The host reads that variable.
+- **Optionally rename the own knob's `env` to `<NAME>_TOKEN`.** A secret,
+  host-only knob of the Connector's own with that env shows in doctor as the
+  row's `credentialKnob`.
+- **Rename a row whose derived name collides.** A derived `<NAME>_TOKEN` equal
+  to a core knob's env, another row's variable or another Connector's knob
+  fails evaluation.
+
+```nix
+# before
+spindrift.connectors.acme.knobs.acmeConnectorToken = {
+  env = "SPINDRIFT_ACME_CONNECTOR_TOKEN";
+  secret = true;
+  boxEnv = false; # ...
+};
+spindrift.connectors.acme.backend.credential = "acmeConnectorToken";
+# after
+spindrift.connectors.acme.knobs.acmeConnectorToken = {
+  env = "ACME_TOKEN";
+  secret = true;
+  boxEnv = false; # ...
+};
+# no `credential`; the row's credential is ACME_TOKEN
+```
+
 ## A forge Connector drops `forge.remote` and probes through `Branches` (issue #7510)
 
 **An out-of-tree forge Connector must rebuild against the 0.4 SDK: the
