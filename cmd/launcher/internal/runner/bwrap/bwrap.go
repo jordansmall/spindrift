@@ -508,6 +508,8 @@ func (a *bwrapAdapter) buildSandboxArgs() []string {
 		"--unshare-all", "--clearenv", "--cap-drop", "ALL", "--new-session", "--die-with-parent",
 		"--proc", "/proc", "--dev", "/dev",
 		"--ro-bind", a.connectorHost, a.connectorHost,
+		// After every op above: those fabricate /proc, /dev and the store path in a writable /.
+		"--remount-ro", "/",
 		"--seccomp", strconv.Itoa(seccompFilterFD),
 		"--", a.connectorHost + "/bin/connector-host",
 	}
