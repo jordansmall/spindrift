@@ -705,3 +705,48 @@ func TestUnopenableAuditFileFailsConnector(t *testing.T) {
 		t.Errorf("loads = %d, want the Connector never to run unrecorded", n)
 	}
 }
+
+func TestReplacingADeadConnectorNotesTheReloadOnce(t *testing.T) {
+	eachAxis(t, func(t *testing.T, a axis) {
+		e := newEnv(t, a.wasm)
+		e.spec.Record = "fixture"
+		read := a.mustOpen(t, e)
+		e.sb.killGuest()
+		if err := read(); err == nil {
+			t.Fatal("want the call on a killed guest to fail")
+		}
+		e.sb.failLoads(errors.New("sandbox gone"))
+		for range 2 {
+			if err := read(); err == nil {
+				t.Fatal("want the failed reload to fail the call")
+			}
+		}
+		if n := strings.Count(connectorLog(t), `"op":"reload the Connector"`); n != 1 {
+			t.Errorf("log has %d reload notes, want one for the one dead Connector", n)
+		}
+	})
+}
+
+func TestBackendThatNotesItsOwnOperationsKeepsOnlyTheReloadNote(t *testing.T) {
+	eachAxis(t, func(t *testing.T, a axis) {
+		e := newEnv(t, a.wasm)
+		e.spec.Record = "fixture"
+		e.spec.NotesOperations = true
+		read := a.mustOpen(t, e)
+		e.sb.killGuest()
+		if err := read(); err == nil {
+			t.Fatal("want the call on a killed guest to fail")
+		}
+		e.sb.failLoads(errors.New("sandbox gone"))
+		if err := read(); err == nil {
+			t.Fatal("want the failed reload to fail the call")
+		}
+		log := connectorLog(t)
+		if !strings.Contains(log, `"op":"reload the Connector"`) {
+			t.Errorf("log = %q, want the reload noted", log)
+		}
+		if n := strings.Count(log, `"op"`); n != 1 {
+			t.Errorf("log has %d notes, want only the reload:\n%s", n, log)
+		}
+	})
+}
