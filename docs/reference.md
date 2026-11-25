@@ -4538,6 +4538,18 @@ description and a regen.
   request sent, and reports the declared Routes no test used. It is a test
   aid, not a control: it re-implements core's rule without the address
   policy, and the real host stays the authority on every request.
+  Three small helpers cover what HTTP-backed Connectors each rewrote.
+  `connector.SendJSON(req, in, out)` sends through `HTTPRequest` with `in`
+  JSON-encoded and decodes a 2xx answer into `out`; it classes a failed send
+  `transient` (even an unresolvable credential) and a non-2xx status by
+  `ClassForStatus`, and still returns the `Response` so a caller can read the
+  status itself. `connector.PathSegment(s)`
+  escapes one URL path segment in the canonical form the host requires, and
+  refuses `""`, `.`, `..`, and any `/` or `;`. `connector.Pages(limit, first,
+  fetch)` walks a paged listing by the Connector's own next-page rule and fails
+  past `limit` pages. They are a convenience, not a control: they run in the
+  guest, and the host enforces every guarantee whether or not a Connector uses
+  them.
 - **Conformance.** `conformance.RunConnector(t, wasmPath, corpusDir)`
   (`cmd/launcher/internal/driver/driverkit/conformance`) loads a compiled
   Driver Connector and runs the same suite over the same corpus as
