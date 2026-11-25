@@ -816,7 +816,7 @@ let
     in
     pkgs.runCommand "driver-connector-artifacts" { nativeBuildInputs = [ pkgs.jq ]; } ''
       mkdir $out
-      ${runInputDocOf driverConnectorConsumer.apps.${system}.default.program}
+      ${runInputDocOf driverConnectorConsumer.apps.${system}.connectors-accept.program}
       cp "$doc" $out/input.json
       cp ${boxHarness.internals.driverRowsFileWith pkgs} $out/box-rows.json
       cp ${claudeBoxHarness.internals.driverRowsFileWith pkgs} $out/claude-box-rows.json
@@ -847,7 +847,7 @@ let
     ''
     + pkgs.lib.concatStrings (
       pkgs.lib.mapAttrsToList (n: c: ''
-        ${runInputDocOf c.apps.${system}.default.program}
+        ${runInputDocOf c.apps.${system}.connectors-accept.program}
         cp "$doc" $out/${n}.json
       '') baselineConsumers
     )

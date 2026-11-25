@@ -175,7 +175,7 @@ in
             (fixtures.connectorConsumerVia [
               ../../lib/flakeModule.nix
               (core.lib.connectorModule core data)
-            ]).apps.${system}.default.program;
+            ]).apps.${system}.connectors-accept.program;
         in
         (builtins.tryEval (builtins.stringLength program)).success;
       # Handles the fixture's attrset `driver` and claude's lib-taking function
@@ -306,7 +306,7 @@ in
     pkgs.runCommand "connector-driver-rows-flake-module-forwards-row"
       { nativeBuildInputs = [ pkgs.jq ]; }
       ''
-        ${fixtures.runInputDocOf (programOf withRow)}
+        ${fixtures.runInputDocOf withRow.apps.${system}.connectors-accept.program}
         jq -e '[.drivers[].name] == ["fixture", "claude"]' "$doc"
         touch $out
       '';
@@ -672,8 +672,9 @@ in
         );
       evaluatesWith =
         modules:
-        (builtins.tryEval (builtins.deepSeq (consumerWith modules).apps.${system}.default.program true))
-        .success;
+        (builtins.tryEval (
+          builtins.deepSeq (consumerWith modules).apps.${system}.connectors-accept.program true
+        )).success;
       # A backend row whose name has no native backend to replace. `primary` is
       # set only when true: a backend row refuses even `primary = false`.
       nativeless = primary: {

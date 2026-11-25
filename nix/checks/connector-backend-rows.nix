@@ -223,6 +223,10 @@ let
   ];
   problemsOf = r: routes.problems "fixture" [ r ];
   has = sub: s: builtins.match ".*${pkgs.lib.escapeRegex sub}.*" s != null;
+  # Evaluation-only: forcing an app's program path forces its derivation.
+  forces = v: (builtins.tryEval (builtins.seq v true)).success;
+  bothRun = h: forces h.apps.default.program && forces h.apps.daemon.program;
+  eitherRuns = h: forces h.apps.default.program || forces h.apps.daemon.program;
 in
 {
   connector-backend-rows-route-table-errors-name-connector-and-route =
@@ -878,7 +882,7 @@ in
             };
           }
         ];
-      programOf = c: c.apps.${system}.default.program;
+      programOf = c: c.apps.${system}.connectors-accept.program;
       builds = c: (builtins.tryEval (builtins.seq (programOf c) true)).success;
     in
     assert assertMsg (builds withRow) "control: the fixture Connector's row must evaluate";
@@ -1174,8 +1178,7 @@ in
             module: .backends[0].module,
             routes: [{method: "GET", host: "api.fixture.test", path: "/repos"}],
             credentialEnv: "FIXTURE_TOKEN",
-            credentialKnob: "fixtureToken",
-            acceptedRoutes: []
+            credentialKnob: "fixtureToken"
           }] and (.backends[0].module | endswith("/network.wasm"))' "$doc"
         test -f "$(jq -r '.backends[0].module' "$doc")"
         ${fixtures.runInputDocOf (
@@ -1191,8 +1194,7 @@ in
             credentialKnob: "probeToken",
             credentialScheme: "basic",
             identityEnv: "PROBE_EMAIL",
-            baseEnv: "PROBE_BASE_URL",
-            acceptedRoutes: []
+            baseEnv: "PROBE_BASE_URL"
           }]' "$doc"
         ${fixtures.runInputDocOf (
           programOf (probe {
@@ -1205,11 +1207,12 @@ in
 
   # Issue #6806: the accepted Route baseline is read from the Consumer's own
   # source tree (spindrift-connector-routes.json), keyed by Connector name, and
-  # rides on the document's backend row. A missing file is an empty baseline.
+  # rides on the document's backend row. A missing file or key is no entry,
+  # which refuses the run (issue #7564).
   connector-backend-rows-accepted-baseline =
     let
       consumers = fixtures.baselineConsumers;
-      programOf = c: c.apps.${system}.default.program;
+      programOf = c: c.apps.${system}.connectors-accept.program;
       builds = c: (builtins.tryEval (builtins.seq (programOf c) true)).success;
       withAccepted =
         a:
@@ -1306,9 +1309,19 @@ in
         acceptedRoutes = [ goodRoute ];
         acceptedGrant = grant;
       };
-      refusal = r: baseline.refusal { name = "fixture"; row = r; };
+      refusal =
+        r:
+        baseline.refusal {
+          name = "fixture";
+          row = r;
+        };
       head = "mkHarness: third-party Connector 'fixture' declares more than its entry in the accepted baseline (spindrift-connector-routes.json):";
       mentions = r: items: builtins.all (i: pkgs.lib.hasInfix i (refusal r)) ([ head ] ++ items);
+      noEntry = removeAttrs live [
+        "acceptedRoutes"
+        "acceptedGrant"
+      ];
+      legacy = removeAttrs live [ "acceptedGrant" ];
       accept = [
         "nix run .#connectors-accept"
         "spindrift connectors accept"
@@ -1328,13 +1341,11 @@ in
       ) == null
     ) "a narrower path and an empty scheme against an absent accepted scheme must not refuse";
     assert assertMsg (
-      refusal (
-        removeAttrs live [ "baseEnv" ] // { routes = [ ]; }
-      ) == null
+      refusal (removeAttrs live [ "baseEnv" ] // { routes = [ ]; }) == null
     ) "fewer Routes and an absent base are narrowings, never refused";
     assert assertMsg (
-      refusal (removeAttrs live [ "acceptedRoutes" "acceptedGrant" ]) != null
-      && builtins.all (s: pkgs.lib.hasInfix s (refusal (removeAttrs live [ "acceptedRoutes" "acceptedGrant" ]))) (
+      refusal noEntry != null
+      && builtins.all (s: pkgs.lib.hasInfix s (refusal noEntry)) (
         [
           "Connector 'fixture'"
           "spindrift-connector-routes.json"
@@ -1345,21 +1356,24 @@ in
     assert assertMsg (
       refusal (live // { acceptedRoutes = [ ]; }) != null
     ) "an empty accepted list is an entry, and a live Route is added against it";
-    assert assertMsg (
-      mentions (live // { routes = [ goodRoute (goodRoute // { path = "/repos/y"; }) ]; acceptedRoutes = [ (goodRoute // { path = "/other"; }) ]; }) (
-        [ "added Route GET api.fixture.test /repos/y" ] ++ accept
-      )
-    ) "a new Route must be listed";
-    assert assertMsg (
-      mentions (live // { acceptedRoutes = [ (goodRoute // { path = "/repos/x"; }) ]; }) [
+    assert assertMsg (mentions (
+      live
+      // {
+        routes = [
+          goodRoute
+          (goodRoute // { path = "/repos/y"; })
+        ];
+        acceptedRoutes = [ (goodRoute // { path = "/other"; }) ];
+      }
+    ) ([ "added Route GET api.fixture.test /repos/y" ] ++ accept)) "a new Route must be listed";
+    assert assertMsg (mentions (live // { acceptedRoutes = [ (goodRoute // { path = "/repos/x"; }) ]; })
+      [
         "added Route GET api.fixture.test /repos"
       ]
     ) "a broader path than the accepted one must be listed";
-    assert assertMsg (
-      mentions (live // { routes = [ (goodRoute // { followRedirect = true; }) ]; }) [
-        "added Route GET api.fixture.test /repos (followRedirect)"
-      ]
-    ) "a new followRedirect opt-in must be listed";
+    assert assertMsg (mentions (live // { routes = [ (goodRoute // { followRedirect = true; }) ]; }) [
+      "added Route GET api.fixture.test /repos (followRedirect)"
+    ]) "a new followRedirect opt-in must be listed";
     assert assertMsg (
       refusal (
         live
@@ -1372,43 +1386,40 @@ in
     assert assertMsg (
       refusal (live // { routes = [ (goodRoute // { path = "/reposx"; }) ]; }) != null
     ) "a sibling path sharing only a prefix must not be covered";
-    assert assertMsg (
-      mentions (live // { credentialEnv = "OTHER_TOKEN"; }) [
-        "credential variable OTHER_TOKEN (accepted: FIXTURE_TOKEN)"
-      ]
-    ) "a changed credential variable must be listed";
-    assert assertMsg (
-      mentions (live // { credentialScheme = "basic"; }) [
-        "authorization scheme basic (accepted: bearer)"
-      ]
-    ) "a basic scheme against an accepted bearer must be listed";
-    assert assertMsg (
-      mentions (live // { baseEnv = "OTHER_BASE"; }) [
-        "base OTHER_BASE (accepted: FIXTURE_BASE_URL)"
-      ]
-    ) "a changed base must be listed";
-    assert assertMsg (
-      mentions (live // { acceptedGrant = removeAttrs grant [ "baseEnv" ]; }) [
-        "base FIXTURE_BASE_URL (accepted: none)"
-      ]
-    ) "a new base must be listed against none";
-    assert assertMsg (
-      mentions (
-        removeAttrs live [ "gitRemote" ] // { gitRemoteEnv = "FIXTURE_REMOTE"; }
-      ) [ "Git remote env FIXTURE_REMOTE (accepted: https://fixture.test)" ]
+    assert assertMsg (mentions (live // { credentialEnv = "OTHER_TOKEN"; }) [
+      "changed credential variable OTHER_TOKEN (accepted: FIXTURE_TOKEN)"
+    ]) "a changed credential variable must be listed";
+    assert assertMsg (mentions (live // { credentialScheme = "basic"; }) [
+      "changed authorization scheme basic (accepted: bearer)"
+    ]) "a basic scheme against an accepted bearer must be listed";
+    assert assertMsg (mentions (live // { baseEnv = "OTHER_BASE"; }) [
+      "changed base OTHER_BASE (accepted: FIXTURE_BASE_URL)"
+    ]) "a changed base must be listed";
+    assert assertMsg (mentions (live // { acceptedGrant = removeAttrs grant [ "baseEnv" ]; }) [
+      "added base FIXTURE_BASE_URL"
+    ]) "a base the grant lacks must be listed as added";
+    assert assertMsg (mentions
+      (removeAttrs live [ "gitRemote" ] // { gitRemoteEnv = "FIXTURE_REMOTE"; })
+      [ "changed Git remote env FIXTURE_REMOTE (accepted: https://fixture.test)" ]
     ) "a Git remote switched from a literal to an env must be listed";
+    assert assertMsg (mentions (live // { gitRemote = "https://other.test"; }) [
+      "changed Git remote https://other.test (accepted: https://fixture.test)"
+    ]) "a changed literal Git remote must be listed";
+    assert assertMsg (mentions legacy [
+      "added credential variable FIXTURE_TOKEN"
+      "added authorization scheme bearer"
+      "added base FIXTURE_BASE_URL"
+      "added Git remote https://fixture.test"
+    ]) "a Routes-only entry has no grant, so every declared part is added";
+    assert assertMsg (mentions (legacy // { credentialScheme = "basic"; }) [
+      "added authorization scheme basic"
+    ]) "a basic scheme against a Routes-only entry is added, not changed";
     assert assertMsg (
-      mentions (live // { gitRemote = "https://other.test"; }) [
-        "Git remote https://other.test (accepted: https://fixture.test)"
-      ]
-    ) "a changed literal Git remote must be listed";
+      !(pkgs.lib.hasInfix "changed" (refusal legacy))
+    ) "nothing is changed against a Routes-only entry";
     assert assertMsg (
-      mentions (removeAttrs live [ "acceptedGrant" ]) [
-        "credential variable FIXTURE_TOKEN (accepted: none)"
-        "base FIXTURE_BASE_URL (accepted: none)"
-      ]
-      && !(pkgs.lib.hasInfix "authorization scheme" (refusal (removeAttrs live [ "acceptedGrant" ])))
-    ) "a Routes-only entry has no grant, so every declared part is added";
+      refusal (live // { acceptedGrant = removeAttrs grant [ "credentialScheme" ]; }) == null
+    ) "an accepted grant without a scheme accepts bearer";
     pkgs.runCommand "connector-backend-rows-baseline-refusal-decision" { } "touch $out";
 
   # Issue #7456: a backend row carries no shadow or primary field. mkHarness
@@ -1456,7 +1467,7 @@ in
           };
         };
       };
-      programOf = c: c.apps.${system}.default.program;
+      programOf = c: c.apps.${system}.connectors-accept.program;
       builds = c: (builtins.tryEval (builtins.seq (programOf c) true)).success;
       plain = consumerWith [ probeModule ];
     in
@@ -1475,4 +1486,164 @@ in
       jq -e '.backends[0] | has("shadow") or has("shadowEvery") or has("primary") | not' "$doc"
       touch $out
     '';
+
+  # Issue #7564: the baseline refusal gates the programs that run Connectors
+  # (the CLI and the daemon), never the input document, so `connectors accept`
+  # still runs for the Connector it blocks.
+  connector-backend-rows-third-party-beyond-baseline-refused =
+    let
+      accepts = h: forces h.apps.connectors-accept.program;
+      grant = {
+        credentialEnv = "FIXTURE_TOKEN";
+        credentialScheme = "bearer";
+      };
+      narrower = goodRoute // {
+        path = "/repos/x";
+      };
+      widened = withRows {
+        fixture = row // {
+          acceptedRoutes = [ narrower ];
+          acceptedGrant = grant;
+        };
+      };
+      grantWidened = withRows {
+        fixture = row // {
+          acceptedRoutes = [ goodRoute ];
+          acceptedGrant = grant // {
+            credentialEnv = "OTHER_TOKEN";
+          };
+        };
+      };
+      schemeWidened = withRows {
+        fixture = row // {
+          credentialScheme = "basic";
+          identityEnv = "FIXTURE_EMAIL";
+          acceptedRoutes = [ goodRoute ];
+          acceptedGrant = grant;
+        };
+      };
+      messages = h: builtins.concatStringsSep "\n" h.internals.baselineRefusals;
+      flakeWidened = fixtures.baselineConsumers.widened;
+    in
+    assert assertMsg (
+      !(forces widened.apps.default.program)
+    ) "a widened Route table must refuse the CLI";
+    assert assertMsg (
+      !(forces widened.apps.daemon.program)
+    ) "a widened Route table must refuse the daemon";
+    assert assertMsg (!(eitherRuns grantWidened)) "a widened grant must refuse the CLI and the daemon";
+    assert assertMsg (
+      accepts widened && accepts grantWidened
+    ) "connectors accept must still evaluate for a refused Connector";
+    assert assertMsg (
+      evaluates widened && evaluates grantWidened
+    ) "the input document must still render";
+    assert assertMsg (
+      pkgs.lib.hasInfix "'fixture'" (messages widened)
+      && pkgs.lib.hasInfix "added Route GET api.fixture.test /repos" (messages widened)
+    ) "the refusal must name the Connector and the added Route";
+    assert assertMsg (pkgs.lib.hasInfix "changed credential variable" (
+      messages grantWidened
+    )) "the refusal must name the widened grant";
+    assert assertMsg (pkgs.lib.hasInfix "changed authorization scheme basic (accepted: bearer)" (
+      messages schemeWidened
+    )) "the refusal must name the widened authorization scheme";
+    assert assertMsg (
+      !(forces flakeWidened.apps.${system}.default.program)
+    ) "a Consumer whose baseline file is narrower than its Connector must refuse";
+    assert assertMsg (forces
+      flakeWidened.apps.${system}.connectors-accept.program
+    ) "that Consumer must still evaluate connectors-accept";
+    pkgs.runCommand "connector-backend-rows-third-party-beyond-baseline-refused" { } "touch $out";
+
+  connector-backend-rows-third-party-no-entry-refused =
+    let
+      noEntry = withRows { fixture = row; };
+      fixtureConnector = (import ../fixtures/connector).lib.connector { core = import ../../core; };
+      flakeNoEntry = fixtures.connectorConsumerVia [
+        ../../lib/flakeModule.nix
+        fixtureConnector.flakeModule
+      ];
+      message = builtins.concatStringsSep "\n" noEntry.internals.baselineRefusals;
+    in
+    assert assertMsg (
+      !(forces noEntry.apps.default.program)
+    ) "a third-party row with no baseline entry must refuse the CLI";
+    assert assertMsg (
+      !(forces noEntry.apps.daemon.program)
+    ) "a third-party row with no baseline entry must refuse the daemon";
+    assert assertMsg (forces noEntry.apps.connectors-accept.program)
+      "connectors accept must evaluate for a row with no entry";
+    assert assertMsg (
+      pkgs.lib.hasInfix "'fixture'" message && pkgs.lib.hasInfix "nix run .#connectors-accept" message
+    ) "the refusal must name the Connector and the accept command";
+    assert assertMsg (
+      !(forces flakeNoEntry.apps.${system}.default.program)
+    ) "a Consumer with no baseline entry must refuse";
+    assert assertMsg (
+      !(forces flakeNoEntry.apps.${system}.daemon.program)
+    ) "a Consumer with no baseline entry must refuse the daemon";
+    assert assertMsg (forces
+      flakeNoEntry.apps.${system}.connectors-accept.program
+    ) "a Consumer with no baseline entry must still evaluate connectors-accept";
+    pkgs.runCommand "connector-backend-rows-third-party-no-entry-refused"
+      { nativeBuildInputs = [ pkgs.jq ]; }
+      ''
+        ${fixtures.runInputDocOf flakeNoEntry.apps.${system}.connectors-accept.program}
+        jq -e '.backends[0] | .name == "fixture" and (has("acceptedRoutes") | not) and (has("acceptedGrant") | not)' "$doc"
+        touch $out
+      '';
+
+  connector-backend-rows-third-party-within-baseline-runs =
+    let
+      grant = {
+        credentialEnv = "FIXTURE_TOKEN";
+        credentialScheme = "bearer";
+      };
+      within =
+        extra:
+        withRows {
+          fixture = row // extra;
+        };
+    in
+    assert assertMsg (bothRun (within {
+      acceptedRoutes = [ goodRoute ];
+      acceptedGrant = grant;
+    })) "a row equal to its baseline entry must run";
+    assert assertMsg (bothRun (within {
+      acceptedRoutes = [
+        goodRoute
+        (goodRoute // { path = "/other"; })
+      ];
+      acceptedGrant = grant;
+    })) "a row declaring less than its entry must run";
+    assert assertMsg (
+      forces fixtures.baselineConsumers.grant.apps.${system}.default.program
+      && forces fixtures.baselineConsumers.grant.apps.${system}.daemon.program
+    ) "a Consumer whose baseline file matches its Connector exactly must run";
+    pkgs.runCommand "connector-backend-rows-third-party-within-baseline-runs" { } "touch $out";
+
+  connector-backend-rows-first-party-beyond-baseline-runs =
+    let
+      firstParty = ghRow // {
+        gitRemote = "https://github.com";
+      };
+      widened = withRows {
+        github = firstParty // {
+          acceptedRoutes = [ ];
+        };
+      };
+      noEntry = withRows { github = firstParty; };
+    in
+    assert assertMsg (widened.internals.backendFirstParty.github
+    ) "control: the batteries row is first-party";
+    assert assertMsg (bothRun widened) "a first-party row beyond its baseline must still run";
+    assert assertMsg (bothRun noEntry) "a first-party row with no baseline entry must still run";
+    assert assertMsg (widened.internals.baselineRefusals == [ ]) "a first-party row never refuses";
+    pkgs.runCommand "connector-backend-rows-first-party-beyond-baseline-runs"
+      { nativeBuildInputs = [ pkgs.jq ]; }
+      ''
+        jq -e '.backends[0] | .routes == [{method: "GET", host: "api.fixture.test", path: "/repos"}] and .acceptedRoutes == []' ${widened.internals.runInputDocumentFile}
+        touch $out
+      '';
 }

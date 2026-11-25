@@ -823,6 +823,7 @@ in
         names twoApps == [
           "claude"
           "claude-daemon"
+          "connectors-accept"
           "daemon"
           "default"
           "opencode"
