@@ -41,7 +41,7 @@ func doctorCheckSets(c config) (classify, report []doctor.Check) {
 	classify = append(classify, prereqClassify...)
 	classify = append(classify, perRoute...)
 
-	connectorRoutes := connectorRoutesChecks()
+	connectorRoutes := connectorRoutesChecks(c)
 	signalSocket := signalSocketTransportChecks(c)
 	report = make([]doctor.Check, 0, len(extra)+len(prereqReport)+len(perRoute)+len(advisory)+len(connectorRoutes)+len(signalSocket)+1)
 	report = append(report, extra...)

@@ -19,7 +19,7 @@ func row(name, credEnv string) backendrows.Row {
 }
 
 // routed registers github, jira and forgejo as ConnectorRouted and "plain" as
-// not, so reads does not depend on which backends the build links.
+// not, so Reads does not depend on which backends the build links.
 func routed(t *testing.T) {
 	t.Helper()
 	var ss []backendkit.Strategy
@@ -67,8 +67,8 @@ func TestReads(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := reads(row(c.row, env), c.forge, c.tracker); got != c.want {
-				t.Fatalf("reads = %v, want %v", got, c.want)
+			if got := Reads(row(c.row, env), c.forge, c.tracker); got != c.want {
+				t.Fatalf("Reads = %v, want %v", got, c.want)
 			}
 		})
 	}

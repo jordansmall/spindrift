@@ -7,16 +7,22 @@ import (
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/doctor"
+	"spindrift.dev/launcher/internal/rowcredential"
 )
 
-// connectorRoutesChecks builds two Advisory rows per network Connector row of
-// the input document: the Route table it holds, and the diff of that table
-// against the Consumer's accepted baseline (ADR 0073, issue #6806). A widening
-// is a finding for the operator to review, never a configuration fault, so the
-// rows reach the report half only.
-func connectorRoutesChecks() []doctor.Check {
+// connectorRoutesChecks builds two Advisory rows per network Connector row the
+// configured run reads through: the Route table it holds, and the diff of its
+// grant (Routes, credential variable, authorization scheme, base, Git remote)
+// against the Consumer's accepted baseline (ADR 0073, issue #6806). A row the
+// run does not read through is no concern of this run's doctor (issue #7383).
+// A widening is a finding for the operator to review, never a configuration
+// fault, so the rows reach the report half only.
+func connectorRoutesChecks(c config) []doctor.Check {
 	var checks []doctor.Check
 	for _, row := range backendrows.All() {
+		if !rowcredential.Reads(row, c.CodeForge, c.IssueTracker) {
+			continue
+		}
 		checks = append(checks, connectorRoutesCheck(row), connectorRoutesWidenedCheck(row))
 	}
 	return checks
@@ -48,16 +54,22 @@ func connectorRoutesWidenedCheck(row backendrows.Row) doctor.Check {
 	return doctor.Check{
 		Name:   name,
 		Tier:   doctor.Advisory,
-		Remedy: fmt.Sprintf(`review the added routes, then add them under %q in the Consumer flake's spindrift-connector-routes.json (ADR 0073)`, row.Name),
+		Remedy: `review the widened grant, then run "spindrift connectors accept" in the Consumer flake's root and commit the spindrift-connector-routes.json diff (ADR 0073)`,
 		Probe: func() (any, error) {
-			added := row.Widening()
-			if len(added) == 0 {
+			var parts []string
+			if added := row.Widening(); len(added) > 0 {
+				parts = append(parts, "routes:\n"+joinRoutes(added, "\n", "+ "))
+			}
+			for _, ch := range row.GrantChanges() {
+				parts = append(parts, fmt.Sprintf("%s: %s (accepted: %s)", ch.Part, ch.Declared, ch.Accepted))
+			}
+			if len(parts) == 0 {
 				return nil, nil
 			}
-			return nil, fmt.Errorf("routes beyond the accepted table:\n%s", joinRoutes(added, "\n", "+ "))
+			return nil, fmt.Errorf("grant beyond the accepted baseline:\n%s", strings.Join(parts, "\n"))
 		},
 		SuccessMsg: func(any) string {
-			return name + " (within the accepted table)"
+			return name + " (within the accepted baseline)"
 		},
 	}
 }
