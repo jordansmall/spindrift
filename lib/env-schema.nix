@@ -526,7 +526,7 @@ withRowKnobs {
   ghTokenRefreshFile = {
     env = "GH_TOKEN_REFRESH_FILE";
     group = "forge";
-    doc = "path to a file the launcher and the daemon re-read and swap into GH_TOKEN whenever its content changes — lets an external minter (e.g. a workflow step re-minting a GitHub App installation token, keeping the App private key in the workflow rather than the launcher) keep the credential fresh across a run that outlives the token's ~1h lifetime (#1027); empty (default) leaves GH_TOKEN static for the whole run";
+    doc = "path to a file the github row's credential source re-reads at each use (the last good token is kept when a read fails or finds it empty) — lets an external minter (e.g. a workflow step re-minting a GitHub App installation token, keeping the App private key in the workflow rather than the launcher) keep the credential fresh across a run that outlives the token's ~1h lifetime (#1027); empty (default) leaves the credential static for the whole run";
     flakeOption = true;
     boxEnv = false;
   };

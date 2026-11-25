@@ -166,3 +166,9 @@ amendment, targets Artifactory.
 - A new host is a profile row plus corpus cases in the ecosystems it
   serves. A new ecosystem's corpus includes an Artifactory case if the
   Artifactory profile claims it.
+
+## Amendment (issue #7549): `tokenrefresh` is replaced by the credential source `credsource.File`
+
+The `tokenrefresh` package named above (issue #1027) no longer exists. Issue
+#7549 replaced it with the credential source `credsource.File`, which the
+Connector runtime reads at each use.
