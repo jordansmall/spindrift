@@ -61,9 +61,9 @@ func SandboxLifecycle(t *testing.T, h SandboxHarness) {
 		return err == nil && slices.Contains(names, name)
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), runReturnTimeout)
+	hello, cancel := context.WithTimeout(context.Background(), runReturnTimeout)
 	defer cancel()
-	s, err := connectorhost.NewSessions(ctx, sb.Stdout, sb.Stdin, func() { _ = r.Kill(name) }, sb.Wait)
+	s, err := connectorhost.NewSessions(hello, sb.Stdout, sb.Stdin, func() { _ = r.Kill(name) }, sb.Wait)
 	if err != nil {
 		t.Fatalf("NewSessions over the sandbox: %v (stderr: %s)", err, sb.Stderr())
 	}
@@ -75,6 +75,9 @@ func SandboxLifecycle(t *testing.T, h SandboxHarness) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Unbounded: the host interprets the module, which on a loaded CI runner
+	// takes well past runReturnTimeout; go test's -timeout backstops a hang.
+	ctx := context.Background()
 	c, err := s.Load(ctx, wasm)
 	if err != nil {
 		t.Fatalf("Load into the sandbox: %v", err)
