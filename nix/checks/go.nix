@@ -661,48 +661,115 @@ let
   # The registry root's guard tests need every Driver, and run in
   # launcher-binaries-go-test.
   corePkgs = ''$(go list ./... | grep -vxF "$(go list -m)/internal/driver")'';
-  # The core run: every package that needs no Driver, bundle or main. It cuts
-  # its source from coreFiles, so a Driver edit never reaches this derivation;
-  # the assert fails if the copied tree still holds one. The corpus find is
-  # defence in depth, for a corpus landing under internal/driver outside a
-  # Driver directory.
-  launcherGoTestFor =
-    files:
-    pkgs.runCommand "launcher-go-test" { nativeBuildInputs = goTestInputs; } ''
+  # The core packages (dirs under internal/) whose tests read the fixture
+  # Connectors or the connector-host binary. Measured, not derived from
+  # imports: `go list -deps` overcounts, since every forge importer reaches
+  # fixturebuild but most never load the Fake. A reader missing here fails
+  # launcher-go-test, so add it.
+  connectorFixtureReaders = [
+    "backend/backendrows"
+    "butler"
+    "connectorconformance"
+    "connectorforge"
+    "connectorhost"
+    "connectorruntime"
+    "connectorsandbox/sandbox"
+    "connectortracker/connectortrackertest"
+    "dispatch"
+    "dispatchrecord"
+    "doctor"
+    "driver/driverrows"
+    "driver/shadow"
+    "forge"
+    "localloop"
+    "reconcile"
+    "runner"
+    "seamtest"
+    "settle"
+    "shadowreplay"
+    "shutdown"
+    "signalsocket"
+    "terminate"
+    "waves"
+  ];
+  # Writes $TMPDIR/reader-pkgs (the readers) and $TMPDIR/free-pkgs (the rest of
+  # corePkgs); a reader that is no longer a core package is a stale list.
+  # Spliced into both core runs, each using one list, so the stale check runs
+  # twice; it is cheap.
+  splitCorePkgs = ''
+    mod=$(go list -m)
+    printf '%s\n' ${corePkgs} >"$TMPDIR/core-pkgs"
+    printf '%s\n' ${pkgs.lib.concatStringsSep " " connectorFixtureReaders} |
+      sed "s|^|$mod/internal/|" >"$TMPDIR/reader-pkgs"
+    stale=$(grep -vxFf "$TMPDIR/core-pkgs" "$TMPDIR/reader-pkgs" || true)
+    if [ -n "$stale" ]; then
+      echo "connectorFixtureReaders (nix/checks/go.nix) lists non-core packages: $stale" >&2
+      exit 1
+    fi
+    grep -vxFf "$TMPDIR/reader-pkgs" "$TMPDIR/core-pkgs" >"$TMPDIR/free-pkgs"
+  '';
+  # The core runs: every package that needs no Driver, bundle or main. They cut
+  # their source from coreFiles, so a Driver edit never reaches these
+  # derivations; the assert fails if the copied tree still holds one. The corpus
+  # find is defence in depth, for a corpus landing under internal/driver
+  # outside a Driver directory.
+  coreGoTestFor =
+    name: src: vendor: goTestCmd:
+    pkgs.runCommand name { nativeBuildInputs = goTestInputs; } ''
       mkdir -p src/cmd
-      cp -r ${coreSrc files} src/cmd/launcher
+      cp -r ${src} src/cmd/launcher
       ${sideTrees}
       chmod -R +w src
       for held in bundle ${pkgs.lib.concatStringsSep " " driverNames}; do
         if [ -e "src/cmd/launcher/internal/driver/$held" ]; then
-          echo "launcher-go-test's source holds internal/driver/$held" >&2
+          echo "${name}'s source holds internal/driver/$held" >&2
           exit 1
         fi
       done
       for held in ${pkgs.lib.concatStringsSep " " bundledBackendNames}; do
         if [ -e "src/cmd/launcher/internal/forge/$held" ]; then
-          echo "launcher-go-test's source holds internal/forge/$held" >&2
+          echo "${name}'s source holds internal/forge/$held" >&2
           exit 1
         fi
       done
       for held in ${pkgs.lib.concatStringsSep " " runnerNames}; do
         if [ -e "src/cmd/launcher/internal/runner/$held" ]; then
-          echo "launcher-go-test's source holds internal/runner/$held" >&2
+          echo "${name}'s source holds internal/runner/$held" >&2
           exit 1
         fi
       done
       for held in ${pkgs.lib.concatStringsSep " " ecosystemNames}; do
         if [ -e "src/cmd/launcher/internal/ecosystem/$held" ]; then
-          echo "launcher-go-test's source holds internal/ecosystem/$held" >&2
+          echo "${name}'s source holds internal/ecosystem/$held" >&2
           exit 1
         fi
       done
       corpora=$(find src/cmd/launcher/internal/driver -path '*/testdata/corpus')
       if [ -n "$corpora" ]; then
-        echo "launcher-go-test's source holds a Driver corpus: $corpora" >&2
+        echo "${name}'s source holds a Driver corpus: $corpora" >&2
         exit 1
       fi
-      ${goTestPrologueWith (vendorFor files)}
+      ${goTestPrologueWith vendor}
+      ${splitCorePkgs}
+      ${goTestCmd}
+      touch $out
+    '';
+  # No fixture Connectors (launcher-go-test-fixture-free pins that) and no
+  # connector-host. The fixtures dir is set to a missing path so a reader that
+  # lands here fails on it instead of skipping on an unset variable; nix is
+  # off PATH in the sandbox, so an unset host fails too.
+  launcherGoTestFor =
+    src: vendor:
+    coreGoTestFor "launcher-go-test" src vendor ''
+      export SPINDRIFT_CONNECTOR_FIXTURES_DIR=/nonexistent/fixture-free-launcher-go-test-see-connectorFixtureReaders
+      go test -timeout 30m $(cat "$TMPDIR/free-pkgs") || {
+        echo "launcher-go-test: if a failure above names SPINDRIFT_CONNECTOR_FIXTURES_DIR, its path or SPINDRIFT_CONNECTOR_HOST, the package reads the fixture Connectors; add it to connectorFixtureReaders in nix/checks/go.nix" >&2
+        exit 1
+      }
+    '';
+  launcherGoTestFixturesFor =
+    src: vendor:
+    coreGoTestFor "launcher-go-test-fixtures" src vendor ''
       export SPINDRIFT_CONNECTOR_FIXTURES_DIR=${fixtures.connectorWasm}
       # Built here from the same trimmed source, not the connector-host package:
       # that one's src is the whole module, so a Driver edit would move this
@@ -713,32 +780,41 @@ let
       # internal/connectorhost runs up to 569s green on aarch64-darwin and past
       # Go's 10m default on slow runners; 30m clears that and still backstops a
       # real hang.
-      go test -timeout 30m ${corePkgs}
-      touch $out
+      go test -timeout 30m $(cat "$TMPDIR/reader-pkgs")
     '';
   # Copies the core source and its vendor tree; ends with src as the working
   # directory.
-  corePrologue = files: ''
-    cp -r ${coreSrc files} src
+  corePrologue = src: vendor: ''
+    cp -r ${src} src
     chmod -R +w src
-    cp -r ${vendorFor files} src/vendor
+    cp -r ${vendor} src/vendor
     ${goCheckEnv}
     cd src
   '';
   # The core checks, each cut from coreFiles so an adapter edit never moves one;
-  # adapterRegistryChecks and backends-go-test-independent pin that.
-  coreChecksFor = files: {
-    launcher-go-test = launcherGoTestFor files;
-    launcher-go-fmt = pkgs.runCommand "launcher-go-fmt" { nativeBuildInputs = [ pkgs.go ]; } ''
-      ${gofmtCheck (coreSrc files)}
-      touch $out
-    '';
-    launcher-go-vet = pkgs.runCommand "launcher-go-vet" { nativeBuildInputs = [ pkgs.go ]; } ''
-      ${corePrologue files}
-      go vet ${corePkgs}
-      touch $out
-    '';
-  };
+  # adapterRegistryChecks and backends-go-test-independent pin that. The
+  # perturbation checks call this once per edited tree, so the source and vendor
+  # tree are cut once per call and shared: cutting them per check pushed
+  # checks-inbox-set-parity past CI's 12 GiB nix-eval-jobs worker budget.
+  coreChecksFor =
+    files:
+    let
+      src = coreSrc files;
+      vendor = vendorFor files;
+    in
+    {
+      launcher-go-test = launcherGoTestFor src vendor;
+      launcher-go-test-fixtures = launcherGoTestFixturesFor src vendor;
+      launcher-go-fmt = pkgs.runCommand "launcher-go-fmt" { nativeBuildInputs = [ pkgs.go ]; } ''
+        ${gofmtCheck src}
+        touch $out
+      '';
+      launcher-go-vet = pkgs.runCommand "launcher-go-vet" { nativeBuildInputs = [ pkgs.go ]; } ''
+        ${corePrologue src vendor}
+        go vet ${corePkgs}
+        touch $out
+      '';
+    };
   # Names of the core checks whose drvPath differs from the unedited tree's.
   coreChecksMovedBy =
     files:
@@ -1045,9 +1121,24 @@ driverGoTests
 
   inherit (coreChecksFor launcherDir)
     launcher-go-test
+    launcher-go-test-fixtures
     launcher-go-fmt
     launcher-go-vet
     ;
+
+  # launcher-go-test must not wait on the fixture Connectors: only
+  # launcher-go-test-fixtures builds them in.
+  launcher-go-test-fixture-free =
+    let
+      depsOf = drv: builtins.attrNames (builtins.getContext drv.drvAttrs.buildCommand);
+      core = coreChecksFor launcherDir;
+      fixtureDrv = fixtures.connectorWasm.drvPath;
+    in
+    assert pkgs.lib.assertMsg (!builtins.elem fixtureDrv (depsOf core.launcher-go-test))
+      "launcher-go-test depends on connector-wasm-fixtures; only launcher-go-test-fixtures may build it in";
+    assert pkgs.lib.assertMsg (builtins.elem fixtureDrv (depsOf core.launcher-go-test-fixtures))
+      "launcher-go-test-fixtures no longer depends on connector-wasm-fixtures, so the fixture-free pin is inert";
+    pkgs.runCommand "launcher-go-test-fixture-free" { } "touch $out";
 
   # The packages that link every native Driver through the bundle
   # (bundleBinaryDirs; claude is a Connector, not linked), the bundle's own
