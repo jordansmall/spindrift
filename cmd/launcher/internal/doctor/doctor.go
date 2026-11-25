@@ -186,9 +186,11 @@ type Config struct {
 	ResearchVerdicts forge.VerdictLabels
 
 	// TokenHint and SlugHint name the knobs Run's auth-failure and
-	// repo-not-found remedies point at. The caller resolves them: the
-	// backend-to-knob mapping lives in package main's backend registry. Empty
-	// means the github-shaped default (GH_TOKEN / --repo-slug / forge.repoSlug).
+	// repo-not-found remedies point at. The caller resolves them from the
+	// issue tracker's backend row: TokenHint is its TokenEnvVar (empty for a
+	// backend with no credential, which drops the auth remedy's "check ..."
+	// clause), SlugHint its DoctorSlugHint (empty means the github-shaped
+	// default, --repo-slug / forge.repoSlug).
 	TokenHint string
 	SlugHint  string
 
@@ -229,9 +231,9 @@ type Config struct {
 // extraChecks never do. stdin is the caller's scanner, so Quickstart can hand
 // one over mid-flow without losing already-buffered input.
 func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, stdin *bufio.Scanner, interactive bool, extraChecks []Check) (err error) {
-	tokenHint, slugHint := "GH_TOKEN", "--repo-slug / forge.repoSlug"
-	if c.TokenHint != "" {
-		tokenHint, slugHint = c.TokenHint, c.SlugHint
+	slugHint := c.SlugHint
+	if slugHint == "" {
+		slugHint = "--repo-slug / forge.repoSlug"
 	}
 
 	// it and cf are stable for this whole call, so BranchProtectionCheck and the
@@ -255,7 +257,10 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 						return nil, err
 					}
 					if errors.Is(err, forge.ErrAuthFailure) {
-						return nil, fmt.Errorf("%w: check %s is set and valid: %w", ErrConnectivity, tokenHint, err)
+						if c.TokenHint == "" {
+							return nil, fmt.Errorf("%w: %w", ErrConnectivity, err)
+						}
+						return nil, fmt.Errorf("%w: check %s is set and valid: %w", ErrConnectivity, c.TokenHint, err)
 					}
 					// Before not-found: a Connector tracker's Probe wraps every call
 					// error, rate-limited included, in ErrRepoNotFound.

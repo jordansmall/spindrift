@@ -27,10 +27,10 @@ type Descriptor struct {
 	// the backend carries no bearer token (git, local).
 	TokenEnvVar string
 
-	// DoctorTokenHint/DoctorSlugHint name the env vars doctor points an
-	// operator at when this backend is the active ISSUE_TRACKER. Empty means
-	// the github-shaped default.
-	DoctorTokenHint, DoctorSlugHint string
+	// DoctorSlugHint names the knob doctor points an operator at when this
+	// backend is the active ISSUE_TRACKER and its repo is not found. Empty
+	// means the github-shaped default. Doctor's token hint is TokenEnvVar.
+	DoctorSlugHint string
 
 	// HostMediatedRemote is true only for a backend with no writable remote to
 	// push to at all (ADR 0033: "local"): the branch returns to the host as an

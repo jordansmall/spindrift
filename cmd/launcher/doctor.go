@@ -202,7 +202,7 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, rep *doctor.
 		NoLabelRegistry:  !row.LabelRegistry,
 		RequiredLabels:   requiredLabels,
 		ResearchVerdicts: doctorResearchVerdicts(c),
-		TokenHint:        row.DoctorTokenHint,
+		TokenHint:        row.TokenEnvVar,
 		SlugHint:         row.DoctorSlugHint,
 		Label:            c.Label,
 		InProgressLabel:  c.InProgressLabel,

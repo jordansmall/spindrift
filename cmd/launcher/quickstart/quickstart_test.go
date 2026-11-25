@@ -2681,8 +2681,8 @@ func TestOfferedOn_PerAxisRules(t *testing.T) {
 // backend.Registry makes doctorHints("gitlab") return its hints with no
 // quickstart-side change.
 func TestDoctorHints_RegistryDriven(t *testing.T) {
-	if gotToken, gotSlug, _ := doctorHints("github"); gotToken != "" || gotSlug != "" {
-		t.Errorf(`doctorHints("github") = (%q, %q), want ("", "")`, gotToken, gotSlug)
+	if gotToken, gotSlug, _ := doctorHints("github"); gotToken != "GH_TOKEN" || gotSlug != "" {
+		t.Errorf(`doctorHints("github") = (%q, %q), want ("GH_TOKEN", "")`, gotToken, gotSlug)
 	}
 	if gotToken, gotSlug, _ := doctorHints("forgejo"); gotToken != "FORGEJO_TOKEN" || gotSlug != "FORGEJO_BASE_URL" {
 		t.Errorf(`doctorHints("forgejo") = (%q, %q), want ("FORGEJO_TOKEN", "FORGEJO_BASE_URL")`, gotToken, gotSlug)
@@ -2700,7 +2700,7 @@ func TestDoctorHints_RegistryDriven(t *testing.T) {
 		ValidAsTracker:   true,
 		ValidAsCodeForge: true,
 		Quickstart:       &backend.QuickstartBlock{Hosts: []string{"gitlab.example.com"}, Axes: []string{axisTracker, axisForge}},
-		DoctorTokenHint:  "GITLAB_TOKEN",
+		TokenEnvVar:      "GITLAB_TOKEN",
 		DoctorSlugHint:   "GITLAB_BASE_URL",
 	})
 	defer func() { backend.Registry = original }()

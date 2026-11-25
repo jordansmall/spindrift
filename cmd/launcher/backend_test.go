@@ -26,7 +26,6 @@ func TestRegisteredStrategiesShape(t *testing.T) {
 		validAsTracker          bool
 		validAsCodeForge        bool
 		tokenEnvVar             string
-		doctorTokenHint         string
 		doctorSlugHint          string
 		hostMediatedRemote      bool
 		hostSeededMirror        bool
@@ -54,7 +53,6 @@ func TestRegisteredStrategiesShape(t *testing.T) {
 			validAsTracker:     true,
 			validAsCodeForge:   true,
 			tokenEnvVar:        backend.Forgejo.TokenEnvVar,
-			doctorTokenHint:    backend.Forgejo.TokenEnvVar,
 			doctorSlugHint:     "FORGEJO_BASE_URL",
 			outboxRelayCapable: true,
 
@@ -68,7 +66,6 @@ func TestRegisteredStrategiesShape(t *testing.T) {
 			validAsTracker:   true,
 			validAsCodeForge: false,
 			tokenEnvVar:      "JIRA_TOKEN",
-			doctorTokenHint:  "JIRA_TOKEN",
 			doctorSlugHint:   "JIRA_BASE_URL / JIRA_PROJECT_KEY",
 
 			hasValidateTracker: true,
@@ -114,9 +111,6 @@ func TestRegisteredStrategiesShape(t *testing.T) {
 			}
 			if row.TokenEnvVar != tc.tokenEnvVar {
 				t.Errorf("tokenEnvVar = %q, want %q", row.TokenEnvVar, tc.tokenEnvVar)
-			}
-			if row.DoctorTokenHint != tc.doctorTokenHint {
-				t.Errorf("doctorTokenHint = %q, want %q", row.DoctorTokenHint, tc.doctorTokenHint)
 			}
 			if row.DoctorSlugHint != tc.doctorSlugHint {
 				t.Errorf("doctorSlugHint = %q, want %q", row.DoctorSlugHint, tc.doctorSlugHint)
