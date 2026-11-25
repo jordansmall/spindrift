@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/localloop"
@@ -134,8 +135,8 @@ func surfaceAfterDispatch(c config, lw *localloop.Wired, caps forge.Capabilities
 // bookkeeping sweep (ADR 0029). It needs no EnsureReady gate, dispatch
 // factory, or settle wiring, so it builds its seams through newReadContext
 // rather than bootstrap (issue #2941).
-func cmdReconcile(stdout, stderr io.Writer) int {
-	return withRepoReadContext(stderr, func(rc readContext, pwd string) error {
+func cmdReconcile(connectors *connectorruntime.Runtime, stdout, stderr io.Writer) int {
+	return withRepoReadContext(connectors, stderr, func(rc readContext, pwd string) error {
 		lp, err := rc.reconcileLivenessProbe(pwd)
 		if err != nil {
 			return err
@@ -147,9 +148,9 @@ func cmdReconcile(stdout, stderr io.Writer) int {
 // withRepoReadContext runs a read-only command body against the read context
 // and the working directory, owning the setup and the 0/1 exit mapping the
 // reconcile commands share.
-func withRepoReadContext(stderr io.Writer, run func(rc readContext, pwd string) error) int {
+func withRepoReadContext(connectors *connectorruntime.Runtime, stderr io.Writer, run func(rc readContext, pwd string) error) int {
 	// These commands never dispatch, so they carry no dispatch kind (issue #2944).
-	rc, err := newReadContext(nil, false)
+	rc, err := newReadContext(connectors, nil, false)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
@@ -172,8 +173,8 @@ func withRepoReadContext(stderr io.Writer, run func(rc readContext, pwd string) 
 // for the late-merge sweep, which pool children skip (issue #7342). Like
 // cmdReconcile it needs only the read context; it shares the throttle with
 // reconcileAfterDispatch, so a stray extra invocation is cheap.
-func cmdLateMergeSweep(stdout, stderr io.Writer) int {
-	return withRepoReadContext(stderr, func(rc readContext, pwd string) error {
+func cmdLateMergeSweep(connectors *connectorruntime.Runtime, stdout, stderr io.Writer) int {
+	return withRepoReadContext(connectors, stderr, func(rc readContext, pwd string) error {
 		return sweepLateMergesThrottled(rc.capabilities, pwd, stdout)
 	})
 }

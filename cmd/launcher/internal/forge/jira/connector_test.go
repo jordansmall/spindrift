@@ -180,6 +180,16 @@ func (b connectorBuild) harness(t *testing.T, cloud bool, tr dispatchkind.Tracke
 // credential env are the operator's, only the site is the scripted backend.
 func newProductionHarness(t *testing.T, cloud bool, tr dispatchkind.Tracker, mapping, lifecycle, issueType string, adjust ...func(*backendrows.Row)) *connectorHarness {
 	t.Helper()
+	h, err := tryProductionHarness(t, cloud, tr, mapping, lifecycle, issueType, adjust...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
+// tryProductionHarness is newProductionHarness returning the constructor's error.
+func tryProductionHarness(t *testing.T, cloud bool, tr dispatchkind.Tracker, mapping, lifecycle, issueType string, adjust ...func(*backendrows.Row)) (*connectorHarness, error) {
+	t.Helper()
 	h, path, table := newConnectorBackend(t, cloud)
 	t.Chdir(t.TempDir()) // the tracker's audit file lands under the host log dir
 	pwd, err := os.Getwd()
@@ -222,14 +232,14 @@ func newProductionHarness(t *testing.T, cloud bool, tr dispatchkind.Tracker, map
 	t.Cleanup(jira.ConnectorClientForTest(h.srv.Client()))
 
 	h.tr, err = jira.Strategy.NewIssueTracker(
-		backendkit.Shared{Labels: testLabels, VerdictLabels: forge.ResearchVerdictLabels(), Tracker: tr},
+		backendkit.Shared{Labels: testLabels, VerdictLabels: forge.ResearchVerdictLabels(), Tracker: tr, Connectors: newRuntime(t)},
 		func(k string) (string, bool) { v, ok := env[k]; return v, ok })
 	if err != nil {
-		t.Fatal(err)
+		return nil, err
 	}
 	live, _ := backendrows.Lookup("jira")
 	h.routes = connectortracker.Routes(live.Routes, connectorProject)
-	return h
+	return h, nil
 }
 
 // record notes a backend request and flags one a read-only Connector must not

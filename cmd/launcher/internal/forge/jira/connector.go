@@ -1,19 +1,14 @@
 package jira
 
 import (
-	"context"
-	"errors"
-	"fmt"
 	"net/http"
 	"os"
-	"slices"
 	"strings"
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
-	"spindrift.dev/launcher/internal/connectorhost"
-	"spindrift.dev/launcher/internal/connectorrecord"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/retry"
@@ -27,13 +22,6 @@ var connectorClient *http.Client
 // value sleeps for real. ConnectorClientForTest swaps it for one that does not.
 var connectorClock retry.Clock
 
-// loadRowConnector loads a backend row's Connector; a test seam.
-var loadRowConnector = backendrows.Load
-
-// errConnectorCapabilities is a Connector whose handshake omits a method
-// core drives.
-var errConnectorCapabilities = errors.New("jira Connector lacks required capabilities")
-
 // connectorCapabilities are the capabilities the jira Connector must advertise:
 // a missing one would reach a nil interface, and a
 // missing CapLabeled would silently degrade the finding dedup to open issues.
@@ -41,23 +29,6 @@ var connectorCapabilities = []string{
 	connectortracker.CapTransition, connectortracker.CapEditLabels, connectortracker.CapLabels,
 	connectortracker.CapComment, connectortracker.CapProbe, connectortracker.CapFileIssue,
 	connectortracker.CapLabeled,
-}
-
-func missingConnectorCapabilities(have []string) []string {
-	var missing []string
-	for _, c := range connectorCapabilities {
-		if !slices.Contains(have, c) {
-			missing = append(missing, c)
-		}
-	}
-	return missing
-}
-
-func checkConnectorCapabilities(have []string) error {
-	if missing := missingConnectorCapabilities(have); len(missing) > 0 {
-		return fmt.Errorf("%w: %s", errConnectorCapabilities, strings.Join(missing, ", "))
-	}
-	return nil
 }
 
 // connectorTracker keeps jira's body grammar, which the Connector
@@ -77,32 +48,28 @@ func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (for
 		return nil, err
 	}
 	row.Routes = connectortracker.Routes(row.Routes, k.JiraProjectKey)
-	it, err := connectortracker.NewReloading(func() (*connectorhost.Connector, error) {
-		conn, err := loadRowConnector(context.Background(), row, backendrows.Options{Client: connectorClient, Getenv: identityGetenv(row, k)})
-		if err != nil {
-			return nil, err
-		}
-		if err := checkConnectorCapabilities(conn.Capabilities); err != nil {
-			_ = conn.Close(context.Background())
-			return nil, err
-		}
-		return conn, nil
-	}, recordFailure, connectortracker.Lifecycle{
-		Labels:        s.Labels,
-		VerdictLabels: s.VerdictLabels,
-		IssueType:     k.JiraIssueType,
-		WebHost:       connectortracker.HostOf(k.JiraBaseURL),
-		Statuses:      wl.Statuses,
-		Resolutions:   wl.Resolutions,
-		StatusOnly:    wl.StatusOnly,
-		Route:         s.Route,
-	}, connectortracker.Target{
-		API:     strings.TrimRight(k.JiraBaseURL, "/"),
-		Repo:    k.JiraProjectKey,
-		Dialect: k.JiraDeployment,
-	}, connectorClock)
+	it, err := s.Connectors.Tracker(row, connectorruntime.TrackerSpec{
+		Target: connectortracker.Target{
+			API:     strings.TrimRight(k.JiraBaseURL, "/"),
+			Repo:    k.JiraProjectKey,
+			Dialect: k.JiraDeployment,
+		},
+		Lifecycle: connectortracker.Lifecycle{
+			Labels:        s.Labels,
+			VerdictLabels: s.VerdictLabels,
+			IssueType:     k.JiraIssueType,
+			WebHost:       connectortracker.HostOf(k.JiraBaseURL),
+			Statuses:      wl.Statuses,
+			Resolutions:   wl.Resolutions,
+			StatusOnly:    wl.StatusOnly,
+			Route:         s.Route,
+		},
+		Requires: connectorCapabilities,
+		Record:   backend.Jira.Name,
+		Options:  backendrows.Options{Client: connectorClient, Getenv: identityGetenv(row, k)},
+		Clock:    connectorClock,
+	})
 	if err != nil {
-		recordFailure("load the Connector", err)
 		return nil, err
 	}
 	return connectorTracker{it}, nil
@@ -119,9 +86,4 @@ func identityGetenv(row backendrows.Row, k Knobs) func(string) string {
 		}
 		return os.Getenv(name)
 	}
-}
-
-// recordFailure records a Connector failure in the connectorrecord .log.
-func recordFailure(op string, err error) {
-	_ = connectorrecord.Note(backend.Jira.Name, op, err)
 }

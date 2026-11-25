@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/connectorsandbox/sandbox"
 	"spindrift.dev/launcher/internal/dispatch"
@@ -64,7 +65,7 @@ type launchContext struct {
 // selects labels, blocker handling and Settle (ADR 0022); selfContained is
 // research's no-repo sub-mode (issue #2202). A defer releases the
 // accumulation lock, the one thing an early error return can leak.
-func bootstrap(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descriptor, selfContained bool) (lc *launchContext, err error) {
+func bootstrap(connectors *connectorruntime.Runtime, stdout io.Writer, ensureReady bool, kind *dispatchkind.Descriptor, selfContained bool) (lc *launchContext, err error) {
 	pwd, err := os.Getwd()
 	if err != nil {
 		return nil, err
@@ -74,7 +75,7 @@ func bootstrap(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descriptor
 	// has to hold the accumulation lock by the time a gate can fail.
 	// newGatedContext loads config again, and the two loads agree because
 	// loadConfig is a deterministic function of env vars and host git config.
-	seedConfig := applyDispatchKind(loadConfig(), kind)
+	seedConfig := applyDispatchKind(loadConfig(connectors), kind)
 	seedConfig.selfContained = selfContained
 
 	// Duplicates newGatedContext's own validate below: the seed has a real git
@@ -109,7 +110,7 @@ func bootstrap(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descriptor
 
 	// newGatedContext installs the Connector sandbox ahead of its gate walk and
 	// stops it itself on an error.
-	gc, err := newGatedContext(stdout, kind, selfContained)
+	gc, err := newGatedContext(connectors, stdout, kind, selfContained)
 	if err != nil {
 		return nil, err
 	}
@@ -350,6 +351,10 @@ func installConnectorSandbox(c config) (closeSandbox func(), err error) {
 	// The totals follow Close so they are final, and live here so every exit
 	// path that closes the sandbox records them.
 	return func() {
+		// A Connector closes through the sandbox that hosts it.
+		if c.connectors != nil {
+			_ = c.connectors.Close()
+		}
 		if cl, ok := l.(interface{ Close(context.Context) error }); ok {
 			_ = cl.Close(context.Background())
 		}

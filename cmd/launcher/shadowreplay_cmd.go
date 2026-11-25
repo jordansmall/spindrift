@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/shadowreplay"
@@ -21,7 +22,7 @@ const defaultShadowReplayDir = ".spindrift/logs"
 // Connector beside its native Strategy, and writes each log's comparison to a
 // sidecar next to it. A log that cannot be replayed is reported and fails the
 // verb at the end, without stopping the rest.
-func cmdShadowReplay(args []string, stdout, stderr io.Writer) int {
+func cmdShadowReplay(connectors *connectorruntime.Runtime, args []string, stdout, stderr io.Writer) int {
 	name, connector, dir, err := parseShadowReplayArgs(args)
 	if err == nil && connector == "" {
 		connector, _ = driver.ShadowModule(name)
@@ -53,7 +54,7 @@ func cmdShadowReplay(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "no Pass logs (issue-*.log) found in %s; if downloaded with `gh run download <run-id>`, pass the nested agent-logs-<n> directory or use `gh run download <run-id> -n agent-logs-<n>`\n", dir)
 		return 1
 	}
-	closeSandbox, err := installConnectorSandbox(loadConfig())
+	closeSandbox, err := installConnectorSandbox(loadConfig(connectors))
 	if err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return 1

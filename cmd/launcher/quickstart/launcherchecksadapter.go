@@ -3,6 +3,7 @@ package main
 import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/launcherchecks"
 )
 
@@ -37,7 +38,7 @@ func quickstartCheckConfig(a answers) launcherchecks.Config {
 }
 
 // quickstartCheckDeps supplies launcherchecks' caller seams for Quickstart.
-func quickstartCheckDeps(a answers) launcherchecks.Deps {
+func quickstartCheckDeps(connectors *connectorruntime.Runtime, a answers) launcherchecks.Deps {
 	return launcherchecks.Deps{
 		// Quickstart runs before the CLI and has no input document to trust, so
 		// the registry alone resolves the signals.
@@ -52,7 +53,7 @@ func quickstartCheckDeps(a answers) launcherchecks.Deps {
 			// reads as unset, as under `spindrift doctor`. Only registered rows
 			// can be the scaffold's tracker or forge, so only they are probed.
 			if s, ok := backendkit.ByName(name); ok {
-				shared := quickstartShared(a.repoSlug, a.gitUserName, a.gitUserEmail)
+				shared := quickstartShared(connectors, a.repoSlug, a.gitUserName, a.gitUserEmail)
 				lookup := a.lookup()
 				if s.ValidateTracker != nil {
 					b.ValidateTracker = func() error { return s.ValidateTracker(shared, lookup) }

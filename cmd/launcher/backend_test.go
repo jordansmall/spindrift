@@ -9,6 +9,7 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/inputdoc"
@@ -172,6 +173,7 @@ func TestJiraNewIssueTrackerMalformedStatusMapping(t *testing.T) {
 			"JIRA_STATUS_MAPPING": "{not valid json",
 		},
 	}}
+	c.connectors = connectorRuntime(t)
 	if _, err := row.NewIssueTracker(backendShared(c), c.knobLookup); err == nil || !strings.Contains(err.Error(), "JIRA_STATUS_MAPPING") {
 		t.Fatalf("err = %v, want one naming JIRA_STATUS_MAPPING", err)
 	}
@@ -304,7 +306,7 @@ func TestNewReadContext_UnregisteredBackendIsAnError(t *testing.T) {
 	setFullyLocalEnv(t)
 	setKnob(t, "CODE_FORGE", "nope")
 
-	if _, err := newReadContext(dispatchkind.Work, false); err == nil || !strings.Contains(err.Error(), `CODE_FORGE="nope" is not valid`) {
+	if _, err := newReadContext(nil, dispatchkind.Work, false); err == nil || !strings.Contains(err.Error(), `CODE_FORGE="nope" is not valid`) {
 		t.Errorf("newReadContext err = %v, want the unregistered CODE_FORGE rejected", err)
 	}
 }
@@ -319,4 +321,13 @@ func (c *config) setRowKnob(env, value string) {
 	}
 	m[env] = value
 	c.RowKnobs = m
+}
+
+// connectorRuntime is a Connector runtime over the rows the test applied, as
+// mainRun builds one, closed with the test.
+func connectorRuntime(t *testing.T) *connectorruntime.Runtime {
+	t.Helper()
+	rt := connectorruntime.FromRegistries()
+	t.Cleanup(func() { _ = rt.Close() })
+	return rt
 }

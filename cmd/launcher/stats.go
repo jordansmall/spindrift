@@ -14,6 +14,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/driver/driverkit"
@@ -188,7 +189,7 @@ func warnEach(stderr io.Writer, prefix string, err error) {
 	}
 }
 
-func cmdStats(args []string, stdout, stderr io.Writer) int {
+func cmdStats(connectors *connectorruntime.Runtime, args []string, stdout, stderr io.Writer) int {
 	opts, err := parseStatsArgs(args)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
@@ -198,7 +199,7 @@ func cmdStats(args []string, stdout, stderr io.Writer) int {
 	// Parsing a log loads its Driver's Connector, whose grammar reads the log.
 	// No checkBackendsRegistered: stats builds no tracker or forge, so a bad
 	// ISSUE_TRACKER or CODE_FORGE is not its concern.
-	c := loadConfig()
+	c := loadConfig(connectors)
 	closeSandbox, err := installConnectorSandbox(c)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)

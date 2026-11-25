@@ -12,6 +12,7 @@ import (
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
@@ -42,7 +43,7 @@ type missingSources map[daemon.Kind]string
 // -file/-cmd flag or _CMD form leaves the kind exit-driven (a set _CMD earns a
 // tokenFormHint). A relative LOCAL_ISSUES_DIR resolves against the daemon's
 // cwd, which every child inherits (StartChild sets no cmd.Dir).
-func buildDemandSources(doc *inputdoc.Document, kinds []daemon.Kind) (demandSources, missingSources) {
+func buildDemandSources(connectors *connectorruntime.Runtime, doc *inputdoc.Document, kinds []daemon.Kind) (demandSources, missingSources) {
 	var probed []*dispatchkind.Descriptor
 	sources := demandSources{}
 	for _, k := range kinds {
@@ -64,13 +65,13 @@ func buildDemandSources(doc *inputdoc.Document, kinds []daemon.Kind) (demandSour
 	if len(probed) == 0 {
 		return sources, nil
 	}
-	tracked, missing := buildTrackerSources(doc, probed)
+	tracked, missing := buildTrackerSources(connectors, doc, probed)
 	maps.Copy(sources, tracked)
 	return sources, missing
 }
 
 // buildTrackerSources is the DemandTrackerProbe half of buildDemandSources.
-func buildTrackerSources(doc *inputdoc.Document, probed []*dispatchkind.Descriptor) (demandSources, missingSources) {
+func buildTrackerSources(connectors *connectorruntime.Runtime, doc *inputdoc.Document, probed []*dispatchkind.Descriptor) (demandSources, missingSources) {
 	name := issueTrackerName(doc)
 	strat, ok := backendkit.ByName(name)
 	if !ok {
@@ -82,7 +83,7 @@ func buildTrackerSources(doc *inputdoc.Document, probed []*dispatchkind.Descript
 	lookup := childLookup(doc)
 	// The branch prefix is left blank: it only names agent branches, which
 	// counting never touches.
-	shared := backendkit.Shared{RepoSlug: childKnob(doc, "REPO_SLUG", os.Getenv("REPO_SLUG"))}
+	shared := backendkit.Shared{RepoSlug: childKnob(doc, "REPO_SLUG", os.Getenv("REPO_SLUG")), Connectors: connectors}
 	// A route the child would refuse must not leave the daemon counting the
 	// tracker's whole scope.
 	route, err := forge.ResolveRoute(issueRoute(doc), name, strat.RouteKinds)

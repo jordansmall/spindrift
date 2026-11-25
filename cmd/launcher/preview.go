@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/freshness"
 	"spindrift.dev/launcher/internal/runner"
@@ -124,10 +125,10 @@ func printPlan(w io.Writer, plan waves.Plan) {
 	}
 }
 
-func preview(stdout io.Writer, issueNums []string) error {
+func preview(connectors *connectorruntime.Runtime, stdout io.Writer, issueNums []string) error {
 	// Preview never dispatches, so it carries no dispatch kind at all rather
 	// than dispatchkind.Default, matching doctor and reconcile (issue #2944).
-	gc, err := newGatedContext(stdout, nil, false)
+	gc, err := newGatedContext(connectors, stdout, nil, false)
 	if err != nil {
 		return err
 	}

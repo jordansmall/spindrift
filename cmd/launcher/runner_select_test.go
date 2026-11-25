@@ -99,7 +99,7 @@ func TestRunnerForKind_BwrapUnshareNetKnobReachesAdapter(t *testing.T) {
 			setKnob(t, "NETWORK_MODE", "host")
 			setArtifact(t, "RUNNER_KIND", "bwrap")
 			setKnob(t, "BWRAP_UNSHARE_NET", tc.unshareNet)
-			c := loadConfig()
+			c := loadConfig(nil)
 
 			got, err := runnerForKind(c, runnerConfig(c), "/pwd")
 			if err != nil {

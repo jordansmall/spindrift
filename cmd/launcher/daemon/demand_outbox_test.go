@@ -68,7 +68,7 @@ func outboxCounterT(t *testing.T, settings map[string]string, now time.Time) for
 	t.Helper()
 	clearKnobEnvT(t)
 	t.Chdir(t.TempDir())
-	src, _ := buildDemandSources(demandDocT(settings), []daemon.Kind{recoverKind})
+	src, _ := buildDemandSources(nil, demandDocT(settings), []daemon.Kind{recoverKind})
 	c, ok := src[recoverKind].(*outboxDemand)
 	if !ok {
 		t.Fatalf("recover source = %T, want *outboxDemand", src[recoverKind])
@@ -199,7 +199,7 @@ func TestBuildDemandSources_RecoverGetsOutboxSourceWhateverTheTracker(t *testing
 	for _, tracker := range []string{"bogus", "forgejo", "local", ""} {
 		t.Run(tracker, func(t *testing.T) {
 			clearKnobEnvT(t)
-			src, missing := buildDemandSources(demandDocT(map[string]string{"ISSUE_TRACKER": tracker}), []daemon.Kind{recoverKind})
+			src, missing := buildDemandSources(nil, demandDocT(map[string]string{"ISSUE_TRACKER": tracker}), []daemon.Kind{recoverKind})
 			if _, ok := src[recoverKind].(*outboxDemand); !ok {
 				t.Errorf("recover source = %T, want *outboxDemand", src[recoverKind])
 			}
@@ -212,7 +212,7 @@ func TestBuildDemandSources_RecoverGetsOutboxSourceWhateverTheTracker(t *testing
 
 func TestBuildDemandSources_RecoverAlongsideBrokenTracker(t *testing.T) {
 	clearKnobEnvT(t)
-	src, missing := buildDemandSources(demandDocT(map[string]string{"ISSUE_TRACKER": "bogus"}), []daemon.Kind{workKind, recoverKind})
+	src, missing := buildDemandSources(nil, demandDocT(map[string]string{"ISSUE_TRACKER": "bogus"}), []daemon.Kind{workKind, recoverKind})
 	if _, ok := src[recoverKind]; !ok {
 		t.Error("recover lost its outbox source to the unknown tracker")
 	}
@@ -293,7 +293,7 @@ func TestRecoverOutboxDemand_DrivesTheLoopThroughTheDaemonWiring(t *testing.T) {
 	clk := &wiringClock{now: t0}
 
 	doc := demandDocT(map[string]string{"TRANSIENT_BACKOFF_SECS": "3600"})
-	src, _ := buildDemandSources(doc, []daemon.Kind{recoverKind})
+	src, _ := buildDemandSources(nil, doc, []daemon.Kind{recoverKind})
 	src[recoverKind].(*outboxDemand).now = clk.Now
 	cfg := daemon.Config{
 		Kinds:            []daemon.Kind{recoverKind},

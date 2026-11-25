@@ -74,7 +74,7 @@ func TestNewReadContext_FullyLocal_ConstructsClean(t *testing.T) {
 	setKnob(t, "GIT_USER_EMAIL", "bot@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
 
-	rc, err := newReadContext(dispatchkind.Work, false)
+	rc, err := newReadContext(nil, dispatchkind.Work, false)
 	if err != nil {
 		t.Fatalf("newReadContext: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestNewReadContext_FullyLocal_ConstructsClean(t *testing.T) {
 func TestNewReadContext_FullyLocal_ResolvesCapabilities(t *testing.T) {
 	setFullyLocalEnv(t)
 
-	rc, err := newReadContext(dispatchkind.Work, false)
+	rc, err := newReadContext(nil, dispatchkind.Work, false)
 	if err != nil {
 		t.Fatalf("newReadContext: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestNewReadContext_InvalidConfig_ConstructsCleanly(t *testing.T) {
 	setFullyLocalEnv(t)
 	setKnob(t, "GIT_USER_NAME", "")
 
-	rc, err := newReadContext(dispatchkind.Work, false)
+	rc, err := newReadContext(nil, dispatchkind.Work, false)
 	if err != nil {
 		t.Fatalf("newReadContext: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestNewReadContext_ForgejoLoadFailure_ReturnsError(t *testing.T) {
 	}
 	t.Chdir(t.TempDir())
 
-	rc, err := newReadContext(dispatchkind.Work, false)
+	rc, err := newReadContext(nil, dispatchkind.Work, false)
 
 	if err == nil || !strings.Contains(err.Error(), "read module") || !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("newReadContext err = %v, want the Connector's module read error", err)

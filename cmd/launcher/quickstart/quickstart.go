@@ -16,6 +16,7 @@ import (
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/driver"
@@ -269,13 +270,15 @@ func buildForge(tracker, codeForge backendkit.Strategy, sh backendkit.Shared, l 
 	return it, cf, nil
 }
 
-// quickstartShared is the Shared the wizard hands every Strategy hook.
-func quickstartShared(repoSlug, gitUserName, gitUserEmail string) backendkit.Shared {
+// quickstartShared is the Shared the wizard hands every Strategy hook;
+// connectors is nil in a test that builds no Connector-routed tracker.
+func quickstartShared(connectors *connectorruntime.Runtime, repoSlug, gitUserName, gitUserEmail string) backendkit.Shared {
 	return backendkit.Shared{
 		RepoSlug:     repoSlug,
 		Labels:       defaultDispatchLabels,
 		GitUserName:  gitUserName,
 		GitUserEmail: gitUserEmail,
+		Connectors:   connectors,
 	}
 }
 
@@ -333,7 +336,7 @@ func rollbackAndFail(backedUp []backupRecord, restore func(bakPath, path string)
 // runQuickstart drives the wizard end-to-end over injected I/O and seams.
 // Interactive-only for v1: a non-TTY stdin is a fatal error that directs
 // scripted setups to write flake.nix and harness.env directly.
-func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBuilder ForgeBuilder, w io.Writer, stdin io.Reader, interactive, force bool) error {
+func runQuickstart(connectors *connectorruntime.Runtime, dir string, env Environment, cmdRunner CommandRunner, forgeBuilder ForgeBuilder, w io.Writer, stdin io.Reader, interactive, force bool) error {
 	if !interactive {
 		return fmt.Errorf("quickstart requires an interactive terminal — for scripted setups, write flake.nix and harness.env directly (see docs/flake-options.md)")
 	}
@@ -484,7 +487,7 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 	gitUserName := promptDefault("Git user name", env.GitConfig(hostGitConfigKeyGitUserName))
 	gitUserEmail := promptDefault("Git user email", env.GitConfig(hostGitConfigKeyGitUserEmail))
 
-	shared := quickstartShared(repoSlug, gitUserName, gitUserEmail)
+	shared := quickstartShared(connectors, repoSlug, gitUserName, gitUserEmail)
 	// Quickstart installs no Connector sandbox, so a Connector-read tracker or
 	// Code Forge defers its finish-line checks to `spindrift doctor`, as does
 	// the token probe of any chosen row whose tracker side is the Connector.
@@ -625,7 +628,7 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 		tokenHint, slugHint, noLabelRegistry := doctorHints(a.tracker.name)
 		// launcherchecks carries no runtime row: doctor.Config.Runtime below
 		// reports runtime validity.
-		launcherRows := launcherchecks.All(quickstartCheckConfig(a), quickstartCheckDeps(a))
+		launcherRows := launcherchecks.All(quickstartCheckConfig(a), quickstartCheckDeps(connectors, a))
 		// Verbose: quickstart's finish line always reports in full, whatever
 		// `spindrift doctor`'s own quiet default does (issue #3777).
 		rep := doctor.NewReporter(w, true)

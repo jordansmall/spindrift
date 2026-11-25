@@ -212,7 +212,7 @@ func TestParseFlags_MergeGuardPathsEmptyDisablesGuard(t *testing.T) {
 	if _, err := parseResolved(t, []string{"--merge-guard-paths", ""}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := loadConfig().MergeGuardPaths; got != "" {
+	if got := loadConfig(nil).MergeGuardPaths; got != "" {
 		t.Errorf("mergeGuardPaths = %q, want empty (guard disabled)", got)
 	}
 }
@@ -2609,7 +2609,7 @@ func TestParseFlags_SchemaFlagReachesConfigWithoutTouchingEnv(t *testing.T) {
 	if _, err := parseResolved(t, []string{"--max-jobs", "2", "--model", "flag-model"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := loadConfig().MaxJobs; got != 2 {
+	if got := loadConfig(nil).MaxJobs; got != 2 {
 		t.Errorf("loadConfig().MaxJobs = %d, want 2", got)
 	}
 	if got := resolveBoxEnvVar("MODEL"); got != "flag-model" {

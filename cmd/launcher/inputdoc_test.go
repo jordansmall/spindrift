@@ -138,7 +138,7 @@ func TestLoadConfig_ArtifactsIgnoreAmbientEnv(t *testing.T) {
 	t.Setenv("IMAGE_TAG", "ambient")
 	t.Setenv("AGENT_FILES", "ambient")
 
-	c := loadConfig()
+	c := loadConfig(nil)
 	if c.imageTag != "spindrift:from-doc" {
 		t.Errorf("imageTag = %q, want the document's IMAGE_TAG", c.imageTag)
 	}
@@ -152,7 +152,7 @@ func TestLoadConfig_ArtifactsIgnoreAmbientEnv(t *testing.T) {
 func TestLoadConfig_AbsentArtifactsAreEmpty(t *testing.T) {
 	useDoc(t, nil)
 	t.Setenv("IMAGE_TAG", "ambient")
-	c := loadConfig()
+	c := loadConfig(nil)
 	if c.imageTag != "" {
 		t.Errorf("imageTag = %q, want empty without a document entry", c.imageTag)
 	}
@@ -209,7 +209,7 @@ func TestMainRun_AmbientDriverMismatch_WarnsOnceAndBakedWins(t *testing.T) {
 	if n := strings.Count(got, "using the baked Driver"); n != 1 {
 		t.Errorf("mismatch: %d warnings in stderr, want 1: %q", n, got)
 	}
-	if c := loadConfig(); c.driver != "claude" {
+	if c := loadConfig(nil); c.driver != "claude" {
 		t.Errorf("driver = %q, want the baked claude", c.driver)
 	}
 	for _, ambient := range []string{"claude", ""} {

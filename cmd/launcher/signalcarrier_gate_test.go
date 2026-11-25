@@ -79,7 +79,7 @@ func TestSignalCarrierNetworkModeGate_SocketUnderNoneRendersSharedReason(t *test
 // and runs NETWORK_MODE=none gets the startup error naming the remedy.
 func TestSignalCarrierNetworkModeGate_UnsetKnobUnderNoneFailsNamingLogRemedy(t *testing.T) {
 	c := minimalValidConfig()
-	c.SignalCarrier = loadConfig().SignalCarrier
+	c.SignalCarrier = loadConfig(nil).SignalCarrier
 	c.NetworkMode = "none"
 
 	err := checkSignalCarrierNetworkModeGate(c)

@@ -132,7 +132,7 @@ func TestStubStrategy_LaunchGateRunsAtLaunchAndDoctorOnlyRunsOnlyInDoctor(t *tes
 	counts := installStubStrategy(t, nil, nil)
 	setStubFamilyLaunchEnv(t)
 
-	if _, err := newGatedContext(&bytes.Buffer{}, dispatchkind.Work, false); err != nil {
+	if _, err := newGatedContext(nil, &bytes.Buffer{}, dispatchkind.Work, false); err != nil {
 		t.Fatalf("newGatedContext() = %v, want nil", err)
 	}
 	if counts.gateCalls != 1 || counts.doctorOnlyCalls != 0 {
@@ -160,7 +160,7 @@ func TestNewGatedContext_FailingStubLaunchGateErrorSurfacesVerbatim(t *testing.T
 	counts := installStubStrategy(t, gateErr, errors.New("doctor-only failure"))
 	setStubFamilyLaunchEnv(t)
 
-	gc, err := newGatedContext(&bytes.Buffer{}, dispatchkind.Work, false)
+	gc, err := newGatedContext(nil, &bytes.Buffer{}, dispatchkind.Work, false)
 	if err != gateErr {
 		t.Errorf("newGatedContext() error = %v, want the gate probe's error verbatim", err)
 	}
@@ -304,7 +304,7 @@ func TestNewGatedContext_FailingLaunchWithConfigRowStopsBeforeGates(t *testing.T
 	counts.configErr = errors.New("stub config sentinel failure")
 	setStubFamilyLaunchEnv(t)
 
-	if _, err := newGatedContext(&bytes.Buffer{}, dispatchkind.Work, false); err == nil || !strings.Contains(err.Error(), "stub config sentinel failure") {
+	if _, err := newGatedContext(nil, &bytes.Buffer{}, dispatchkind.Work, false); err == nil || !strings.Contains(err.Error(), "stub config sentinel failure") {
 		t.Errorf("newGatedContext() = %v, want the config row's failure", err)
 	}
 	if counts.gateCalls != 0 {
@@ -388,7 +388,7 @@ func setRealRunnerLaunchEnv(t *testing.T, bwrapExit int, pasta bool) {
 func TestRealBwrapStrategy_DefaultNetworkModeMissingPastaFailsLaunch(t *testing.T) {
 	setRealRunnerLaunchEnv(t, 0, false)
 
-	_, err := newGatedContext(&bytes.Buffer{}, dispatchkind.Work, false)
+	_, err := newGatedContext(nil, &bytes.Buffer{}, dispatchkind.Work, false)
 	if err == nil {
 		t.Fatal("newGatedContext() = nil, want the pasta error when pasta is absent from PATH")
 	}
@@ -407,7 +407,7 @@ func TestRealBwrapStrategy_RequiredOverlayUnsupportedFailsLaunch(t *testing.T) {
 	setArtifact(t, "NIX_STORE_WRITABLE", "true")
 	setArtifact(t, "NIX_CONFIG_FILE", "/nix/store/somehash-nix.conf")
 
-	_, err := newGatedContext(&bytes.Buffer{}, dispatchkind.Work, false)
+	_, err := newGatedContext(nil, &bytes.Buffer{}, dispatchkind.Work, false)
 	if err == nil {
 		t.Fatal("newGatedContext() = nil, want the overlay error when the overlay probe fails")
 	}
@@ -424,7 +424,7 @@ func TestRealBwrapStrategy_RequiredOverlayUnsupportedFailsLaunch(t *testing.T) {
 func TestRealBwrapStrategy_PastaPresentOverlayNotRequiredPassesLaunch(t *testing.T) {
 	setRealRunnerLaunchEnv(t, 1, true)
 
-	if _, err := newGatedContext(&bytes.Buffer{}, dispatchkind.Work, false); err != nil {
+	if _, err := newGatedContext(nil, &bytes.Buffer{}, dispatchkind.Work, false); err != nil {
 		t.Errorf("newGatedContext() = %v, want nil with pasta present and no overlay requirement", err)
 	}
 }

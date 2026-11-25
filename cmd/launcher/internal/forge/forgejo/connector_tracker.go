@@ -1,23 +1,15 @@
 package forgejo
 
 import (
-	"context"
-	"errors"
-	"fmt"
-	"slices"
 	"strings"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
-	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/retry"
 )
-
-// errConnectorCapabilities is a Connector whose handshake omits a method the
-// tracker needs.
-var errConnectorCapabilities = errors.New("forgejo Connector lacks required capabilities")
 
 // connectorCapabilities are what the forgejo tracker needs, so none silently
 // disappears. A missing one would reach a nil layer, and a missing CapLabeled
@@ -30,48 +22,25 @@ var connectorCapabilities = []string{
 	connectortracker.CapSearchIssues,
 }
 
-func checkConnectorCapabilities(have []string) error {
-	var missing []string
-	for _, c := range connectorCapabilities {
-		if !slices.Contains(have, c) {
-			missing = append(missing, c)
-		}
-	}
-	if len(missing) > 0 {
-		return fmt.Errorf("%w: %s", errConnectorCapabilities, strings.Join(missing, ", "))
-	}
-	return nil
-}
-
 // newConnectorTracker builds the issue tracker from row's Connector alone:
 // every read and write goes through it.
-// Lifecycle policy stays core's. The tracker reloads a dead Connector, so it
-// may live as long as a daemon; the Connector and its audit file live for the
-// process.
+// Lifecycle policy stays core's. The runtime reloads a dead Connector, so the
+// tracker may live as long as a daemon.
 func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (forge.IssueTracker, error) {
 	row.Routes = connectortracker.Routes(row.Routes, s.RepoSlug)
-	it, err := connectortracker.NewReloading(func() (*connectorhost.Connector, error) {
-		conn, err := loadRowConnector(context.Background(), row, backendrows.Options{Client: connectorClient})
-		if err != nil {
-			return nil, err
-		}
-		if err := checkConnectorCapabilities(conn.Capabilities); err != nil {
-			_ = conn.Close(context.Background())
-			return nil, err
-		}
-		return conn, nil
-	}, recordFailure, connectortracker.Lifecycle{
-		Labels:        s.Labels,
-		Route:         s.Route,
-		VerdictLabels: s.VerdictLabels,
-		WebHost:       connectortracker.HostOf(k.ForgejoBaseURL),
-	}, connectortracker.Target{
-		API:  strings.TrimSuffix(k.ForgejoBaseURL, "/"),
-		Repo: s.RepoSlug,
-	}, retry.Clock{})
-	if err != nil {
-		recordFailure("load the Connector", err)
-		return nil, err
-	}
-	return it, nil
+	return s.Connectors.Tracker(row, connectorruntime.TrackerSpec{
+		Target: connectortracker.Target{
+			API:  strings.TrimSuffix(k.ForgejoBaseURL, "/"),
+			Repo: s.RepoSlug,
+		},
+		Lifecycle: connectortracker.Lifecycle{
+			Labels:        s.Labels,
+			Route:         s.Route,
+			VerdictLabels: s.VerdictLabels,
+			WebHost:       connectortracker.HostOf(k.ForgejoBaseURL),
+		},
+		Requires: connectorCapabilities,
+		Record:   backend.Forgejo.Name,
+		Options:  backendrows.Options{Client: connectorClient},
+	})
 }
