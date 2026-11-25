@@ -151,6 +151,18 @@ func TestConnectorRoutesChecks_WideningFailsNamingAddedRoutes(t *testing.T) {
 	}
 }
 
+func TestConnectorRoutesChecks_HeaderWideningNamesTheHeader(t *testing.T) {
+	live := fixtureGetRepos
+	live.RequestHeaders, live.ResponseHeaders = []string{"X-Extra"}, []string{"X-Seen"}
+	useConnectorRows(t, connectorRow([]connectorhost.Route{fixtureGetRepos}, []connectorhost.Route{live}))
+	out := runConnectorRows(t, connectorRoutesChecks(fixtureConfig()))
+	for _, want := range []string{"connector-routes-widened[fixture]", "\n+ GET api.fixture.test /repos (sends X-Extra) (reads X-Seen)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestConnectorRoutesChecks_JiraWriteRoutesRenderAsAdded(t *testing.T) {
 	get := func(p string) connectorhost.Route {
 		return connectorhost.Route{Method: "GET", Host: backendrows.BaseHost, Path: p}

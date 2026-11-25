@@ -100,15 +100,17 @@ const (
 
 // Widening returns the live Routes no accepted Route covers. An accepted Route
 // covers one with the same method and host, compared literally, no redirect
-// opt-in the accepted one lacks, and a path equal to or inside the accepted
-// path's subtree. The subtree test is PathSet.Admits' request-path match,
-// sound here because Use validates both tables as canonical patterns (no
-// blanket "/").
+// opt-in the accepted one lacks, no declared request or response header the
+// accepted one lacks (names compared case-insensitively), and a path equal to
+// or inside the accepted path's subtree. The subtree test is PathSet.Admits'
+// request-path match, sound here because Use validates both tables as
+// canonical patterns (no blanket "/").
 func (r Row) Widening() []connectorhost.Route {
 	var added []connectorhost.Route
 	for _, live := range r.Routes {
 		covered := slices.ContainsFunc(r.AcceptedRoutes, func(a connectorhost.Route) bool {
 			return a.Method == live.Method && a.Host == live.Host && (a.FollowRedirect || !live.FollowRedirect) &&
+				headersCovered(a.RequestHeaders, live.RequestHeaders) && headersCovered(a.ResponseHeaders, live.ResponseHeaders) &&
 				registryvocab.PathSet{a.Path}.Admits(live.Path)
 		})
 		if !covered {
@@ -116,6 +118,15 @@ func (r Row) Widening() []connectorhost.Route {
 		}
 	}
 	return added
+}
+
+// headersCovered reports whether every header in live is named in accepted.
+func headersCovered(accepted, live []string) bool {
+	return !slices.ContainsFunc(live, func(h string) bool {
+		return !slices.ContainsFunc(accepted, func(a string) bool {
+			return http.CanonicalHeaderKey(a) == http.CanonicalHeaderKey(h)
+		})
+	})
 }
 
 // GrantChanges returns the non-Route parts of the row's grant that differ from
