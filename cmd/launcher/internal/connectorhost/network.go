@@ -222,21 +222,6 @@ func (n *Network) record(e AuditEntry) error {
 	return n.Audit.Record(e)
 }
 
-// DeclaredHosts returns the distinct hosts of the Connector's Route table as
-// written (host[:port]), or nil without a network grant.
-func (c *Connector) DeclaredHosts() []string {
-	if c.network == nil {
-		return nil
-	}
-	var hosts []string
-	for _, r := range c.network.Routes {
-		if !slices.ContainsFunc(hosts, func(h string) bool { return strings.EqualFold(h, r.Host) }) {
-			hosts = append(hosts, r.Host)
-		}
-	}
-	return hosts
-}
-
 // AuditRefusal audits core refusing the Connector's answer to method, as
 // opposed to an http_request, and returns refusal. A failed audit write, or a
 // Connector without a network grant (so no audit log), also matches ErrAudit:
