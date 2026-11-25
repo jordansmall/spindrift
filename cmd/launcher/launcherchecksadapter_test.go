@@ -17,6 +17,7 @@ import (
 func TestLauncherCheckDeps_BackendBindsValidatorToConfig(t *testing.T) {
 	c := minimalValidConfig()
 	c.IssueTracker = "forgejo"
+	c.setRowKnob("FORGEJO_BASE_URL", "")
 
 	deps := launcherCheckDeps(c)
 	b, ok := deps.Backend("forgejo")

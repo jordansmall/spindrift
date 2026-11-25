@@ -111,7 +111,7 @@ func validate(axis string) func(backendkit.Shared, backendkit.Lookup) error {
 		if err != nil {
 			return err
 		}
-		return ValidateForgejoEnv(axis, k.ForgejoBaseURL, k.ForgejoToken)
+		return ValidateForgejoEnv(axis, k.ForgejoBaseURL)
 	}
 }
 

@@ -95,7 +95,17 @@ func buildTrackerSources(doc *inputdoc.Document, probed []*dispatchkind.Descript
 	// it) is probed.
 	if strat.ValidateTracker != nil {
 		if err := strat.ValidateTracker(shared, lookup); err != nil {
-			return nil, allMissing(probed, err.Error()+tokenFormHint(strat, lookup, err))
+			return nil, allMissing(probed, err.Error())
+		}
+	}
+	// The row-credential rule launcherchecks applies to a selected backend:
+	// without it NewIssueTracker fails with a Connector-construction error that
+	// never names the knob. In production resolveConnectorCredentials already
+	// refused an unset credential for every Connector-routed row, so this is the
+	// fallback that keeps the probe's reason naming the knob.
+	if env := strat.TokenEnvVar; env != "" {
+		if v, _ := lookup(env); v == "" {
+			return nil, allMissing(probed, fmt.Sprintf("set %s, the credential of the %s backend%s", env, strat.Name, tokenFormHint(env, lookup)))
 		}
 	}
 	configured := forge.DispatchLabels{
@@ -242,18 +252,9 @@ func allMissing(probed []*dispatchkind.Descriptor, reason string) missingSources
 	return missing
 }
 
-// tokenFormHint explains a blank plain token when the tracker's _CMD form is
-// set, since the daemon never runs the command. It names knobs only, and
-// applies only to the blank-token error, which every backend words as "set
-// <plain token knob> when ...".
-func tokenFormHint(strat backendkit.Strategy, lookup backendkit.Lookup, err error) string {
-	plain := strat.TokenEnvVar
-	if plain == "" || !strings.Contains(err.Error(), plain) {
-		return ""
-	}
-	if v, _ := lookup(plain); v != "" {
-		return ""
-	}
+// tokenFormHint explains a blank plain token when its _CMD form is set, since
+// the daemon never runs the command. It names knobs only.
+func tokenFormHint(plain string, lookup backendkit.Lookup) string {
 	if cmd, _ := lookup(plain + "_CMD"); cmd == "" {
 		return ""
 	}

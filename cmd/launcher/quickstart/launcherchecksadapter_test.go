@@ -268,7 +268,7 @@ func TestQuickstartCheckDeps_BlankSlugFailsOnlyRepoSlugRow(t *testing.T) {
 	}
 }
 
-// forgejoAnswers fills in both inputs forgejo.ValidateForgejoEnv reads, so a
+// forgejoAnswers fills in the input forgejo.ValidateForgejoEnv reads, so a
 // test can blank one at a time.
 func forgejoAnswers() answers {
 	a := validAnswers()
@@ -297,7 +297,10 @@ func TestQuickstartCheckDeps_ForgejoBindsValidator(t *testing.T) {
 		mutate  func(a *answers)
 		wantErr string
 	}{
-		{name: "missing token", mutate: func(a *answers) { a.tokens = nil }, wantErr: "FORGEJO_TOKEN"},
+		{name: "blank base URL", mutate: func(a *answers) {
+			a.tracker = backendChoice{name: "forgejo", knobs: map[string]string{"FORGEJO_BASE_URL": ""}}
+			a.forge = a.tracker
+		}, wantErr: "FORGEJO_BASE_URL"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := forgejoAnswers()

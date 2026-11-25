@@ -90,10 +90,11 @@ func warnConnectorWriteUndetermined(w io.Writer, c config, env, reason string) {
 // checkConnectorWriteGate refuses a launch whose github Connector
 // credential cannot write: a read-only token would fail the Connector's writes
 // only after the claim. A credential whose capability cannot be read (a
-// fine-grained PAT, an installation token, an unsupported hook, an unset env)
-// warns rather than refuses. The env is final here: mainRun resolves the _CMD
-// form of each row this run reads before any verb runs, so an empty value is
-// not set, and backendrows.Use only checks that the row names a credential env.
+// fine-grained PAT, an installation token, an unsupported hook) warns rather
+// than refuses. An unset env passes silently: the Required backend-credential
+// row refuses it first. The env is final here: mainRun resolves the _CMD form
+// of each row this run reads before any verb runs, so an empty value is not
+// set.
 func checkConnectorWriteGate(c config, w io.Writer) error {
 	row, ok := backendrows.Lookup(backend.GitHub.Name)
 	if !ok {
@@ -102,7 +103,6 @@ func checkConnectorWriteGate(c config, w io.Writer) error {
 	env := row.CredentialEnv
 	token := os.Getenv(env)
 	if token == "" {
-		fmt.Fprintf(w, "WARNING: the github Connector's credential %s is not set, so its writes will fail; it needs %s.\n", env, connectorWritePermissions(c))
 		return nil
 	}
 	// An installation token's introspection reports repository push (Contents

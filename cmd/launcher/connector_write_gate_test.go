@@ -255,7 +255,7 @@ func TestConnectorWriteGate_InstallationTokenWarnsWithoutIntrospecting(t *testin
 	}
 }
 
-func TestConnectorWriteGate_UnsetCredentialWarns(t *testing.T) {
+func TestConnectorWriteGate_UnsetCredentialPassesSilently(t *testing.T) {
 	called := false
 	useGithubConnectorRow(t, func(string, string) (backendkit.TokenIntrospection, error) {
 		called = true
@@ -263,13 +263,8 @@ func TestConnectorWriteGate_UnsetCredentialWarns(t *testing.T) {
 	})
 	t.Setenv(ghTokenEnv, "")
 	out, err := walkConnectorWriteGate(minimalValidConfig(), walkEnforce)
-	if err != nil || called {
-		t.Fatalf("err = %v, called = %v, want a warning only", err, called)
-	}
-	for _, want := range []string{"WARNING:", ghTokenEnv, "not set", "Issues", "Pull requests", "Contents", "Checks", "Commit statuses"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("output = %q, want %q", out, want)
-		}
+	if err != nil || called || strings.Contains(out, "WARNING") {
+		t.Errorf("err = %v, called = %v, output = %q, want a pass without a warning", err, called, out)
 	}
 }
 

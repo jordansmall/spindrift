@@ -26,11 +26,11 @@ func TestStrategyShape(t *testing.T) {
 	}
 }
 
-func TestStrategyValidateTrackerNamesMissingToken(t *testing.T) {
-	err := forgejo.Strategy.ValidateTracker(backendkit.Shared{}, mapLookup(nil))
-	if err == nil || !strings.Contains(err.Error(), "FORGEJO_TOKEN") ||
+func TestStrategyValidateTrackerNamesBlankBaseURL(t *testing.T) {
+	err := forgejo.Strategy.ValidateTracker(backendkit.Shared{}, mapLookup(map[string]string{"FORGEJO_BASE_URL": ""}))
+	if err == nil || !strings.Contains(err.Error(), "FORGEJO_BASE_URL") ||
 		!strings.Contains(err.Error(), "ISSUE_TRACKER=forgejo") {
-		t.Errorf("err = %v, want one naming FORGEJO_TOKEN and ISSUE_TRACKER=forgejo", err)
+		t.Errorf("err = %v, want one naming FORGEJO_BASE_URL and ISSUE_TRACKER=forgejo", err)
 	}
 }
 
