@@ -7,6 +7,7 @@ import (
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/gitexec"
 	"spindrift.dev/launcher/internal/gitremote"
@@ -52,7 +53,13 @@ var Strategy = backendkit.Strategy{
 		if err != nil {
 			return backendkit.LedgerSite{}, err
 		}
-		return backendkit.LedgerSite{URL: GitRemoteURL(k.ForgejoBaseURL, s.RepoSlug), Credential: gitexec.StaticCredential(gitCredential)}, nil
+		// The derivation Compose makes from the row's Git remote, so the Ledger
+		// and the clone site name one URL for the path-scoped git credential.
+		cloneURL, err := connectorforge.CloneURL(k.ForgejoBaseURL, s.RepoSlug)
+		if err != nil {
+			return backendkit.LedgerSite{}, err
+		}
+		return backendkit.LedgerSite{URL: cloneURL, Credential: gitexec.StaticCredential(gitCredential)}, nil
 	},
 	WebURL: func(s backendkit.Shared, l backendkit.Lookup) string {
 		base := identityBase(l)

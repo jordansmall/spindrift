@@ -30,7 +30,7 @@ func useGithubRowAt(t *testing.T, host string) { applyGithubRow(t, host, func(*b
 func applyGithubRow(t *testing.T, host string, adjust func(*backendrows.Row)) {
 	t.Helper()
 	path, routes := githubConnectorRoutes(t, host, connectorRepo)
-	row := backendrows.Row{Name: "github", Module: path, Routes: routes, CredentialEnv: tokenCredentialEnv}
+	row := backendrows.Row{Name: "github", Module: path, Routes: routes, CredentialEnv: tokenCredentialEnv, GitRemote: "https://" + host}
 	adjust(&row)
 	doc, err := json.Marshal([]backendrows.Row{row})
 	if err != nil {

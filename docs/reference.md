@@ -4083,16 +4083,15 @@ description and a regen.
   core's credential, which the Connector never sees.
   [`connectorforge.Compose`](../cmd/launcher/internal/connectorforge/pushonly.go)
   builds the Code Forge and refuses a Connector without `"forge.branches"`, or
-  declaring neither `"forge.pushOnly"` nor `"forge.prs"`. It reads
-  `forge.remote` once at construction, and again on a Probe that has no
-  `forge.probe`, and
-  refuses the answer unless both URLs are `https`, carry no userinfo and name a
-  host of the Connector's Route table (case-insensitive, port included);
-  otherwise the git credential would go to whatever host the Connector named.
-  A backend whose git host is not its API host passes core's own web host
-  instead (`Git.WebHost`; github passes `GH_HOST`, else `github.com`, since its
-  Routes name only `api.github.com`), and then both URLs must name exactly that
-  host and no Route host is accepted (issue #7195).
+  declaring neither `"forge.pushOnly"` nor `"forge.prs"`. Core derives the clone
+  URL `<web base>/<owner>/<name>.git` from the forge's Git remote declaration
+  (its backend row's `gitRemote`) and the Target repository, and the web host
+  PR URLs are pinned to from the same declaration; it never asks the Connector
+  for a remote at construction, so the git credential goes only to the derived
+  repository URL. A Probe with no `forge.probe` still reads `forge.remote` as a
+  liveness check and refuses an answer unless both URLs are `https`, carry no
+  userinfo and name the derived host (case-insensitive, port included); the
+  URLs are otherwise ignored.
   A refusal is audited as one line with `decision` `refused` and `reason`
   `forge.remote: <error>`, the error printing the URL without its userinfo,
   and no route, host or status. It matches `ErrRemoteCredentials` or
@@ -4124,7 +4123,7 @@ description and a regen.
   | `forge.autoMerge` | `forge.autoMergeAllowed` (`{target}` → `{allowed}`), `forge.enqueueAutoMerge` (`{target, number}` → `{}`) | auto-merge reads as disallowed |
   | `forge.ciRun` | `forge.ciRun` (`{target, number}` → `{url}`) | no CI run link |
   | `forge.branchProtection` | `forge.branchProtected` (`{target, branch}` → `{protected}`) | doctor's `branch-protection` row is not applicable |
-  | `forge.probe` | `forge.probe` (`{target}` → `{repo}`) | Probe re-reads `forge.remote` |
+  | `forge.probe` | `forge.probe` (`{target}` → `{repo}`) | Probe reads `forge.remote` as a liveness check |
   | `forge.draftPRs` | `forge.openPR` (`{target, pr: {title, body, base, head, draft}}` → a PR) | no draft-PR creation, host-side branch push, bundle relay or commit subjects: the forge cannot host-mediate a read-only Box (see Host mediation) |
 
   Core pins every PR URL to the remote's web host, fails closed on an unknown
@@ -4152,12 +4151,12 @@ description and a regen.
   that cannot push: core's git, not the Connector, carries the Box's work to
   the forge, so the Connector never sees the bundle, git or the credential.
   Core pushes a branch it built itself, relays the Box's outbox bundle and
-  reads the bundle's commit subjects, each in its own clone of the validated
-  `forge.remote` clone URL with its own credential. The relay and the subjects
-  are offered whenever the Connector declares `forge.draftPRs`, since Settle
-  reads a relay as "the Box handed off a bundle". Only the draft-PR create
-  crosses the Connector, as `forge.openPR`. A create that fails adopts the
-  branch's open PR, if there is one, as not created: adopt is the result a
+  reads the bundle's commit subjects, each in its own clone of the URL it
+  derives from the row's Git remote, with its own credential. The relay and the
+  subjects are offered whenever the Connector declares `forge.draftPRs`, since
+  Settle reads a relay as "the Box handed off a bundle". Only the draft-PR
+  create crosses the Connector, as `forge.openPR`. A create that fails adopts
+  the branch's open PR, if there is one, as not created: adopt is the result a
   retried hand-off needs, so no forge-specific status code or error class
   stands for it.
   Without `forge.draftPRs` the forge cannot host-mediate, and Settle blocks a

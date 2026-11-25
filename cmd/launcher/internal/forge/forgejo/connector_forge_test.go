@@ -36,7 +36,7 @@ func useForgejoRow(t *testing.T, baseURL string, adjust func(*backendrows.Row)) 
 	path, table := declaredRoutes(t)
 	row := backendrows.Row{
 		Name: "forgejo", Module: path, Routes: table,
-		CredentialEnv: connectorCredentialEnv, BaseEnv: forgejo.ForgejoBaseURLEnv,
+		CredentialEnv: connectorCredentialEnv, BaseEnv: forgejo.ForgejoBaseURLEnv, GitRemoteEnv: forgejo.ForgejoBaseURLEnv,
 	}
 	adjust(&row)
 	doc, err := json.Marshal([]backendrows.Row{row})

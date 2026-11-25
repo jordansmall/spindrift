@@ -10,6 +10,7 @@ import (
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
+	"spindrift.dev/launcher/internal/gitexec"
 )
 
 func TestComposedForgeCodeForgeContract(t *testing.T) {
@@ -77,61 +78,137 @@ func TestDeleteBranchRefusesBaseAndEmptyBeforeAnyBackendHit(t *testing.T) {
 	}
 }
 
-func TestComposeHandsPlumbingTheCloneURLAndCredentialOnlyWhenTheRemoteIsAccepted(t *testing.T) {
+func TestComposeHandsPlumbingTheDerivedCloneURLAndCredential(t *testing.T) {
 	h := connectorforgetest.New(t)
 	calls := h.PlumbingCalls()
 	want := "https://" + h.Backend.Host + "/o/r.git"
 	if len(calls) != 1 || calls[0].CloneURL != want || calls[0].Credential != h.Credential {
 		t.Fatalf("plumbing calls = %v, want one for %q with the configured credential", calls, want)
 	}
-
-	hostile := connectorforgetest.New(t)
-	hostile.Backend.SetRemote("https://evil.example/o/r.git", "https://"+hostile.Backend.Host+"/o/r")
-	before := len(hostile.PlumbingCalls())
-	if _, _, err := hostile.Compose(); !errors.Is(err, connectorforge.ErrRemoteHost) {
-		t.Fatalf("Compose = %v, want ErrRemoteHost", err)
-	}
-	if n := len(hostile.PlumbingCalls()); n != before {
-		t.Errorf("plumbing built %d times for a refused remote, want 0", n-before)
+	if n := h.Backend.RemoteRequests(); n != 0 {
+		t.Errorf("Compose asked the Connector for its remote %d times, want 0", n)
 	}
 }
 
-// A forge whose API and git live on different hosts (api.github.com and
-// github.com) declares only the API host: with core's web host given, the
-// remote is checked against that host instead.
-func TestComposeAcceptsARemoteOnCoresWebHostOutsideTheDeclaredRoutes(t *testing.T) {
-	const web = "github.example"
+// Core derives the clone URL from the Git remote declaration and the Target
+// repository, keeping a subpath, and never takes the Connector's answer.
+func TestComposeDerivesTheCloneURLFromTheDeclaration(t *testing.T) {
 	h := connectorforgetest.New(t)
-	h.Backend.SetRemote("https://"+web+"/o/r.git", "https://"+web+"/o/r")
-	if _, _, err := h.Compose(); !errors.Is(err, connectorforge.ErrRemoteHost) {
-		t.Fatalf("Compose without a web host = %v, want ErrRemoteHost", err)
-	}
-
-	h.WebHost = web
-	cf, _, err := h.Compose()
-	if err != nil {
-		t.Fatalf("Compose with web host %q = %v", web, err)
+	h.Backend.SetRemote("https://evil.example/x/y.git", "https://evil.example/x/y")
+	h.WebBase = "https://forge.example/sub/"
+	if _, _, err := h.Compose(); err != nil {
+		t.Fatalf("Compose = %v", err)
 	}
 	calls := h.PlumbingCalls()
-	if got := calls[len(calls)-1].CloneURL; got != "https://"+web+"/o/r.git" {
-		t.Errorf("plumbing clone URL = %q, want the web host's", got)
+	if got, want := calls[len(calls)-1].CloneURL, "https://forge.example/sub/o/r.git"; got != want {
+		t.Errorf("plumbing clone URL = %q, want %q", got, want)
+	}
+	if n := h.Backend.RemoteRequests(); n != 0 {
+		t.Errorf("Compose asked the Connector for its remote %d times, want 0", n)
+	}
+}
+
+func TestComposeRefusesAnUnderivableCloneURL(t *testing.T) {
+	h := connectorforgetest.New(t)
+	for name, remote := range map[string]string{
+		"empty":       "",
+		"http":        "http://forge.example",
+		"no host":     "https://",
+		"userinfo":    "https://u:p@forge.example",
+		"query":       "https://forge.example?x=1",
+		"fragment":    "https://forge.example#f",
+		"not a URL":   "https://forge.example\x7f",
+		"scheme-less": "forge.example",
+	} {
+		t.Run(name, func(t *testing.T) {
+			before := len(h.PlumbingCalls())
+			h.WebBase = remote
+			_, _, err := h.Compose()
+			if !errors.Is(err, connectorforge.ErrGitRemote) {
+				t.Fatalf("Compose(Remote %q) = %v, want ErrGitRemote", remote, err)
+			}
+			if strings.Contains(err.Error(), "u:p") {
+				t.Errorf("error leaks userinfo: %v", err)
+			}
+			if n := len(h.PlumbingCalls()); n != before {
+				t.Errorf("plumbing built %d times for a refused remote, want 0", n-before)
+			}
+		})
+	}
+}
+
+func TestCloneURLRefusesARepositoryThatIsNotOwnerSlashName(t *testing.T) {
+	for _, repo := range []string{"", "r", "o/", "/r", "o/r/x", "./r", "o/..", "../r"} {
+		if got, err := connectorforge.CloneURL("https://forge.example", repo); !errors.Is(err, connectorforge.ErrGitRemote) {
+			t.Errorf("CloneURL(%q) = %q, %v, want ErrGitRemote", repo, got, err)
+		}
+	}
+	got, err := connectorforge.CloneURL("https://forge.example/sub/", "o/r")
+	if err != nil || got != "https://forge.example/sub/o/r.git" {
+		t.Errorf("CloneURL = %q, %v, want the subpath kept and the trailing slash trimmed", got, err)
+	}
+}
+
+func TestComposeRefusesATargetRepositoryThatIsNotOwnerSlashName(t *testing.T) {
+	h := connectorforgetest.New(t)
+	_, _, err := connectorforge.Compose(h.Conn, connectorforge.Target{Repo: "r"}, connectorforge.Git{
+		WebBase:  "https://" + h.Backend.Host,
+		Plumbing: func(string, gitexec.Credential) forge.CodeForge { t.Fatal("plumbing built"); return nil },
+	})
+	if !errors.Is(err, connectorforge.ErrGitRemote) {
+		t.Fatalf("Compose = %v, want ErrGitRemote", err)
+	}
+}
+
+// The PR URLs are pinned to the host core derived: a Connector's remote on
+// any other host, a declared route's included, is refused when it is read.
+func TestProbeRefusesARemoteOnAnotherHostThanTheDerivedOne(t *testing.T) {
+	h := connectorforgetest.New(t)
+	h.WebBase = "https://github.example"
+	cf, _, err := h.Compose()
+	if err != nil {
+		t.Fatalf("Compose = %v", err)
+	}
+	if _, err := cf.Probe(); !errors.Is(err, connectorforge.ErrRemoteHost) {
+		t.Fatalf("Probe = %v, want ErrRemoteHost for a remote on %s", err, h.Backend.Host)
+	}
+
+	h.WebBase = "https://" + h.Backend.Host
+	cf, _, err = h.Compose()
+	if err != nil {
+		t.Fatalf("Compose = %v", err)
 	}
 	if _, err := cf.Probe(); err != nil {
-		t.Errorf("Probe = %v, want the same remote accepted", err)
+		t.Errorf("Probe = %v, want a remote on the derived host accepted", err)
 	}
 }
 
-// Core's web host replaces the declared hosts rather than widening them: a
-// remote on a route host that is not the web host is refused.
-func TestComposeWithAWebHostRefusesARemoteOnAnotherDeclaredHost(t *testing.T) {
-	h := connectorforgetest.New(t)
-	h.WebHost = "github.example"
-	if _, _, err := h.Compose(); !errors.Is(err, connectorforge.ErrRemoteHost) {
-		t.Fatalf("Compose = %v, want ErrRemoteHost for a remote on %s", err, h.Backend.Host)
+// The PR URLs are pinned to the host core derived from the Git remote, not to
+// the host the backend serves: an answer on the backend's host is refused.
+func TestComposePinsPRURLsToTheDerivedHostNotTheBackendHost(t *testing.T) {
+	const derived = "github.example"
+	h := connectorforgetest.NewPR(t)
+	h.WebBase = "https://" + derived
+	h.SeedOpenPR("7")
+	branch := forge.AgentBranchName(h.BranchPrefix(), "7")
+	_, caps, err := h.Compose()
+	if err != nil {
+		t.Fatalf("Compose = %v", err)
+	}
+	if pr, ok, err := caps.PRForge.OpenPRForBranch(branch); err == nil {
+		t.Fatalf("OpenPRForBranch = %+v, %v, want an answer on %s refused", pr, ok, h.Backend.Host)
+	}
+
+	h.Backend.SetRemote("https://"+derived+"/"+connectorforgetest.Repo+".git", "https://"+derived+"/"+connectorforgetest.Repo)
+	pr, ok, err := caps.PRForge.OpenPRForBranch(branch)
+	if err != nil || !ok || pr.URL != h.Backend.PRURL(7) {
+		t.Errorf("OpenPRForBranch = %+v, %v, %v, want the PR on %s accepted", pr, ok, err, derived)
 	}
 }
 
-func TestComposeRefusesAHostileRemote(t *testing.T) {
+// Compose does not read the Connector's remote, so a hostile one is met only
+// at Probe, where it is refused and audited without leaking its userinfo.
+func TestProbeRefusesAHostileRemote(t *testing.T) {
 	const secret = "s3cr3t"
 	cases := []struct {
 		name       string
@@ -142,9 +219,9 @@ func TestComposeRefusesAHostileRemote(t *testing.T) {
 			func(h string) string { return "https://" + h + "/o/r" }, connectorforge.ErrRemoteCredentials},
 		{"credentialed web", func(h string) string { return "https://" + h + "/o/r.git" },
 			func(h string) string { return "https://" + secret + "@" + h + "/o/r" }, connectorforge.ErrRemoteCredentials},
-		{"undeclared clone host", func(string) string { return "https://evil.example/o/r.git" },
+		{"other clone host", func(string) string { return "https://evil.example/o/r.git" },
 			func(h string) string { return "https://" + h + "/o/r" }, connectorforge.ErrRemoteHost},
-		{"undeclared web host", func(h string) string { return "https://" + h + "/o/r.git" },
+		{"other web host", func(h string) string { return "https://" + h + "/o/r.git" },
 			func(string) string { return "https://evil.example/o/r" }, connectorforge.ErrRemoteHost},
 		{"plain http", func(h string) string { return "http://" + h + "/o/r.git" },
 			func(h string) string { return "https://" + h + "/o/r" }, connectorforge.ErrRemoteHost},
@@ -155,20 +232,16 @@ func TestComposeRefusesAHostileRemote(t *testing.T) {
 			host := h.Backend.Host
 			h.Backend.SetRemote(tc.clone(host), tc.web(host))
 			h.Audit.Reset()
-			_, _, err := h.Compose()
-			if !errors.Is(err, tc.want) {
-				t.Fatalf("Compose = %v, want %v", err, tc.want)
+			_, perr := h.Forge().Probe()
+			if !errors.Is(perr, tc.want) {
+				t.Fatalf("Probe = %v, want %v", perr, tc.want)
 			}
 			audit := h.Audit.String()
 			if !strings.Contains(audit, "refused") || !strings.Contains(audit, "forge.remote") {
 				t.Errorf("audit = %q, want a refused entry naming forge.remote", audit)
 			}
-			if strings.Contains(err.Error(), secret) || strings.Contains(audit, secret) {
-				t.Errorf("secret leaked: error %q, audit %q", err, audit)
-			}
-			// Probe re-resolves the identity and refuses the same way.
-			if _, perr := h.Forge().Probe(); !errors.Is(perr, tc.want) {
-				t.Errorf("Probe = %v, want %v", perr, tc.want)
+			if strings.Contains(perr.Error(), secret) || strings.Contains(audit, secret) {
+				t.Errorf("secret leaked: error %q, audit %q", perr, audit)
 			}
 		})
 	}
@@ -297,14 +370,14 @@ func TestComposeNotesFailedCallsByMethod(t *testing.T) {
 	}
 }
 
-func TestComposeNotesNothingForARefusedRemote(t *testing.T) {
+func TestComposeNotesNothingForAnUnderivableRemote(t *testing.T) {
 	var got []noted
 	h := connectorforgetest.New(t)
 	h.Note = func(method string, err error) { got = append(got, noted{method, err}) }
-	h.Backend.SetRemote("https://evil.example/o/r.git", "https://"+h.Backend.Host+"/o/r")
+	h.WebBase = "http://" + h.Backend.Host
 
-	if _, _, err := h.Compose(); !errors.Is(err, connectorforge.ErrRemoteHost) {
-		t.Fatalf("Compose = %v, want ErrRemoteHost", err)
+	if _, _, err := h.Compose(); !errors.Is(err, connectorforge.ErrGitRemote) {
+		t.Fatalf("Compose = %v, want ErrGitRemote", err)
 	}
 	if len(got) != 0 {
 		t.Errorf("Compose noted %v, want the caller to record its error", got)

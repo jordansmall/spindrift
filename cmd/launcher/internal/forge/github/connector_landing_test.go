@@ -189,7 +189,9 @@ func TestPlainRow_RefusedRouteFailsTheLandingWrite(t *testing.T) {
 				applyGithubRow(t, host, func(r *backendrows.Row) {
 					r.Routes = r.Routes[:0:0]
 					for _, rt := range allRoutes(t, host) {
-						if !strings.Contains(rt.Path, "/pulls") && !strings.Contains(rt.Path, "/git/") && !strings.Contains(rt.Path, "/graphql") {
+						// Compose no longer reads the Connector's remote through
+						// /graphql, so the comment write's own route is dropped too.
+						if !strings.Contains(rt.Path, "/pulls") && !strings.Contains(rt.Path, "/git/") && !strings.Contains(rt.Path, "/graphql") && !(rt.Method == "POST" && strings.Contains(rt.Path, "/issues")) {
 							r.Routes = append(r.Routes, rt)
 						}
 					}

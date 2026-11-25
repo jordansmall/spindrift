@@ -686,6 +686,7 @@ func loadGithubConnectorAs(t *testing.T, host, repo string, client *http.Client,
 // names.
 func composeForge(conn *connectorhost.Connector, api, targetRepo string) (forge.CodeForge, forge.Capabilities, error) {
 	return connectorforge.Compose(conn, connectorforge.Target{API: api, Repo: targetRepo}, connectorforge.Git{
+		WebBase:    api,
 		Credential: gitexec.Credential{Username: "bot", Password: gitSecret},
 		Plumbing: func(u string, cred gitexec.Credential) forge.CodeForge {
 			return git.NewGitClient(u, "main", "Test Bot", "bot@example.com", git.WithCredential(cred))

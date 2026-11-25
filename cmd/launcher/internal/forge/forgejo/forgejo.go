@@ -5,30 +5,9 @@ package forgejo
 
 import (
 	"fmt"
-	"net/url"
-	"strings"
 
 	"spindrift.dev/launcher/internal/gitexec"
 )
-
-// GitRemoteURL builds the clone URL for repo (an owner/repo slug). It carries
-// no userinfo: git authenticates with gitCredential, out of band, so the token
-// never reaches an argv, a persisted remote or an error string. It must equal
-// the Connector's CloneURL for the same base and slug (connectors/forgejo
-// remote): the credential is scoped to this URL's path and git matches paths
-// by whole segments, so a base subpath is kept. If baseURL fails to parse, it
-// concatenates the slug onto the raw base.
-func GitRemoteURL(baseURL, repo string) string {
-	baseURL = strings.TrimSuffix(baseURL, "/")
-	u, err := url.Parse(baseURL)
-	if err != nil {
-		return baseURL + "/" + strings.Trim(repo, "/") + ".git"
-	}
-	u.User, u.RawQuery, u.Fragment = nil, "", ""
-	u.Path = strings.TrimSuffix(u.Path, "/") + "/" + strings.Trim(repo, "/") + ".git"
-	u.RawPath = ""
-	return u.String()
-}
 
 // gitCredential is the credential git presents to a Forgejo instance. Forgejo
 // and Gitea basic auth takes a non-empty password as an access token, so the

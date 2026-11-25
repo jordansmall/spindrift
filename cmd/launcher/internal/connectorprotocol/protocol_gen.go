@@ -349,7 +349,7 @@ const (
 	CheckProbeRepo = "probeRepo"
 	// CheckProbeStatus: connectortracker's body reads the status: 2xx proves the repository, 401 and 403 are an auth failure, any other status means the repository is unreachable.
 	CheckProbeStatus = "probeStatus"
-	// CheckRemoteURLs: connectorforge's body refuses a clone or web URL that is not https with a host, carries userinfo, or names a host outside core's web host (Git.WebHost) or, without one, the Connector's declared routes (checkURL); a refusal is audited.
+	// CheckRemoteURLs: connectorforge's body refuses a clone or web URL that is not https with a host, carries userinfo, or names a host other than the one core derived from the forge's Git remote declaration (checkURL); a refusal is audited.
 	CheckRemoteURLs = "remoteURLs"
 	// CheckResolveExitGuard: connectorhost.DriverStrategy refuses an answer that resolves a non-zero exit to 0.
 	CheckResolveExitGuard = "resolveExitGuard"

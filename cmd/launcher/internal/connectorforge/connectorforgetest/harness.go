@@ -326,9 +326,10 @@ type base struct {
 	Audit *bytes.Buffer
 	// Credential is core's git credential handed to Compose.
 	Credential gitexec.Credential
-	// WebHost is the web host core hands Compose; empty checks the remote
-	// against the Connector's declared hosts.
-	WebHost string
+	// WebBase is the Git remote declaration core hands Compose, the forge's https
+	// web base; it defaults to the backend's own, so the derived clone URL is the
+	// repository the backend serves.
+	WebBase string
 	// Note is Git.Note as Compose gets it; nil records nothing.
 	Note func(method string, err error)
 
@@ -371,7 +372,7 @@ func newBase(t *testing.T, eng Engine, c Connector, opts ...Option) *base {
 	}
 	h := &base{
 		t: t, eng: eng, connector: c, Repo: repo, Backend: s.backend, Conn: s.conn, Audit: s.audit, target: s.target,
-		Credential: cred,
+		Credential: cred, WebBase: "https://" + s.backend.Host,
 	}
 	if o.gitOverHTTPS {
 		t.Setenv("GIT_CONFIG_COUNT", "0")
@@ -412,7 +413,7 @@ func (h *base) GitRequests() []GitRequest {
 
 func (h *base) git() connectorforge.Git {
 	return connectorforge.Git{
-		Credential: h.Credential, WebHost: h.WebHost, Note: h.Note,
+		Credential: h.Credential, WebBase: h.WebBase, Note: h.Note,
 		Plumbing: func(u string, cred gitexec.Credential) forge.CodeForge {
 			h.mu.Lock()
 			h.plumbing = append(h.plumbing, PlumbingCall{u, cred})
