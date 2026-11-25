@@ -49,7 +49,7 @@ let
       ++ modules
     )).apps.${system}.default.program;
   forgejoConnector = (import ../../connectors/forgejo).lib.connector { core = import ../../core; };
-  claudeRow = claudeConnector.driverRow pkgs.lib;
+  claudeRow = claudeConnector.data.driver pkgs.lib;
   # opencode rejects the schema's bare claude ids (issue #5355), so each
   # Harness selecting it names its models; the worker's is dropped silently.
   opencodeDefaults = fixtures.opencodeNamespacedDefaults;
