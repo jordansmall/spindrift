@@ -19,7 +19,9 @@ declarative surface and the built image.
 nix flake check                 # everything CI runs, in one shot
 nix flake check -L              # same, streaming build logs (aka --print-build-logs)
 nix build .#checks.$(nix eval --raw --impure --expr builtins.currentSystem).launcher-go-test -L
-                                # core launcher Go tests: no Driver, bundle or main in its source
+                                # core launcher Go tests: no Driver, bundle or main in its source, and no fixture Connectors
+nix build .#checks.$(nix eval --raw --impure --expr builtins.currentSystem).launcher-go-test-fixtures -L
+                                # the core packages that read the fixture Connectors (connectorFixtureReaders in nix/checks/go.nix)
 nix build .#checks.$(nix eval --raw --impure --expr builtins.currentSystem).launcher-binaries-go-test -L
                                 # the tests of the mains, which link every native Driver through the bundle (claude is its Connector row)
 nix build .#checks.$(nix eval --raw --impure --expr builtins.currentSystem).drivers-opencode-go-test -L
@@ -140,8 +142,14 @@ in any package that uses `seamtest`, or a `forge.NewFake` (its reads and
 writes cross a fixture network Connector, ADR 0073, RelayBundle excepted),
 also needs its `.wasm` files. They resolve from the directory named by
 `SPINDRIFT_CONNECTOR_FIXTURES_DIR`, falling back to
-`nix build .#connector-wasm-fixtures`. Unlike the seam-fixtures tests, these do
-not skip when neither works: they panic, since no core test may skip the seam.
+`nix build .#connector-wasm-fixtures`. Unlike the seam-fixtures tests, the
+`seamtest` and `forge.NewFake` paths do not skip when neither works: they fail
+(`forge.NewFake` panics), since no core test may skip the seam (a few direct
+readers of the variable still skip when it is unset). In Nix only
+`launcher-go-test-fixtures` gets the directory; `launcher-go-test` points it at
+a missing path, so a reader that errors on it fails there. A core package whose
+tests start reading it must join `connectorFixtureReaders` in
+`nix/checks/go.nix`.
 
 ```sh
 SPINDRIFT_CONNECTOR_FIXTURES_DIR=$(nix build --no-link --print-out-paths ../..#connector-wasm-fixtures) \
@@ -371,7 +379,8 @@ and in the in-box `box` program; the only bash left is the generated shim that
   which `checks/go.nix` generates from the same row; each bundled (non-core)
   backend row in `lib/backends/default.nix` likewise yields
   `backends-<name>-go-test` over its `internal/forge/<name>` package, while
-  the core rows' packages run in the core `launcher-go-test`. Those root
+  the core rows' packages run in the core `launcher-go-test` (or
+  `launcher-go-test-fixtures`, if they read the fixture Connectors). Those root
   checks skip the Connector conformance tests: the Connector's subflake
   (`connector-<name>-conformance`) exports
   `SPINDRIFT_BACKEND_CONNECTOR_WASM` and
