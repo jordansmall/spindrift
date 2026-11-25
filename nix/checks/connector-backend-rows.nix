@@ -1286,6 +1286,131 @@ in
       touch $out
     '';
 
+  # Issue #7564: the pure decision behind a third-party row's baseline
+  # refusal (a thrown message is invisible to tryEval, so assert on it).
+  connector-backend-rows-baseline-refusal-decision =
+    let
+      baseline = import ../../lib/connector-baseline.nix;
+      grant = {
+        credentialEnv = "FIXTURE_TOKEN";
+        credentialScheme = "bearer";
+        baseEnv = "FIXTURE_BASE_URL";
+        gitRemote = "https://fixture.test";
+      };
+      live = {
+        routes = [ goodRoute ];
+        credentialEnv = "FIXTURE_TOKEN";
+        credentialScheme = "bearer";
+        baseEnv = "FIXTURE_BASE_URL";
+        gitRemote = "https://fixture.test";
+        acceptedRoutes = [ goodRoute ];
+        acceptedGrant = grant;
+      };
+      refusal = r: baseline.refusal { name = "fixture"; row = r; };
+      head = "mkHarness: third-party Connector 'fixture' declares more than its entry in the accepted baseline (spindrift-connector-routes.json):";
+      mentions = r: items: builtins.all (i: pkgs.lib.hasInfix i (refusal r)) ([ head ] ++ items);
+      accept = [
+        "nix run .#connectors-accept"
+        "spindrift connectors accept"
+      ];
+    in
+    assert assertMsg (refusal live == null) "an exact-match entry must not refuse";
+    assert assertMsg (
+      refusal (
+        live
+        // {
+          routes = [ (goodRoute // { path = "/repos/x"; }) ];
+          credentialScheme = "";
+          acceptedGrant = grant // {
+            credentialScheme = "";
+          };
+        }
+      ) == null
+    ) "a narrower path and an empty scheme against an absent accepted scheme must not refuse";
+    assert assertMsg (
+      refusal (
+        removeAttrs live [ "baseEnv" ] // { routes = [ ]; }
+      ) == null
+    ) "fewer Routes and an absent base are narrowings, never refused";
+    assert assertMsg (
+      refusal (removeAttrs live [ "acceptedRoutes" "acceptedGrant" ]) != null
+      && builtins.all (s: pkgs.lib.hasInfix s (refusal (removeAttrs live [ "acceptedRoutes" "acceptedGrant" ]))) (
+        [
+          "Connector 'fixture'"
+          "spindrift-connector-routes.json"
+        ]
+        ++ accept
+      )
+    ) "no entry must refuse, naming the Connector, the file and the accept command";
+    assert assertMsg (
+      refusal (live // { acceptedRoutes = [ ]; }) != null
+    ) "an empty accepted list is an entry, and a live Route is added against it";
+    assert assertMsg (
+      mentions (live // { routes = [ goodRoute (goodRoute // { path = "/repos/y"; }) ]; acceptedRoutes = [ (goodRoute // { path = "/other"; }) ]; }) (
+        [ "added Route GET api.fixture.test /repos/y" ] ++ accept
+      )
+    ) "a new Route must be listed";
+    assert assertMsg (
+      mentions (live // { acceptedRoutes = [ (goodRoute // { path = "/repos/x"; }) ]; }) [
+        "added Route GET api.fixture.test /repos"
+      ]
+    ) "a broader path than the accepted one must be listed";
+    assert assertMsg (
+      mentions (live // { routes = [ (goodRoute // { followRedirect = true; }) ]; }) [
+        "added Route GET api.fixture.test /repos (followRedirect)"
+      ]
+    ) "a new followRedirect opt-in must be listed";
+    assert assertMsg (
+      refusal (
+        live
+        // {
+          routes = [ (goodRoute // { followRedirect = true; }) ];
+          acceptedRoutes = [ (goodRoute // { followRedirect = true; }) ];
+        }
+      ) == null
+    ) "an accepted followRedirect must not refuse";
+    assert assertMsg (
+      refusal (live // { routes = [ (goodRoute // { path = "/reposx"; }) ]; }) != null
+    ) "a sibling path sharing only a prefix must not be covered";
+    assert assertMsg (
+      mentions (live // { credentialEnv = "OTHER_TOKEN"; }) [
+        "credential variable OTHER_TOKEN (accepted: FIXTURE_TOKEN)"
+      ]
+    ) "a changed credential variable must be listed";
+    assert assertMsg (
+      mentions (live // { credentialScheme = "basic"; }) [
+        "authorization scheme basic (accepted: bearer)"
+      ]
+    ) "a basic scheme against an accepted bearer must be listed";
+    assert assertMsg (
+      mentions (live // { baseEnv = "OTHER_BASE"; }) [
+        "base OTHER_BASE (accepted: FIXTURE_BASE_URL)"
+      ]
+    ) "a changed base must be listed";
+    assert assertMsg (
+      mentions (live // { acceptedGrant = removeAttrs grant [ "baseEnv" ]; }) [
+        "base FIXTURE_BASE_URL (accepted: none)"
+      ]
+    ) "a new base must be listed against none";
+    assert assertMsg (
+      mentions (
+        removeAttrs live [ "gitRemote" ] // { gitRemoteEnv = "FIXTURE_REMOTE"; }
+      ) [ "Git remote env FIXTURE_REMOTE (accepted: https://fixture.test)" ]
+    ) "a Git remote switched from a literal to an env must be listed";
+    assert assertMsg (
+      mentions (live // { gitRemote = "https://other.test"; }) [
+        "Git remote https://other.test (accepted: https://fixture.test)"
+      ]
+    ) "a changed literal Git remote must be listed";
+    assert assertMsg (
+      mentions (removeAttrs live [ "acceptedGrant" ]) [
+        "credential variable FIXTURE_TOKEN (accepted: none)"
+        "base FIXTURE_BASE_URL (accepted: none)"
+      ]
+      && !(pkgs.lib.hasInfix "authorization scheme" (refusal (removeAttrs live [ "acceptedGrant" ])))
+    ) "a Routes-only entry has no grant, so every declared part is added";
+    pkgs.runCommand "connector-backend-rows-baseline-refusal-decision" { } "touch $out";
+
   # Issue #7456: a backend row carries no shadow or primary field. mkHarness
   # ignores one a Consumer hands it, so the document never grows the retired
   # switches.

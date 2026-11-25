@@ -41,6 +41,61 @@ rec {
     else
       null;
 
+  # Why a third-party backend `row` (as mkHarness's checkBackendRow returns it)
+  # may not run, or null. Mirrors doctor's `Widening` and `GrantChanges`
+  # (backendrows.go), but stricter on the grant: a Routes-only entry has none,
+  # so every part the row declares counts as added. A part the row declares
+  # absent is a narrowing and stays silent.
+  refusal =
+    { name, row }:
+    let
+      acceptCommand = "Run `nix run .#connectors-accept` (the `spindrift connectors accept` verb) in the Consumer flake's root, then review and commit the diff.";
+      file = "spindrift-connector-routes.json";
+      accepted = row.acceptedRoutes;
+      grant = row.acceptedGrant or { };
+      covers =
+        l: a:
+        a.method == l.method
+        && a.host == l.host
+        && ((a.followRedirect or false) || !(l.followRedirect or false))
+        && (
+          a.path == l.path
+          || (
+            builtins.substring 0 (builtins.stringLength a.path + 1) l.path == "${a.path}/"
+          )
+        );
+      uncovered = builtins.filter (l: !(builtins.any (a: covers l a) accepted)) row.routes;
+      routeLine =
+        r:
+        "\n  added Route ${r.method} ${r.host} ${r.path}"
+        + (if r.followRedirect or false then " (followRedirect)" else "");
+      orNone = s: if s == "" then "none" else s;
+      scheme = s: if s == "" then "bearer" else s;
+      remote =
+        g:
+        if (g.gitRemoteEnv or "") != "" then "env ${g.gitRemoteEnv}" else g.gitRemote or "";
+      part =
+        what: declared: was:
+        if declared != "" && declared != was then
+          [ "\n  changed ${what} ${declared} (accepted: ${orNone was})" ]
+        else
+          [ ];
+      changes =
+        part "credential variable" (row.credentialEnv or "") (grant.credentialEnv or "")
+        ++ part "authorization scheme" (scheme (row.credentialScheme or "")) (
+          scheme (grant.credentialScheme or "")
+        )
+        ++ part "base" (row.baseEnv or "") (grant.baseEnv or "")
+        ++ part "Git remote" (remote row) (remote grant);
+      added = map routeLine uncovered ++ changes;
+    in
+    if !(row ? acceptedRoutes) then
+      "mkHarness: third-party Connector '${name}' has no entry in the accepted baseline (${file}), and nothing from it runs before it is accepted. ${acceptCommand}"
+    else if added == [ ] then
+      null
+    else
+      "mkHarness: third-party Connector '${name}' declares more than its entry in the accepted baseline (${file}):${builtins.concatStringsSep "" added}\n${acceptCommand}";
+
   # The row fields for `entry` of Connector `name` in `file`.
   rowFields =
     file: name: entry:
