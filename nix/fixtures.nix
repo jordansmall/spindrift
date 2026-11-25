@@ -99,6 +99,13 @@ let
     packages = p: [ p.hello ];
   };
 
+  # The repo's own baseline as backend row fields, read through the helper the
+  # flake module uses so the two paths agree.
+  baselineFields =
+    name:
+    (import ../lib/connector-baseline.nix).rowFields "spindrift-connector-routes.json" name (
+      (builtins.fromJSON (builtins.readFile ../spindrift-connector-routes.json)).${name}
+    );
   # Bound once and shared verbatim by every dogfood mkHarness call below, so a
   # future nix/dogfood-defaults.nix key threaded into only one call site can't
   # turn the podman/bwrap A/B into a comparison of diverging configs instead of
@@ -137,8 +144,8 @@ let
       credentialEnv = "GH_TOKEN";
       credentialKnob = "ghToken";
       gitRemote = "https://github.com";
-      acceptedRoutes = (builtins.fromJSON (builtins.readFile ../spindrift-connector-routes.json)).github;
-    };
+    }
+    // baselineFields "github";
     # The Connector is the tracker and Code Forge.
     backendRows.forgejo = {
       module = p: "${forgejoConnector.package p}/forgejo.wasm";
@@ -147,8 +154,8 @@ let
       credentialKnob = "forgejoToken";
       baseEnv = "FORGEJO_BASE_URL";
       gitRemoteEnv = "FORGEJO_BASE_URL";
-      acceptedRoutes = (builtins.fromJSON (builtins.readFile ../spindrift-connector-routes.json)).forgejo;
-    };
+    }
+    // baselineFields "forgejo";
     # jira's Connector is its only tracker, so the row loads for ISSUE_TRACKER=jira.
     backendRows.jira = {
       module = p: "${jiraConnector.package p}/jira.wasm";
@@ -158,8 +165,8 @@ let
       credentialScheme = "basic";
       identityEnv = "JIRA_EMAIL";
       baseEnv = "JIRA_BASE_URL";
-      acceptedRoutes = (builtins.fromJSON (builtins.readFile ../spindrift-connector-routes.json)).jira;
-    };
+    }
+    // baselineFields "jira";
   };
 
   # The dogfood as a direct call, mirroring the `spindrift = { ... }` module
@@ -827,9 +834,13 @@ let
       ../lib/flakeModule.nix
       ((import ./fixtures/connector).lib.connector { core = import ../core; }).flakeModule
     ];
-  baselineConsumers = pkgs.lib.genAttrs [ "widened" "accepted" "narrowed" ] (
-    n: baselineConsumerAt (./fixtures/connector-routes + "/${n}")
-  );
+  baselineConsumers = pkgs.lib.genAttrs [
+    "widened"
+    "accepted"
+    "narrowed"
+    "grant"
+    "grant-remoteenv"
+  ] (n: baselineConsumerAt (./fixtures/connector-routes + "/${n}"));
   connectorBaselineDocs = pkgs.runCommand "connector-baseline-docs" { } (
     ''
       mkdir $out

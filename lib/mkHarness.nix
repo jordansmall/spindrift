@@ -819,6 +819,13 @@ let
       }
       // lib.optionalAttrs (row ? acceptedRoutes) {
         acceptedRoutes = checkAcceptedRoutes name row.acceptedRoutes;
+      }
+      // lib.optionalAttrs (row ? acceptedGrant) {
+        acceptedGrant =
+          let
+            problem = (import ./connector-baseline.nix).grantProblem "mkHarness: backendRows.${name}.acceptedGrant" row.acceptedGrant;
+          in
+          if problem != null then throw problem else row.acceptedGrant;
       };
   docBackendRows =
     p:
@@ -830,6 +837,7 @@ let
         inherit (r) routes credentialEnv;
       }
       // lib.optionalAttrs (r ? acceptedRoutes) { inherit (r) acceptedRoutes; }
+      // lib.optionalAttrs (r ? acceptedGrant) { inherit (r) acceptedGrant; }
       // lib.optionalAttrs (r ? credentialKnob) { inherit (r) credentialKnob; }
       // lib.optionalAttrs (r ? credentialScheme) { inherit (r) credentialScheme; }
       // lib.optionalAttrs (r ? identityEnv) { inherit (r) identityEnv; }

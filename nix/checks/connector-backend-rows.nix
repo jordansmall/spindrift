@@ -1235,7 +1235,47 @@ in
     assert assertMsg (
       !(builds (fixtures.baselineConsumerAt ../fixtures/connector-routes/list))
     ) "a baseline file whose top level is not an object must fail evaluation";
+    assert assertMsg (
+      !(builds (fixtures.baselineConsumerAt ../fixtures/connector-routes/grant-badkey))
+    ) "a grant entry with an unknown key must fail evaluation";
+    assert assertMsg (
+      !(builds (fixtures.baselineConsumerAt ../fixtures/connector-routes/grant-badvalue))
+    ) "a grant entry with a non-string value must fail evaluation";
+    assert assertMsg (
+      !(builds (fixtures.baselineConsumerAt ../fixtures/connector-routes/grant-badscheme))
+    ) "a grant entry with an unknown credentialScheme must fail evaluation";
+    assert assertMsg (
+      !(builds (fixtures.baselineConsumerAt ../fixtures/connector-routes/grant-bothremotes))
+    ) "a grant entry with both gitRemote and gitRemoteEnv must fail evaluation";
+    assert assertMsg (evaluates (withRows {
+      fixture = row // {
+        acceptedGrant = {
+          credentialEnv = "FIXTURE_TOKEN";
+        };
+      };
+    })) "a direct row may carry an acceptedGrant";
+    assert assertMsg (
+      !(evaluates (withRows {
+        fixture = row // {
+          acceptedGrant = {
+            tokenEnv = "X";
+          };
+        };
+      }))
+    ) "a direct acceptedGrant with an unknown key must fail evaluation";
+    assert assertMsg (
+      !(evaluates (withRows {
+        fixture = row // {
+          acceptedGrant = {
+            credentialEnv = 7;
+          };
+        };
+      }))
+    ) "a direct acceptedGrant with a non-string value must fail evaluation";
     pkgs.runCommand "connector-backend-rows-accepted-baseline" { nativeBuildInputs = [ pkgs.jq ]; } ''
+      jq -e '.backends[0] | .acceptedRoutes == [{method: "GET", host: "api.fixture.test", path: "/repos"}] and .acceptedGrant == {credentialEnv: "FIXTURE_TOKEN", credentialScheme: "bearer", baseEnv: "FIXTURE_BASE_URL", gitRemote: "https://fixture.test"}' ${fixtures.connectorBaselineDocs}/grant.json
+      jq -e '.backends[0].acceptedGrant == {credentialEnv: "FIXTURE_TOKEN", credentialScheme: "bearer", baseEnv: "FIXTURE_BASE_URL", gitRemoteEnv: "FIXTURE_REMOTE"}' ${fixtures.connectorBaselineDocs}/grant-remoteenv.json
+      jq -e '.backends[0] | has("acceptedGrant") | not' ${fixtures.connectorBaselineDocs}/accepted.json
       jq -e '.backends[0].acceptedRoutes == [{method: "GET", host: "api.fixture.test", path: "/repos/x"}]' ${fixtures.connectorBaselineDocs}/widened.json
       jq -e '.backends[0].acceptedRoutes == [{method: "GET", host: "api.fixture.test", path: "/repos"}]' ${fixtures.connectorBaselineDocs}/accepted.json
       jq -e '.backends[0].credentialKnob == "fixtureToken"' ${fixtures.connectorBaselineDocs}/accepted.json

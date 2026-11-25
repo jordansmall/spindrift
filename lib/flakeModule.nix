@@ -80,6 +80,11 @@ let
         throw "spindrift-connector-routes.json: the top level must be an object keyed by Connector name"
     else
       { };
+  baselineRowFields =
+    name:
+    (import ./connector-baseline.nix).rowFields "spindrift-connector-routes.json" name (
+      acceptedRoutesBaseline.${name} or [ ]
+    );
   # Connectors whose row asks for shadow mode (ADR 0073, issues #6797, #6810).
   # A row with a `driver` is shadowed through mkHarness's `shadowDrivers`; a
   # `backend` row refuses `shadow` in checkedConnectors (issue #7456), and a
@@ -170,8 +175,8 @@ let
     else
       {
         inherit (b) module routes;
-        acceptedRoutes = acceptedRoutesBaseline.${name} or [ ];
       }
+      // baselineRowFields name
       // (
         if b.credential != null then
           {
