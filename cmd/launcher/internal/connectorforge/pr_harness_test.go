@@ -76,7 +76,7 @@ func TestMergeLandsARealBranchAndReportsTheMergeCommit(t *testing.T) {
 
 func TestComposeResolvesAForgeWithoutTheUndeclaredCapabilities(t *testing.T) {
 	h := connectorforgetest.NewPRVariant(t, connectorforgetest.MinimalPRWasm)
-	for _, c := range []string{"forge.autoMerge", "forge.ciRun", "forge.branchProtection", "forge.probe", "forge.draftPRs"} {
+	for _, c := range []string{"forge.autoMerge", "forge.ciRun", "forge.branchProtection", "forge.draftPRs"} {
 		for _, have := range h.Conn.Capabilities {
 			if have == c {
 				t.Fatalf("handshake declares %q, want it absent: %v", c, h.Conn.Capabilities)
@@ -111,10 +111,6 @@ func TestComposeResolvesAForgeWithoutTheUndeclaredCapabilities(t *testing.T) {
 	}
 	if h.AutoMergeEnqueued(url) || h.Backend.MergeRequests() != 0 {
 		t.Error("EnqueueAutoMerge reached the backend")
-	}
-	// Probe falls back to a liveness branch lookup.
-	if repo, err := h.CodeForge().Probe(); err != nil || repo != "o/r" {
-		t.Fatalf("Probe = (%q, %v), want o/r", repo, err)
 	}
 }
 

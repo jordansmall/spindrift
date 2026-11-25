@@ -55,10 +55,6 @@ type PRs struct {
 	// reports whether branch has protection rules.
 	BranchProtected func(t Target, branch string) (bool, error)
 
-	// Probe is optional and declares CapProbe. It returns the repository's
-	// full name, proving the forge answers with the Connector's credential.
-	Probe func(t Target) (string, error)
-
 	// TokenGrant is optional and declares CapTokenGrant. It reports what the
 	// credential the host attached may do on the repository: the token under
 	// audit rides as the Connector's credential, so the Connector never sees
@@ -95,14 +91,6 @@ func prHandlers(p PRs) ([]string, map[string]method) {
 		panic("forge: PRs.AutoMergeAllowed and PRs.EnqueueAutoMerge are set together or not at all")
 	}
 
-	// targeted decodes the {target} params of the repository-wide calls.
-	targeted := func(params json.RawMessage) (Target, error) {
-		var q struct {
-			Target Target `json:"target"`
-		}
-		err := unmarshal(params, &q)
-		return q.Target, err
-	}
 	// done runs a call with no result, answering an empty object, not null.
 	done := func(err error) (any, error) {
 		if err != nil {
@@ -242,22 +230,6 @@ func prHandlers(p PRs) ([]string, map[string]method) {
 			}{protected}, nil
 		}
 		caps = append(caps, CapBranchProtection)
-	}
-	if p.Probe != nil {
-		m[methodProbe] = func(params json.RawMessage) (any, error) {
-			t, err := targeted(params)
-			if err != nil {
-				return nil, err
-			}
-			repo, err := p.Probe(t)
-			if err != nil {
-				return nil, err
-			}
-			return struct {
-				Repo string `json:"repo"`
-			}{repo}, nil
-		}
-		caps = append(caps, CapProbe)
 	}
 	if p.TokenGrant != nil {
 		m[methodTokenGrant] = func(params json.RawMessage) (any, error) {

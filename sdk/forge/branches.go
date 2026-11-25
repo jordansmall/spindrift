@@ -15,6 +15,10 @@ type Branches struct {
 	// DeleteBranch deletes branch from the forge.
 	DeleteBranch func(t Target, branch string) error
 
+	// Probe returns the repository's full name, proving the forge answers
+	// with the Connector's credential. It declares CapProbe.
+	Probe func(t Target) (string, error)
+
 	// PushOnly declares a forge with no pull-request concept, so core composes
 	// a push-only Code Forge from it.
 	PushOnly bool
@@ -37,6 +41,8 @@ func branchHandlers(b Branches) ([]string, map[string]method) {
 		panic("forge: Branches.BranchExists is required")
 	case b.DeleteBranch == nil:
 		panic("forge: Branches.DeleteBranch is required")
+	case b.Probe == nil:
+		panic("forge: Branches.Probe is required")
 	}
 
 	// branched decodes the {target, branch} params of the per-branch calls.
@@ -72,8 +78,21 @@ func branchHandlers(b Branches) ([]string, map[string]method) {
 			}
 			return struct{}{}, nil // an empty object, not null
 		},
+		methodProbe: func(params json.RawMessage) (any, error) {
+			t, err := targeted(params)
+			if err != nil {
+				return nil, err
+			}
+			repo, err := b.Probe(t)
+			if err != nil {
+				return nil, err
+			}
+			return struct {
+				Repo string `json:"repo"`
+			}{repo}, nil
+		},
 	}
-	caps := []string{CapBranches}
+	caps := []string{CapBranches, CapProbe}
 	if b.PushOnly {
 		caps = append(caps, CapPushOnly)
 	}

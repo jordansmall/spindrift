@@ -26,7 +26,6 @@ type prForge struct {
 	*reads
 	push      *pushOnly
 	autoMerge bool
-	hasProbe  bool
 }
 
 // composePR wraps the validated push-only pieces p as a PR forge for a Connector
@@ -38,7 +37,6 @@ func composePR(p *pushOnly, caps []string, webHost, webPath string) forge.CodeFo
 		reads:     p.rd,
 		push:      p,
 		autoMerge: slices.Contains(caps, capAutoMerge),
-		hasProbe:  slices.Contains(caps, capProbe),
 	}
 	var cf forge.CodeForge = f
 	if slices.Contains(caps, capCIRun) {
@@ -397,14 +395,8 @@ func (f *prForge) createDraftPR(title, body, base, head string) (string, bool, e
 	return "", false, err
 }
 
-// Probe asks the Connector for the repository's name when it declares
-// "forge.probe", and otherwise reads liveness through a branch lookup.
-func (f *prForge) Probe() (string, error) {
-	if !f.hasProbe {
-		return f.push.Probe()
-	}
-	return probeRepo(f.call, f.target)
-}
+// Probe goes through forge.probe, like the push-only forge.
+func (f *prForge) Probe() (string, error) { return f.push.Probe() }
 
 func (f *prForge) BranchExists(branch string) (bool, error) { return f.push.BranchExists(branch) }
 

@@ -22,6 +22,7 @@ func init() {
 	forge.RegisterBranches(forge.Branches{
 		BranchExists: branchExists,
 		DeleteBranch: deleteBranch,
+		Probe:        probe,
 	})
 	// CIRun and TokenGrant are left unset: the Connector declares only what it
 	// implements.
@@ -35,7 +36,6 @@ func init() {
 		AutoMergeAllowed: autoMergeAllowed,
 		EnqueueAutoMerge: enqueueAutoMerge,
 		BranchProtected:  branchProtected,
-		Probe:            probe,
 	})
 	tracker.Register(tracker.Reader{
 		ListIssues:    listIssues,

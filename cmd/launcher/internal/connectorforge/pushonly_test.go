@@ -39,9 +39,14 @@ func TestComposeRequiresTheBranchesCapability(t *testing.T) {
 	if _, _, err := h.Compose(); !errors.Is(err, connectorforge.ErrNotForge) {
 		t.Fatalf("Compose = %v, want ErrNotForge", err)
 	}
-	h.Conn.Capabilities = []string{"forge.branches"}
+	h.Conn.Capabilities = []string{"forge.branches", "forge.probe"}
 	if _, _, err := h.Compose(); !errors.Is(err, connectorforge.ErrPRForgeUnsupported) {
 		t.Fatalf("Compose without forge.pushOnly = %v, want ErrPRForgeUnsupported", err)
+	}
+	h.Conn.Capabilities = []string{"forge.branches", "forge.pushOnly"}
+	_, _, err := h.Compose()
+	if !errors.Is(err, connectorforge.ErrNotForge) || !strings.Contains(err.Error(), "forge.probe") {
+		t.Fatalf("Compose without forge.probe = %v, want ErrNotForge naming forge.probe", err)
 	}
 }
 
@@ -153,16 +158,20 @@ func TestComposeRefusesATargetRepositoryThatIsNotOwnerSlashName(t *testing.T) {
 	}
 }
 
-// Probe reads liveness through a request the backend answers.
+// Probe reads liveness through forge.probe, one repository request the backend
+// answers, not a branch lookup.
 func TestProbeReachesTheBackend(t *testing.T) {
 	h := connectorforgetest.New(t)
-	before := h.Backend.BranchRequests()
+	before, branches := h.Backend.Requests(), h.Backend.BranchRequests()
 	repo, err := h.Forge().Probe()
 	if err != nil || repo != connectorforgetest.Repo {
 		t.Fatalf("Probe = (%q, %v), want (%q, nil)", repo, err, connectorforgetest.Repo)
 	}
-	if n := h.Backend.BranchRequests() - before; n != 1 {
-		t.Errorf("Probe sent %d backend branch requests, want 1", n)
+	if n := h.Backend.Requests() - before; n != 1 {
+		t.Errorf("Probe sent %d backend requests, want 1", n)
+	}
+	if n := h.Backend.BranchRequests() - branches; n != 0 {
+		t.Errorf("Probe sent %d backend branch requests, want none", n)
 	}
 }
 
