@@ -2,6 +2,7 @@ package launcherchecks
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -32,10 +33,9 @@ func minimalValidConfig() Config {
 		RepoSlug:     "owner/repo",
 		GitUserName:  "Test User",
 		GitUserEmail: "test@example.com",
-		GHToken:      "gh-token",
 
 		Driver:      "claude",
-		Credentials: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-token"},
+		Credentials: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-token", "GH_TOKEN": "gh-token"},
 
 		IssueTracker: "github",
 		CodeForge:    "github",
@@ -65,7 +65,7 @@ func minimalDeps() Deps {
 
 func TestRequiredKnobChecks_ReturnsFiveRowsInOrder_NoRuntimeRow(t *testing.T) {
 	checks := RequiredKnobChecks(minimalValidConfig(), minimalDeps())
-	want := []string{"repo-slug", "git-user-name", "git-user-email", "gh-token", "driver-credentials"}
+	want := []string{"repo-slug", "git-user-name", "git-user-email", "backend-credential", "driver-credentials"}
 	if len(checks) != len(want) {
 		t.Fatalf("RequiredKnobChecks returned %d rows, want %d", len(checks), len(want))
 	}
@@ -155,30 +155,29 @@ func TestRequiredKnobChecks_GitUserEmail(t *testing.T) {
 	}
 }
 
-func TestRequiredKnobChecks_GHToken(t *testing.T) {
+func TestRequiredKnobChecks_BackendCredential(t *testing.T) {
 	c := minimalValidConfig()
-	c.GHToken = ""
-	ch := checkByName(t, RequiredKnobChecks(c, minimalDeps()), "gh-token")
+	c.Credentials["GH_TOKEN"] = ""
+	ch := checkByName(t, RequiredKnobChecks(c, minimalDeps()), "backend-credential")
 	_, err := ch.Probe()
 	if err == nil {
-		t.Fatal("gh-token Probe() must fail when GHToken is empty")
+		t.Fatal("backend-credential Probe() must fail when GH_TOKEN is empty")
 	}
-	want := "set GH_TOKEN (fine-grained PAT scoped to the single target repo: Issues RW, Contents RW, Pull requests RW, Metadata R)"
+	want := "set GH_TOKEN, the credential of the github backend"
 	if err.Error() != want {
-		t.Errorf("gh-token Probe() error = %q, want %q", err.Error(), want)
+		t.Errorf("backend-credential Probe() error = %q, want %q", err.Error(), want)
 	}
 
-	c2 := minimalValidConfig()
-	ch2 := checkByName(t, RequiredKnobChecks(c2, minimalDeps()), "gh-token")
+	ch2 := checkByName(t, RequiredKnobChecks(minimalValidConfig(), minimalDeps()), "backend-credential")
 	if _, err := ch2.Probe(); err != nil {
-		t.Errorf("gh-token Probe() unexpected error: %v", err)
+		t.Errorf("backend-credential Probe() unexpected error: %v", err)
 	}
 }
 
-// GH_TOKEN is required whenever the pairing reaches GitHub: a GitHub tracker
-// or forge token, or a forge whose Box clone uses the gh credential helper
-// (git). Pairings that never reach GitHub free it.
-func TestRequiredKnobChecks_GHToken_ByPairing(t *testing.T) {
+// Each selected backend row's TokenEnvVar is required, with no per-backend
+// branch: a pairing needs one credential per distinct variable its rows name,
+// and a row with none (git, local) needs nothing.
+func TestRequiredKnobChecks_BackendCredential_ByPairing(t *testing.T) {
 	rows := map[string]Backend{
 		"github":  {Descriptor: backend.GitHub},
 		"forgejo": {Descriptor: backend.Forgejo},
@@ -188,46 +187,85 @@ func TestRequiredKnobChecks_GHToken_ByPairing(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		tracker, forge string
-		wantRequired   bool
+		wantEnvs       []string
 	}{
-		{"forgejo", "forgejo", false},
-		{"jira", "forgejo", false},
-		{"github", "forgejo", true},
-		{"forgejo", "github", true},
-		{"jira", "github", true},
-		{"forgejo", "git", false},
-		{"forgejo", "local", false},
-		{"jira", "local", false},
-		{"github", "local", true},
-		{"github", "github", true},
-		{"forgejo", "nope", true},
-		{"", "", true},
+		{"github", "github", []string{"GH_TOKEN"}},
+		{"forgejo", "forgejo", []string{"FORGEJO_TOKEN"}},
+		{"forgejo", "github", []string{"GH_TOKEN", "FORGEJO_TOKEN"}},
+		{"jira", "github", []string{"GH_TOKEN", "JIRA_TOKEN"}},
+		{"jira", "forgejo", []string{"FORGEJO_TOKEN", "JIRA_TOKEN"}},
+		{"github", "forgejo", []string{"GH_TOKEN", "FORGEJO_TOKEN"}},
+		{"github", "git", []string{"GH_TOKEN"}},
+		{"github", "local", []string{"GH_TOKEN"}},
+		{"jira", "git", []string{"JIRA_TOKEN"}},
+		{"local", "git", nil},
+		{"local", "local", nil},
 	} {
-		t.Run(tc.tracker+"/"+tc.forge, func(t *testing.T) {
-			c := minimalValidConfig()
-			c.GHToken = ""
-			c.IssueTracker = tc.tracker
-			c.CodeForge = tc.forge
+		t.Run(tc.tracker+"-"+tc.forge, func(t *testing.T) {
 			d := minimalDeps()
 			d.Backend = func(name string) (Backend, bool) {
 				b, ok := rows[name]
 				return b, ok
 			}
-			_, err := checkByName(t, RequiredKnobChecks(c, d), "gh-token").Probe()
-			if tc.wantRequired && err == nil {
-				t.Error("gh-token Probe() = nil, want the set-GH_TOKEN error")
+			probe := func(creds map[string]string) error {
+				c := minimalValidConfig()
+				c.IssueTracker, c.CodeForge = tc.tracker, tc.forge
+				c.Credentials = creds
+				_, err := checkByName(t, RequiredKnobChecks(c, d), "backend-credential").Probe()
+				return err
 			}
-			if !tc.wantRequired && err != nil {
-				t.Errorf("gh-token Probe() unexpected error: %v", err)
+
+			all := map[string]string{}
+			for _, env := range tc.wantEnvs {
+				all[env] = "token"
+			}
+			if err := probe(all); err != nil {
+				t.Errorf("every required credential set: Probe() unexpected error: %v", err)
+			}
+
+			// Unrelated variables never satisfy a row's credential.
+			stray := map[string]string{"GH_TOKEN": "t", "FORGEJO_TOKEN": "t", "JIRA_TOKEN": "t"}
+			for _, env := range tc.wantEnvs {
+				without := map[string]string{}
+				for k, v := range stray {
+					without[k] = v
+				}
+				delete(without, env)
+				err := probe(without)
+				if err == nil {
+					t.Errorf("%s unset: Probe() = nil, want an error", env)
+				} else if !strings.Contains(err.Error(), "set "+env+",") {
+					t.Errorf("%s unset: Probe() error = %q, want it to name %s", env, err, env)
+				}
+			}
+
+			err := probe(nil)
+			if len(tc.wantEnvs) == 0 {
+				if err != nil {
+					t.Errorf("no credentials set: Probe() unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("no credentials set: Probe() = nil, want an error")
+			}
+			for _, env := range []string{"GH_TOKEN", "FORGEJO_TOKEN", "JIRA_TOKEN"} {
+				if got, want := strings.Contains(err.Error(), env), slices.Contains(tc.wantEnvs, env); got != want {
+					t.Errorf("no credentials set: error %q names %s = %v, want %v", err, env, got, want)
+				}
+				// A credential both rows name is reported once.
+				if n := strings.Count(err.Error(), "set "+env+","); n > 1 {
+					t.Errorf("no credentials set: error %q names %s %d times, want once", err, env, n)
+				}
 			}
 		})
 	}
 }
 
-func TestRequiredKnobChecks_RepoSlugGHToken_ExemptFullyLocal(t *testing.T) {
+func TestRequiredKnobChecks_RepoSlugBackendCredential_ExemptFullyLocal(t *testing.T) {
 	c := minimalValidConfig()
 	c.RepoSlug = ""
-	c.GHToken = ""
+	c.Credentials["GH_TOKEN"] = ""
 	d := minimalDeps()
 	d.Signals = func(codeForge, issueTracker string) Signals {
 		return Signals{FullyLocal: true}
@@ -236,8 +274,8 @@ func TestRequiredKnobChecks_RepoSlugGHToken_ExemptFullyLocal(t *testing.T) {
 	if _, err := checkByName(t, checks, "repo-slug").Probe(); err != nil {
 		t.Errorf("repo-slug Probe() unexpected error under FullyLocal: %v", err)
 	}
-	if _, err := checkByName(t, checks, "gh-token").Probe(); err != nil {
-		t.Errorf("gh-token Probe() unexpected error under FullyLocal: %v", err)
+	if _, err := checkByName(t, checks, "backend-credential").Probe(); err != nil {
+		t.Errorf("backend-credential Probe() unexpected error under FullyLocal: %v", err)
 	}
 }
 
@@ -259,14 +297,14 @@ func TestRequiredKnobChecks_RepoSlug_RoutedFullyLocal(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := minimalValidConfig()
-			c.RepoSlug, c.GHToken, c.IssueRouted = tc.slug, "", tc.routed
+			c.RepoSlug, c.Credentials["GH_TOKEN"], c.IssueRouted = tc.slug, "", tc.routed
 			checks := RequiredKnobChecks(c, d)
 			_, err := checkByName(t, checks, "repo-slug").Probe()
 			if (err != nil) != tc.wantErr {
 				t.Errorf("repo-slug Probe() err = %v, wantErr %v", err, tc.wantErr)
 			}
-			if _, err := checkByName(t, checks, "gh-token").Probe(); err != nil {
-				t.Errorf("gh-token Probe() = %v, want nil: a fully-local routed run needs no GH_TOKEN", err)
+			if _, err := checkByName(t, checks, "backend-credential").Probe(); err != nil {
+				t.Errorf("backend-credential Probe() = %v, want nil: a fully-local routed run needs no GH_TOKEN", err)
 			}
 		})
 	}
@@ -276,7 +314,7 @@ func TestRequiredKnobChecks_RepoSlug_RoutedFullyLocal(t *testing.T) {
 // Target repo, so its exemption survives a set route.
 func TestRequiredKnobChecks_RepoSlug_RoutedSelfContainedResearch(t *testing.T) {
 	c := minimalValidConfig()
-	c.RepoSlug, c.GHToken, c.IssueRouted = "", "", true
+	c.RepoSlug, c.Credentials["GH_TOKEN"], c.IssueRouted = "", "", true
 	c.ResearchDispatch, c.SelfContained = true, true
 	d := minimalDeps()
 	d.Signals = func(codeForge, issueTracker string) Signals {
@@ -287,10 +325,10 @@ func TestRequiredKnobChecks_RepoSlug_RoutedSelfContainedResearch(t *testing.T) {
 	}
 }
 
-func TestRequiredKnobChecks_RepoSlugGHToken_ExemptSelfContainedResearch(t *testing.T) {
+func TestRequiredKnobChecks_RepoSlugBackendCredential_ExemptSelfContainedResearch(t *testing.T) {
 	c := minimalValidConfig()
 	c.RepoSlug = ""
-	c.GHToken = ""
+	c.Credentials["GH_TOKEN"] = ""
 	c.ResearchDispatch = true
 	c.SelfContained = true
 	d := minimalDeps()
@@ -301,8 +339,8 @@ func TestRequiredKnobChecks_RepoSlugGHToken_ExemptSelfContainedResearch(t *testi
 	if _, err := checkByName(t, checks, "repo-slug").Probe(); err != nil {
 		t.Errorf("repo-slug Probe() unexpected error under self-contained research exemption: %v", err)
 	}
-	if _, err := checkByName(t, checks, "gh-token").Probe(); err != nil {
-		t.Errorf("gh-token Probe() unexpected error under self-contained research exemption: %v", err)
+	if _, err := checkByName(t, checks, "backend-credential").Probe(); err != nil {
+		t.Errorf("backend-credential Probe() unexpected error under self-contained research exemption: %v", err)
 	}
 }
 
@@ -560,7 +598,7 @@ func TestAll_ReturnsEightRowsInOrder(t *testing.T) {
 	d.ExtraCrossKnob = []doctor.Check{extra}
 	checks := All(minimalValidConfig(), d)
 	want := []string{
-		"repo-slug", "git-user-name", "git-user-email", "gh-token", "driver-credentials",
+		"repo-slug", "git-user-name", "git-user-email", "backend-credential", "driver-credentials",
 		"issue-tracker-config", "code-forge-config", "registry-proxy-routes",
 	}
 	if len(checks) != len(want) {
@@ -644,32 +682,20 @@ func TestRequiredKnobChecks_DriverCredentials_PiAuthContentRejectsOtherOAuth(t *
 	}
 }
 
-// A git forge clones the host-seeded mirror, so GH_TOKEN is required only when
-// the tracker is GitHub (#6898).
-func TestRequiredKnobChecks_GHToken_GitMirror(t *testing.T) {
-	rows := map[string]Backend{
-		"git":    {Descriptor: backend.Git},
-		"jira":   {Descriptor: backend.Jira},
-		"github": {Descriptor: backend.GitHub},
+// A name that is unknown, or not valid for its axis, is the cross-knob rows'
+// to reject: the credential row does not demand its token first.
+func TestRequiredKnobChecks_BackendCredential_SkipsInvalidAxis(t *testing.T) {
+	d := minimalDeps()
+	d.Backend = func(name string) (Backend, bool) {
+		if name == "jira" {
+			return Backend{Descriptor: backend.Jira}, true
+		}
+		return Backend{}, false
 	}
-	for _, tc := range []struct {
-		tracker      string
-		wantRequired bool
-	}{
-		{"jira", false},
-		{"github", true},
-	} {
-		c := minimalValidConfig()
-		c.GHToken = ""
-		c.IssueTracker, c.CodeForge = tc.tracker, "git"
-		d := minimalDeps()
-		d.Backend = func(name string) (Backend, bool) {
-			b, ok := rows[name]
-			return b, ok
-		}
-		_, err := checkByName(t, RequiredKnobChecks(c, d), "gh-token").Probe()
-		if (err != nil) != tc.wantRequired {
-			t.Errorf("tracker=%s: gh-token Probe() err = %v, wantRequired %v", tc.tracker, err, tc.wantRequired)
-		}
+	c := minimalValidConfig()
+	c.Credentials = nil
+	c.IssueTracker, c.CodeForge = "nope", "jira"
+	if _, err := checkByName(t, RequiredKnobChecks(c, d), "backend-credential").Probe(); err != nil {
+		t.Errorf("backend-credential Probe() = %v, want nil: jira is no code forge and nope is unknown", err)
 	}
 }

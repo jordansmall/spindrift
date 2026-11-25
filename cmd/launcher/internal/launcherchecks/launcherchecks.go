@@ -21,14 +21,15 @@ type Config struct {
 	RepoSlug     string
 	GitUserName  string
 	GitUserEmail string
-	GHToken      string
 
 	Driver string
 	// Models are every model tier the run uses (MODEL and the per-tier
 	// *_MODEL), so a credential rule gated on a model prefix sees them all.
 	Models []string
-	// Credentials maps a credential env name to its value. The adapter fills it
-	// from named config fields, so a new rule variable needs an entry there.
+	// Credentials maps a credential env name to its value: the Driver's rule
+	// variables and the selected backend rows' TokenEnvVars. The adapter fills
+	// it from named config fields, so a new rule or row variable needs an
+	// entry there.
 	Credentials map[string]string
 
 	IssueTracker string
@@ -37,13 +38,13 @@ type Config struct {
 	// IssueRouted is true when ISSUE_ROUTE is set; see repoSlugRequired.
 	IssueRouted bool
 	// These two, with Signals.InBoxUnreachableTracker, feed the
-	// REPO_SLUG/GH_TOKEN exemption (noRepoResearch below).
+	// REPO_SLUG/backend-credential exemption (noRepoResearch below).
 	ResearchDispatch bool
 	SelfContained    bool
 }
 
-// Signals carries the two capability bits the repo-slug/gh-token exemption
-// reads for one CodeForge/IssueTracker pairing.
+// Signals carries the two capability bits the repo-slug/backend-credential
+// exemption reads for one CodeForge/IssueTracker pairing.
 type Signals struct {
 	InBoxUnreachableTracker bool
 	FullyLocal              bool
@@ -80,10 +81,10 @@ func noRepoResearch(sig Signals, c Config) bool {
 	return c.ResearchDispatch && c.SelfContained && sig.InBoxUnreachableTracker
 }
 
-// ghTokenExempt reports whether c is exempt from the GH_TOKEN presence
+// credentialExempt reports whether c is exempt from the backend credential
 // requirement: a fully-local run, or a noRepoResearch run. REPO_SLUG uses
 // repoSlugRequired.
-func ghTokenExempt(sig Signals, c Config) bool {
+func credentialExempt(sig Signals, c Config) bool {
 	return sig.FullyLocal || noRepoResearch(sig, c)
 }
 
@@ -91,18 +92,35 @@ func ghTokenExempt(sig Signals, c Config) bool {
 // its Target repo through REPO_SLUG, even on a fully-local run, so a routed
 // run needs it despite the fully-local exemption. A self-contained research
 // run keeps its exemption (no Target repo, no route fragment in its prompt);
-// gh-token has no route override.
+// the backend credential has no route override.
 func repoSlugRequired(sig Signals, c Config) bool {
 	return !noRepoResearch(sig, c) && (!sig.FullyLocal || c.IssueRouted)
 }
 
-// ghTokenRequired resolves both backends' descriptors for backend.NeedsGHToken.
-// Jira and forgejo trackers check their own tokens through their cross-knob
-// validators.
-func ghTokenRequired(c Config, d Deps) bool {
-	tracker, _ := d.Backend(c.IssueTracker)
+// missingBackendCredentials names each selected backend row's TokenEnvVar
+// with no value in c.Credentials, once per variable. A backend with an empty
+// TokenEnvVar (local, git) needs none, and a name that is unknown or not valid
+// for its axis is left to the cross-knob rows to reject.
+func missingBackendCredentials(c Config, d Deps) []error {
+	var errs []error
+	seen := map[string]bool{}
 	forge, _ := d.Backend(c.CodeForge)
-	return backend.NeedsGHToken(forge.Descriptor, tracker.Descriptor)
+	tracker, _ := d.Backend(c.IssueTracker)
+	for _, s := range []struct {
+		b     Backend
+		valid bool
+	}{{forge, forge.ValidAsCodeForge}, {tracker, tracker.ValidAsTracker}} {
+		b := s.b
+		env := b.TokenEnvVar
+		if env == "" || seen[env] || !s.valid {
+			continue
+		}
+		seen[env] = true
+		if c.Credentials[env] == "" {
+			errs = append(errs, fmt.Errorf("set %s, the credential of the %s backend", env, b.Name))
+		}
+	}
+	return errs
 }
 
 // requiredValue builds a Required-tier Check row whose Remedy and Probe error
@@ -141,9 +159,17 @@ func RequiredKnobChecks(c Config, d Deps) []doctor.Check {
 		requiredValue("git-user-email", "pass --user-email or set git.user.email, or configure git user.email on the host", func() bool {
 			return c.GitUserEmail == ""
 		}),
-		requiredValue("gh-token", "set GH_TOKEN (fine-grained PAT scoped to the single target repo: Issues RW, Contents RW, Pull requests RW, Metadata R)", func() bool {
-			return !ghTokenExempt(sig, c) && ghTokenRequired(c, d) && c.GHToken == ""
-		}),
+		{
+			Name:   "backend-credential",
+			Tier:   doctor.Required,
+			Remedy: "set the credential each selected backend's row names (see the error for which)",
+			Probe: func() (any, error) {
+				if credentialExempt(sig, c) {
+					return nil, nil
+				}
+				return nil, errors.Join(missingBackendCredentials(c, d)...)
+			},
+		},
 		{
 			Name:   "driver-credentials",
 			Tier:   doctor.Required,

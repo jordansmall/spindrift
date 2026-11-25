@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/inputdoc"
 )
@@ -84,6 +85,22 @@ func TestLauncherCrossKnobDeps_ExtraCrossKnobIsRegistryProxyRoutesRow(t *testing
 func TestLauncherCheckDeps_NoExtraCrossKnobRow(t *testing.T) {
 	if got := launcherCheckDeps(minimalValidConfig()).ExtraCrossKnob; got != nil {
 		t.Errorf("launcherCheckDeps(c).ExtraCrossKnob = %v, want nil", got)
+	}
+}
+
+// TestLauncherCredentialsCoverRowCredentials fails when a backend row names a
+// TokenEnvVar that is neither the github core field nor a row knob the
+// generated loader fills, so launcherCredentials could never carry it.
+func TestLauncherCredentialsCoverRowCredentials(t *testing.T) {
+	rowKnobs := loadSchemaConfig().RowKnobs
+	for _, row := range backend.Registry {
+		env := row.TokenEnvVar
+		if env == "" || env == backend.GitHub.TokenEnvVar {
+			continue
+		}
+		if _, ok := rowKnobs[env]; !ok {
+			t.Errorf("backend %s: credential %s is not a row knob, so the backend-credential check would always refuse it", row.Name, env)
+		}
 	}
 }
 

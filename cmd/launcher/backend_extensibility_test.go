@@ -68,6 +68,7 @@ func TestBackendRegistry_NewBackendNeedsOnlyRowAndNoOtherChanges(t *testing.T) {
 	c := minimalValidConfig()
 	c.IssueTracker = "gitlab"
 	c.CodeForge = "gitlab"
+	c.setRowKnob("GITLAB_TOKEN", "tok")
 	if err := validate(c); err != nil {
 		t.Errorf("validate() with ISSUE_TRACKER=CODE_FORGE=gitlab = %v, want nil", err)
 	}

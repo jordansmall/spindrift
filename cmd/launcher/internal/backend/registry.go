@@ -182,16 +182,6 @@ func ForgeBackendSignal(codeForge string) string {
 	return row.ForgeBackend
 }
 
-// NeedsGHToken reports whether a forge/tracker pairing reaches GitHub: a GitHub
-// tracker or forge token. local and git clone a host-seeded mirror, so they
-// free GH_TOKEN when paired with a non-GitHub tracker (issues #4494, #6898).
-// An unknown name's zero row fails closed.
-func NeedsGHToken(forge, tracker Descriptor) bool {
-	return tracker.TokenEnvVar == GitHub.TokenEnvVar ||
-		forge.TokenEnvVar == GitHub.TokenEnvVar ||
-		!forge.ValidAsCodeForge
-}
-
 // ClosesRef reports whether a `Closes #N` in a PR body on forge auto-closes
 // tracker's issue N: forge has pull requests and is the same backend as the
 // tracker, so the two share an issue namespace. Any other pairing names a
