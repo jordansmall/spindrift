@@ -23,6 +23,7 @@
 let
   inherit (pkgs.lib)
     all
+    any
     assertMsg
     attrNames
     concatStringsSep
@@ -190,9 +191,16 @@ in
     assert assertMsg (elem "data.nix" (
       map (f: f.rel) scanned."nix/fixtures/connector"
     )) "connector-escape-guard scanned no fixture data.nix; the scan is vacuous";
-    assert assertMsg (all (root: elem "module.nix" (map (f: f.rel) scanned.${root})) (
-      attrNames scaffoldDirs
-    )) "connector-escape-guard scanned no scaffold module.nix; the scan is vacuous";
+    assert assertMsg (all
+      (
+        root:
+        any (r: elem r (map (f: f.rel) scanned.${root})) [
+          "data.nix"
+          "module.nix"
+        ]
+      )
+      (attrNames scaffoldDirs)
+    ) "connector-escape-guard scanned no scaffold data.nix or module.nix; the scan is vacuous";
     assert assertMsg (hits == [ ])
       "a Connector's Nix reaches outside its own directory (ADR 0073 decision 11):\n${concatStringsSep "\n" hits}";
     pkgs.runCommand "connector-escape-guard" { } "touch $out";

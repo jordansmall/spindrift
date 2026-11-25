@@ -391,6 +391,10 @@ let
     "baked-skills:cmd/launcher" = "spliced and built; its marker files are under promptassembly/";
     "connector-checks-any-name:templates/connector-driver" =
       "builds and golden-diffs the scaffold; its text is matched by ci-comment-readers";
+    "connector-checks-any-name:templates/connector-forge" =
+      "builds the scaffold's wasm; its text is matched by ci-comment-readers";
+    "connector-checks-any-name:templates/connector-tracker" =
+      "builds the scaffold's wasm; its text is matched by ci-comment-readers";
     "connector-checks-parity:connectors" = "imports each Connector's flake.nix, never reads its text";
     "connector-backend-rows:connectors" =
       "imports each batteries Connector's default.nix to compare its wasm, never reads its text";

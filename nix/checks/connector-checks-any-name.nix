@@ -2,8 +2,15 @@
 # core Driver over the corpus it carries. The test-only `echo` fixture is that
 # Connector; its connector-echo-* checks are the proof. The Driver Connector
 # scaffold (templates/connector-driver) is the second: it must start green and
-# fail on a drifted golden, so a generated Connector does too.
-{ nixpkgs, system, ... }:
+# fail on a drifted golden, so a generated Connector does too. It also holds
+# `connector-scaffold-builds`, the placeholder-name wasm build of the tracker
+# and forge templates, kept out of the docs-lane connector-scaffold checks.
+{
+  nixpkgs,
+  system,
+  pkgs,
+  ...
+}:
 let
   core = import ../../core;
   checksOf =
@@ -63,4 +70,24 @@ echo
   # Connector lane's, as for every Connector.
   connector-driver-template-conformance = template.connector-connectorname-conformance;
   connector-driver-template-golden-drift = goldenDrift template.connector-connectorname-conformance;
+
+  # The tracker and forge scaffolds (templates/connector-tracker, -forge) are
+  # data Connectors; a generated one must compile to its wasm. connector-scaffold
+  # only evaluates them, being in the docs lane, so the build lives here.
+  connector-scaffold-builds = pkgs.runCommand "connector-scaffold-builds" { } ''
+    ${pkgs.lib.concatMapStringsSep "\n"
+      (
+        dir:
+        let
+          connector = (import dir).lib.connector { inherit core; };
+        in
+        "test -s ${connector.package pkgs}/${connector.data.name}.wasm"
+      )
+      [
+        ../../templates/connector-tracker
+        ../../templates/connector-forge
+      ]
+    }
+    touch $out
+  '';
 }

@@ -13,6 +13,7 @@
   pkgs,
   nixpkgs,
   system,
+  fixtures,
   ...
 }:
 let
@@ -267,14 +268,39 @@ let
       };
       allKnobFields = r: unique (concatMap attrNames (attrValues (r.knobs or { })));
       routeAttrs = d: unique (concatMap attrNames (load d "routes.nix"));
+      entry = (load tmplDir "default.nix").lib.connector { inherit core; };
+      # What a Consumer importing the template's flakeModule registers.
+      consumed =
+        (fixtures.connectorConsumerVia [
+          ../../lib/flakeModule.nix
+          entry.flakeModule
+        ]).debug.config.spindrift.connectors;
     in
-    # A first-party reference may name its own backend's core credential and
-    # declare no knobs (issues #7500 and #7501); a third-party row cannot name a core
-    # knob, and names no `credential` at all (core derives `<NAME>_TOKEN`, issue
-    # #7560), so the template always declares its own `<NAME>_TOKEN` knob.
-    sameNames "registered row attrs" (subtractLists [ "knobs" ] (attrNames rows.ref)) (
-      subtractLists [ "knobs" ] (attrNames rows.tmpl)
-    )
+    # The Connector templates hand out data, not a flake-parts module (#7561).
+    expect
+      (builtins.pathExists (tmplDir + "/data.nix") && !builtins.pathExists (tmplDir + "/module.nix"))
+      "the template registers in module.nix, not data.nix: a Connector template is data core turns into the row"
+    ++ expect (
+      entry ? data
+    ) "default.nix: lib.connector carries no `data` (the template is module-form)"
+    ++
+      expect
+        (
+          entry ? data
+          && consumed ? ${token}
+          && consumed.${token}.routes == entry.data.routes
+          && consumed.${token}.backend.credential == (entry.data.credential or null)
+          && attrNames consumed.${token}.knobs == attrNames entry.data.knobs
+        )
+        "a Consumer importing the template's flakeModule does not register spindrift.connectors.${token} with the data's row"
+    ++
+      # A first-party reference may name its own backend's core credential and
+      # declare no knobs (issues #7500 and #7501); a third-party row cannot name a core
+      # knob, and names no `credential` at all (core derives `<NAME>_TOKEN`, issue
+      # #7560), so the template always declares its own `<NAME>_TOKEN` knob.
+      sameNames "registered row attrs" (subtractLists [ "knobs" ] (attrNames rows.ref)) (
+        subtractLists [ "knobs" ] (attrNames rows.tmpl)
+      )
     # The template's backend and knobs may use fewer of the reference's options
     # (token auth, not Basic), never one it does not.
     ++ namesProblems "registered row backend" [
