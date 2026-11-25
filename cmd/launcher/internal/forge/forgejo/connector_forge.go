@@ -68,6 +68,7 @@ func newConnectorCodeForge(row backendrows.Row, s backendkit.Shared, k Knobs) (f
 	}
 	cf, _, err := connectorforge.Compose(conn, connectorforge.Target{API: strings.TrimSuffix(k.ForgejoBaseURL, "/"), Repo: s.RepoSlug}, connectorforge.Git{
 		Credential: gitCredential,
+		WebBase:    row.GitRemote,
 		Note:       recordFailure,
 		Plumbing: func(cloneURL string, cred gitexec.Credential) forge.CodeForge {
 			return git.NewGitClient(cloneURL, s.BaseBranch, s.GitUserName, s.GitUserEmail, git.WithCredential(cred))

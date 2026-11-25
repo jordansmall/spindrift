@@ -113,6 +113,7 @@ func declaredRoutes(t *testing.T) (string, []connectorhost.Route) {
 
 func composeForge(conn *connectorhost.Connector, api string) (forge.CodeForge, forge.Capabilities, error) {
 	return connectorforge.Compose(conn, connectorforge.Target{API: api, Repo: connectorRepo}, connectorforge.Git{
+		WebBase:    api,
 		Credential: gitexec.Credential{Username: "oauth2", Password: connectorToken},
 		Plumbing: func(u string, cred gitexec.Credential) forge.CodeForge {
 			return git.NewGitClient(u, "main", "Test Bot", "bot@example.com", git.WithCredential(cred))

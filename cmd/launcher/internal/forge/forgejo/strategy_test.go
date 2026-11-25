@@ -35,13 +35,13 @@ func TestStrategyValidateTrackerNamesBlankBaseURL(t *testing.T) {
 }
 
 func TestStrategyLedgerURLUsesLookupBaseURL(t *testing.T) {
-	l := mapLookup(map[string]string{"FORGEJO_BASE_URL": "https://forge.example", "FORGEJO_TOKEN": "tok"})
+	l := mapLookup(map[string]string{"FORGEJO_BASE_URL": "https://forge.example/forgejo/", "FORGEJO_TOKEN": "tok"})
 	site, err := forgejo.Strategy.NewLedger(backendkit.Shared{RepoSlug: "o/r"}, l)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(site.URL, "forge.example") || !strings.Contains(site.URL, "o/r") {
-		t.Errorf("URL = %q, want it built from the looked-up base URL and slug", site.URL)
+	if want := "https://forge.example/forgejo/o/r.git"; site.URL != want {
+		t.Errorf("URL = %q, want %q: the looked-up base with its subpath kept, then the slug", site.URL, want)
 	}
 }
 

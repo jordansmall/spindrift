@@ -152,23 +152,13 @@ func TestConnectorRow_SeedMirrorRunsInCoreGit(t *testing.T) {
 	}
 }
 
-// splitWebHost moves the repository's web URL, and so its clone URL, onto
-// GH_HOST while the API stays on the backend's host, as github.com and
-// api.github.com split on GitHub. The row's Routes declare only the API host.
-func splitWebHost(t *testing.T, h *connectorHarness) {
-	t.Helper()
-	const web = "github.example"
-	h.backend.mu.Lock()
-	h.backend.web = "https://" + web + "/" + connectorRepo
-	h.backend.mu.Unlock()
-	t.Setenv("GH_HOST", web)
-	t.Setenv("GIT_CONFIG_VALUE_0", h.backend.web+".git")
-}
-
-// The mirror seeds when git's host is GH_HOST and no declared route names it.
-func TestConnectorRow_SeedMirrorWhenTheWebHostIsNotAnAPIRoute(t *testing.T) {
+// The mirror seeds from the clone URL core derived from the row's Git remote,
+// whatever repository the Connector's own answer names.
+func TestConnectorRow_SeedMirrorIgnoresTheConnectorsRemote(t *testing.T) {
 	h, _, _, _ := routedLogHarness(t, useGithubRowAt)
-	splitWebHost(t, h)
+	h.backend.mu.Lock()
+	h.backend.web = "https://" + h.backend.host + "/o/other"
+	h.backend.mu.Unlock()
 	dir := filepath.Join(t.TempDir(), "mirror")
 
 	if err := routedGitClient().SeedMirror(dir); err != nil {
@@ -176,19 +166,6 @@ func TestConnectorRow_SeedMirrorWhenTheWebHostIsNotAnAPIRoute(t *testing.T) {
 	}
 	if got, want := forgetest.RevParse(t, dir, "main"), forgetest.RevParse(t, h.backend.repo.Bare, "main"); got != want {
 		t.Errorf("mirror main = %s, want %s", got, want)
-	}
-}
-
-// No git operation a routed row composes refuses a remote on GH_HOST.
-func TestConnectorRow_GitOpsAcceptARemoteOnGHHost(t *testing.T) {
-	for _, op := range routedGitOps {
-		t.Run(op.name, func(t *testing.T) {
-			h, _, _, _ := routedLogHarness(t, useGithubRowAt)
-			splitWebHost(t, h)
-			if err := op.run(h, t); errors.Is(err, connectorforge.ErrRemoteHost) {
-				t.Errorf("err = %v, want the GH_HOST remote accepted", err)
-			}
-		})
 	}
 }
 
@@ -254,26 +231,29 @@ func TestConnectorRow_RebasePRHeadConflictIsErrMergeConflict(t *testing.T) {
 // seeded.
 var routedGitOps = []struct {
 	name string
-	run  func(h *connectorHarness, t *testing.T) error
+	// asksConnector is whether the op calls the Connector (a route to refuse);
+	// the rest run in core's git over the derived clone URL.
+	asksConnector bool
+	run           func(h *connectorHarness, t *testing.T) error
 }{
-	{"RelayBundle", func(h *connectorHarness, t *testing.T) error {
+	{"RelayBundle", false, func(h *connectorHarness, t *testing.T) error {
 		outbox := t.TempDir()
 		forgetest.SeedRelayBundle(t, h.backend.repo.Bare, "main", outbox, landingBranch)
 		return routedGitClient().RelayBundle(outbox, landingBranch)
 	}},
-	{"CommitSubjects", func(h *connectorHarness, t *testing.T) error {
+	{"CommitSubjects", false, func(h *connectorHarness, t *testing.T) error {
 		outbox := t.TempDir()
 		forgetest.SeedRelayBundle(t, h.backend.repo.Bare, "main", outbox, landingBranch)
 		_, err := routedGitClient().CommitSubjects(outbox, "main", landingBranch)
 		return err
 	}},
-	{"PushBranch", func(h *connectorHarness, t *testing.T) error {
+	{"PushBranch", false, func(h *connectorHarness, t *testing.T) error {
 		return routedGitClient().PushBranch(t.TempDir(), "work", landingBranch, "main")
 	}},
-	{"RebasePRHead", func(h *connectorHarness, t *testing.T) error {
+	{"RebasePRHead", true, func(h *connectorHarness, t *testing.T) error {
 		return routedGitClient().RebasePRHead(h.SeedLandablePR("13"), forge.AgentBranchName(h.BranchPrefix(), "13"))
 	}},
-	{"SeedMirror", func(h *connectorHarness, t *testing.T) error {
+	{"SeedMirror", false, func(h *connectorHarness, t *testing.T) error {
 		return routedGitClient().SeedMirror(filepath.Join(t.TempDir(), "mirror"))
 	}},
 }
@@ -298,6 +278,10 @@ func TestConnectorRow_GitOpsFailByName(t *testing.T) {
 				t.Errorf("ran gh %d times", n)
 			}
 		})
+		if !op.asksConnector {
+			// No Connector call, so no route to be refused.
+			continue
+		}
 		t.Run(op.name+"/refused", func(t *testing.T) {
 			h, _, calls, _ := routedLogHarness(t, func(t *testing.T, host string) {
 				applyGithubRow(t, host, func(r *backendrows.Row) {

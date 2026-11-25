@@ -677,8 +677,6 @@ func TestProbe(t *testing.T) {
 // auditStub records AuditRefusal entries in place of a network Connector's log.
 type auditStub struct{ audit *bytes.Buffer }
 
-func (auditStub) DeclaredHosts() []string { return nil }
-
 func (s auditStub) AuditRefusal(method string, refusal error) error {
 	s.audit.WriteString("refused " + method + ": " + refusal.Error() + "\n")
 	return refusal

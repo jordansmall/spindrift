@@ -92,8 +92,9 @@ func (e *execClient) forgeGit(row backendrows.Row, verb string, fn func(forge.Co
 		var plumbing *coreGit
 		cf, caps, err := connectorforge.Compose(conn, connectorforge.Target{API: api, Repo: e.repo}, connectorforge.Git{
 			Credential: cred,
-			// The Routes name only api.github.com; git and the web are on Host().
-			WebHost: Host(),
+			// The Routes name only api.github.com; git and the web are on the row's
+			// declared Git remote, which core derives the clone URL and web host from.
+			WebBase: row.GitRemote,
 			Plumbing: func(cloneURL string, cred gitexec.Credential) forge.CodeForge {
 				plumbing = &coreGit{
 					CodeForge: git.NewGitClient(cloneURL, e.baseBranch, e.userName, e.userEmail, git.WithCredential(cred)),

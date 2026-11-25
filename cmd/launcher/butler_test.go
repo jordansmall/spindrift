@@ -1038,7 +1038,7 @@ func TestCmdButler_PatchFindingCarriesPatchLabel(t *testing.T) {
 	// remote that git redirects to the fixture's bare repo.
 	t.Setenv("GIT_CONFIG_COUNT", "1")
 	t.Setenv("GIT_CONFIG_KEY_0", "url."+repo+".insteadOf")
-	t.Setenv("GIT_CONFIG_VALUE_0", "http://forgejo.test/owner/repo.git")
+	t.Setenv("GIT_CONFIG_VALUE_0", "https://forgejo.test/owner/repo.git")
 
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/9301"
@@ -1068,7 +1068,7 @@ func TestCmdButler_PatchFindingCarriesPatchLabel(t *testing.T) {
 
 	lc := &launchContext{
 		config: config{Knobs: butlerTestSchemaConfig("docs-drift", "forgejo", map[string]string{
-			"FORGEJO_BASE_URL": "http://forgejo.test",
+			"FORGEJO_BASE_URL": "https://forgejo.test",
 			"FORGEJO_TOKEN":    "tok",
 		}, func(sc *inputdoc.Knobs) {
 			sc.RepoSlug = "owner/repo"
