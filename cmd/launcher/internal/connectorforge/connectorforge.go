@@ -52,10 +52,6 @@ type Target struct {
 
 // The shapes the forge adapter decodes from the guest.
 type (
-	wireRemote struct {
-		CloneURL string `json:"cloneUrl"`
-		WebURL   string `json:"webUrl"`
-	}
 	wirePR struct {
 		Number      string `json:"number"`
 		URL         string `json:"url"`

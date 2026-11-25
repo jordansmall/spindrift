@@ -4079,24 +4079,17 @@ description and a regen.
 
   `forge.deleteBranch` is a write, but only of a branch: core refuses the base
   branch and an option-shaped name before the call. Every git operation (push,
-  merge, rebase) stays in core's own git plumbing against `cloneUrl`, with
-  core's credential, which the Connector never sees.
+  merge, rebase) stays in core's own git plumbing against the derived clone URL
+  below, with core's credential, which the Connector never sees.
   [`connectorforge.Compose`](../cmd/launcher/internal/connectorforge/pushonly.go)
   builds the Code Forge and refuses a Connector without `"forge.branches"`, or
   declaring neither `"forge.pushOnly"` nor `"forge.prs"`. Core derives the clone
   URL `<web base>/<owner>/<name>.git` from the forge's Git remote declaration
   (its backend row's `gitRemote`) and the Target repository, and the web host
-  PR URLs are pinned to from the same declaration; it never asks the Connector
-  for a remote at construction, so the git credential goes only to the derived
-  repository URL. A Probe with no `forge.probe` still reads `forge.remote` as a
-  liveness check and refuses an answer unless both URLs are `https`, carry no
-  userinfo and name the derived host (case-insensitive, port included); the
-  URLs are otherwise ignored.
-  A refusal is audited as one line with `decision` `refused` and `reason`
-  `forge.remote: <error>`, the error printing the URL without its userinfo,
-  and no route, host or status. It matches `ErrRemoteCredentials` or
-  `ErrRemoteHost`, and also `ErrAudit` when the line cannot be written or the
-  Connector has no network grant and so no audit log. The SDK's
+  PR URLs are pinned to from the same declaration, subpath included; core never
+  calls `forge.remote`, so the git credential goes only to the derived
+  repository URL. A Probe with no `forge.probe` asks `forge.branchExists` as a
+  liveness check that reaches the backend, and ignores the answer. The SDK's
   `forge.RegisterBranches(forge.Branches{...})` serves the methods.
 
   **PR primitives.** A forge Connector that advertises `"forge"`,
@@ -4123,7 +4116,7 @@ description and a regen.
   | `forge.autoMerge` | `forge.autoMergeAllowed` (`{target}` → `{allowed}`), `forge.enqueueAutoMerge` (`{target, number}` → `{}`) | auto-merge reads as disallowed |
   | `forge.ciRun` | `forge.ciRun` (`{target, number}` → `{url}`) | no CI run link |
   | `forge.branchProtection` | `forge.branchProtected` (`{target, branch}` → `{protected}`) | doctor's `branch-protection` row is not applicable |
-  | `forge.probe` | `forge.probe` (`{target}` → `{repo}`) | Probe reads `forge.remote` as a liveness check |
+  | `forge.probe` | `forge.probe` (`{target}` → `{repo}`) | Probe asks `forge.branchExists` as a liveness check |
   | `forge.draftPRs` | `forge.openPR` (`{target, pr: {title, body, base, head, draft}}` → a PR) | no draft-PR creation, host-side branch push, bundle relay or commit subjects: the forge cannot host-mediate a read-only Box (see Host mediation) |
 
   Core pins every PR URL to the remote's web host, fails closed on an unknown

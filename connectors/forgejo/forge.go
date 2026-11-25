@@ -239,6 +239,8 @@ func remote(t forge.Target) (forge.Remote, error) {
 	u.Path = strings.TrimSuffix(u.Path, "/") + "/" + t.Repo
 	u.RawPath = ""
 	web := u.String()
+	// Core never reads this answer; kept while the protocol declares
+	// forge.remote, remove at protocol 0.4.0.
 	return forge.Remote{CloneURL: web + ".git", WebURL: web}, nil
 }
 

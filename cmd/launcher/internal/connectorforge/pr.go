@@ -398,7 +398,7 @@ func (f *prForge) createDraftPR(title, body, base, head string) (string, bool, e
 }
 
 // Probe asks the Connector for the repository's name when it declares
-// "forge.probe", and otherwise re-reads the remote's identity.
+// "forge.probe", and otherwise reads liveness through a branch lookup.
 func (f *prForge) Probe() (string, error) {
 	if !f.hasProbe {
 		return f.push.Probe()
