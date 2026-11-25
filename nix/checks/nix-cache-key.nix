@@ -22,8 +22,11 @@ let
   ciPrefix = "nix-\${{ matrix.nix-system }}-";
   render = replaceStrings [ "\${{ matrix.nix-system }}" ] [ "x86_64-linux" ];
 
-  ciHasCacheKey = hasInfix "primary-key: ${ciKey}" ciSrc;
-  ciHasCachePrefix = hasInfix "restore-prefixes-first-match: ${ciPrefix}" ciSrc;
+  # Counted, not matched: the restore-only `image` job carries the same raw
+  # key, so a bare match would pass with the saving `check` job's key gone.
+  linuxCacheJobs = 2;
+  ciHasCacheKey = occurrences "primary-key: ${ciKey}" == linuxCacheJobs;
+  ciHasCachePrefix = occurrences "restore-prefixes-first-match: ${ciPrefix}" == linuxCacheJobs;
   ciHasMatrixLeg = hasInfix "nix-system: x86_64-linux" ciSrc;
   # The docs-only lane (issue #5155) restores the aarch64-linux leg's cache
   # outside the matrix; that runner finishes faster than the x86_64 one.
@@ -35,8 +38,9 @@ let
   setupHasCacheKey = hasInfix "primary-key: ${render ciKey}" setupSrc;
   setupHasCachePrefix = hasInfix "restore-prefixes-first-match: ${render ciPrefix}" setupSrc;
 
+  checkRoot = "nix build --stdin --out-link \"$RUNNER_TEMP/check-roots/check\"";
   occurrences = needle: length (splitString needle ciSrc) - 1;
-  # Both saving jobs: the Linux matrix and macOS.
+  # Both saving jobs: the Linux `check` matrix and macOS; `image` only restores.
   savingJobs = 2;
 in
 {
@@ -60,12 +64,22 @@ in
     pkgs.runCommand "agent-setup-nix-cache-key" { } "touch $out";
 
   ci-nix-cache-keeps-check-outputs =
-    # `nix flake check` registers no GC roots, so cache-nix-action's pre-save
-    # `nix store gc --max` deleted every check output and each PR rebuilt
-    # ~900 derivations from a store holding only toolchains.
-    assert assertMsg
-      (occurrences "| nix build --stdin --out-link \"$RUNNER_TEMP/check-roots/check\"" == savingJobs)
+    # Neither `nix flake check` nor a `--no-link` build registers GC roots, so
+    # cache-nix-action's pre-save `nix store gc --max` deleted every check
+    # output and each PR rebuilt ~900 derivations from a store holding only
+    # toolchains.
+    assert assertMsg (occurrences checkRoot == savingJobs)
       "ci.yml no longer roots the check outputs in both saving jobs before the cache save — the pre-save GC deletes them and every PR rebuilds every check.";
+    # The Linux main job roots only its own partition: rooting all of
+    # checks.<system> would build the image set there too (issue #7524).
+    assert assertMsg (hasInfix "${checkRoot} <\"$RUNNER_TEMP/main-set\"" ciSrc)
+      "ci.yml's Linux cache-save rooting no longer builds only the main set — the main job's rooting builds the image set too, rebuilding the whole image chain in the main job (issue #7524).";
+    # agent-setup restores the x86_64-linux entry and realizes the agent image
+    # from it; the `image` job builds but never saves it. The gate is pinned
+    # too: without it every PR and aarch64 `check` job builds the image.
+    assert assertMsg
+      (hasInfix "if: github.ref == 'refs/heads/main' && matrix.nix-system == 'x86_64-linux'\n        run: nix build .#packages.\${{ matrix.nix-system }}.agent-image --print-build-logs --out-link \"$RUNNER_TEMP/check-roots/agent-image\"" ciSrc)
+      "ci.yml no longer roots the agent image before the x86_64-linux cache save — agent-setup's restore misses the image and every dispatch rebuilds it cold (issue #7524).";
     # Per-commit keys never collide, so without a purge each main push adds a
     # full store generation until the 10 GB repo cap LRU-evicts at random.
     assert assertMsg (occurrences "purge-primary-key: never" == savingJobs)

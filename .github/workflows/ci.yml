@@ -97,7 +97,7 @@ jobs:
           echo "change kind: $kind; Connectors: $connectors"
 
   check:
-    name: flake check + image realize (${{ matrix.nix-system }})
+    name: flake check + main set (${{ matrix.nix-system }})
     needs: changes
     if: needs.changes.outputs.kind == 'code'
     runs-on: ${{ matrix.runner }}
@@ -140,14 +140,27 @@ jobs:
           purge-created: 0
           purge-primary-key: never
 
-      # shellcheck, the bats suite, and the eval-only equivalence checks.
+      # Evaluates checks.<system> writably, so it also realises every check's
+      # import-from-derivation inputs: `nix flake check --no-build` below
+      # runs read-only and fails on any the restored store lacks. One
+      # partition worker: a worker reaches ~10 GB over the check set, and
+      # two would risk overrunning the 16 GB runner.
+      - name: Partition the checks
+        env:
+          CI_PARTITION_WORKERS: "1"
+        run: |
+          nix shell --inputs-from . nixpkgs#nix-eval-jobs --command \
+            bash .github/scripts/ci-partition-checks.sh "${{ matrix.nix-system }}" main >"$RUNNER_TEMP/main-set"
+
+      # Schema and eval validation only: the main-set step below builds this
+      # job's checks, and the parallel `image` job builds the image set.
       # The x86_64 leg also records eval stats for the report below; Nix
       # reads any NIX_SHOW_STATS but "0" as on, so the other leg sets "0".
       - name: nix flake check
         env:
           NIX_SHOW_STATS: ${{ matrix.nix-system == 'x86_64-linux' && '1' || '0' }}
           NIX_SHOW_STATS_PATH: ${{ runner.temp }}/eval-stats.json
-        run: nix flake check --print-build-logs
+        run: nix flake check --no-build --print-build-logs
 
       # Eval cost is reviewed, never gated (issue #5863): the report can't
       # change the job's conclusion. A PR compares against the latest
@@ -184,11 +197,10 @@ jobs:
             ${{ runner.temp }}/eval-probe.json
           if-no-files-found: warn
 
-      # Realize the Linux OCI image natively — the one thing the checks only
-      # assert at eval time. Both matrix arches build their own image on a
-      # native runner, so no cross-compile or podman fallback.
-      - name: Build the agent image
-        run: nix build .#packages.${{ matrix.nix-system }}.agent-image --print-build-logs
+      # shellcheck, the bats suite, and the eval-only equivalence checks:
+      # every check outside the image set, built here.
+      - name: Build the main set of checks
+        run: nix build --stdin --no-link --print-build-logs <"$RUNNER_TEMP/main-set"
 
       # Ubuntu 24.04's AppArmor policy denies capabilities inside an
       # unprivileged user namespace, so bwrap and pasta both die writing
@@ -211,22 +223,75 @@ jobs:
           SPINDRIFT_REQUIRE_BWRAP: "1"
         run: nix develop -c bash -c 'cd cmd/launcher && go test -tags=integration -v ./internal/runner/... ./driver-exec/...'
 
-      # `nix flake check` registers no GC roots, so the pre-save
-      # `gc-max-store-size` collection deleted every check output and each PR
-      # rebuilt every check. Out-links under RUNNER_TEMP outlive the post-job
-      # save. Every output is already built, so this only evaluates.
+      # Building leaves no GC roots, so the pre-save `gc-max-store-size`
+      # collection deleted every check output and each PR rebuilt every
+      # check. Out-links under RUNNER_TEMP outlive the post-job save. Roots
+      # only the main set, already built above; the image set's outputs are
+      # built in the `image` job and never saved.
       - name: Root the check outputs for the cache save
         if: github.ref == 'refs/heads/main'
+        run: nix build --stdin --out-link "$RUNNER_TEMP/check-roots/check" <"$RUNNER_TEMP/main-set"
+
+      # agent-setup restores this x86_64-linux entry and realizes the agent
+      # image from it, so main's saved store must hold the image the `image`
+      # job builds but never saves. Main pushes only: PRs keep the image off
+      # this job.
+      - name: Root the agent image for the cache save
+        if: github.ref == 'refs/heads/main' && matrix.nix-system == 'x86_64-linux'
+        run: nix build .#packages.${{ matrix.nix-system }}.agent-image --print-build-logs --out-link "$RUNNER_TEMP/check-roots/agent-image"
+
+  # The image set of checks plus the natively realized OCI image, split off
+  # `check` so the long image chain builds in parallel with the main set.
+  image:
+    name: image set + image realize (${{ matrix.nix-system }})
+    needs: changes
+    if: needs.changes.outputs.kind == 'code'
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            nix-system: x86_64-linux
+          - runner: ubuntu-24.04-arm
+            nix-system: aarch64-linux
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v16
+
+      # Restore-only: the Actions cache sits near its 10 GB cap (issue
+      # #7524), so image-only inputs missing from main's store come from the
+      # public binary cache or build cold.
+      - name: Restore the nix store
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ matrix.nix-system }}-${{ github.sha }}
+          restore-prefixes-first-match: nix-${{ matrix.nix-system }}-
+          save: false
+
+      # One partition worker, for the same 16 GB runner limit as `check`'s
+      # main set.
+      - name: Build the image set of checks
+        env:
+          CI_PARTITION_WORKERS: "1"
         run: |
-          nix eval --raw .#checks.${{ matrix.nix-system }} \
-            --apply 'cs: builtins.concatStringsSep "\n" (map (n: ".#checks.${{ matrix.nix-system }}.${n}") (builtins.attrNames cs))' \
-            | nix build --stdin --out-link "$RUNNER_TEMP/check-roots/check"
+          nix shell --inputs-from . nixpkgs#nix-eval-jobs --command \
+            bash .github/scripts/ci-partition-checks.sh "${{ matrix.nix-system }}" image >"$RUNNER_TEMP/image-set"
+          nix build --stdin --no-link --print-build-logs <"$RUNNER_TEMP/image-set"
+
+      # Realize the Linux OCI image natively — the one thing the checks only
+      # assert at eval time. Both matrix arches build their own image on a
+      # native runner, so no cross-compile or podman fallback.
+      - name: Build the agent image
+        run: nix build .#packages.${{ matrix.nix-system }}.agent-image --print-build-logs
 
   # spindrift's product is a Linux OCI box, so the image build and the
-  # bwrap/OCI integration tests above are Linux-only and stay on the job
+  # bwrap/OCI integration tests are Linux-only and stay on the Linux jobs
   # above. This job guards the other axis: the developer/consumer surface on
   # Apple Silicon (aarch64-darwin, a flake.nix system). It runs in parallel
-  # with `check` — no `needs:` between them.
+  # with `check` and `image` — no `needs:` between them.
   check-macos:
     name: flake check (aarch64-darwin)
     needs: changes
@@ -404,7 +469,7 @@ jobs:
   # the lane that kind requires succeeded and nothing failed or was cancelled.
   ci-ok:
     name: ci-ok
-    needs: [changes, check, check-macos, docs, connector, evaluators]
+    needs: [changes, check, image, check-macos, docs, connector, evaluators]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -435,7 +500,7 @@ jobs:
           elif [ "$KIND" = connector ]; then
             required=(changes docs connector)
           else
-            required=(changes check check-macos evaluators)
+            required=(changes check image check-macos evaluators)
           fi
           # Fails closed: a missing or malformed output makes the lane required.
           if [ "$KIND" != connector ] && [ "$CONNECTORS" != '[]' ]; then

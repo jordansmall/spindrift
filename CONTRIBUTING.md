@@ -33,8 +33,12 @@ nix build .#packages.x86_64-linux.agent-image -L
 nix develop                     # host-side dev shell: git, gh, jq, and the spindrift CLI on PATH
 ```
 
-CI (`.github/workflows/ci.yml`) runs `nix flake check --print-build-logs` and
-then realises the Linux image on every push and PR, except a PR touching only
+CI (`.github/workflows/ci.yml`) builds every check `nix flake check` would and
+realises the Linux image. Each Linux system splits that across two parallel
+jobs: `check` runs `nix flake check --no-build` and builds the main set,
+`image` builds the image set and the image itself
+(`.github/scripts/ci-partition-checks.sh` draws the line). That holds on
+every push and every pull request, except a pull request touching only
 `docs/`, root `*.md`, or the release-please manifest, or editing only comments
 in `.go`/`.nix` files: that builds just `.#checks-docs`, the checks that read
 docs files (and gofmt, nixfmt and the Go tests). A comment edit still runs the
