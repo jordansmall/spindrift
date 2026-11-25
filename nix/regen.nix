@@ -44,6 +44,7 @@ let
   sdkProtocolFiles = connectorProtocolRender.renderSDK connectorProtocol (
     import ../lib/connector-protocol/sdk.nix
   );
+  admitCaseFiles = connectorProtocolRender.renderAdmitCases connectorProtocol;
   choreCatalog = import ../lib/chore-catalog.nix;
   choreBuiltinsFile = renderers.renderChoreBuiltinsGo choreCatalog;
   agentPaths = import ../lib/agent-paths.nix;
@@ -203,6 +204,9 @@ pkgs.writeShellApplication {
     ${pkgs.lib.concatMapStrings (
       path: writeGenerated path sdkProtocolFiles.${path} + "\n    gofmt -w \"$root/${path}\"\n"
     ) (builtins.attrNames sdkProtocolFiles)}
+    ${pkgs.lib.concatMapStrings (
+      path: writeGenerated path admitCaseFiles.${path} + "\n    gofmt -w \"$root/${path}\"\n"
+    ) (builtins.attrNames admitCaseFiles)}
     ${writeGenerated "cmd/launcher/internal/chore/builtins_gen.go" choreBuiltinsFile}
     ${writeGenerated "cmd/launcher/internal/agentpaths/agentpaths_gen.go" agentPathsFile}
     ${writeGenerated "cmd/launcher/internal/runner/families_gen.go" runnerFamiliesFile}

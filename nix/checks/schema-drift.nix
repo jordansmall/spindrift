@@ -657,6 +657,21 @@ checkedMerge {
       touch $out
     '';
 
+  # The generated admit-case tests for core's Network host and the SDK fake
+  # host (issue #7569). regen gofmts each, so the check does too.
+  connector-protocol-admit-cases-gen =
+    let
+      files = connectorProtocolRender.renderAdmitCases connectorProtocol;
+    in
+    pkgs.runCommand "connector-protocol-admit-cases-gen" { nativeBuildInputs = [ pkgs.go ]; } ''
+      ${pkgs.lib.concatMapStrings (path: ''
+        gofmt ${pkgs.writeText "admitcases_gen_test.go" files.${path}} > generated.go
+        diff generated.go ${../../. + "/${path}"} \
+          || { echo ${pkgs.lib.escapeShellArg "${path} is out of sync with lib/connector-protocol/default.nix — regenerate it with `nix run .#regen`"} >&2; exit 1; }
+      '') (builtins.attrNames files)}
+      touch $out
+    '';
+
   # regen writes the schema verbatim, so a byte diff is the exact freshness test.
   connector-protocol-schema-gen =
     pkgs.runCommand "connector-protocol-schema-gen"
@@ -686,6 +701,7 @@ checkedMerge {
             (connectorProtocolRender.renderGo d)
             (connectorProtocolRender.renderSchema d)
             (connectorProtocolRender.renderSDK d sdkBinding)
+            (connectorProtocolRender.renderAdmitCases d)
           ] true
         );
       tweakFirst =
