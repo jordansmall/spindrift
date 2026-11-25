@@ -30,6 +30,8 @@ const (
 const (
 	// MaxHTTPResponse: Bytes of response body http_request hands a guest.
 	MaxHTTPResponse = 4194304
+	// MaxHTTPURL: Bytes of an http_request URL, checked before it is parsed or routed.
+	MaxHTTPURL = 8192
 )
 
 // Request is one outbound HTTP request. The host admits it only if a declared

@@ -26,7 +26,10 @@ let
 in
 {
   # Limits the SDK publishes.
-  connector.limits = [ "maxHTTPResponse" ];
+  connector.limits = [
+    "maxHTTPResponse"
+    "maxHTTPURL"
+  ];
 
   connector.structs = [
     {
