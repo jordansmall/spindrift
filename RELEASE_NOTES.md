@@ -9,6 +9,31 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## Unreleased
+
+A Connector is now registered only as data: a flake no longer imports a
+Connector's flake module, and core builds every Connector row from the data a
+Consumer lists.
+
+**⚠ Breaking changes** this release: a Connector's flake no longer exports
+`flakeModules.default`, and `core.lib.connectorModule` is removed.
+
+- **⚠ Breaking: register a Connector as data.** A Consumer that imported a
+  Connector's flake module (jira's `inputs.jira.flakeModules.default`, or a
+  third-party Connector's) now keeps importing `spindrift.flakeModules.default`
+  and adds `spindrift.connectorData = [ inputs.jira.connectorData ];`; github
+  and forgejo stay registered for you. A Connector author exports a top-level
+  `connectorData` output and returns `data` from `lib.connector`. See
+  [`MIGRATING.md`](MIGRATING.md) for before and after.
+- **⚠ Breaking: a Connector name registers once.** Importing a Connector
+  twice no longer dedups: a second registration of a name fails evaluation
+  naming both. An `mkForce` or `mkOverride` of `spindrift.connectorData` is
+  refused, and so is any setting on `spindrift.connectors.<name>` other than
+  `shadow`, `shadowEvery` and `primary`, `mkForce` included, so a module can no
+  longer adjust or replace a Connector's row.
+
+---
+
 ## 0.35.0 — 2026-11-24
 
 Cleanup and hardening after the Connector switch: the backend shadow is gone,

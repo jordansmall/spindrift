@@ -194,8 +194,9 @@ same `lib.mkHarness`, `lib.rosterLib` and `flakeModules.default`, but the
 `imports` line differs: the root module adds the github and forgejo backend
 rows, and core's module carries neither. A core-only Consumer on github
 also takes the github Connector subflake as an input, with its `core`
-following your `spindrift`, and imports its module too. The core-only path
-drops the forgejo row; a forgejo Consumer adds that Connector the same way.
+following your `spindrift`, and lists its `connectorData` in
+`spindrift.connectorData`. The core-only path drops the forgejo row; a forgejo
+Consumer adds that Connector the same way.
 The `core-connector` template is the complete example:
 
 ```sh
