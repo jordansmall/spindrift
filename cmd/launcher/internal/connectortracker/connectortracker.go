@@ -807,12 +807,13 @@ var (
 //
 // clock paces the retry backoff; the zero value sleeps for real.
 func New(c *connectorhost.Connector, lifecycle Lifecycle, target Target, clock retry.Clock) (forge.IssueTracker, error) {
-	return newFrom(c, c.Call, lifecycle, target, clock)
+	return NewCalling(c, c.Call, lifecycle, target, clock)
 }
 
-// newFrom builds the tracker over c's handshake, routing calls through call
-// through the shared retry path; a zero clock sleeps for real.
-func newFrom(c *connectorhost.Connector, call guestCall, lifecycle Lifecycle, target Target, clock retry.Clock) (forge.IssueTracker, error) {
+// NewCalling is New with calls routed through call instead of c.Call, for a
+// caller that owns the Connector's lifetime and reloads it behind call; c
+// supplies the handshake. A zero clock sleeps for real.
+func NewCalling(c *connectorhost.Connector, call connectorcall.Call, lifecycle Lifecycle, target Target, clock retry.Clock) (forge.IssueTracker, error) {
 	if !slices.Contains(c.Capabilities, "tracker") {
 		return nil, fmt.Errorf("%w: capabilities %v lack \"tracker\"", ErrNotTracker, c.Capabilities)
 	}
@@ -833,7 +834,7 @@ func NewReloading(load func() (*connectorhost.Connector, error), note func(metho
 		return nil, err
 	}
 	r := &reloader{load: func() (conn, error) { return load() }, cur: c, note: note}
-	return newFrom(c, r.call, lifecycle, target, clock)
+	return NewCalling(c, r.call, lifecycle, target, clock)
 }
 
 // conn is the part of a Connector the reloader drives, a seam for its tests.

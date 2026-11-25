@@ -345,6 +345,8 @@ type Options struct {
 	Getenv func(string) string
 	// Client is the transport; nil means a default client.
 	Client *http.Client
+	// Sandbox is where the module loads; nil means the installed one.
+	Sandbox connectorsandbox.Loader
 }
 
 // Authorizer returns the function that attaches the row's credential to an
@@ -387,13 +389,17 @@ func Load(ctx context.Context, row Row, o Options) (*connectorhost.Connector, er
 	if err != nil {
 		return nil, fmt.Errorf("backend %q: read module: %w", row.Name, err)
 	}
-	return connectorsandbox.LoadNetwork(ctx, wasm, connectorhost.Network{
+	n := connectorhost.Network{
 		Name:      row.Name,
 		Routes:    row.Routes,
 		Authorize: row.Authorizer(getenv),
 		Client:    o.Client,
 		Audit:     connectorhost.NewAuditLog(audit),
-	})
+	}
+	if o.Sandbox != nil {
+		return o.Sandbox.LoadNetwork(ctx, wasm, n)
+	}
+	return connectorsandbox.LoadNetwork(ctx, wasm, n)
 }
 
 // Snapshot captures the applied rows and registered gates and returns the
