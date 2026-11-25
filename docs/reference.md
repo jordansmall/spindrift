@@ -2382,10 +2382,12 @@ mean at runtime is issue #6751. The worked example is the fixture Connector in
   Connector and the key; the deeper checks (Route rules, scheme, credential
   ownership) stay with the row's types and validators. Core's own readers, such
   as the knob and fragment folds, read `data` directly and need no module. The
-  fixture Connector ([`data.nix`](../nix/fixtures/connector/data.nix)) and
-  github ([`data.nix`](../connectors/github/data.nix)) register this way; the
-  other first-party Connectors still use a flake module and move over in their
-  own issues, after which the flake-module path is withdrawn.
+  fixture Connector ([`data.nix`](../nix/fixtures/connector/data.nix)),
+  github ([`data.nix`](../connectors/github/data.nix)), forgejo
+  ([`data.nix`](../connectors/forgejo/data.nix)) and jira
+  ([`data.nix`](../connectors/jira/data.nix)) register this way; the other
+  first-party Connectors still use a flake module and move over in their own
+  issues, after which the flake-module path is withdrawn.
 
 - **Row-owned knobs.** A row's `knobs` attrset has the shape of a core row's
   (ADR 0068), keyed by env-schema key with an env-schema entry as value. The
