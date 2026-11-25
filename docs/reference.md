@@ -4338,20 +4338,31 @@ load with `ErrNoConnectorSandbox`, never falling back to its own process.
   host that does not delegate a writable cgroup subtree, or one whose
   `pids.max` and `memory.max` stay unwritable (a user systemd scope that does
   not delegate those controllers), warns and starts the sandbox uncapped.
-- **Failure.** A sandbox that cannot start fails the run with
-  `ErrConnectorSandboxStart`, naming the runner and its stderr; there is no
-  in-process fallback. On a bwrap host that denies unprivileged user
-  namespaces, bwrap exits at once and its message is the stderr named.
-- **Lifetime.** The sandbox lasts no longer than its run. On every exit path
+- **Failure.** A sandbox that cannot start fails that load with
+  `ErrConnectorSandboxStart`, naming the runner and its stderr, and in a run
+  fails the run too; there is no in-process fallback, though the next load
+  tries again. On a bwrap host that denies unprivileged user namespaces,
+  bwrap exits at once and its message is the stderr named.
+- **Restart.** A sandbox whose host died is restarted by the next load, which
+  first closes and reaps the dead one. Sessions open on the dead one fail and
+  are not moved to the new one. A failed restart is a failed start (see
+  **Failure**). A closed sandbox is never restarted: a load after the close
+  fails and starts nothing.
+- **Lifetime.** A run's sandbox lasts no longer than its run; the daemon's own
+  sandbox, which serves its demand probe, lasts as long as the daemon process
+  and restarts as above after a crash. On every exit path
   (success, a failed or blocked run, a Launcher error, SIGINT/SIGTERM, the
   shutdown gate, and daemon shutdown with runs in flight, where each daemon
-  child is its own run with its own sandbox) the Launcher closes the sandbox's
-  stdin, then calls the runner's `Kill` on its name as the backstop, logging
-  `==> stopped Connector sandbox: <name>` once it succeeds. A failed `Kill`
-  logs a warning instead and is retried by the next exit step. The sandbox
-  outlives an interrupted run's settle: the runner starts it in a process
-  group of its own, so a terminal Ctrl-C reaches the Launcher but not the
-  sandbox, and the close comes only after the settle's tracker writes
+  child is its own run with its own sandbox) the Launcher closes the run's
+  sandbox (a restart already stopped the dead one as it started this one),
+  closing its stdin, then calls the runner's `Kill` on its name as the
+  backstop, logging `==> stopped Connector sandbox: <name>` once it succeeds.
+  A failed `Kill` logs a warning instead and is retried by the next exit step;
+  a restart's failed `Kill` of the dead sandbox is logged and not retried,
+  leaving it to the **Orphans** sweep once the process exits.
+  The sandbox outlives an interrupted run's settle: the runner starts it in a
+  process group of its own, so a terminal Ctrl-C reaches the Launcher but not
+  the sandbox, and the close comes only after the settle's tracker writes
   (issue #7302).
 - **Orphans.** Only a hard kill of the Launcher or the runtime CLI leaves a
   sandbox running. The sandbox sits outside the terminal's process group, so a
