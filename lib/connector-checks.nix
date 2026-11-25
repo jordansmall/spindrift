@@ -163,7 +163,14 @@ let
         fi
       '';
       "connector-${name}-go-vet" = mk "vet" "GOOS=wasip1 GOARCH=wasm go vet ./...";
-      "connector-${name}-go-test" = mk "test" "go test ./...";
+      # A backend Connector's tests run against the SDK's fake host, which loads
+      # the declared Route table from this variable.
+      "connector-${name}-go-test" = mk "test" (
+        pkgs.lib.optionalString isBackend ''
+          export SPINDRIFT_BACKEND_CONNECTOR_ROUTES=${pkgs.lib.escapeShellArg (builtins.toJSON connector.routes)}
+        ''
+        + "go test ./..."
+      );
       "connector-${name}-conformance" =
         pkgs.runCommand "connector-${name}-conformance"
           (
