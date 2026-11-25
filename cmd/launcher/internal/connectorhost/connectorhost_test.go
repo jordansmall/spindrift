@@ -470,7 +470,7 @@ func TestHostileConnectorFailsWithItsOwnNamedError(t *testing.T) {
 		{"handshake with null capabilities", handshakeModule(`{"protocolVersion":"0.4.0","capabilities":null}`), connectorhost.ErrMalformedOutput},
 		{"JSON of the wrong shape", handshakeModule("[]"), connectorhost.ErrMalformedOutput},
 	}
-	runCasesPerEngine(t, tests,
+	runCasesPerEngine(t, tests, true,
 		func(t *testing.T, ld loader, tc handshakeCase, budget time.Duration) {
 			start := time.Now()
 			c, err := ld(context.Background(), tc.wasm)

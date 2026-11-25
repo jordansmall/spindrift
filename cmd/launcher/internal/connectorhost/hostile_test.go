@@ -53,30 +53,37 @@ func (c guardCase) wantErr() error   { return c.want }
 // expect ErrBudget: it lowers the call budget to ShortCallBudget, and its
 // engines and cases run in parallel so the kills overlap instead of queueing.
 // "production" holds the rest under the production budget, which leaves their
-// legitimate work room on a loaded runner; they touch no process-global state,
-// so they run in parallel too.
+// legitimate work room on a loaded runner. They touch no process-global state,
+// so they run in parallel too unless overlapProduction is false: cases whose
+// legitimate work is heavy, like a Go-built fixture filling its memory cap in
+// the interpreter, starve one another past that budget when they overlap.
 //
 // The budget is written only on the budget group's own goroutine. Go resumes a
 // group's parallel children after its body returns, and a serial t.Run returns
 // only once those children and the group's Cleanup (the restore) are done, so
 // "production" starts after "budget" has fully ended.
-func runCasesPerEngine[C engineCase](t *testing.T, cases []C, run func(t *testing.T, ld loader, c C, budget time.Duration)) {
+func runCasesPerEngine[C engineCase](t *testing.T, cases []C, overlapProduction bool, run func(t *testing.T, ld loader, c C, budget time.Duration)) {
 	t.Helper()
 	loaders := loadersFor(t)
 	runGroup := func(label string, budget time.Duration, exhausts bool) {
+		overlap := exhausts || overlapProduction
 		t.Run(label, func(t *testing.T) {
 			if exhausts {
 				useShortCallBudget(t)
 			}
 			for engine, ld := range loaders {
 				t.Run(engine, func(t *testing.T) {
-					t.Parallel()
+					if overlap {
+						t.Parallel()
+					}
 					for _, tc := range cases {
 						if errors.Is(tc.wantErr(), connectorhost.ErrBudget) != exhausts {
 							continue
 						}
 						t.Run(tc.caseName(), func(t *testing.T) {
-							t.Parallel()
+							if overlap {
+								t.Parallel()
+							}
 							run(t, ld, tc, budget)
 						})
 					}
@@ -100,7 +107,7 @@ func TestHostileFixtureConnectorsFailClosed(t *testing.T) {
 		{"hostile-malformed.wasm", connectorhost.ErrMalformedOutput},
 		{"hostile-invalid.wasm", connectorhost.ErrMalformedOutput},
 	}
-	runCasesPerEngine(t, tests,
+	runCasesPerEngine(t, tests, false,
 		func(t *testing.T, ld loader, tc hostileCase, budget time.Duration) {
 			c, err := loadUsing(t, ld, tc.fixture)
 			if err != nil {
