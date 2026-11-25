@@ -6,7 +6,7 @@ package forge
 const (
 	// capForge: Serves forge.prsForBranch, forge.pr and forge.checks, and optionally forge.jobLog.
 	capForge = "forge"
-	// CapBranches: Serves forge.remote, forge.branchExists and forge.deleteBranch.
+	// CapBranches: Serves forge.branchExists and forge.deleteBranch.
 	CapBranches = "forge.branches"
 	// CapPushOnly: The forge has no pull-request concept, so core composes a push-only Code Forge.
 	CapPushOnly = "forge.pushOnly"
@@ -36,8 +36,6 @@ const (
 	methodChecks = "forge.checks"
 	// methodJobLog: The last `tail` bytes of a job's log, preceded by the error lines of the head it cut, up to `errorLines` bytes; optional, and a failed read only costs failure detail its logs.
 	methodJobLog = "forge.jobLog"
-	// methodRemote: The repository's git identity: the clone URL core's git pushes to and the web URL.
-	methodRemote = "forge.remote"
 	// methodBranchExists: Whether `branch` exists on the forge.
 	methodBranchExists = "forge.branchExists"
 	// methodDeleteBranch: Deletes `branch` from the forge; core refuses the base branch and an option-shaped name before the call.
@@ -121,15 +119,6 @@ type Check struct {
 type Rollup struct {
 	State  string  `json:"state"`
 	Checks []Check `json:"checks"`
-}
-
-// Remote is a repository's git identity. CloneURL is what core's git plumbing
-// pushes to and WebURL is the repository's web page. Neither may carry
-// credentials: core refuses one that does, and one naming a host outside the
-// Connector's declared routes.
-type Remote struct {
-	CloneURL string `json:"cloneUrl"`
-	WebURL   string `json:"webUrl"`
 }
 
 // Grant is what a token may do on a repository, in core's canonical terms. A

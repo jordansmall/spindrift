@@ -13,10 +13,9 @@ import (
 // repoQuery reads the repository facts the forge primitives need. It goes over
 // the /graphql route the Connector already declares; REST's GET /repos/{repo}
 // would need a route admitting every GET under the repository.
-const repoQuery = `query($owner:String!,$repo:String!){repository(owner:$owner,name:$repo){url nameWithOwner autoMergeAllowed}}`
+const repoQuery = `query($owner:String!,$repo:String!){repository(owner:$owner,name:$repo){nameWithOwner autoMergeAllowed}}`
 
 type rawRepo struct {
-	URL              string `json:"url"`
 	NameWithOwner    string `json:"nameWithOwner"`
 	AutoMergeAllowed bool   `json:"autoMergeAllowed"`
 }
@@ -37,14 +36,6 @@ func repository(t forge.Target) (rawRepo, error) {
 		return rawRepo{}, connector.Errorf(connector.NotFound, "POST /graphql: no repository %s", t.Repo)
 	}
 	return *data.Repository, nil
-}
-
-func remote(t forge.Target) (forge.Remote, error) {
-	r, err := repository(t)
-	if err != nil {
-		return forge.Remote{}, err
-	}
-	return forge.Remote{CloneURL: r.URL + ".git", WebURL: r.URL}, nil
 }
 
 // probe is the repository's canonical owner/name.

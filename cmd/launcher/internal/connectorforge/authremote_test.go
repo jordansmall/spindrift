@@ -81,12 +81,11 @@ func TestRoutedMergeAndRebaseAuthenticateAtTheCloneURL(t *testing.T) {
 	gitexectest.RequireAuthOnlyUnder(t, h.GitRequests(), cloneURLPath)
 }
 
-// The Connector's forge.remote names another repository on the same host.
-// Core never asks: its push, bundle relay and mirror seed go to the repository
-// it derived, and the credential is offered only under that repository's path.
-func TestGitGoesToTheDerivedCloneURLWhateverTheConnectorSaysItIs(t *testing.T) {
+// Git goes to the repository core derived from the Git remote declaration:
+// its push, bundle relay and mirror seed, and the credential is offered only
+// under that repository's path.
+func TestGitGoesToTheDerivedCloneURL(t *testing.T) {
 	h := connectorforgetest.NewHostMediation(t, connectorforgetest.WithGitOverHTTPS())
-	h.Backend.SetRemote("https://"+h.Backend.Host+"/o/other.git", "https://"+h.Backend.Host+"/o/other")
 	_, caps, err := h.Compose()
 	if err != nil {
 		t.Fatal(err)
@@ -122,9 +121,6 @@ func TestGitGoesToTheDerivedCloneURLWhateverTheConnectorSaysItIs(t *testing.T) {
 			t.Errorf("git request to %s, want only the derived repository under %s", r.Path, cloneURLPath)
 		}
 	}
-	if n := h.Backend.RemoteRequests(); n != 0 {
-		t.Errorf("core asked the Connector for its remote %d times, want 0", n)
-	}
 }
 
 // A forge served under a subpath: git, the bundle relay and the mirror seed all
@@ -133,7 +129,6 @@ func TestGitGoesToTheDerivedCloneURLWhateverTheConnectorSaysItIs(t *testing.T) {
 func TestASubpathForgeKeepsGitAndURLsUnderItsBase(t *testing.T) {
 	const sub = "/forgejo"
 	h := connectorforgetest.NewHostMediation(t, connectorforgetest.WithGitOverHTTPS(), connectorforgetest.WithWebBasePath(sub))
-	h.Backend.SetRemote("https://"+h.Backend.Host+"/o/other.git", "https://"+h.Backend.Host+"/o/other")
 	_, caps, err := h.Compose()
 	if err != nil {
 		t.Fatal(err)
@@ -168,12 +163,7 @@ func TestASubpathForgeKeepsGitAndURLsUnderItsBase(t *testing.T) {
 			t.Errorf("git request to %s, want only %s", r.Path, subClonePath)
 		}
 	}
-	if n := h.Backend.RemoteRequests(); n != 0 {
-		t.Errorf("core asked the Connector for its remote %d times, want 0", n)
-	}
 
-	// The backend now serves the subpath's own URLs.
-	h.Backend.SetRemote("https://"+h.Backend.Host+sub+"/o/r.git", "https://"+h.Backend.Host+sub+"/o/r")
 	head, wantURL := h.SeedExistingOpenPR()
 	pr, ok, err := caps.PRForge.OpenPRForBranch(head)
 	if err != nil || !ok || pr.URL != wantURL || !strings.Contains(pr.URL, sub+"/o/r/pull/") {

@@ -406,21 +406,6 @@
       ],
       "type": "object"
     },
-    "remote": {
-      "properties": {
-        "cloneUrl": {
-          "type": "string"
-        },
-        "webUrl": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "cloneUrl",
-        "webUrl"
-      ],
-      "type": "object"
-    },
     "rollup": {
       "properties": {
         "checks": {
@@ -1504,24 +1489,6 @@
           "prs"
         ],
         "type": "object"
-      }
-    },
-    "forge.remote": {
-      "capability": "forge.branches",
-      "params": {
-        "additionalProperties": false,
-        "properties": {
-          "target": {
-            "$ref": "#/$defs/target"
-          }
-        },
-        "required": [
-          "target"
-        ],
-        "type": "object"
-      },
-      "result": {
-        "$ref": "#/$defs/remote"
       }
     },
     "forge.setDraft": {

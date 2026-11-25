@@ -126,13 +126,11 @@ type Backend struct {
 	script []Scripted
 
 	mu       sync.Mutex
-	clone    string
 	web      string
 	webPath  string
 	token    string
 	failures []int
 	branch   int
-	remotes  int
 
 	// gitHandler, when set, serves smart HTTP under the clone URL's owner.
 	gitHandler *gitexectest.AuthHandler
@@ -146,26 +144,23 @@ func newBackend(t *testing.T, bare string) *Backend {
 	b.Server = httptest.NewTLSServer(http.HandlerFunc(b.serve))
 	t.Cleanup(b.Close)
 	b.Host = b.Listener.Addr().String()
-	b.clone = "https://" + b.Host + "/" + Repo + ".git"
 	b.web = "https://" + b.Host + "/" + Repo
 	return b
 }
 
-// underWebPath moves the backend's clone and web URLs under webPath.
+// underWebPath moves the backend's web URLs under webPath.
 func (b *Backend) underWebPath(webPath string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.webPath = webPath
-	b.clone = "https://" + b.Host + webPath + "/" + Repo + ".git"
 	b.web = "https://" + b.Host + webPath + "/" + Repo
 }
 
-// SetRemote scripts the clone_url and html_url the backend serves, which core
-// must not follow for git.
-func (b *Backend) SetRemote(clone, web string) {
+// SetWeb scripts the web URL the backend serves for the repository and its PRs.
+func (b *Backend) SetWeb(web string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.clone, b.web = clone, web
+	b.web = web
 }
 
 // FailBranchRequests makes the next len(statuses) branch requests answer those
@@ -181,13 +176,6 @@ func (b *Backend) BranchRequests() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.branch
-}
-
-// RemoteRequests is how many repository-identity requests the backend has seen.
-func (b *Backend) RemoteRequests() int {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.remotes
 }
 
 // SetToken makes the backend refuse any request that does not carry token, as
@@ -230,12 +218,11 @@ func (b *Backend) serve(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == apiPath+"/repos/"+Repo && r.Method == http.MethodGet:
 		b.mu.Lock()
-		b.remotes++
-		clone, web, allowRebase := b.clone, b.web, b.prs.allowRebase
+		web, allowRebase := b.web, b.prs.allowRebase
 		b.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"clone_url": clone, "html_url": web, "full_name": Repo, "allow_rebase": allowRebase,
+			"html_url": web, "full_name": Repo, "allow_rebase": allowRebase,
 		})
 	case strings.HasPrefix(r.URL.Path, branchPath):
 		b.mu.Lock()
@@ -397,7 +384,7 @@ func newBase(t *testing.T, eng Engine, c Connector, opts ...Option) *base {
 		// the environment: no config file, and Credential.Apply extends the count.
 		t.Setenv("GIT_CONFIG_COUNT", "1")
 		t.Setenv("GIT_CONFIG_KEY_0", "url."+repo.Bare+".insteadOf")
-		t.Setenv("GIT_CONFIG_VALUE_0", s.backend.clone)
+		t.Setenv("GIT_CONFIG_VALUE_0", "https://"+s.backend.Host+o.webPath+"/"+Repo+".git")
 	}
 
 	cf, caps, err := h.Compose()

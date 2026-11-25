@@ -74,26 +74,7 @@ func TestRawPRKeepsNodeIDAndBase(t *testing.T) {
 	}
 }
 
-const repoReply = `{"data":{"repository":{"url":"https://github.com/o/r","nameWithOwner":"o/r","autoMergeAllowed":true}}}`
-
-func TestRemote(t *testing.T) {
-	got := stub(t, map[string]connector.Response{graphqlURL: ok(repoReply)})
-	r, err := remote(ftgt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := (forge.Remote{CloneURL: "https://github.com/o/r.git", WebURL: "https://github.com/o/r"}); r != want {
-		t.Fatalf("remote = %#v", r)
-	}
-	req := (*got)[0]
-	var body struct {
-		Variables map[string]string `json:"variables"`
-	}
-	if err := json.Unmarshal([]byte(req.Body), &body); err != nil || req.Method != "POST" ||
-		body.Variables["owner"] != "o" || body.Variables["repo"] != "r" {
-		t.Fatalf("request = %#v, err = %v", req, err)
-	}
-}
+const repoReply = `{"data":{"repository":{"nameWithOwner":"o/r","autoMergeAllowed":true}}}`
 
 func TestProbeAndAutoMerge(t *testing.T) {
 	stub(t, map[string]connector.Response{graphqlURL: ok(repoReply)})
@@ -111,11 +92,11 @@ func TestRepositoryErrors(t *testing.T) {
 		"null repository": `{"data":{"repository":null}}`,
 	} {
 		stub(t, map[string]connector.Response{graphqlURL: ok(body)})
-		if _, err := remote(ftgt); err == nil {
+		if _, err := probe(ftgt); err == nil {
 			t.Errorf("%s: want error", name)
 		}
 	}
-	if _, err := remote(forge.Target{API: ftgt.API, Repo: "norepo"}); err == nil {
+	if _, err := probe(forge.Target{API: ftgt.API, Repo: "norepo"}); err == nil {
 		t.Error("repo without owner: want error")
 	}
 }

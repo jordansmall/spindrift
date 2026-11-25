@@ -224,26 +224,6 @@ func resolveWarning(statuses []rawStatus) string {
 	return state
 }
 
-// remote is the repository's identity, built from the configured base URL: no
-// request, and no credential. A userinfo in the base is dropped, since core
-// refuses a remote carrying one and git authenticates out of band.
-func remote(t forge.Target) (forge.Remote, error) {
-	if !validRepo(t.Repo) {
-		return forge.Remote{}, fmt.Errorf("repo %q is not owner/name", t.Repo)
-	}
-	u, err := url.Parse(t.API)
-	if err != nil {
-		return forge.Remote{}, fmt.Errorf("base URL is not parseable: %w", err)
-	}
-	u.User, u.RawQuery, u.Fragment = nil, "", ""
-	u.Path = strings.TrimSuffix(u.Path, "/") + "/" + t.Repo
-	u.RawPath = ""
-	web := u.String()
-	// Core never reads this answer; kept while the protocol declares
-	// forge.remote, remove at protocol 0.4.0.
-	return forge.Remote{CloneURL: web + ".git", WebURL: web}, nil
-}
-
 func validRepo(repo string) bool {
 	owner, name, ok := strings.Cut(repo, "/")
 	return ok && validSegment(owner) && validSegment(name)

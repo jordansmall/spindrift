@@ -12,12 +12,6 @@ import (
 func fakeBranches(t *testing.T) Branches {
 	t.Helper()
 	return Branches{
-		Remote: func(tg Target) (Remote, error) {
-			if tg != wantTarget {
-				t.Errorf("Remote(%v)", tg)
-			}
-			return Remote{CloneURL: "https://forge.example/o/r.git", WebURL: "https://forge.example/o/r"}, nil
-		},
 		BranchExists: func(tg Target, branch string) (bool, error) {
 			if tg != wantTarget || branch != "agent/issue-3" {
 				t.Errorf("BranchExists(%v, %q)", tg, branch)
@@ -44,21 +38,19 @@ func TestBranchCapabilities(t *testing.T) {
 	if want := []string{"forge.branches", "forge.pushOnly"}; !reflect.DeepEqual(caps, want) {
 		t.Fatalf("push-only caps = %v, want %v", caps, want)
 	}
-	for _, name := range []string{"forge.remote", "forge.branchExists", "forge.deleteBranch"} {
+	for _, name := range []string{"forge.branchExists", "forge.deleteBranch"} {
 		if _, ok := m[name]; !ok {
 			t.Errorf("%s handler missing", name)
 		}
 	}
-	if len(m) != 3 {
-		t.Errorf("%d handlers, want 3", len(m))
+	if len(m) != 2 {
+		t.Errorf("%d handlers, want 2", len(m))
 	}
 }
 
 func TestBranchWireShapes(t *testing.T) {
 	_, m := branchHandlers(fakeBranches(t))
 	cases := []struct{ method, params, want string }{
-		{"forge.remote", `{` + target + `}`,
-			`{"cloneUrl":"https://forge.example/o/r.git","webUrl":"https://forge.example/o/r"}`},
 		{"forge.branchExists", `{` + target + `,"branch":"agent/issue-3"}`, `{"exists":true}`},
 		{"forge.deleteBranch", `{` + target + `,"branch":"agent/issue-3"}`, `{}`},
 	}
@@ -81,12 +73,10 @@ func TestBranchBadParams(t *testing.T) {
 func TestBranchErrorPassesThrough(t *testing.T) {
 	boom := connector.Errorf(connector.NotFound, "gone")
 	b := fakeBranches(t)
-	b.Remote = func(Target) (Remote, error) { return Remote{}, boom }
 	b.BranchExists = func(Target, string) (bool, error) { return false, boom }
 	b.DeleteBranch = func(Target, string) error { return boom }
 	_, m := branchHandlers(b)
 	for method, params := range map[string]string{
-		"forge.remote":       `{` + target + `}`,
 		"forge.branchExists": `{` + target + `,"branch":"b"}`,
 		"forge.deleteBranch": `{` + target + `,"branch":"b"}`,
 	} {
@@ -99,7 +89,6 @@ func TestBranchErrorPassesThrough(t *testing.T) {
 func TestMissingBranchFuncPanics(t *testing.T) {
 	full := fakeBranches(t)
 	for name, mut := range map[string]func(*Branches){
-		"Remote":       func(b *Branches) { b.Remote = nil },
 		"BranchExists": func(b *Branches) { b.BranchExists = nil },
 		"DeleteBranch": func(b *Branches) { b.DeleteBranch = nil },
 	} {

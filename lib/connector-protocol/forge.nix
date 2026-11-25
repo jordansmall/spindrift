@@ -61,9 +61,6 @@ in
     "decode"
     "The last `tail` bytes of a job's log, preceded by the error lines of the head it cut, up to `errorLines` bytes; optional, and a failed read only costs failure detail its logs."
   )
-  (method "forge.remote" "forge.branches" targeted (t.ref "remote") retryable "remoteURLs"
-    "The repository's git identity: the clone URL core's git pushes to and the web URL."
-  )
   (method "forge.branchExists" "forge.branches" branched (t.open {
     exists = t.boolean;
   }) retryable "decode" "Whether `branch` exists on the forge.")

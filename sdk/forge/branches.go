@@ -7,11 +7,8 @@ import (
 )
 
 // Branches is everything a Connector-backed Code Forge needs of the forge
-// itself for branches; core does every git operation against Remote.
+// itself for branches; core does every git operation itself.
 type Branches struct {
-	// Remote returns the repository's clone and web URLs.
-	Remote func(t Target) (Remote, error)
-
 	// BranchExists reports whether branch exists on the forge.
 	BranchExists func(t Target, branch string) (bool, error)
 
@@ -36,8 +33,6 @@ func RegisterBranches(b Branches) {
 // branchHandlers builds the capability list and method table for b.
 func branchHandlers(b Branches) ([]string, map[string]method) {
 	switch {
-	case b.Remote == nil:
-		panic("forge: Branches.Remote is required")
 	case b.BranchExists == nil:
 		panic("forge: Branches.BranchExists is required")
 	case b.DeleteBranch == nil:
@@ -54,15 +49,6 @@ func branchHandlers(b Branches) ([]string, map[string]method) {
 		return p.Target, p.Branch, err
 	}
 	m := map[string]method{
-		methodRemote: func(params json.RawMessage) (any, error) {
-			var p struct {
-				Target Target `json:"target"`
-			}
-			if err := unmarshal(params, &p); err != nil {
-				return nil, err
-			}
-			return b.Remote(p.Target)
-		},
 		methodBranchExists: func(params json.RawMessage) (any, error) {
 			t, branch, err := branched(params)
 			if err != nil {

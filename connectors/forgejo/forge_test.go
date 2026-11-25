@@ -38,34 +38,6 @@ func ok(body string) connector.Response {
 
 func status(code int) connector.Response { return connector.Response{Status: code} }
 
-func TestRemote(t *testing.T) {
-	for _, tc := range []struct {
-		api, clone, web string
-	}{
-		{"https://forge.test", "https://forge.test/o/r.git", "https://forge.test/o/r"},
-		{"https://forge.test/", "https://forge.test/o/r.git", "https://forge.test/o/r"},
-		{"https://forge.test/git", "https://forge.test/git/o/r.git", "https://forge.test/git/o/r"},
-		// A credential in the configured base never reaches the identity core hands to git.
-		{"https://u:p@forge.test", "https://forge.test/o/r.git", "https://forge.test/o/r"},
-	} {
-		r, err := remote(forge.Target{API: tc.api, Repo: "o/r"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if want := (forge.Remote{CloneURL: tc.clone, WebURL: tc.web}); r != want {
-			t.Errorf("remote(%q) = %#v, want %#v", tc.api, r, want)
-		}
-	}
-}
-
-func TestRemoteRefusesBadRepo(t *testing.T) {
-	for _, repo := range []string{"", "o", "o/", "/r", "o/r/x", "o/../r"} {
-		if _, err := remote(forge.Target{API: "https://forge.test", Repo: repo}); err == nil {
-			t.Errorf("remote(repo %q) accepted", repo)
-		}
-	}
-}
-
 func prList(page int) string {
 	return repoAPI + "/pulls?limit=100&page=" + strconv.Itoa(page) + "&state=all"
 }

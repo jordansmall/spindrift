@@ -53,10 +53,6 @@ func forgeChecks(p *pushOnly) connectorcall.Checks {
 			return nil
 		}),
 		connectorprotocol.CheckPrFiles: connectorcall.Typed(checkPRFiles),
-		// Core never calls forge.remote, but the axis test wants a body for every
-		// method. Drop it with forge.remote at protocol 0.4.0, together with the
-		// filter in protocol_test.go.
-		connectorprotocol.CheckRemoteURLs: connectorcall.Decode,
 		connectorprotocol.CheckProbeRepo: connectorcall.Typed(func(_ any, r *wireProbe) error {
 			if r.Repo == "" {
 				return fmt.Errorf("%w: probe named no repository", ErrAnswer)

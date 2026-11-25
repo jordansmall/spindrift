@@ -50,7 +50,6 @@ func init() {
 		JobLog:       jobLog,
 	})
 	forge.RegisterBranches(forge.Branches{
-		Remote:       remote,
 		BranchExists: branchExists,
 		DeleteBranch: deleteBranch,
 	})

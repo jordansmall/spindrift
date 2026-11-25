@@ -2,13 +2,10 @@
 // forge.RegisterBranches with PushOnly and translates the branch primitives to
 // a forgejo-shaped REST backend over http_request, with Target.API as the base
 // URL. The test supplies that URL because the scripted backend's port is
-// dynamic. The backend scripts the hostile identities: Remote passes its
-// clone_url and html_url through verbatim, so a credentialed or undeclared-host
-// URL is the backend's to serve and core's to refuse.
+// dynamic.
 package main
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"spindrift.dev/sdk/connector"
@@ -17,7 +14,6 @@ import (
 
 func init() {
 	forge.RegisterBranches(forge.Branches{
-		Remote:       remote,
 		BranchExists: branchExists,
 		DeleteBranch: deleteBranch,
 		PushOnly:     true,
@@ -37,24 +33,6 @@ func call(method, url string) (connector.Response, error) {
 
 func statusErr(status int) error {
 	return connector.Errorf(connector.ClassForStatus(status), "forge backend answered status %d", status)
-}
-
-func remote(t forge.Target) (forge.Remote, error) {
-	resp, err := call(http.MethodGet, t.API+"/repos/"+t.Repo)
-	if err != nil {
-		return forge.Remote{}, err
-	}
-	if resp.Status/100 != 2 {
-		return forge.Remote{}, statusErr(resp.Status)
-	}
-	var repo struct {
-		CloneURL string `json:"clone_url"`
-		HTMLURL  string `json:"html_url"`
-	}
-	if err := json.Unmarshal(resp.Body, &repo); err != nil {
-		return forge.Remote{}, err
-	}
-	return forge.Remote{CloneURL: repo.CloneURL, WebURL: repo.HTMLURL}, nil
 }
 
 // The branch rides in the path raw: the host refuses an escaped path.
