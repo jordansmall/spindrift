@@ -32,8 +32,8 @@ import (
 const stoppedLine = "==> stopped Connector sandbox: "
 
 // sandboxExit is one way a launcher run ends with a Connector sandbox started.
-// A run is a work dispatch on the family's fake; the sandbox starts for the
-// Driver's Connector, or for the github row's, which is why every run has one.
+// A run is a work dispatch on the family's fake; a sandbox starts for the
+// Driver's Connector and one for each github row load (sandboxesStarted).
 type sandboxExit struct {
 	name string
 	// mode wires the github row. Local runs on a local tracker and the git forge,
@@ -262,6 +262,11 @@ func runSandboxExit(t *testing.T, runtime string, x sandboxExit) {
 
 	rig.cmd.OwnGroup = x.group
 	p := seamtest.Start(t, rig.cmd)
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("launcher stdout:\n%s\nlauncher stderr:\n%s\nrecord:\n%v", p.Stdout(), p.Stderr(), seamtest.ReadRecord(t, recPath))
+		}
+	})
 	if x.signal != 0 {
 		// Whatever happens, free a held fake Box so it cannot outlive the test.
 		t.Cleanup(func() { _ = os.WriteFile(rig.release, nil, 0o644) })
@@ -305,21 +310,23 @@ func runSandboxExit(t *testing.T, runtime string, x sandboxExit) {
 	}
 
 	// The stopped line prints only after a successful stop, so a fail-then-retry
-	// still shows one; no failed-attempt warning too is what proves one hook run.
+	// still shows one; no failed-attempt warning too is what proves one hook run
+	// per sandbox.
+	want := sandboxesStarted(t, x.mode)
 	stopped := stoppedSandboxes(out)
-	if failed := strings.Count(out, "warning: stopping Connector sandbox"); len(stopped) != 1 || failed != 0 {
-		t.Fatalf("the stop hook ran %d times (%q) with %d failed attempts, want exactly once\noutput:\n%s", len(stopped), stopped, failed, out)
+	if failed := strings.Count(out, "warning: stopping Connector sandbox"); len(stopped) != want || failed != 0 || hasDuplicate(stopped) {
+		t.Fatalf("the stop hook ran %d times (%q) with %d failed attempts, want each of %d sandboxes stopped exactly once\noutput:\n%s", len(stopped), stopped, failed, want, out)
 	}
 
 	recs := seamtest.ReadRecord(t, recPath)
 	starts, boxes := countRuns(runtime, recs)
 	for _, r := range recs {
-		if got := sandboxName(r); runtime == "podman" && r[0] == "run" && got != "" && got != stopped[0] {
-			t.Errorf("stopped sandbox %q, but the runtime started %q", stopped[0], got)
+		if got := sandboxName(r); runtime == "podman" && r[0] == "run" && got != "" && !slices.Contains(stopped, got) {
+			t.Errorf("the runtime started sandbox %q, but only %q were stopped", got, stopped)
 		}
 	}
-	if starts != 1 {
-		t.Errorf("the runtime started %d Connector sandboxes, want 1", starts)
+	if starts != want {
+		t.Errorf("the runtime started %d Connector sandboxes, want %d", starts, want)
 	}
 	if want := b2i(x.wantBox); boxes != want {
 		t.Errorf("the runtime ran %d Boxes, want %d", boxes, want)
@@ -327,16 +334,45 @@ func runSandboxExit(t *testing.T, runtime string, x sandboxExit) {
 	if runtime == "podman" {
 		// The OCI stop hook probes the container before removing it, and the
 		// fake reports none, so one probe per sandbox name is one hook call.
-		probes := 0
-		for _, r := range recs {
-			if r[0] == "inspect" && r[len(r)-1] == stopped[0] {
-				probes++
+		for _, name := range stopped {
+			probes := 0
+			for _, r := range recs {
+				if r[0] == "inspect" && r[len(r)-1] == name {
+					probes++
+				}
+			}
+			if probes != 1 {
+				t.Errorf("podman probed sandbox %s %d times, want once", name, probes)
 			}
 		}
-		if probes != 1 {
-			t.Errorf("podman probed sandbox %s %d times, want once", stopped[0], probes)
-		}
 	}
+}
+
+// sandboxesStarted is how many Connector sandboxes a run in mode starts, each
+// of which must be stopped exactly once. Every run starts the one sandbox the
+// Driver's Connector shares. Each backend row's Connector holds a credential,
+// so it gets a sandbox of its own, started by its first load: the tracker mode's
+// github row adds one. A routed row adds two, because the write gate loads it a
+// second time under the token it introspects, in a short-lived runtime whose
+// sandbox is its own.
+func sandboxesStarted(t testing.TB, mode sandboxMode) int {
+	t.Helper()
+	switch mode {
+	case sandboxLocal:
+		return 1
+	case sandboxTracker:
+		return 2
+	case sandboxRouted:
+		return 3
+	default:
+		t.Fatalf("sandboxesStarted: unknown sandbox mode %d", mode)
+		return 0
+	}
+}
+
+func hasDuplicate(names []string) bool {
+	sorted := slices.Sorted(slices.Values(names))
+	return len(slices.Compact(sorted)) != len(sorted)
 }
 
 // TestSeamConnectorSandboxReapsOrphans starts a launcher while the runtime
@@ -572,8 +608,8 @@ func TestSeamConnectorSandboxTotals(t *testing.T) {
 	rig := newSandboxRig(t, "podman", sandboxRigOpts{mode: sandboxRouted, issues: []int{7}})
 	res := seamtest.Start(t, rig.cmd).Wait(t)
 	res.WantExit(t, 1)
-	if starts, _ := countRuns("podman", seamtest.ReadRecord(t, filepath.Join(rig.recDir, "podman.jsonl"))); starts != 1 {
-		t.Errorf("the runtime started %d Connector sandboxes, want 1", starts)
+	if starts, _ := countRuns("podman", seamtest.ReadRecord(t, filepath.Join(rig.recDir, "podman.jsonl"))); starts != sandboxesStarted(t, sandboxRouted) {
+		t.Errorf("the runtime started %d Connector sandboxes, want %d", starts, sandboxesStarted(t, sandboxRouted))
 	}
 
 	logDir := hostpaths.LogDir(rig.workDir)

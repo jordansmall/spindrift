@@ -1,6 +1,7 @@
 // Package connectorruntime owns what a Launcher process needs to host
-// Connectors: the backend rows, each row's credential source, the sandbox it
-// loads them into, and the live sessions, closed together.
+// Connectors: the backend rows, each row's credential source, the sandboxes it
+// loads them into (one per row, since every row holds a credential), and the
+// live sessions, closed together.
 //
 // A session is the one Connector a (row, Target) pair keeps alive, whichever
 // axis (tracker, Code Forge or read-only forge view) or direct request for the
@@ -62,6 +63,8 @@ type Runtime struct {
 	mu       sync.Mutex
 	closed   bool
 	sessions map[sessionKey]*session
+	// owned are the sandboxes started for rows, by row name.
+	owned map[string]connectorsandbox.Sandbox
 }
 
 type sessionKey struct {
@@ -70,7 +73,10 @@ type sessionKey struct {
 }
 
 // New is a runtime over rows and their credential sources that loads
-// Connectors into sandbox; a nil sandbox is the installed one.
+// Connectors into sandbox; a nil sandbox is the installed one, resolved at each
+// load. A sandbox that starts sandboxes of its own
+// (connectorsandbox.OwningLoader) hosts each row in one of its own, started by
+// the row's first load; any other Loader is shared by every row.
 func New(rows []backendrows.Row, creds map[string]credsource.Row, sandbox connectorsandbox.Loader) *Runtime {
 	byName := make(map[string]backendrows.Row, len(rows))
 	for _, row := range rows {
@@ -86,7 +92,7 @@ func FromRegistries(creds map[string]credsource.Row) *Runtime {
 }
 
 func newRuntime(lookup func(string) (backendrows.Row, bool), creds map[string]credsource.Row, sandbox connectorsandbox.Loader) *Runtime {
-	return &Runtime{lookup: lookup, creds: creds, sandbox: sandbox, now: time.Now, sessions: map[sessionKey]*session{}}
+	return &Runtime{lookup: lookup, creds: creds, sandbox: sandbox, now: time.Now, sessions: map[sessionKey]*session{}, owned: map[string]connectorsandbox.Sandbox{}}
 }
 
 // gitUsername is the username core's git presents with a row's token: GitHub
@@ -137,8 +143,9 @@ func (r *Runtime) GitCredential(row backendrows.Row) gitexec.CredentialSource {
 // Row is the named backend row.
 func (r *Runtime) Row(name string) (backendrows.Row, bool) { return r.lookup(name) }
 
-// Close closes every session's live Connector and refuses further Trackers and
-// Code Forges; a second Close does nothing.
+// Close closes every session's live Connector, then every sandbox it started
+// for a row, and refuses further Trackers and Code Forges; a second Close does
+// nothing.
 func (r *Runtime) Close() error {
 	r.mu.Lock()
 	if r.closed {
@@ -148,10 +155,16 @@ func (r *Runtime) Close() error {
 	r.closed = true
 	sessions := r.sessions
 	r.sessions = nil
+	owned := r.owned
+	r.owned = nil
 	r.mu.Unlock()
 	var errs []error
 	for _, s := range sessions {
 		errs = append(errs, s.close())
+	}
+	// After the sessions: a Connector closes through the sandbox that hosts it.
+	for _, sb := range owned {
+		errs = append(errs, sb.Close(context.Background()))
 	}
 	return errors.Join(errs...)
 }
@@ -298,7 +311,6 @@ func (r *Runtime) session(row backendrows.Row, spec SessionSpec) (*session, erro
 	s, ok := r.sessions[key]
 	if !ok {
 		s = &session{rt: r, row: row, requires: spec.Requires, record: cmp.Or(spec.Record, row.Name), opts: spec.Options, backendNotes: spec.NotesOperations}
-		s.opts.Sandbox = r.sandbox
 		s.opts.Getenv = r.getenv(row)
 		r.sessions[key] = s
 	}
@@ -352,8 +364,37 @@ func (s *session) live() (*connectorhost.Connector, error) {
 	return c, nil
 }
 
+// sandboxFor is where the named row loads: its own sandbox when the loader
+// starts them, else the loader itself, nil when none is installed.
+func (r *Runtime) sandboxFor(name string) (connectorsandbox.Loader, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return nil, ErrClosed
+	}
+	l := r.sandbox
+	if l == nil {
+		l = connectorsandbox.Current()
+	}
+	ss, ok := l.(connectorsandbox.OwningLoader)
+	if !ok {
+		return l, nil
+	}
+	sb, ok := r.owned[name]
+	if !ok {
+		sb = ss.Own(name)
+		r.owned[name] = sb
+	}
+	return sb, nil
+}
+
 func (s *session) load() (*connectorhost.Connector, error) {
-	c, err := backendrows.Load(context.Background(), s.row, s.opts)
+	opts := s.opts
+	var err error
+	if opts.Sandbox, err = s.rt.sandboxFor(s.row.Name); err != nil {
+		return nil, err
+	}
+	c, err := backendrows.Load(context.Background(), s.row, opts)
 	if err != nil {
 		return nil, err
 	}

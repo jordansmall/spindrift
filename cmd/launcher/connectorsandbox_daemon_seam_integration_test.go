@@ -183,6 +183,12 @@ func runDaemonSandboxes(t *testing.T, runtime string, o daemonSandboxOpts) {
 	// The tracker rig's daemon counts demand through its github row, so it holds
 	// a sandbox of its own besides each run's.
 	ownSandboxes := b2i(tracker)
+	// Each run's launcher starts the sandbox its Driver Connector shares, and
+	// with the tracker its github row's own besides.
+	perRun := sandboxesStarted(t, sandboxLocal)
+	if tracker {
+		perRun = sandboxesStarted(t, sandboxTracker)
+	}
 	recPath := filepath.Join(rig.recDir, runtime+".jsonl")
 	t.Cleanup(func() { _ = os.WriteFile(rig.release, nil, 0o644) })
 
@@ -196,9 +202,9 @@ func runDaemonSandboxes(t *testing.T, runtime string, o daemonSandboxOpts) {
 		_, boxes := countRuns(runtime, seamtest.ReadRecord(t, recPath))
 		return boxes >= slots
 	})
-	// Every run is held mid-run, so each owns its sandbox and no more.
-	if starts, _ := countRuns(runtime, seamtest.ReadRecord(t, recPath)); starts != slots+ownSandboxes {
-		t.Errorf("%d Connector sandboxes with %d runs in flight, want one each", starts, slots)
+	// Every run is held mid-run, so each owns its sandboxes and no more.
+	if starts, _ := countRuns(runtime, seamtest.ReadRecord(t, recPath)); starts != slots*perRun+ownSandboxes {
+		t.Errorf("%d Connector sandboxes with %d runs in flight, want %d each plus the daemon's %d", starts, slots, perRun, ownSandboxes)
 	}
 	for _, log := range daemonChildLogs(t, rig.workDir, p.Stdout()) {
 		if got := stoppedSandboxes(readFile(t, log)); len(got) != 0 {
@@ -238,8 +244,8 @@ func runDaemonSandboxes(t *testing.T, runtime string, o daemonSandboxOpts) {
 	for _, log := range logs {
 		body := readFile(t, log)
 		got := stoppedSandboxes(body)
-		if len(got) != 1 {
-			t.Errorf("%s: the stop hook ran %d times (%q), want exactly once", log, len(got), got)
+		if len(got) != perRun {
+			t.Errorf("%s: the stop hook ran %d times (%q), want each of %d sandboxes stopped exactly once", log, len(got), got, perRun)
 		}
 		stopped = append(stopped, got...)
 		assertSandboxSurvivedSettle(t, log, body)
@@ -249,8 +255,8 @@ func runDaemonSandboxes(t *testing.T, runtime string, o daemonSandboxOpts) {
 	} else {
 		stopped = append(stopped, own...)
 	}
-	if starts != len(logs)+ownSandboxes || len(stopped) != starts {
-		t.Errorf("%d children started %d Connector sandboxes and stopped %d, want one each", len(logs), starts, len(stopped))
+	if starts != len(logs)*perRun+ownSandboxes || len(stopped) != starts {
+		t.Errorf("%d children started %d Connector sandboxes and stopped %d, want %d each", len(logs), starts, len(stopped), len(logs)*perRun+ownSandboxes)
 	}
 	seen := map[string]bool{}
 	for _, name := range stopped {

@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"io"
 	"os"
@@ -11,6 +10,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
 	"spindrift.dev/launcher/internal/exitcode"
@@ -31,9 +31,9 @@ func init() {
 	})
 }
 
-// loadViaRow loads a backend row over a module that no engine can compile, so
-// a load that reached an engine fails with a compile error, and a sandboxed one
-// with the sandbox's.
+// loadViaRow loads a backend row through a Connector runtime, as production
+// does, over a module that no engine can compile, so a load that reached an
+// engine fails with a compile error, and a sandboxed one with the sandbox's.
 func loadViaRow(t *testing.T) error {
 	t.Helper()
 	t.Chdir(t.TempDir()) // the audit file opens under the working directory
@@ -41,7 +41,10 @@ func loadViaRow(t *testing.T) error {
 	if err := os.WriteFile(module, []byte("not wasm"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err := backendrows.Load(context.Background(), backendrows.Row{Name: "x", Module: module}, backendrows.Options{})
+	row := backendrows.Row{Name: "x", Module: module}
+	rt := connectorruntime.New([]backendrows.Row{row}, nil, nil)
+	defer rt.Close()
+	_, err := rt.Connector(row, connectorruntime.SessionSpec{})
 	return err
 }
 
@@ -153,7 +156,7 @@ func TestInstallConnectorSandbox_StartFailureFailsTheRun(t *testing.T) {
 		t.Fatalf("load = %v, want ErrConnectorSandboxStart carrying the runner's refusal, not an in-process compile error", err)
 	}
 	// RUNTIME=podman is not the runner here: the error names the kind that refused.
-	if !strings.Contains(err.Error(), "runner "+refusingKind+":") || strings.Contains(err.Error(), "podman") {
+	if !strings.Contains(err.Error(), "runner "+refusingKind+" for Connector x:") || strings.Contains(err.Error(), "podman") {
 		t.Errorf("load = %v, want it to name runner %s", err, refusingKind)
 	}
 	var stderr bytes.Buffer
