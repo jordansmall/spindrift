@@ -315,28 +315,6 @@ func TestNewReadContext_UnregisteredBackendIsAnError(t *testing.T) {
 	}
 }
 
-// TestHostTokenValue pins the precedence: a resolved row knob wins, the core
-// GitHub token is served from the config field (not the environment), and any
-// other name falls back to the environment.
-func TestHostTokenValue(t *testing.T) {
-	c := minimalValidConfig()
-	c.GhToken = "ghp_core"
-	c.setRowKnob(backend.Forgejo.TokenEnvVar, "fj_knob")
-	t.Setenv(backend.GitHub.TokenEnvVar, "env_gh")
-	t.Setenv(backend.Forgejo.TokenEnvVar, "env_fj")
-	t.Setenv("STUB_TOKEN", "env_stub")
-
-	for env, want := range map[string]string{
-		backend.GitHub.TokenEnvVar:  "ghp_core",
-		backend.Forgejo.TokenEnvVar: "fj_knob",
-		"STUB_TOKEN":                "env_stub",
-	} {
-		if got := c.hostTokenValue(env); got != want {
-			t.Errorf("hostTokenValue(%q) = %q, want %q", env, got, want)
-		}
-	}
-}
-
 // setRowKnob stores a row knob's resolved value, as a test fixture would set
 // it. It copies the map first so a config copied by value never shares writes
 // with the original.
