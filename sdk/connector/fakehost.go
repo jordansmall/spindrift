@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"net/textproto"
 	"net/url"
 	"os"
 	"path"
@@ -14,11 +16,16 @@ import (
 
 // Route mirrors the host's Route JSON shape: a Connector's declared grant to
 // send Method requests to Host under the subtree rooted at Path.
+//
+// RequestHeaders and ResponseHeaders declare the headers beyond the fixed sets
+// the Connector may send and read on this Route.
 type Route struct {
-	Method         string `json:"method"`
-	Host           string `json:"host"`
-	Path           string `json:"path"`
-	FollowRedirect bool   `json:"followRedirect,omitempty"`
+	Method          string   `json:"method"`
+	Host            string   `json:"host"`
+	Path            string   `json:"path"`
+	FollowRedirect  bool     `json:"followRedirect,omitempty"`
+	RequestHeaders  []string `json:"requestHeaders,omitempty"`
+	ResponseHeaders []string `json:"responseHeaders,omitempty"`
 }
 
 // RoutesEnv names the environment variable a Connector's checks export its
@@ -33,7 +40,28 @@ const (
 	routeRepoVar  = "{repo}"
 )
 
+// httpMethods, fixedRequestHeaders and neverRequestHeader mirror the host's
+// (cmd/launcher/internal/connectorhost); the SDK module cannot import them, so a
+// change there lands here too. The response-side allowlist (ResponseHeaders) is
+// deliberately not applied: the fake serves no response headers, so a
+// conformance run against it does not check response reads.
 var httpMethods = []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"}
+
+var fixedRequestHeaders = []string{
+	"Accept", "Accept-Language", "Cache-Control", "Content-Type",
+	"If-Match", "If-Modified-Since", "If-None-Match", "If-Unmodified-Since",
+}
+
+// neverRequestHeader reports a request header no Route may declare; name is
+// canonical. The host rejects such a declaration when it loads the Route table,
+// which the fake does not, so the fake refuses the header even if declared.
+func neverRequestHeader(name string) bool {
+	switch name {
+	case "Authorization", "Cookie", "Host", "Forwarded", "Via", "X-Real-Ip":
+		return true
+	}
+	return strings.HasPrefix(name, "X-Forwarded-") || strings.HasPrefix(name, "Proxy-")
+}
 
 // LoadRoutes decodes the declared Route table from RoutesEnv.
 func LoadRoutes() ([]Route, error) {
@@ -144,6 +172,22 @@ func (h *FakeHost) match(in Request) (int, error) {
 	if strings.HasPrefix(u.Path, "/") && path.Clean(u.Path) == u.Path && u.RawPath == "" {
 		for i, r := range h.routes {
 			if r.Method == in.Method && strings.EqualFold(r.Host, u.Host) && admitsPath(r.Path, u.Path) {
+				// Sorted, so the refusal names the same header whatever the map order.
+				for _, k := range slices.Sorted(maps.Keys(in.Headers)) {
+					c := textproto.CanonicalMIMEHeaderKey(k)
+					name := k
+					if len(name) > MaxHeaderName {
+						name = name[:MaxHeaderName] + "..."
+					}
+					if neverRequestHeader(c) {
+						return refuse("%s %s%s: request header %q can never be declared", in.Method, u.Host, u.Path, name)
+					}
+					declared := slices.Contains(fixedRequestHeaders, c) ||
+						slices.ContainsFunc(r.RequestHeaders, func(d string) bool { return textproto.CanonicalMIMEHeaderKey(d) == c })
+					if !declared {
+						return refuse("%s %s%s: request header %q is not declared by the route", in.Method, u.Host, u.Path, name)
+					}
+				}
 				return i, nil
 			}
 		}

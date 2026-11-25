@@ -28,6 +28,8 @@ const (
 )
 
 const (
+	// MaxHeaderName: Bytes of a header name http_response_header looks up; a longer one is fatal, as for http_request.
+	MaxHeaderName = 256
 	// MaxHTTPResponse: Bytes of response body http_request hands a guest.
 	MaxHTTPResponse = 4194304
 	// MaxHTTPURL: Bytes of an http_request URL, checked before it is parsed or routed.

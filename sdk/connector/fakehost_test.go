@@ -205,3 +205,58 @@ func TestResolveRoutes(t *testing.T) {
 		t.Errorf("no {base} route needs no base, got %v", err)
 	}
 }
+
+func TestAdmitRequestHeaders(t *testing.T) {
+	h := NewFakeHost([]Route{
+		{Method: "GET", Host: "h.example.com", Path: "/a", RequestHeaders: []string{"x-trace-id"}},
+		{Method: "GET", Host: "h.example.com", Path: "/b"},
+		{Method: "GET", Host: "h.example.com", Path: "/c", RequestHeaders: []string{"Cookie"}},
+	})
+	tests := []struct {
+		name, path string
+		headers    map[string]string
+		want       string // empty: admitted; else the exact reason
+	}{
+		{"no headers", "/a", nil, ""},
+		{"fixed", "/b", map[string]string{"Accept": "application/json", "content-type": "x"}, ""},
+		{"declared, other case", "/a", map[string]string{"X-Trace-Id": "1"}, ""},
+		{"declared elsewhere", "/b", map[string]string{"X-Trace-Id": "1"}, `GET h.example.com/b: request header "X-Trace-Id" is not declared by the route`},
+		{"undeclared names the first sorted", "/a", map[string]string{"Zeta": "1", "Alpha": "1", "Accept": "x"}, `GET h.example.com/a: request header "Alpha" is not declared by the route`},
+		{"never declarable", "/b", map[string]string{"Authorization": "x"}, `GET h.example.com/b: request header "Authorization" can never be declared`},
+		{"never declarable even if declared", "/c", map[string]string{"Cookie": "x"}, `GET h.example.com/c: request header "Cookie" can never be declared`},
+		{"overlong name is bounded", "/b", map[string]string{strings.Repeat("a", 300): "x"}, `GET h.example.com/b: request header "` + strings.Repeat("a", 256) + `..." is not declared by the route`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := h.Admit(Request{Method: "GET", URL: "https://h.example.com" + tc.path, Headers: tc.headers})
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("Admit = %v, want admitted", err)
+				}
+				return
+			}
+			if !errors.Is(err, ErrRouteRefused) {
+				t.Fatalf("err = %v, want ErrRouteRefused", err)
+			}
+			if got := strings.TrimPrefix(err.Error(), ErrRouteRefused.Error()+": "); got != tc.want {
+				t.Errorf("reason = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoadRoutesDecodesHeaderDeclarations(t *testing.T) {
+	t.Setenv(RoutesEnv, `[{"method":"GET","host":"h","path":"/p","requestHeaders":["X-A"],"responseHeaders":["X-B"]}]`)
+	got, err := LoadRoutes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Route{{Method: "GET", Host: "h", Path: "/p", RequestHeaders: []string{"X-A"}, ResponseHeaders: []string{"X-B"}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("routes = %v, want %v", got, want)
+	}
+	resolved, err := ResolveRoutes(got, "", "")
+	if err != nil || !reflect.DeepEqual(resolved, want) {
+		t.Errorf("ResolveRoutes = %v, %v; want the declarations kept", resolved, err)
+	}
+}
