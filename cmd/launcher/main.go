@@ -2205,7 +2205,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	launcherInput = resolved
 	// Both run after launcherInput is in place: CODE_FORGE and ISSUE_TRACKER may
 	// be set through the document alone.
-	if err := applyConnectorCredentials(); err != nil {
+	if err := applyRowCredentials(); err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
 	}

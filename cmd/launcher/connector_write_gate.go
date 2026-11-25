@@ -91,9 +91,9 @@ func warnConnectorWriteUndetermined(w io.Writer, c config, env, reason string) {
 // credential cannot write: a read-only token would fail the Connector's writes
 // only after the claim. A credential whose capability cannot be read (a
 // fine-grained PAT, an installation token, an unsupported hook, an unset env)
-// warns rather than refuses. The env is final here: mainRun resolves each
-// row's _CMD form before any verb runs, so an empty value is not set, and
-// backendrows.Use only checks that the row names a credential env.
+// warns rather than refuses. The env is final here: mainRun resolves the _CMD
+// form of each row this run reads before any verb runs, so an empty value is
+// not set, and backendrows.Use only checks that the row names a credential env.
 func checkConnectorWriteGate(c config, w io.Writer) error {
 	row, ok := backendrows.Lookup(backend.GitHub.Name)
 	if !ok {

@@ -16,6 +16,7 @@ import (
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/launcherchecks"
+	"spindrift.dev/launcher/internal/rowcredential"
 	"spindrift.dev/launcher/internal/secretcmd"
 )
 
@@ -406,47 +407,24 @@ func parseFlags(args []string) (remaining, schemaArgs []string, err error) {
 // changing parseFlags' signature.
 var globalSecretCmdTemplate string
 
-// connectorCredentialNeededThisRun reports whether this run reads through row.
-// backendrows.Use keeps rows nothing reads (a jira Connector imported under a
-// non-jira ISSUE_TRACKER), and SECRET_CMD must not fetch, or fail on, their
-// credential.
-func connectorCredentialNeededThisRun(row backendrows.Row) bool {
-	isForge := resolvedKnob("CODE_FORGE") == row.Name
-	isTracker := resolvedKnob("ISSUE_TRACKER") == row.Name
-	return (isForge && backendkit.ForgeReadsThroughConnector(row.Name)) ||
-		(isTracker && backendkit.TrackerReadsThroughConnector(row.Name))
-}
-
 func isCoreSecretKnob(env string) bool {
 	return slices.ContainsFunc(inputdoc.SecretKnobs, func(k inputdoc.SecretKnob) bool { return k.Env == env })
 }
 
-// applyConnectorCredentials resolves each backend row's credential env the way
-// a core secret resolves. The rows only exist once backendrows.Use has run.
-// A row whose credential is itself a core secret knob (github's GH_TOKEN,
-// forgejo's FORGEJO_TOKEN) is skipped: parseFlags and applySecretCmdFallback
-// own it, and resolving it here would run its command a second time.
-func applyConnectorCredentials() error {
-	seen := map[string]bool{}
-	for _, row := range backendrows.All() {
-		env := row.CredentialEnv
-		if seen[env] || isCoreSecretKnob(env) {
-			continue
-		}
-		tmpl := ""
-		if connectorCredentialNeededThisRun(row) {
-			tmpl = globalSecretCmdTemplate
-		}
-		cmd := secretcmd.Command(env, tmpl)
-		if cmd == "" {
-			continue
-		}
-		seen[env] = true
-		if err := secretcmd.Export(env, cmd, secretCmdRunner); err != nil {
-			return err
-		}
+// applyRowCredentials fills the credential env of each backend row this run
+// reads through, via the resolver the Daemon shares. Applied is isCoreSecretKnob
+// because parseFlags already ran each core secret's `_CMD`, so running it here
+// would resolve the credential twice. An unset credential is tolerated: doctor
+// must run without one, and validate and the launch gates refuse it per verb.
+func applyRowCredentials() error {
+	_, err := rowcredential.Resolution{
+		Forge: resolvedKnob("CODE_FORGE"), Tracker: resolvedKnob("ISSUE_TRACKER"),
+		Template: globalSecretCmdTemplate, Run: secretCmdRunner, Applied: isCoreSecretKnob,
+	}.Apply(backendrows.All())
+	if errors.Is(err, rowcredential.ErrUnset) {
+		return nil
 	}
-	return nil
+	return err
 }
 
 // applySecretCmdFallback resolves globalSecretCmdTemplate, substituting
