@@ -2318,17 +2318,17 @@ mean at runtime is issue #6751. The worked example is the fixture Connector in
   exports `fragments`, the `{ name; dir; shipped }` contribution its module
   sets as `spindrift.connectors.<name>.fragments` (`connectors/jira`,
   `connectors/forgejo`).
-
 - **Module.** `module.nix` is a flake-parts module. It imports
   `core.flakeModules.default` (the module system dedups by path, so a Consumer
-  that imports the same core is unaffected) and contributes rows to
-  `spindrift.connectors.<name>`. The module system's merge is the registry,
-  and one row name registered by two modules fails evaluation with a one-line
-  `spindrift.connectors.<name> is registered twice` error naming both
-  modules' files. Each row takes a single definition, so a Consumer cannot
-  adjust a Connector's row additively; overriding it is `lib.mkForce` on the
-  whole row.
-  The exceptions are `shadow` (issues #6797, #6810) and `primary` (issue
+  that imports the same core is unaffected) and registers its data in
+  `spindrift.connectorData`; core builds the row `spindrift.connectors.<name>`
+  from it (issue #7562). A name has one definer: a second registration fails
+  evaluation with a one-line `Connector '<name>' is registered twice` error
+  naming both modules' files, and an override (`lib.mkForce`) of the list is
+  refused, so no definition discards another's registration. A definition of
+  `spindrift.connectors.<name>` sets only the switches below, never a field of
+  the row, so a Consumer cannot adjust or replace a Connector's row.
+  The switches are `shadow` (issues #6797, #6810) and `primary` (issue
   #6998): a definition that sets only `spindrift.connectors.<name>.shadow =
   true` or only `primary = true` is a Consumer's switch on the registered
   Driver row, not a second registration. With `shadow` on, the native Strategy

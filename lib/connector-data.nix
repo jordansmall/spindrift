@@ -93,7 +93,7 @@ let
       if unknown != [ ] then
         "${label}: unknown key${
           if builtins.length unknown > 1 then "s" else ""
-        } ${list unknown} in its connector data (known: ${list (builtins.attrNames fields)})"
+        } ${list unknown} in its connector data (known: ${list (builtins.attrNames fields)}); connector data declares only its own row, never another spindrift option"
       else if badType != [ ] then
         let
           k = builtins.head badType;
@@ -152,9 +152,8 @@ let
     );
 
   # `coreModule` is core's flake-parts module (a path or module value). The key
-  # matches what a hand-written Connector module carries, so a Consumer that
-  # imports the Connector twice dedups instead of failing "registered twice".
-  # The inner module takes `lib` from the module system for a function `driver`.
+  # keeps a Consumer importing the Connector twice from registering it twice.
+  # The module registers the data and nothing else: core builds the row.
   toFlakeModule =
     coreModule: data:
     let
@@ -162,15 +161,8 @@ let
     in
     {
       key = "spindrift-connector-${d.name}";
-      imports = [
-        coreModule
-        (
-          { lib, ... }:
-          {
-            spindrift.connectors.${d.name} = row lib d;
-          }
-        )
-      ];
+      imports = [ coreModule ];
+      spindrift.connectorData = [ d ];
     };
 
   # The readers below take a `lib.connector` entry in either form: a data
@@ -211,6 +203,7 @@ in
   inherit
     problem
     validate
+    row
     toFlakeModule
     rowsOf
     fragmentsOf

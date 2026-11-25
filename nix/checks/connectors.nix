@@ -58,13 +58,18 @@ let
   ];
   configOf = consumer: consumer.debug.config.spindrift;
   knobModule = name: key: env: {
-    spindrift.connectors.${name}.knobs.${key} = {
-      inherit env;
-      group = "dispatch";
-      doc = "test knob";
-      flakeOption = false;
-      boxEnv = false;
-    };
+    spindrift.connectorData = [
+      {
+        inherit name;
+        knobs.${key} = {
+          inherit env;
+          group = "dispatch";
+          doc = "test knob";
+          flakeOption = false;
+          boxEnv = false;
+        };
+      }
+    ];
   };
   fails = v: !(builtins.tryEval (builtins.deepSeq v true)).success;
   drvPathsOf = pkgs': builtins.mapAttrs (_: p: p.drvPath) (filterAttrs (_: isDerivation) pkgs');
@@ -369,8 +374,8 @@ in
       let
         imports = fixtureConnector.flakeModule.imports;
       in
-      builtins.length imports == 2 && builtins.head imports == core.flakeModules.default
-    ) "the fixture module must import the core it was handed, then its own row module";
+      imports == [ core.flakeModules.default ]
+    ) "the fixture module must import exactly the core it was handed";
     pkgs.runCommand "connectors-fixture-takes-in-tree-core" { } "touch $out";
 
   connectors-duplicate-name-fails =
@@ -395,9 +400,9 @@ in
         (sourced "a.nix" (knobModule "dup" "a" "DUP_A"))
       ];
       # The type the module system rebuilds through substSubModules; a lost
-      # override would merge two definitions instead of throwing.
-      rewrapped = (connectorNames.uniqueRow (pkgs.lib.types.submodule { })).substSubModules [ ];
-      shadowable = connectorNames.uniqueRow (
+      # override would let a definition set a row's fields.
+      rewrapped = (connectorNames.dataRow (_: null) (pkgs.lib.types.submodule { })).substSubModules [ ];
+      shadowable = connectorNames.dataRow (_: null) (
         pkgs.lib.types.submodule {
           options.shadow = pkgs.lib.mkOption {
             type = pkgs.lib.types.bool;
@@ -410,30 +415,34 @@ in
         }
       );
       mergeFrom =
-        files:
-        rewrapped.merge [ "connectors" "dup" ] (
-          map (file: {
-            inherit file;
-            value = { };
-          }) files
-        );
+        value:
+        rewrapped.merge
+          [ "connectors" "dup" ]
+          [
+            {
+              file = "a.nix";
+              inherit value;
+            }
+          ];
     in
-    assert assertMsg (
-      message == "spindrift.connectors.dup is registered twice: by a.nix and by b.nix"
-    ) "the duplicate-name message must name the option path and both sources; got ${toString message}";
-    assert assertMsg (
-      threeMessage == "spindrift.connectors.dup is registered 3 times: by a.nix and by b.nix and by c.nix"
-    ) "the duplicate-name message must count three definitions; got ${toString threeMessage}";
+    assert assertMsg
+      (
+        message
+        == "Connector 'dup' is registered twice: by a.nix and by b.nix; a Connector registers once, as data, and a name has one definer"
+      )
+      "the duplicate-name message must name the Connector, both sources and the rule; got ${toString message}";
+    assert assertMsg
+      (pkgs.lib.hasInfix "registered 3 times: by a.nix and by b.nix and by c.nix" threeMessage)
+      "the duplicate-name message must count three definitions; got ${toString threeMessage}";
     assert assertMsg (
       connectorNames.duplicateError "dup" [ { file = "a.nix"; } ] == null
     ) "a single definition must not be reported as a duplicate";
-    assert assertMsg (fails (mergeFrom [
-      "a.nix"
-      "b.nix"
-    ])) "uniqueRow must keep throwing on a duplicate after substSubModules rebuilds the type";
+    assert assertMsg (fails (mergeFrom {
+      knobs = { };
+    })) "dataRow must keep refusing a row's fields after substSubModules rebuilds the type";
     assert assertMsg (
-      !(fails (mergeFrom [ "a.nix" ]))
-    ) "control: uniqueRow after substSubModules must merge a single definition";
+      !(fails (mergeFrom { }))
+    ) "control: dataRow after substSubModules must merge a definition setting nothing";
     # A Consumer's `spindrift.connectors.<name>.shadow = true` is a switch on
     # the registered row, not a second registration.
     assert assertMsg (
@@ -453,7 +462,7 @@ in
             }
           ]
       ))
-    ) "a definition setting only `shadow` must not count as a second registration";
+    ) "a definition setting only `shadow` must not count as a registration";
     assert assertMsg (
       !(fails (
         shadowable.merge
@@ -472,12 +481,12 @@ in
             }
           ]
       ))
-    ) "a definition setting only `shadow` and `shadowEvery` must not count as a second registration";
+    ) "a definition setting only `shadow` and `shadowEvery` must not count as a registration";
     assert assertMsg (
       (configOf oneModule).connectors.dup.knobs.a.env == "DUP_A"
     ) "control: one module registering the row must evaluate";
     assert assertMsg (fails (configOf twoModules)
-      .connectors.dup) "two modules registering one Connector row name must fail to evaluate, not merge";
+      .connectors.dup) "two modules registering one Connector name must fail to evaluate, not merge";
     pkgs.runCommand "connectors-duplicate-name-fails" { } "touch $out";
 }
 // builtins.mapAttrs collisionCase {

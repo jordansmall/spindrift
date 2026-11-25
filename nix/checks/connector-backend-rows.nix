@@ -911,7 +911,7 @@ in
           knobs ? probeKnobs,
           backend ? probeBackend,
         }:
-        consumerWith [ { spindrift.connectors.probe = { inherit knobs backend; }; } ];
+        consumerWith [ (fixtures.rowAsData "probe" { inherit knobs backend; }) ];
       names = import ../../lib/connector-names.nix;
       coreBackends = import ../../lib/backends/default.nix;
       # A first-party row of core backend `rowName` naming core knob `knob` as
@@ -943,32 +943,28 @@ in
       probeBackendRow =
         rowName: backend:
         consumerWith [
-          {
-            spindrift.connectors.${rowName} = {
-              # The checked-in accepted baseline (spindrift-connector-routes.json)
-              # holds `{base}` routes for the forgejo and jira rows, which
-              # mkHarness refuses without a `baseEnv`.
-              knobs.probeBase = baseKnob;
-              inherit backend;
-            };
-          }
+          (fixtures.rowAsData rowName {
+            # The checked-in accepted baseline (spindrift-connector-routes.json)
+            # holds `{base}` routes for the forgejo and jira rows, which
+            # mkHarness refuses without a `baseEnv`.
+            knobs.probeBase = baseKnob;
+            inherit backend;
+          })
         ];
       # A basic first-party row of core backend `rowName` with its own
       # credential, naming core knob `knob` as its identity.
       probeIdentityRow =
         rowName: knob:
         consumerWith [
-          {
-            spindrift.connectors.${rowName} = {
-              knobs.probeBase = baseKnob;
-              knobs.probeToken = secretKnob;
-              backend = basicBackend // {
-                inherit (firstParty rowName) module;
-                credential = "probeToken";
-                identity = knob;
-              };
+          (fixtures.rowAsData rowName {
+            knobs.probeBase = baseKnob;
+            knobs.probeToken = secretKnob;
+            backend = basicBackend // {
+              inherit (firstParty rowName) module;
+              credential = "probeToken";
+              identity = knob;
             };
-          }
+          })
         ];
       programOf = c: c.apps.${system}.connectors-accept.program;
       builds = c: (builtins.tryEval (builtins.seq (programOf c) true)).success;
@@ -1021,21 +1017,21 @@ in
     # would hand that knob's value to this row's routes.
     assert assertMsg (
       !(builds (consumerWith [
-        {
-          spindrift.connectors.acme.knobs.acmeWidget = secretKnob // {
+        (fixtures.rowAsData "acme" {
+          knobs.acmeWidget = secretKnob // {
             env = "WIDGET_TOKEN";
           };
-          spindrift.connectors.widget.backend = probeBackend;
-        }
+        })
+        (fixtures.rowAsData "widget" { backend = probeBackend; })
       ]))
     ) "a derived credential variable that is another Connector's knob must fail evaluation";
     assert assertMsg (builds (consumerWith [
-      {
-        spindrift.connectors.acme.knobs.acmeWidget = secretKnob // {
+      (fixtures.rowAsData "acme" {
+        knobs.acmeWidget = secretKnob // {
           env = "OTHER_WIDGET_TOKEN";
         };
-        spindrift.connectors.widget.backend = probeBackend;
-      }
+      })
+      (fixtures.rowAsData "widget" { backend = probeBackend; })
     ])) "control: a distinct knob env on another Connector must evaluate";
     # A row may name its own backend's core token (issue #7498). `probe` is
     # no core backend, so a core knob stays refused there above.
@@ -1539,20 +1535,18 @@ in
   connector-backend-rows-flake-module-shadow =
     let
       consumerWith = modules: fixtures.connectorConsumerVia ([ ../../lib/flakeModule.nix ] ++ modules);
-      probeModule = {
-        spindrift.connectors.probe = {
-          knobs.probeToken = {
-            env = "PROBE_TOKEN";
-            group = "dispatch";
-            secret = true;
-            doc = "credential knob of a probe Connector in the backend-row shadow checks";
-            flakeOption = false;
-            boxEnv = false;
-          };
-          backend = {
-            module = p: "${fixtures.connectorWasm}/network.wasm";
-            routes = [ goodRoute ];
-          };
+      probeModule = fixtures.rowAsData "probe" {
+        knobs.probeToken = {
+          env = "PROBE_TOKEN";
+          group = "dispatch";
+          secret = true;
+          doc = "credential knob of a probe Connector in the backend-row shadow checks";
+          flakeOption = false;
+          boxEnv = false;
+        };
+        backend = {
+          module = p: "${fixtures.connectorWasm}/network.wasm";
+          routes = [ goodRoute ];
         };
       };
       programOf = c: c.apps.${system}.connectors-accept.program;

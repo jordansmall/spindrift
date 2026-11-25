@@ -1,14 +1,14 @@
-# The error for a Connector row name registered by more than one module
-# (ADR 0073). Pure so nix/checks/connectors.nix can pin the text:
-# builtins.tryEval cannot see thrown messages. `defs` is the module system's
-# definition list; each carries the `file` of the module that wrote it. A def
-# that sets nothing but `shadow`, its rate `shadowEvery` or `primary` is a
-# Consumer's switch on a registered row (issues #6797, #6810, #6998), not a
-# second registration.
+# The errors for a Connector registered a second time or outside its data
+# (ADR 0073, issue #7562). Pure so nix/checks/connector-registration.nix can
+# pin the text: builtins.tryEval cannot see thrown messages. A definition list
+# is the module system's; each def carries the `file` of the module that wrote
+# it. A def that sets nothing but `shadow`, its rate `shadowEvery` or `primary`
+# is a Consumer's switch on a registered row (issues #6797, #6810, #6998), not
+# a registration.
 rec {
   # The Consumer switches a backend row refuses (issue #7456), in the order
   # the refusal lists them. One source for the module's `definedSwitches` and
-  # `uniqueRow`'s switch-only defs.
+  # `dataRow`'s switch-only defs.
   switchNames = [
     "shadow"
     "shadowEvery"
@@ -191,6 +191,9 @@ rec {
     else
       "Connector '${name}': its derived credential variable `${derived}` is already a knob of Connector '${owner}'; rename the row";
 
+  # Why a Connector name cannot be registered by more than one definer, or
+  # null. `defs` is the module system's definition list; each carries the
+  # `file` of the module that wrote it.
   duplicateError =
     name: defs:
     let
@@ -199,31 +202,130 @@ rec {
     if n < 2 then
       null
     else
-      "spindrift.connectors.${name} is registered ${
-        if n == 2 then "twice" else "${toString n} times"
-      }: by ${builtins.concatStringsSep " and by " (map (d: d.file) defs)}";
+      "Connector '${name}' is registered ${if n == 2 then "twice" else "${toString n} times"}: by ${
+        builtins.concatStringsSep " and by " (map (d: d.file) defs)
+      }; a Connector registers once, as data, and a name has one definer";
 
-  # `type`, an attrsOf element type, made to throw `duplicateError` on a second
-  # definition instead of merging. Not `types.unique`: its message is multi-line
-  # and names no sources. `substSubModules` must re-wrap: the module system
-  # rebuilds a submodule type through it, which would drop the override.
-  uniqueRow =
-    type:
+  # Why a definition of `spindrift.connectors.<name>` is refused: it sets
+  # `keys`, which only the Connector's data may declare.
+  rowOutsideDataError =
+    name: file: keys:
+    "Connector '${name}': ${file} sets ${
+      builtins.concatStringsSep ", " (map (k: "'${k}'") keys)
+    } on spindrift.connectors.${name}; a Connector row registers only as data, through spindrift.connectorData, and spindrift.connectors.${name} takes only the switches ${builtins.concatStringsSep ", " switchNames}";
+
+  # Why a definition of `spindrift.connectors.<name>` is refused when no data
+  # registers `name`: a switch has no row to apply to.
+  unregisteredRowError =
+    name: file:
+    "Connector '${name}': ${file} defines spindrift.connectors.${name}, but no Connector '${name}' is registered; a Connector registers only as data, through spindrift.connectorData, and spindrift.connectors.${name} takes only switches on a registered row";
+
+  # Why `spindrift.connectorData` cannot carry a priority below the default:
+  # an override would discard another definer's registration. `registered` is
+  # the Connector names in the list that survived.
+  dataOverrideError =
+    registered:
+    "spindrift.connectorData was overridden (mkForce or mkOverride) and no longer carries every registration, leaving ${
+      if registered == [ ] then
+        "no Connector"
+      else
+        "only ${builtins.concatStringsSep ", " (map (n: "'${n}'") registered)}"
+    }; no definition may discard another's registration, so write a plain list";
+
+  # `type`, an attrsOf element type, made to take from a definition only the
+  # switches, and to build the row itself from `dataOf name`, the Connector's
+  # data row or null. A row is the Connector's data, so no definition of it can
+  # replace or merge into it, mkForce included: a whole-row override is refused
+  # for the keys it sets, and a switch-only one (which may drop core's `{ }`)
+  # leaves the data row intact. `substSubModules` must re-wrap: the module
+  # system rebuilds a submodule type through it, which would drop the override.
+  dataRow =
+    dataOf: type:
     type
     // {
       merge =
         loc: defs:
         let
-          switchOnly =
+          name = builtins.elemAt loc (builtins.length loc - 1);
+          strayKeys =
             d:
-            builtins.isAttrs d.value
-            && builtins.attrNames d.value != [ ]
-            && builtins.all (n: builtins.elem n switchNames) (builtins.attrNames d.value);
-          err = duplicateError (builtins.elemAt loc (builtins.length loc - 1)) (
-            builtins.filter (d: !(switchOnly d)) defs
-          );
+            if builtins.isAttrs d.value then
+              builtins.filter (k: !(builtins.elem k switchNames)) (builtins.attrNames d.value)
+            else
+              [ "<a module function>" ];
+          bad = builtins.filter (d: strayKeys d != [ ]) defs;
+          data = dataOf name;
         in
-        if err != null then throw err else type.merge loc defs;
-      substSubModules = m: uniqueRow (type.substSubModules m);
+        if bad != [ ] then
+          throw (rowOutsideDataError name (builtins.head bad).file (strayKeys (builtins.head bad)))
+        else
+          type.merge loc (
+            defs
+            ++ (
+              if data == null then
+                [ ]
+              else
+                [
+                  {
+                    file = "spindrift.connectorData";
+                    value = data;
+                  }
+                ]
+            )
+          );
+      substSubModules = m: dataRow dataOf (type.substSubModules m);
+    };
+
+  # Whether a definition's value survives the module system's property
+  # discharge (lib.modules dischargeProperties): `mkIf false` and an empty
+  # `mkMerge` leave no definition behind. An override is not discharged:
+  # filterOverrides unwraps it and keeps its content defined, so
+  # `mkForce (mkIf false ...)` is still a row; mkOrder likewise counts as live.
+  live =
+    v:
+    if !(builtins.isAttrs v) then
+      true
+    else if v._type or "" == "if" then
+      v.condition && live v.content
+    else if v._type or "" == "merge" then
+      builtins.any live v.contents
+    else
+      true;
+
+  # The file of the first definition that keeps row `n` alive, which is the
+  # one that made a name outside the registered data a stray.
+  strayDefiner =
+    defs: n: (builtins.head (builtins.filter (d: d.value ? ${n} && live d.value.${n}) defs)).file;
+
+  # `type`, the attrsOf of `dataRow` rows, made to carry exactly the rows in
+  # `registered` (the data by name). The row names come from here, appended
+  # after the module system's priority filtering, rather than from a
+  # definition that `mkForce` of the whole set could discard. A name outside
+  # `registered` that survives the merge is refused rather than given a row;
+  # one whose definitions all discharge (`mkIf false`) is dropped as attrsOf
+  # drops it.
+  registeredRowSet =
+    registered: type:
+    type
+    // {
+      merge =
+        loc: defs:
+        let
+          merged = type.merge loc (
+            defs
+            ++ [
+              {
+                file = "spindrift.connectorData";
+                value = builtins.mapAttrs (_: _: { }) registered;
+              }
+            ]
+          );
+          stray = builtins.filter (n: !(registered ? ${n})) (builtins.attrNames merged);
+        in
+        if stray != [ ] then
+          throw (unregisteredRowError (builtins.head stray) (strayDefiner defs (builtins.head stray)))
+        else
+          merged;
+      substSubModules = m: registeredRowSet registered (type.substSubModules m);
     };
 }
