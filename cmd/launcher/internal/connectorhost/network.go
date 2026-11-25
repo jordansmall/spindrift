@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"path"
@@ -66,6 +67,64 @@ var (
 	ErrAudit = errors.New("connector audit log write failed")
 )
 
+// fixedRequestHeaders is what a guest may send on any route: content
+// negotiation and caching. A route declares anything else in RequestHeaders.
+// lib/connector-routes.nix mirrors it.
+var fixedRequestHeaders = []string{
+	"Accept", "Accept-Language", "Cache-Control", "Content-Type",
+	"If-Match", "If-Modified-Since", "If-None-Match", "If-Unmodified-Since",
+}
+
+// fixedResponseHeaders is what a guest may read on any route; a route declares
+// anything else in ResponseHeaders. lib/connector-routes.nix mirrors it.
+var fixedResponseHeaders = []string{
+	"Content-Type", "Content-Length", "Content-Range", "Date", "ETag",
+	"Last-Modified", "Link", "Location", "Retry-After",
+}
+
+// neverRequestHeader reports a request header no route may declare: the host
+// owns the credential and the connection's identity, so a guest never sets
+// them. name is canonical.
+func neverRequestHeader(name string) bool {
+	switch name {
+	case "Authorization", "Cookie", "Host", "Forwarded", "Via", "X-Real-Ip":
+		return true
+	}
+	return strings.HasPrefix(name, "X-Forwarded-") || strings.HasPrefix(name, "Proxy-")
+}
+
+// neverResponseHeader reports a response header no route may declare: a
+// cookie is a credential the host keeps. name is canonical.
+func neverResponseHeader(name string) bool {
+	return name == "Set-Cookie" || name == "Set-Cookie2"
+}
+
+// validHeaderName reports whether s is an RFC 9110 token.
+func validHeaderName(s string) bool {
+	return s != "" && !strings.ContainsFunc(s, func(r rune) bool {
+		return r >= 0x80 || !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("!#$%&'*+-.^_`|~", r))
+	})
+}
+
+// checkDeclaredHeaders judges one route's declared header names; never says
+// whether a canonical name is undeclarable.
+func checkDeclaredHeaders(field string, names []string, never func(string) bool) error {
+	seen := map[string]bool{}
+	for _, n := range names {
+		c := http.CanonicalHeaderKey(n)
+		switch {
+		case !validHeaderName(n):
+			return fmt.Errorf("%s: %q is not a valid header name", field, n)
+		case never(c):
+			return fmt.Errorf("%s: %q can never be declared", field, n)
+		case seen[c]:
+			return fmt.Errorf("%s: %q is declared twice", field, n)
+		}
+		seen[c] = true
+	}
+	return nil
+}
+
 // Route admits one slice of a network Connector's traffic: an exact uppercase
 // Method, an exact host[:port] (case-insensitive, the port significant), and a
 // Path subtree root in registryvocab.PathSet form. A route does not restrict the
@@ -79,11 +138,21 @@ var (
 // shows the opt-in, so a Route-table diff does too. A body over the response
 // cap keeps its tail rather than failing the call, which would be fatal to the
 // Connector: the tail of a blob such as a job log is the useful part.
+//
+// RequestHeaders and ResponseHeaders declare the headers a guest may send and
+// read beyond the fixed sets (fixedRequestHeaders, fixedResponseHeaders);
+// anything else is refused on the way out and absent on the way back. String
+// shows them, so a Route-table diff does too. validate rejects a name that
+// could carry the credential or the host's identity (neverRequestHeader,
+// neverResponseHeader), one that is not a valid header token, and one declared
+// twice.
 type Route struct {
-	Method         string `json:"method"`
-	Host           string `json:"host"`
-	Path           string `json:"path"`
-	FollowRedirect bool   `json:"followRedirect,omitempty"`
+	Method          string   `json:"method"`
+	Host            string   `json:"host"`
+	Path            string   `json:"path"`
+	FollowRedirect  bool     `json:"followRedirect,omitempty"`
+	RequestHeaders  []string `json:"requestHeaders,omitempty"`
+	ResponseHeaders []string `json:"responseHeaders,omitempty"`
 }
 
 func (r Route) String() string {
@@ -91,7 +160,35 @@ func (r Route) String() string {
 	if r.FollowRedirect {
 		s += " (follows redirect)"
 	}
+	if len(r.RequestHeaders) > 0 {
+		s += " (sends " + strings.Join(sortedNames(r.RequestHeaders), ", ") + ")"
+	}
+	if len(r.ResponseHeaders) > 0 {
+		s += " (reads " + strings.Join(sortedNames(r.ResponseHeaders), ", ") + ")"
+	}
 	return s
+}
+
+// sortedNames returns names canonicalised and sorted, so declarations that
+// differ only in case render the same.
+func sortedNames(names []string) []string {
+	out := make([]string, len(names))
+	for i, n := range names {
+		out[i] = http.CanonicalHeaderKey(n)
+	}
+	slices.Sort(out)
+	return out
+}
+
+// declares reports whether names holds canonical, compared canonically.
+func declares(names []string, canonical string) bool {
+	return slices.ContainsFunc(names, func(d string) bool { return http.CanonicalHeaderKey(d) == canonical })
+}
+
+// sendable reports whether a guest may send the request header name (canonical)
+// on this route: the fixed set or a declared extra.
+func (r Route) sendable(name string) bool {
+	return slices.Contains(fixedRequestHeaders, name) || declares(r.RequestHeaders, name)
 }
 
 // ValidateRoutes checks every route, naming the first that fails; the error
@@ -117,6 +214,12 @@ func (r Route) validate() error {
 	}
 	if r.FollowRedirect && r.Method != http.MethodGet {
 		return errors.New("followRedirect is allowed on GET only")
+	}
+	if err := checkDeclaredHeaders("requestHeaders", r.RequestHeaders, neverRequestHeader); err != nil {
+		return err
+	}
+	if err := checkDeclaredHeaders("responseHeaders", r.ResponseHeaders, neverResponseHeader); err != nil {
+		return err
 	}
 	return registryvocab.CheckPathPattern(r.Path)
 }
@@ -158,6 +261,11 @@ type AuditEntry struct {
 	RetryAfter string `json:"retry_after,omitempty"`
 	// RedirectHost is the host of the one hop a FollowRedirect route followed.
 	RedirectHost string `json:"redirect_host,omitempty"`
+	// Headers names, sorted and canonical, every header the host set on the
+	// request (the guest's plus the credential); never a value. It omits what
+	// the transport adds (User-Agent, Accept-Encoding, Content-Length) and the
+	// redirect hop's Range. Empty when nothing was sent.
+	Headers []string `json:"headers,omitempty"`
 }
 
 // The wire values of AuditEntry.RateLimit; docs/reference.md documents them.
@@ -381,6 +489,19 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 	}
 	entry.Route = matched.String()
 
+	// Sorted, so the refusal names the same header whatever the map order.
+	for _, k := range slices.Sorted(maps.Keys(in.Headers)) {
+		c := http.CanonicalHeaderKey(k)
+		if !matched.sendable(c) {
+			// The name is the guest's; bound what a refusal echoes of it.
+			name := k
+			if len(name) > maxHeaderName {
+				name = name[:maxHeaderName] + "..."
+			}
+			return 0, nil, nil, refuse("%s %s%s: request header %q is not declared by the route", in.Method, u.Host, u.Path, name)
+		}
+	}
+
 	timeout := cmp.Or(n.requestTimeout, httpRequestTimeout)
 	timeoutCause := fmt.Errorf("no response within %s", timeout)
 	ctx, cancelTimeout := context.WithTimeoutCause(ctx, timeout, timeoutCause)
@@ -411,6 +532,7 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 			return 0, nil, nil, sendFailed("authorize", aerr)
 		}
 	}
+	entry.Headers = slices.Sorted(maps.Keys(req.Header))
 
 	client := http.Client{}
 	if n.Client != nil {
@@ -495,5 +617,19 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 	if len(data) > maxBody {
 		return status, nil, nil, fmt.Errorf("%w: connector %q: over %d bytes", ErrResponseTooLarge, n.Name, maxBody)
 	}
-	return status, data, resp.Header, nil
+	return status, data, matched.readable(resp.Header), nil
+}
+
+// readable is the part of h a guest may read on this route: the fixed set and
+// the route's declared extras. The host's own reads (rateLimitKind) use the
+// whole header.
+func (r Route) readable(h http.Header) http.Header {
+	out := http.Header{}
+	for _, name := range slices.Concat(fixedResponseHeaders, r.ResponseHeaders) {
+		c := http.CanonicalHeaderKey(name)
+		if v, ok := h[c]; ok {
+			out[c] = slices.Clone(v)
+		}
+	}
+	return out
 }

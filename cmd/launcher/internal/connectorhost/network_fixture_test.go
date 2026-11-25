@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -47,10 +48,13 @@ func loadNetworkFixtureVia(t *testing.T, ld netLoader, wasm string, tweak func(*
 		w.Header().Add("X-Scripted", "b")
 		w.Header().Set("X-Empty", "")
 		w.Header().Set("Set-Cookie", "session=s3cret")
+		w.Header().Set("ETag", `"v1"`)
+		w.Header().Set("X-OAuth-Scopes", "repo")
+		w.Header().Set("X-RateLimit-Remaining", "4999")
 		fmt.Fprint(w, "scripted "+r.URL.Path)
 	})
 	audit = &bytes.Buffer{}
-	n := netFor(b, audit, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
+	n := netFor(b, audit, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos", ResponseHeaders: []string{"X-Scripted", "X-Empty"}})
 	n.Name = "fixture-network"
 	tweak(n)
 	c = loadNetWith(t, ld, fixture(t, wasm), n)
@@ -78,10 +82,10 @@ func TestNetworkFixtureReachesTheBackendWithTheHostCredential(t *testing.T) {
 		t.Fatalf("audit = %+v, want one entry", lines)
 	}
 	want := connectorhost.AuditEntry{
-		Connector: "fixture-network", Route: "GET " + b.host() + " /repos", Method: "GET",
-		Host: b.host(), Path: "/repos/x", Status: 200, Size: int64(len(out.Body)), Decision: connectorhost.DecisionSent,
+		Connector: "fixture-network", Route: "GET " + b.host() + " /repos (reads X-Empty, X-Scripted)", Method: "GET",
+		Host: b.host(), Path: "/repos/x", Status: 200, Size: int64(len(out.Body)), Decision: connectorhost.DecisionSent, Headers: []string{"Authorization"},
 	}
-	if lines[0] != want {
+	if !reflect.DeepEqual(lines[0], want) {
 		t.Errorf("audit = %+v, want %+v", lines[0], want)
 	}
 }

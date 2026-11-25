@@ -168,7 +168,7 @@ func grantsHTTPRequest(t *testing.T, load netLoader) {
 		fmt.Fprintf(w, `{"result":{"authorized":%t}}`, r.Header.Get("Authorization") == "Bearer s3cret")
 	})
 	var audit bytes.Buffer
-	req := fmt.Sprintf(`{"method":"GET","url":"%s/repos/x","headers":{"Authorization":"Bearer guest"}}`, b.URL)
+	req := fmt.Sprintf(`{"method":"GET","url":"%s/repos/x","headers":{"Accept":"text/plain"}}`, b.URL)
 	wasm := httpCallGuest(req, netRespOff, 4096, true)
 	if bytes.Contains(wasm, []byte("s3cret")) {
 		t.Fatal("credential in the module bytes")

@@ -33,7 +33,9 @@ func (s *stubTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 // FuzzHTTPRequest feeds arbitrary bytes to http_request as the guest's request
 // body: request decoding, the URL cap and parse, the method set and route
 // matching, against a Network whose transport is a stub. Whatever the input,
-// only an https request to the route host with a method in the fixed set may
+// only an https request to the route host with a method in the fixed set and
+// no header outside the fixed set, the route's declared extras and the host's
+// credential (a redirect hop carries only a Range) may
 // reach the transport, the failure must name a sentinel, and a refused
 // oversized URL or unknown method must not be echoed into the error or the
 // audit entry. The seeds are the f.Add calls below. See FuzzHandshake for the
@@ -42,6 +44,11 @@ func FuzzHTTPRequest(f *testing.F) {
 	for _, s := range []string{
 		`{"method":"GET","url":"https://api.example.com/v1/items?q=1"}`,
 		`{"method":"POST","url":"https://api.example.com/v1/items","headers":{"X":"y"},"body":"{}"}`,
+		`{"method":"GET","url":"https://api.example.com/v1/items","headers":{"accept":"a","X-Declared":"d","x-declared":"e","If-None-Match":"\"t\""}}`,
+		`{"method":"POST","url":"https://api.example.com/v1/items","headers":{"X-Declared":"v"},"body":"{}"}`,
+		`{"method":"GET","url":"https://api.example.com/v1/items","headers":{"Accept":"a","Cookie":"c"}}`,
+		`{"method":"GET","url":"https://api.example.com/v1/items","headers":{"Authorization":"Bearer guest","X-Forwarded-For":"1.2.3.4","Proxy-Authorization":"p","Host":"evil"}}`,
+		`{"method":"GET","url":"https://api.example.com/v1/items","headers":{"X Bad":"v","":"v","X-Declared\n":"v"}}`,
 		`{"method":"get","url":"https://api.example.com/v1/items"}`,
 		`{"method":"TRACE","url":"https://api.example.com/v1/items"}`,
 		`{"method":"","url":"https://api.example.com/v1/items"}`,
@@ -71,8 +78,12 @@ func FuzzHTTPRequest(f *testing.F) {
 		n := &Network{
 			Name: "fuzz",
 			Routes: []Route{
-				{Method: "GET", Host: "api.example.com", Path: "/v1/items", FollowRedirect: true},
+				{Method: "GET", Host: "api.example.com", Path: "/v1/items", FollowRedirect: true, RequestHeaders: []string{"X-Declared"}},
 				{Method: "POST", Host: "api.example.com", Path: "/v1/items"},
+			},
+			Authorize: func(r *http.Request) error {
+				r.Header.Set("Authorization", "Bearer host")
+				return nil
 			},
 			Client: &http.Client{Transport: stub},
 			Audit:  NewAuditLog(&audit),
@@ -82,6 +93,27 @@ func FuzzHTTPRequest(f *testing.F) {
 			t.Fatalf("unnamed failure for %q: %v", raw, err)
 		}
 		for _, r := range stub.sent {
+			// The route host gets the fixed set, the matched route's extras and the
+			// host's credential; the redirect hop gets a Range and nothing the
+			// guest set.
+			// Matching by method alone is sound only while the fuzz routes share
+			// host and path and differ by method; keep that or change this lookup.
+			var extras []string
+			for _, route := range n.Routes {
+				if route.Method == r.Method {
+					extras = route.RequestHeaders
+				}
+			}
+			for k := range r.Header {
+				switch {
+				case strings.EqualFold(r.URL.Host, "api.example.com"):
+					if !slices.Contains(fixedRequestHeaders, k) && !slices.Contains(extras, k) && k != "Authorization" {
+						t.Fatalf("sent header %q for %q", k, raw)
+					}
+				case k != "Range":
+					t.Fatalf("redirect hop carried header %q for %q", k, raw)
+				}
+			}
 			if r.URL.Scheme != "https" || r.URL.User != nil || r.URL.Fragment != "" || len(r.URL.String()) > maxHTTPURL {
 				t.Fatalf("sent %s for %q", r.URL.Redacted(), raw)
 			}

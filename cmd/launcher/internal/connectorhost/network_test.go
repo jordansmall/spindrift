@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -125,7 +126,7 @@ func TestNetworkSendsAdmittedRequestWithHostCredential(t *testing.T) {
 	})
 	var audit bytes.Buffer
 	n := netFor(b, &audit, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
-	raw := fmt.Sprintf(`{"method":"GET","url":"%s/repos/x?q=1","headers":{"Accept":"text/plain","Authorization":"Bearer guest"}}`, b.URL)
+	raw := fmt.Sprintf(`{"method":"GET","url":"%s/repos/x?q=1","headers":{"Accept":"text/plain"}}`, b.URL)
 	status, body, err := n.Do(context.Background(), []byte(raw), 1<<10)
 	if err != nil {
 		t.Fatal(err)
@@ -141,8 +142,8 @@ func TestNetworkSendsAdmittedRequestWithHostCredential(t *testing.T) {
 		t.Errorf("request not forwarded: %v %v", r.Header, r.URL)
 	}
 	lines := auditLines(t, &audit)
-	want := connectorhost.AuditEntry{Connector: "demo", Route: "GET " + b.host() + " /repos", Method: "GET", Host: b.host(), Path: "/repos/x", Query: "q=1", Status: 200, Size: 5, Decision: connectorhost.DecisionSent}
-	if len(lines) != 1 || lines[0] != want {
+	want := connectorhost.AuditEntry{Connector: "demo", Route: "GET " + b.host() + " /repos", Method: "GET", Host: b.host(), Path: "/repos/x", Query: "q=1", Status: 200, Size: 5, Decision: connectorhost.DecisionSent, Headers: []string{"Accept", "Authorization"}}
+	if len(lines) != 1 || !reflect.DeepEqual(lines[0], want) {
 		t.Fatalf("audit = %+v, want [%+v]", lines, want)
 	}
 	if strings.Contains(audit.String(), "s3cret") {
@@ -448,7 +449,7 @@ func TestNetworkFollowRedirectRouteFollowsOneUncredentialedHop(t *testing.T) {
 	target := newBackend(t, func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "log body") })
 	origin := redirectingOrigin(t, target.URL+"/blob?sig=abc")
 	var audit bytes.Buffer
-	n := netFor(origin, &audit, connectorhost.Route{Method: "GET", Host: origin.host(), Path: "/logs", FollowRedirect: true})
+	n := netFor(origin, &audit, connectorhost.Route{Method: "GET", Host: origin.host(), Path: "/logs", FollowRedirect: true, RequestHeaders: []string{"X-Guest"}})
 	raw := fmt.Sprintf(`{"method":"GET","url":"%s/logs/1","headers":{"X-Guest":"1","Accept":"text/plain"}}`, origin.URL)
 	status, body, err := n.Do(context.Background(), []byte(raw), 1<<10)
 	if err != nil || status != 200 || string(body) != "log body" {
@@ -674,7 +675,7 @@ func TestNetworkDoReturnsTheResponseHeaders(t *testing.T) {
 		w.Header().Set("X-OAuth-Scopes", "repo")
 		fmt.Fprint(w, "hello")
 	})
-	n := netFor(b, &bytes.Buffer{}, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
+	n := netFor(b, &bytes.Buffer{}, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos", ResponseHeaders: []string{"X-OAuth-Scopes"}})
 	raw := fmt.Sprintf(`{"method":"GET","url":"%s/repos/x"}`, b.URL)
 	_, _, h, err := n.DoHeader(context.Background(), []byte(raw), 1<<10)
 	if err != nil || h.Get("x-oauth-scopes") != "repo" {
@@ -700,7 +701,7 @@ func TestNetworkFollowRedirectHeadersAreTheHopsNotTheOrigins(t *testing.T) {
 		fmt.Fprint(w, "log body")
 	})
 	origin := redirectingOrigin(t, target.URL+"/blob")
-	n := netFor(origin, &bytes.Buffer{}, connectorhost.Route{Method: "GET", Host: origin.host(), Path: "/logs", FollowRedirect: true})
+	n := netFor(origin, &bytes.Buffer{}, connectorhost.Route{Method: "GET", Host: origin.host(), Path: "/logs", FollowRedirect: true, ResponseHeaders: []string{"X-Source"}})
 	raw := fmt.Sprintf(`{"method":"GET","url":"%s/logs/1"}`, origin.URL)
 	_, _, h, err := n.DoHeader(context.Background(), []byte(raw), 1<<10)
 	if err != nil || h.Get("X-Source") != "target" || h.Get("Location") != "" {

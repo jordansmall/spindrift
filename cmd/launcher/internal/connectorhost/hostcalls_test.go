@@ -35,7 +35,7 @@ func TestHostCallsWithholdSetCookie(t *testing.T) {
 		w.Header().Set("Set-Cookie", "session=s3cret")
 		w.Header().Set("X-OAuth-Scopes", "repo")
 	})
-	n := netFor(b, &bytes.Buffer{}, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
+	n := netFor(b, &bytes.Buffer{}, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos", ResponseHeaders: []string{"X-OAuth-Scopes"}})
 	raw := fmt.Sprintf(`{"method":"GET","url":"%s/repos"}`, b.URL)
 	_, _, hdr, err := connectorhost.NewHostCalls(n).HTTPRequest(context.Background(), []byte(raw), 1<<10)
 	if err != nil {

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -540,13 +541,13 @@ func TestUseSubstitutesTheConfiguredBaseURLIntoRoutes(t *testing.T) {
 				t.Fatal(err)
 			}
 			got, _ := backendrows.Lookup("site")
-			if len(got.Routes) != 2 || got.Routes[0] != tc.want || got.Routes[1] != getRepos {
+			if len(got.Routes) != 2 || !reflect.DeepEqual(got.Routes[0], tc.want) || !reflect.DeepEqual(got.Routes[1], getRepos) {
 				t.Errorf("Routes = %v, want [%v %v]", got.Routes, tc.want, getRepos)
 			}
-			if len(got.AcceptedRoutes) != 1 || got.AcceptedRoutes[0] != tc.want {
+			if len(got.AcceptedRoutes) != 1 || !reflect.DeepEqual(got.AcceptedRoutes[0], tc.want) {
 				t.Errorf("AcceptedRoutes = %v, want [%v]", got.AcceptedRoutes, tc.want)
 			}
-			if w := got.Widening(); len(w) != 1 || w[0] != getRepos {
+			if w := got.Widening(); len(w) != 1 || !reflect.DeepEqual(w[0], getRepos) {
 				t.Errorf("Widening() = %v, want only %v", w, getRepos)
 			}
 		})
@@ -656,7 +657,7 @@ func TestUseMapsARootBaseRouteToTheBarePrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := backendrows.Lookup("site")
-	if want := (connectorhost.Route{Method: "GET", Host: "acme.example.net", Path: "/jira"}); got.Routes[0] != want {
+	if want := (connectorhost.Route{Method: "GET", Host: "acme.example.net", Path: "/jira"}); !reflect.DeepEqual(got.Routes[0], want) {
 		t.Errorf("Routes[0] = %v, want %v", got.Routes[0], want)
 	}
 }
