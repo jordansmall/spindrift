@@ -57,7 +57,7 @@ func TestCallGuardsAgainstHostileGuest(t *testing.T) {
 		{"call loops", build(allocOff, respPtr, body(fnCall, append(loop, i64Const(0)...))), connectorhost.ErrBudget},
 		{"call grows memory past the cap", build(allocOff, respPtr, body(fnCall, append(grow(capPages+1), i64Const(respPtr)...))), connectorhost.ErrMemoryCap},
 	}
-	runCasesPerEngine(t, tests,
+	runCasesPerEngine(t, tests, true,
 		func(t *testing.T, ld loader, tc guardCase, budget time.Duration) {
 			c := loadWasmUsing(t, ld, tc.wasm)
 			var out int
