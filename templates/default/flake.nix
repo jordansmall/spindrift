@@ -319,7 +319,7 @@
             #   };
             #   # narrows this instance's slice of the tracker scope (ADR 0075): comma-joined kind=value pairs that must all match, e.g. label=orders-api; the flake option takes the same pairs as an attrset keyed by kind. Each kind must be one the configured ISSUE_TRACKER declares (lib/backends/<name>.nix routeKinds). Empty means no narrowing
             #   route = { };
-            #   # IssueTracker backend (ADR 0013): github (gh-exec, default), local (private Markdown + YAML frontmatter files; see LOCAL_ISSUES_DIR), jira (through the jira Connector's flake module; see JIRA_BASE_URL/JIRA_PROJECT_KEY), or forgejo (Forgejo/Gitea REST API adapter; Codeberg default via FORGEJO_BASE_URL; see FORGEJO_BASE_URL/FORGEJO_TOKEN); the Code Forge (PR/CI/merge) is selected independently by CODE_FORGE
+            #   # IssueTracker backend (ADR 0013): github (gh-exec, default), local (private Markdown + YAML frontmatter files; see LOCAL_ISSUES_DIR), jira (through the jira Connector, registered in spindrift.connectorData; see JIRA_BASE_URL/JIRA_PROJECT_KEY), or forgejo (Forgejo/Gitea REST API adapter; Codeberg default via FORGEJO_BASE_URL; see FORGEJO_BASE_URL/FORGEJO_TOKEN); the Code Forge (PR/CI/merge) is selected independently by CODE_FORGE
             #   tracker = "github";
             # };
             # END GENERATED SETTINGS EXAMPLE

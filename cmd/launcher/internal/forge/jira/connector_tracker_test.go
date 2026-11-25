@@ -71,8 +71,8 @@ func TestNoJiraRowIsAnActionableErrorNotANativeFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := newJiraTracker(t)
-	if err == nil || !strings.Contains(err.Error(), "flake module") || !strings.Contains(err.Error(), "JIRA_BASE_URL") {
-		t.Fatalf("err = %v, want one naming the Connector's flake module and a JIRA_BASE_URL", err)
+	if err == nil || !strings.Contains(err.Error(), "spindrift.connectorData") || !strings.Contains(err.Error(), "JIRA_BASE_URL") {
+		t.Fatalf("err = %v, want one naming the Connector's spindrift.connectorData and a JIRA_BASE_URL", err)
 	}
 }
 

@@ -177,8 +177,8 @@ func TestBuildDemandSources_JiraWithoutAConnectorRowHasNoSource(t *testing.T) {
 		t.Fatalf("sources = %v, want none", src)
 	}
 	for _, d := range []*dispatchkind.Descriptor{dispatchkind.Work, dispatchkind.Research} {
-		if got := missing[daemon.KindOf(d)]; !strings.Contains(got, "flake module") {
-			t.Errorf("%s missing reason = %q, want it to name the Connector's flake module", d.Name, got)
+		if got := missing[daemon.KindOf(d)]; !strings.Contains(got, "spindrift.connectorData") {
+			t.Errorf("%s missing reason = %q, want it to name the Connector's spindrift.connectorData", d.Name, got)
 		}
 	}
 }
