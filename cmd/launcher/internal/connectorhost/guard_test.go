@@ -34,11 +34,7 @@ func TestCallGuardsAgainstHostileGuest(t *testing.T) {
 	body := func(i int, b []byte) func([]guestFn) { return func(fns []guestFn) { fns[i].body = b } }
 	hs, all := connectorFns(nil, allocOff, respPtr)
 	seg := []dataSeg{{0, hs}, {respOff, []byte(resp)}}
-	tests := []struct {
-		name string
-		wasm []byte
-		want error // nil means the call must succeed
-	}{
+	tests := []guardCase{
 		{"well-formed", guestModule(nil, seg, all...), nil},
 		{"no call exports", guestModule(nil, seg, all[0]), connectorhost.ErrExport},
 		{"no connector_call", guestModule(nil, seg, all[:2]...), connectorhost.ErrExport},
@@ -61,41 +57,35 @@ func TestCallGuardsAgainstHostileGuest(t *testing.T) {
 		{"call loops", build(allocOff, respPtr, body(fnCall, append(loop, i64Const(0)...))), connectorhost.ErrBudget},
 		{"call grows memory past the cap", build(allocOff, respPtr, body(fnCall, append(grow(capPages+1), i64Const(respPtr)...))), connectorhost.ErrMemoryCap},
 	}
-	for engine, ld := range loadersFor(t) {
-		t.Run(engine, func(t *testing.T) {
-			for _, tc := range tests {
-				t.Run(tc.name, func(t *testing.T) {
-					budget := shortenBudgetIfExhausting(t, tc.want)
-					c := loadWasmUsing(t, ld, tc.wasm)
-					var out int
-					start := time.Now()
-					err := c.Call(context.Background(), "m", nil, &out)
-					if d := time.Since(start); d > budget+slack {
-						t.Errorf("Call took %v, want a prompt return", d)
-					}
-					if tc.want == nil {
-						if err != nil || out != 5 {
-							t.Fatalf("Call = %d, %v, want 5", out, err)
-						}
-						return
-					}
-					if !errors.Is(err, connectorhost.ErrCall) {
-						t.Fatalf("err = %v, want ErrCall", err)
-					}
-					assertOnlySentinel(t, err, tc.want)
-					again := c.Call(context.Background(), "m", nil, &out)
-					if tc.want == connectorhost.ErrExport {
-						// A missing export is the module's shape, not damage: it stays loaded.
-						if errors.Is(again, connectorhost.ErrUnusable) {
-							t.Errorf("a bad export closed the Connector")
-						}
-					} else if !errors.Is(again, connectorhost.ErrCall) || !errors.Is(again, connectorhost.ErrUnusable) {
-						t.Errorf("Call after the failure: err = %v, want ErrCall and ErrUnusable", again)
-					}
-				})
+	runCasesPerEngine(t, tests,
+		func(t *testing.T, ld loader, tc guardCase, budget time.Duration) {
+			c := loadWasmUsing(t, ld, tc.wasm)
+			var out int
+			start := time.Now()
+			err := c.Call(context.Background(), "m", nil, &out)
+			if d := time.Since(start); d > budget+slack {
+				t.Errorf("Call took %v, want a prompt return", d)
+			}
+			if tc.want == nil {
+				if err != nil || out != 5 {
+					t.Fatalf("Call = %d, %v, want 5", out, err)
+				}
+				return
+			}
+			if !errors.Is(err, connectorhost.ErrCall) {
+				t.Fatalf("err = %v, want ErrCall", err)
+			}
+			assertOnlySentinel(t, err, tc.want)
+			again := c.Call(context.Background(), "m", nil, &out)
+			if tc.want == connectorhost.ErrExport {
+				// A missing export is the module's shape, not damage: it stays loaded.
+				if errors.Is(again, connectorhost.ErrUnusable) {
+					t.Errorf("a bad export closed the Connector")
+				}
+			} else if !errors.Is(again, connectorhost.ErrCall) || !errors.Is(again, connectorhost.ErrUnusable) {
+				t.Errorf("Call after the failure: err = %v, want ErrCall and ErrUnusable", again)
 			}
 		})
-	}
 }
 
 // A Connector-reported error is an answer, not a failure: it wraps ErrCall
