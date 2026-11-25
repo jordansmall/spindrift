@@ -153,3 +153,14 @@ func TestNameUnownedWhenIdentityUnreadable(t *testing.T) {
 		t.Fatalf("owner = %q, %v", owner, ok)
 	}
 }
+
+func TestNameIsUniqueWithinOneTick(t *testing.T) {
+	at := time.Now()
+	a, b := Name(os.Getpid(), at), Name(os.Getpid(), at)
+	if a == b {
+		t.Fatalf("two sandboxes started in one tick share the name %q", a)
+	}
+	if _, _, ok := parseName(b); !ok {
+		t.Errorf("parseName(%q) rejects a generated name", b)
+	}
+}

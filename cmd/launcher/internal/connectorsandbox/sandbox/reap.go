@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -32,13 +33,28 @@ var ownerID = sync.OnceValues(func() (string, error) {
 	return hex.EncodeToString(sum[:])[:ownerLen], nil
 })
 
-// Name is a new sandbox's runtime name for the Launcher process pid.
+// lastNano is the latest nanosecond stamp Name issued.
+var lastNano atomic.Int64
+
+// Name is a new sandbox's runtime name for the Launcher process pid. A process
+// starts several sandboxes and a coarse clock can stamp two in one tick, so the
+// stamp is bumped past the last one issued.
 func Name(pid int, t time.Time) string {
 	owner, err := ownerID()
 	if err != nil {
 		owner = unowned
 	}
-	return sandboxName(owner, pid, t)
+	ns := t.UnixNano()
+	for {
+		last := lastNano.Load()
+		if ns <= last {
+			ns = last + 1
+		}
+		if lastNano.CompareAndSwap(last, ns) {
+			break
+		}
+	}
+	return sandboxName(owner, pid, time.Unix(0, ns))
 }
 
 // sandboxName is a sandbox's runtime name. It embeds the owning Launcher's pid
