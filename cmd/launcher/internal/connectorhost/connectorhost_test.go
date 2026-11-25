@@ -453,11 +453,7 @@ func grow(pages int32) []byte {
 const goodHandshake = `{"protocolVersion":"0.4.0","capabilities":["a"]}`
 
 func TestHostileConnectorFailsWithItsOwnNamedError(t *testing.T) {
-	tests := []struct {
-		name string
-		wasm []byte
-		want error
-	}{
+	tests := []handshakeCase{
 		{"loop", wasmModule(nil, []byte{i64}, append(loop, i64Const(0)...), true), connectorhost.ErrBudget},
 		{"unreachable", wasmModule(nil, []byte{i64}, []byte{unreachable}, true), connectorhost.ErrTrap},
 		{"memory grow past cap", wasmModule(nil, []byte{i64}, append(grow(capPages+1), handshakeAt(0, 1)...), true), connectorhost.ErrMemoryCap},
@@ -474,27 +470,21 @@ func TestHostileConnectorFailsWithItsOwnNamedError(t *testing.T) {
 		{"handshake with null capabilities", handshakeModule(`{"protocolVersion":"0.4.0","capabilities":null}`), connectorhost.ErrMalformedOutput},
 		{"JSON of the wrong shape", handshakeModule("[]"), connectorhost.ErrMalformedOutput},
 	}
-	for engine, ld := range loadersFor(t) {
-		t.Run(engine, func(t *testing.T) {
-			for _, tc := range tests {
-				t.Run(tc.name, func(t *testing.T) {
-					budget := shortenBudgetIfExhausting(t, tc.want)
-					start := time.Now()
-					c, err := ld(context.Background(), tc.wasm)
-					if c != nil {
-						_ = c.Close(context.Background())
-					}
-					if d := time.Since(start); d > connectorhost.InitBudget+budget+slack {
-						t.Fatalf("Load took %v with no caller deadline", d)
-					}
-					if !errors.Is(err, connectorhost.ErrHandshake) {
-						t.Errorf("err = %v, want ErrHandshake", err)
-					}
-					assertOnlySentinel(t, err, tc.want)
-				})
+	runCasesPerEngine(t, tests,
+		func(t *testing.T, ld loader, tc handshakeCase, budget time.Duration) {
+			start := time.Now()
+			c, err := ld(context.Background(), tc.wasm)
+			if c != nil {
+				_ = c.Close(context.Background())
 			}
+			if d := time.Since(start); d > connectorhost.InitBudget+budget+slack {
+				t.Fatalf("Load took %v with no caller deadline", d)
+			}
+			if !errors.Is(err, connectorhost.ErrHandshake) {
+				t.Errorf("err = %v, want ErrHandshake", err)
+			}
+			assertOnlySentinel(t, err, tc.want)
 		})
-	}
 }
 
 func TestCallerDeadlineIsNotABudgetOverrun(t *testing.T) {

@@ -15,30 +15,84 @@ func useShortCallBudget(t *testing.T) {
 	t.Cleanup(connectorhost.SetCallBudget(connectorhost.ShortCallBudget))
 }
 
-// shortenBudgetIfExhausting lowers the call budget (until t ends) for a case
-// that must exhaust it, so the test does not wait out the production budget,
-// and returns the budget in force. Other cases keep the production budget,
-// which leaves their legitimate work room on a loaded runner. Those other
-// cases touch no process-global state, so they run in parallel: the budget
-// cases go first and restore the budget before any parallel sibling resumes.
-func shortenBudgetIfExhausting(t *testing.T, want error) time.Duration {
+// engineCase is a runCasesPerEngine case: its subtest name, and the error its
+// call must fail with (nil for none), which sorts it into a group.
+type engineCase interface {
+	caseName() string
+	wantErr() error
+}
+
+type hostileCase struct {
+	fixture string
+	want    error
+}
+
+func (c hostileCase) caseName() string { return c.fixture }
+func (c hostileCase) wantErr() error   { return c.want }
+
+type handshakeCase struct {
+	name string
+	wasm []byte
+	want error
+}
+
+func (c handshakeCase) caseName() string { return c.name }
+func (c handshakeCase) wantErr() error   { return c.want }
+
+type guardCase struct {
+	name string
+	wasm []byte
+	want error // nil means the call must succeed
+}
+
+func (c guardCase) caseName() string { return c.name }
+func (c guardCase) wantErr() error   { return c.want }
+
+// runCasesPerEngine runs every case under every engine, in two serial groups
+// so no case sees a budget it did not ask for. "budget" holds the cases that
+// expect ErrBudget: it lowers the call budget to ShortCallBudget, and its
+// engines and cases run in parallel so the kills overlap instead of queueing.
+// "production" holds the rest under the production budget, which leaves their
+// legitimate work room on a loaded runner; they touch no process-global state,
+// so they run in parallel too.
+//
+// The budget is written only on the budget group's own goroutine. Go resumes a
+// group's parallel children after its body returns, and a serial t.Run returns
+// only once those children and the group's Cleanup (the restore) are done, so
+// "production" starts after "budget" has fully ended.
+func runCasesPerEngine[C engineCase](t *testing.T, cases []C, run func(t *testing.T, ld loader, c C, budget time.Duration)) {
 	t.Helper()
-	if !errors.Is(want, connectorhost.ErrBudget) {
-		t.Parallel()
-		return connectorhost.CallBudget
+	loaders := loadersFor(t)
+	runGroup := func(label string, budget time.Duration, exhausts bool) {
+		t.Run(label, func(t *testing.T) {
+			if exhausts {
+				useShortCallBudget(t)
+			}
+			for engine, ld := range loaders {
+				t.Run(engine, func(t *testing.T) {
+					t.Parallel()
+					for _, tc := range cases {
+						if errors.Is(tc.wantErr(), connectorhost.ErrBudget) != exhausts {
+							continue
+						}
+						t.Run(tc.caseName(), func(t *testing.T) {
+							t.Parallel()
+							run(t, ld, tc, budget)
+						})
+					}
+				})
+			}
+		})
 	}
-	useShortCallBudget(t)
-	return connectorhost.ShortCallBudget
+	runGroup("budget", connectorhost.ShortCallBudget, true)
+	runGroup("production", connectorhost.CallBudget, false)
 }
 
 // The hostile fixtures are real Go-built Connectors whose connector_call
 // misbehaves as named; each must fail closed without taking the host down or
 // hanging the caller.
 func TestHostileFixtureConnectorsFailClosed(t *testing.T) {
-	tests := []struct {
-		fixture string
-		want    error
-	}{
+	tests := []hostileCase{
 		{"hostile-loop.wasm", connectorhost.ErrBudget},
 		{"hostile-trap.wasm", connectorhost.ErrTrap},
 		{"hostile-memory.wasm", connectorhost.ErrMemoryCap},
@@ -46,40 +100,34 @@ func TestHostileFixtureConnectorsFailClosed(t *testing.T) {
 		{"hostile-malformed.wasm", connectorhost.ErrMalformedOutput},
 		{"hostile-invalid.wasm", connectorhost.ErrMalformedOutput},
 	}
-	for engine, ld := range loadersFor(t) {
-		t.Run(engine, func(t *testing.T) {
-			for _, tc := range tests {
-				t.Run(tc.fixture, func(t *testing.T) {
-					budget := shortenBudgetIfExhausting(t, tc.want)
-					c, err := loadUsing(t, ld, tc.fixture)
-					if err != nil {
-						t.Fatalf("Load: %v", err)
-					}
-					start := time.Now()
-					err = c.Call(context.Background(), "misbehave", nil, nil)
-					if d := time.Since(start); d > budget+slack {
-						t.Errorf("Call took %v, want a prompt return", d)
-					}
-					if !errors.Is(err, connectorhost.ErrCall) {
-						t.Errorf("err = %v, want ErrCall", err)
-					}
-					assertOnlySentinel(t, err, tc.want)
-					if err := c.Call(context.Background(), "misbehave", nil, nil); !errors.Is(err, connectorhost.ErrUnusable) {
-						t.Errorf("Call after the failure: err = %v, want ErrUnusable", err)
-					}
-					// The host survives: a fresh well-behaved Connector still works.
-					good, err := loadUsing(t, ld, "call.wasm")
-					if err != nil {
-						t.Fatalf("Load after the hostile call: %v", err)
-					}
-					var out string
-					if err := good.Call(context.Background(), "echo", "ok", &out); err != nil || out != "ok" {
-						t.Errorf("good Connector echo = %q, %v", out, err)
-					}
-				})
+	runCasesPerEngine(t, tests,
+		func(t *testing.T, ld loader, tc hostileCase, budget time.Duration) {
+			c, err := loadUsing(t, ld, tc.fixture)
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			start := time.Now()
+			err = c.Call(context.Background(), "misbehave", nil, nil)
+			if d := time.Since(start); d > budget+slack {
+				t.Errorf("Call took %v, want a prompt return", d)
+			}
+			if !errors.Is(err, connectorhost.ErrCall) {
+				t.Errorf("err = %v, want ErrCall", err)
+			}
+			assertOnlySentinel(t, err, tc.want)
+			if err := c.Call(context.Background(), "misbehave", nil, nil); !errors.Is(err, connectorhost.ErrUnusable) {
+				t.Errorf("Call after the failure: err = %v, want ErrUnusable", err)
+			}
+			// The host survives: a fresh well-behaved Connector still works.
+			good, err := loadUsing(t, ld, "call.wasm")
+			if err != nil {
+				t.Fatalf("Load after the hostile call: %v", err)
+			}
+			var out string
+			if err := good.Call(context.Background(), "echo", "ok", &out); err != nil || out != "ok" {
+				t.Errorf("good Connector echo = %q, %v", out, err)
 			}
 		})
-	}
 }
 
 // Err is how a caller whose API has no error return (a Decoder) learns that the
