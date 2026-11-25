@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/x/term"
 
+	"spindrift.dev/launcher/internal/connectorruntime"
 	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers
 )
 
@@ -101,9 +102,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	connectors := connectorruntime.FromRegistries()
 	interactive := term.IsTerminal(os.Stdin.Fd())
 
-	if err := runQuickstart(dir, hostEnvironment{}, hostCommandRunner{}, buildForge, os.Stdout, os.Stdin, interactive, *force); err != nil {
+	err = runQuickstart(connectors, dir, hostEnvironment{}, hostCommandRunner{}, buildForge, os.Stdout, os.Stdin, interactive, *force)
+	_ = connectors.Close() // os.Exit skips defers
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "quickstart: %s\n", err)
 		os.Exit(1)
 	}

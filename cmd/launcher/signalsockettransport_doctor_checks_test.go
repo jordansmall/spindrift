@@ -244,7 +244,7 @@ func TestDoctorCheckSets_UnsetCarrierIncludesSignalSocketTransportRow(t *testing
 	withRegistryProxyTransportFake(t, fake)
 
 	c := minimalValidConfig()
-	c.SignalCarrier = loadConfig().SignalCarrier
+	c.SignalCarrier = loadConfig(nil).SignalCarrier
 
 	classify, report := doctorCheckSets(c)
 	checkByName(t, report, signalSocketTransportCheckName)

@@ -38,7 +38,7 @@ func newTrackerHarness(t *testing.T) trackerHarness {
 	t.Helper()
 	h := newConnectorHarness(t, true)
 	useForgejoRow(t, h.srv.URL, func(*backendrows.Row) {})
-	tr, err := buildTracker(h.srv)
+	tr, err := buildTracker(t, h.srv)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +262,7 @@ func TestConnectorTracker_IssueRouteNarrowsReadsAndFilesWithItsLabel(t *testing.
 
 	tr, err := forgejo.Strategy.NewIssueTracker(backendkit.Shared{
 		RepoSlug: connectorRepo, Labels: testLabels, VerdictLabels: forge.ResearchVerdictLabels(),
-		Route: forge.Route{{Kind: "label", Value: routeLabel}},
+		Route: forge.Route{{Kind: "label", Value: routeLabel}}, Connectors: newRuntime(t),
 	}, mapLookup(map[string]string{forgejo.ForgejoBaseURLEnv: w.srv.URL, forgejo.ForgejoTokenEnv: connectorToken}))
 	if err != nil {
 		t.Fatal(err)

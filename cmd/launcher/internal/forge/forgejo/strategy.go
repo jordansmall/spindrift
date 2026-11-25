@@ -8,6 +8,7 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorforge"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/gitexec"
 	"spindrift.dev/launcher/internal/gitremote"
@@ -30,6 +31,9 @@ var Strategy = backendkit.Strategy{
 		k, err := ReadKnobs(l)
 		if err != nil {
 			return nil, err
+		}
+		if s.Connectors == nil {
+			return nil, fmt.Errorf("forgejo: %w", connectorruntime.ErrNoRuntime)
 		}
 		row, err := connectorRow()
 		if err != nil {

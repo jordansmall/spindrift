@@ -57,7 +57,7 @@ func TestRowKnobsKeysAreDeclaredByARow(t *testing.T) {
 func TestKnobLookup_ServesPodmanNetwork(t *testing.T) {
 	setKnob(t, "PODMAN_NETWORK", "pasta")
 
-	if v, _ := loadConfig().knobLookup("PODMAN_NETWORK"); v != "pasta" {
+	if v, _ := loadConfig(nil).knobLookup("PODMAN_NETWORK"); v != "pasta" {
 		t.Errorf("PODMAN_NETWORK knob = %q, want pasta", v)
 	}
 }

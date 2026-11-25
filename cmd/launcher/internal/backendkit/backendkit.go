@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/gitexec"
@@ -42,6 +43,8 @@ type Shared struct {
 	// Tracker is the tracker instance being built: the research instance rides
 	// the label lifecycle only (jira's status mapping is work-only, issue #4919).
 	Tracker dispatchkind.Tracker
+	// Connectors hosts the Connectors a backend factory builds its trackers on.
+	Connectors *connectorruntime.Runtime
 }
 
 // LedgerSite is where a butler Ledger lives. A hosted forge names a URL (with

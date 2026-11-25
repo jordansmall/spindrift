@@ -19,6 +19,9 @@ import (
 	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectorrecord"
+	"spindrift.dev/launcher/internal/connectorruntime"
+	"spindrift.dev/launcher/internal/connectorsandbox"
+	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgejo"
@@ -211,7 +214,7 @@ func TestPlainRow_BuildsTheConnectorForgeAndTracker(t *testing.T) {
 	if _, err := buildForge(srv, ""); err != nil {
 		t.Fatal(err)
 	}
-	tr, err := buildTracker(srv)
+	tr, err := buildTracker(t, srv)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +236,7 @@ func TestNoConnectorRow_RefusesTheCodeForgeAndTheTracker(t *testing.T) {
 	if !errors.Is(err, forgejo.ErrNoConnectorRow) || cf != nil {
 		t.Errorf("buildForge = (%v, %v), want (nil, ErrNoConnectorRow)", cf, err)
 	}
-	tr, err := buildTracker(srv)
+	tr, err := buildTracker(t, srv)
 	if !errors.Is(err, forgejo.ErrNoConnectorRow) || tr != nil {
 		t.Errorf("buildTracker = (%v, %v), want (nil, ErrNoConnectorRow)", tr, err)
 	}
@@ -253,7 +256,7 @@ func TestPlainRow_PlaintextBaseNamesTheBase(t *testing.T) {
 	if !strings.Contains(err.Error(), "must be an https URL") || !strings.Contains(err.Error(), forgejo.ForgejoBaseURLEnv) {
 		t.Errorf("err = %q, want it to say %s must be an https URL", err, forgejo.ForgejoBaseURLEnv)
 	}
-	tr, err := buildTracker(srv)
+	tr, err := buildTracker(t, srv)
 	if !errors.Is(err, forgejo.ErrNoConnectorRow) || tr != nil || !strings.Contains(err.Error(), "must be an https URL") {
 		t.Errorf("buildTracker = (%v, %v), want (nil, ErrNoConnectorRow naming the base)", tr, err)
 	}
@@ -320,10 +323,41 @@ func TestConnectorForge_SelfHostedUnderASubpath(t *testing.T) {
 	}
 }
 
+// newRuntime is the Connector runtime over the rows the test applied and the
+// sandbox TestMain installed, closed with the test.
+func newRuntime(t *testing.T) *connectorruntime.Runtime {
+	t.Helper()
+	rt := connectorruntime.FromRegistries()
+	t.Cleanup(func() { _ = rt.Close() })
+	return rt
+}
+
 // buildTracker runs the production constructor for the issue tracker.
-func buildTracker(srv *httptest.Server) (forge.IssueTracker, error) {
+func buildTracker(t *testing.T, srv *httptest.Server) (forge.IssueTracker, error) {
+	t.Helper()
+	return buildTrackerOn(newRuntime(t), srv)
+}
+
+func buildTrackerOn(rt *connectorruntime.Runtime, srv *httptest.Server) (forge.IssueTracker, error) {
 	l := mapLookup(map[string]string{forgejo.ForgejoBaseURLEnv: srv.URL, forgejo.ForgejoTokenEnv: connectorToken})
-	return forgejo.Strategy.NewIssueTracker(backendkit.Shared{RepoSlug: connectorRepo, Labels: testLabels, VerdictLabels: forge.ResearchVerdictLabels()}, l)
+	return forgejo.Strategy.NewIssueTracker(backendkit.Shared{RepoSlug: connectorRepo, Labels: testLabels, VerdictLabels: forge.ResearchVerdictLabels(), Connectors: rt}, l)
+}
+
+// strippedSandbox loads every Connector with the capabilities of drop removed
+// from its handshake, and keeps what it loaded.
+type strippedSandbox struct {
+	connectorsandbox.Loader
+	drop   []string
+	loaded []*connectorhost.Connector
+}
+
+func (s *strippedSandbox) LoadNetwork(ctx context.Context, wasm []byte, n connectorhost.Network) (*connectorhost.Connector, error) {
+	c, err := s.Loader.LoadNetwork(ctx, wasm, n)
+	if err == nil {
+		c.Capabilities = slices.DeleteFunc(slices.Clone(c.Capabilities), func(cap string) bool { return slices.Contains(s.drop, cap) })
+		s.loaded = append(s.loaded, c)
+	}
+	return c, err
 }
 
 // A Connector that fails to load fails the tracker's construction with its
@@ -334,25 +368,10 @@ func TestConnectorTracker_LoadFailureFailsConstruction(t *testing.T) {
 	useForgejoRow(t, srv.URL, func(r *backendrows.Row) { r.Module = filepath.Join(t.TempDir(), "absent.wasm") })
 	t.Chdir(t.TempDir())
 
-	tr, err := buildTracker(srv)
+	tr, err := buildTracker(t, srv)
 
 	if err == nil || !strings.Contains(err.Error(), "read module") || tr != nil {
 		t.Errorf("buildTracker = (%v, %v), want (nil, the module read error)", tr, err)
-	}
-}
-
-func TestConnectorTracker_LoadErrorIsReturnedAsIs(t *testing.T) {
-	boom := errors.New("connector would not load")
-	srv := httptest.NewTLSServer(nil)
-	t.Cleanup(srv.Close)
-	useForgejoRow(t, srv.URL, func(*backendrows.Row) {})
-	t.Cleanup(forgejo.SetLoadRowConnector(func(context.Context, backendrows.Row, backendrows.Options) (*connectorhost.Connector, error) {
-		return nil, boom
-	}))
-	t.Chdir(t.TempDir())
-
-	if tr, err := buildTracker(srv); !errors.Is(err, boom) || tr != nil {
-		t.Errorf("buildTracker = (%v, %v), want (nil, the load error)", tr, err)
 	}
 }
 
@@ -363,27 +382,23 @@ func TestConnectorTracker_RefusesAConnectorMissingACapability(t *testing.T) {
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
 	useForgejoRow(t, srv.URL, func(*backendrows.Row) {})
-	var loaded *connectorhost.Connector
-	t.Cleanup(forgejo.SetLoadRowConnector(func(ctx context.Context, row backendrows.Row, o backendrows.Options) (*connectorhost.Connector, error) {
-		c, err := backendrows.Load(ctx, row, o)
-		if err == nil {
-			c.Capabilities = slices.DeleteFunc(slices.Clone(c.Capabilities), func(cap string) bool {
-				return cap == connectortracker.CapLabeled || cap == connectortracker.CapProbe
-			})
-			loaded = c
-		}
-		return c, err
-	}))
+	row, ok := backendrows.Lookup("forgejo")
+	if !ok {
+		t.Fatal("no forgejo row")
+	}
+	sb := &strippedSandbox{Loader: connectorsandboxtest.InProcess(), drop: []string{connectortracker.CapLabeled, connectortracker.CapProbe}}
+	rt := connectorruntime.New([]backendrows.Row{row}, sb)
+	t.Cleanup(func() { _ = rt.Close() })
 	t.Setenv(connectorCredentialEnv, connectorToken)
 	t.Cleanup(forgejo.SetConnectorClient(srv.Client()))
 	t.Chdir(t.TempDir())
 
-	tr, err := buildTracker(srv)
+	tr, err := buildTrackerOn(rt, srv)
 
 	if err == nil || !strings.Contains(err.Error(), "forgejo Connector lacks required capabilities: tracker.probe, tracker.labeled") || tr != nil {
 		t.Errorf("buildTracker = (%v, %v), want (nil, the missing capabilities named)", tr, err)
 	}
-	if loaded == nil || !errors.Is(loaded.Call(context.Background(), connectortracker.CapProbe, struct{}{}, &struct{}{}), connectorhost.ErrUnusable) {
+	if len(sb.loaded) != 1 || !errors.Is(sb.loaded[0].Call(context.Background(), connectortracker.CapProbe, struct{}{}, &struct{}{}), connectorhost.ErrUnusable) {
 		t.Error("the refused Connector was left open")
 	}
 }
@@ -401,7 +416,7 @@ func TestConnectorTracker_RefusedRouteFailsTheOperation(t *testing.T) {
 	t.Cleanup(forgejo.SetConnectorClient(srv.Client()))
 	t.Chdir(t.TempDir())
 
-	tr, err := buildTracker(srv)
+	tr, err := buildTracker(t, srv)
 	if err != nil {
 		t.Fatal(err)
 	}

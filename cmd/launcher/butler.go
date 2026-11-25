@@ -12,6 +12,7 @@ import (
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/butler"
 	"spindrift.dev/launcher/internal/chore"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkind"
@@ -367,13 +368,13 @@ func cmdButler(lc *launchContext, choreName string, stderr io.Writer) int {
 
 // butlerVerbHandler is verbHandlers["butler"]'s body, split out so its own
 // flag-parsing errors are testable without going through bootstrap.
-func butlerVerbHandler(args []string, stdout, stderr io.Writer) int {
+func butlerVerbHandler(connectors *connectorruntime.Runtime, args []string, stdout, stderr io.Writer) int {
 	choreName, noBuild, err := parseButlerArgs(args)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return int(exitcode.Failed)
 	}
-	lc, err := bootstrap(stdout, !noBuild, dispatchkind.Butler, false)
+	lc, err := bootstrap(connectors, stdout, !noBuild, dispatchkind.Butler, false)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return bootstrapExitCode(err)

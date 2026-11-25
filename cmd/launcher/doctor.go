@@ -10,6 +10,7 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/chore"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/exitcode"
@@ -21,9 +22,9 @@ import (
 // to rather than the IssueTracker's repo again. Needing no runner, dispatch or
 // settle wiring, it builds its own via newReadContext (issue #2941), not
 // bootstrap. opts.interactive is always overwritten from the stdin TTY probe.
-func cmdDoctor(opts doctorOptions, stdout, stderr io.Writer) int {
+func cmdDoctor(connectors *connectorruntime.Runtime, opts doctorOptions, stdout, stderr io.Writer) int {
 	// doctor never dispatches, so it carries no dispatch kind (issue #2944).
-	rc, err := newReadContext(nil, false)
+	rc, err := newReadContext(connectors, nil, false)
 	var unregistered *unregisteredBackendError
 	if errors.As(err, &unregistered) {
 		return doctorUnbuildableReport(rc, unregistered, stderr, opts)

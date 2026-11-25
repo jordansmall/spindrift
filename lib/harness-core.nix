@@ -77,6 +77,7 @@ let
     "connectorcall"
     "connectorforge"
     "connectorrecord"
+    "connectorruntime"
     "connectortracker"
     "dedupmarker"
     "flock"

@@ -706,7 +706,7 @@ func TestRunDoctor_ReportsRecoverKind(t *testing.T) {
 // nothing, so an unbuildable config never prints a nil error or exits 0.
 func TestDoctorUnbuildableReport_UnregisteredErrorStandsInForCleanValidation(t *testing.T) {
 	setFullyLocalEnv(t)
-	rc, err := newReadContext(nil, false)
+	rc, err := newReadContext(nil, nil, false)
 	if err != nil {
 		t.Fatalf("newReadContext: %v", err)
 	}
@@ -737,7 +737,7 @@ func TestCmdDoctor_UnregisteredBackend_ExitsTwoWithFullConfigReport(t *testing.T
 			setKnob(t, "MERGE_MODE", "bogus")
 
 			var stdout, stderr bytes.Buffer
-			got := cmdDoctor(doctorOptions{}, &stdout, &stderr)
+			got := cmdDoctor(nil, doctorOptions{}, &stdout, &stderr)
 
 			if got != 2 {
 				t.Errorf("cmdDoctor = %d, want 2; stderr: %q", got, stderr.String())

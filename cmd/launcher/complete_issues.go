@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -24,8 +25,8 @@ func printCompletionIssues(w io.Writer, it forge.IssueTracker, timeout time.Dura
 // cmdCompleteIssues runs the `__complete-issues` hidden subcommand that the
 // bash/zsh/fish completion renderers shell out to (issue #556). It always exits
 // 0 and never writes to stderr: a diagnostic has nowhere to surface mid-<TAB>.
-func cmdCompleteIssues() int {
-	c := loadConfig()
+func cmdCompleteIssues(connectors *connectorruntime.Runtime) int {
+	c := loadConfig(connectors)
 	if checkBackendsRegistered(c) != nil {
 		return 0
 	}

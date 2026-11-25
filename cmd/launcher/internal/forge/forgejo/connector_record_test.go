@@ -46,7 +46,7 @@ func TestConnectorTracker_FailedCallIsRecordedByMethod(t *testing.T) {
 	t.Setenv(connectorCredentialEnv, connectorToken)
 	t.Cleanup(forgejo.SetConnectorClient(srv.Client()))
 	t.Chdir(t.TempDir())
-	tr, err := buildTracker(srv)
+	tr, err := buildTracker(t, srv)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestConnectorTracker_LoadFailureIsRecorded(t *testing.T) {
 	useForgejoRow(t, srv.URL, func(r *backendrows.Row) { r.Module = filepath.Join(t.TempDir(), "missing.wasm") })
 	t.Chdir(t.TempDir())
 
-	if _, err := buildTracker(srv); err == nil {
+	if _, err := buildTracker(t, srv); err == nil {
 		t.Fatal("want the load error")
 	}
 

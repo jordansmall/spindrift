@@ -17,6 +17,7 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatch"
@@ -60,6 +61,10 @@ type config struct {
 	// artifacts is the Launcher input document's artifacts section, handed whole
 	// to the selected runner family, which reads only its own part.
 	artifacts inputdoc.Artifacts
+
+	// connectors is the runtime a Connector-routed backend factory builds its
+	// tracker over; nil in a test that builds no Connector-routed tracker.
+	connectors *connectorruntime.Runtime
 
 	// imageTag/flakeImageAttr are the only artifacts core reads itself
 	// (freshness probe, preview, hot-swap), so loadConfig copies them out of
@@ -233,7 +238,7 @@ func newIssue(fi forge.Issue) issue {
 	return issue{number: fi.Number, title: fi.Title, priority: fi.Priority}
 }
 
-func loadConfig() config {
+func loadConfig(connectors *connectorruntime.Runtime) config {
 	sc := loadSchemaConfig()
 
 	art := docArtifacts()
@@ -248,8 +253,9 @@ func loadConfig() config {
 	driver, _ := resolveDriver()
 
 	cfg := config{
-		Knobs:     sc,
-		artifacts: art,
+		Knobs:      sc,
+		connectors: connectors,
+		artifacts:  art,
 
 		flakeLauncherAttr:  shared.FlakeLauncherAttr.String(),
 		loadedLauncherHash: shared.LauncherCurrencyHash.String(),
@@ -925,8 +931,8 @@ func toWaveIssues(issues []issue) []waves.Issue {
 }
 
 // build realizes the sandbox image or store closures without running any agent.
-func build() error {
-	c := loadConfig()
+func build(connectors *connectorruntime.Runtime) error {
+	c := loadConfig(connectors)
 	if c.runtime == "" {
 		return fmt.Errorf("RUNTIME is not set")
 	}
@@ -1819,8 +1825,8 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 
 // cmdBuild is the `build` subcommand: realize the sandbox image or store
 // closures without running any agent.
-func cmdBuild(stderr io.Writer) int {
-	if err := build(); err != nil {
+func cmdBuild(connectors *connectorruntime.Runtime, stderr io.Writer) int {
+	if err := build(connectors); err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
 	}
@@ -1884,8 +1890,8 @@ func cmdRecoverQueue(lc *launchContext, stdout, stderr io.Writer) int {
 
 // cmdPreview is the `preview` subcommand: report what dispatch would do
 // without launching any Box.
-func cmdPreview(stdout, stderr io.Writer, issueNums []string) int {
-	if err := preview(stdout, issueNums); err != nil {
+func cmdPreview(connectors *connectorruntime.Runtime, stdout, stderr io.Writer, issueNums []string) int {
+	if err := preview(connectors, stdout, issueNums); err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
 	}
@@ -1996,25 +2002,29 @@ func cmdDispatch(lc *launchContext, stdout, stderr io.Writer) int {
 //   - dispatchConfig.ResolveEnv's BASE_BRANCH diagnostics: os.Stdout
 //   - doctor's interactive input and selective dispatch's confirm prompt:
 //     os.Stdin
-type verbHandler func(args []string, stdout, stderr io.Writer) int
+type verbHandler func(connectors *connectorruntime.Runtime, args []string, stdout, stderr io.Writer) int
 
 // verbHandlers is the single source of truth for which subcommands exist
 // (issue #1574); a test enumerates its keys. The hidden __complete-issues
 // and daemon.LateMergeSweepVerb verbs stay out of it and are dispatched ahead
 // of the table lookup, since neither is a documented verb.
 var verbHandlers = map[string]verbHandler{
-	"build": func(args []string, stdout, stderr io.Writer) int { return cmdBuild(stderr) },
-	"doctor": func(args []string, stdout, stderr io.Writer) int {
+	"build": func(connectors *connectorruntime.Runtime, args []string, stdout, stderr io.Writer) int {
+		return cmdBuild(connectors, stderr)
+	},
+	"doctor": func(connectors *connectorruntime.Runtime, args []string, stdout, stderr io.Writer) int {
 		opts, bad, ok := doctorFlagArgs(args)
 		if !ok {
 			fmt.Fprintf(stderr, "unrecognized argument: %s\n", bad)
 			fmt.Fprintln(stderr, subcommandUsage("doctor"))
 			return 1
 		}
-		return cmdDoctor(opts, stdout, stderr)
+		return cmdDoctor(connectors, opts, stdout, stderr)
 	},
-	"reconcile": func(args []string, stdout, stderr io.Writer) int { return cmdReconcile(stdout, stderr) },
-	"recover": func(args []string, stdout, stderr io.Writer) int {
+	"reconcile": func(connectors *connectorruntime.Runtime, args []string, stdout, stderr io.Writer) int {
+		return cmdReconcile(connectors, stdout, stderr)
+	},
+	"recover": func(connectors *connectorruntime.Runtime, args []string, stdout, stderr io.Writer) int {
 		// noBuild and yes are dispatch/research knobs recover has no use for.
 		// remaining is used unfiltered, since recover's non-numeric IDs must
 		// survive; see parseIssuePositionals in flags.go.
@@ -2023,7 +2033,7 @@ var verbHandlers = map[string]verbHandler{
 			fmt.Fprintln(stderr, "flag --self-contained is only valid for the research subcommand")
 			return 1
 		}
-		lc, err := bootstrap(stdout, true, dispatchkind.Work, false)
+		lc, err := bootstrap(connectors, stdout, true, dispatchkind.Work, false)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
 			if len(parsed.remaining) < 1 {
@@ -2036,20 +2046,20 @@ var verbHandlers = map[string]verbHandler{
 		}
 		return cmdRecover(lc, parsed.remaining[0], stdout, stderr)
 	},
-	"preview": func(args []string, stdout, stderr io.Writer) int {
+	"preview": func(connectors *connectorruntime.Runtime, args []string, stdout, stderr io.Writer) int {
 		// remaining is the issue-ID list, unfiltered (issue #3054, #3055).
 		// Unlike dispatch and recover, preview ignores --self-contained rather
 		// than rejecting it, matching its earlier behavior.
 		parsed := parseIssuePositionals(args)
-		return cmdPreview(stdout, stderr, parsed.remaining)
+		return cmdPreview(connectors, stdout, stderr, parsed.remaining)
 	},
-	"dispatch": func(args []string, stdout, stderr io.Writer) int {
+	"dispatch": func(connectors *connectorruntime.Runtime, args []string, stdout, stderr io.Writer) int {
 		parsed := parseIssuePositionals(args)
 		if parsed.selfContained {
 			fmt.Fprintln(stderr, "flag --self-contained is only valid for the research subcommand")
 			return 1
 		}
-		lc, err := bootstrap(stdout, !parsed.noBuild, dispatchkind.Work, false)
+		lc, err := bootstrap(connectors, stdout, !parsed.noBuild, dispatchkind.Work, false)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
 			return bootstrapExitCode(err)
@@ -2059,9 +2069,9 @@ var verbHandlers = map[string]verbHandler{
 		}
 		return cmdDispatch(lc, stdout, stderr)
 	},
-	"research": func(args []string, stdout, stderr io.Writer) int {
+	"research": func(connectors *connectorruntime.Runtime, args []string, stdout, stderr io.Writer) int {
 		parsed := parseIssuePositionals(args)
-		lc, err := bootstrap(stdout, !parsed.noBuild, dispatchkind.Research, parsed.selfContained)
+		lc, err := bootstrap(connectors, stdout, !parsed.noBuild, dispatchkind.Research, parsed.selfContained)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
 			return bootstrapExitCode(err)
@@ -2074,7 +2084,7 @@ var verbHandlers = map[string]verbHandler{
 	"butler":        butlerVerbHandler,
 	"stats":         cmdStats,
 	"shadow-replay": cmdShadowReplay,
-	"registry": func(args []string, stdout, stderr io.Writer) int {
+	"registry": func(connectors *connectorruntime.Runtime, args []string, stdout, stderr io.Writer) int {
 		if len(args) == 0 || args[0] != "discover" {
 			fmt.Fprintln(stderr, subcommandUsage("registry"))
 			return 1
@@ -2203,6 +2213,8 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return configErrorCode(verb, int(exitcode.ConfigInvalid))
 	}
 	launcherInput = resolved
+	connectors := connectorruntime.FromRegistries()
+	defer func() { _ = connectors.Close() }()
 	// Both run after launcherInput is in place: CODE_FORGE and ISSUE_TRACKER may
 	// be set through the document alone.
 	if err := applyRowCredentials(); err != nil {
@@ -2221,13 +2233,13 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if verb == "__complete-issues" {
-		return cmdCompleteIssues()
+		return cmdCompleteIssues(connectors)
 	}
 	if verb == daemon.LateMergeSweepVerb {
-		return sandboxVerdict(cmdLateMergeSweep(stdout, stderr), stderr)
+		return sandboxVerdict(cmdLateMergeSweep(connectors, stdout, stderr), stderr)
 	}
 	if handler, ok := verbHandlers[verb]; ok {
-		return sandboxVerdict(handler(rest, stdout, stderr), stderr)
+		return sandboxVerdict(handler(connectors, rest, stdout, stderr), stderr)
 	}
 	// Unrecognized subcommand prints help rather than dispatching (issue #555).
 	fmt.Fprintf(stderr, "unknown subcommand: %s\n\n", verb)

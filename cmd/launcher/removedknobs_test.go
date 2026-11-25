@@ -125,7 +125,7 @@ func TestValidate_RejectsReadWriteBoxAccess(t *testing.T) {
 	for name, set := range cases {
 		t.Run(name, func(t *testing.T) {
 			set(t)
-			c := loadConfig()
+			c := loadConfig(nil)
 			c.runtime = "echo"
 			c.GhToken, c.RepoSlug, c.GitUserName, c.GitUserEmail = "ghp_test", "owner/repo", "bot", "bot@example.com"
 			assertReadWriteRemovedErr(t, validate(c))
@@ -139,7 +139,7 @@ func TestValidate_RejectsReadWriteBoxAccess(t *testing.T) {
 func TestValidateConfig_ReportsInvalidChoiceFromEnv(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
 	t.Setenv("MERGE_MODE", "bogus")
-	c := loadConfig()
+	c := loadConfig(nil)
 	c.runtime = "echo"
 	c.GhToken, c.RepoSlug, c.GitUserName, c.GitUserEmail = "ghp_test", "owner/repo", "bot", "bot@example.com"
 	c.MergeMode = "bogus"
@@ -152,7 +152,7 @@ func TestValidateConfig_ReportsInvalidChoiceFromEnv(t *testing.T) {
 // and must still reject an env-set removed choice, once.
 func TestValidateConfigChecks_WithoutRemovedKnobsRowStillRejects(t *testing.T) {
 	t.Setenv("BOX_FORGE_AND_ISSUE_ACCESS", "read-write")
-	c := loadConfig()
+	c := loadConfig(nil)
 	c.BoxForgeAndIssueAccess = "read-write"
 	err := validateConfigChecks(c, nil)
 	if n := strings.Count(fmt.Sprint(err), "BOX_FORGE_AND_ISSUE_ACCESS=read-write was removed"); n != 1 {
@@ -166,7 +166,7 @@ func TestValidateConfig_ReportsRemovedChoiceOnce(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
 	t.Setenv("BOX_FORGE_AND_ISSUE_ACCESS", "read-write")
 	setKnob(t, "BOX_FORGE_AND_ISSUE_ACCESS", "read-write")
-	c := loadConfig()
+	c := loadConfig(nil)
 	if c.BoxForgeAndIssueAccess != "read-write" {
 		t.Fatalf("BoxForgeAndIssueAccess = %q, want read-write", c.BoxForgeAndIssueAccess)
 	}

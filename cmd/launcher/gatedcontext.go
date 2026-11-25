@@ -3,6 +3,7 @@ package main
 import (
 	"io"
 
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/doctor"
 )
@@ -20,8 +21,8 @@ type gatedContext struct {
 // after, so preview and real dispatch stop at the same first failure and the
 // network gates' live calls never run ahead of a runner-prerequisite
 // failure.
-func newGatedContext(w io.Writer, kind *dispatchkind.Descriptor, selfContained bool) (gc gatedContext, err error) {
-	rc, err := newReadContext(kind, selfContained)
+func newGatedContext(connectors *connectorruntime.Runtime, w io.Writer, kind *dispatchkind.Descriptor, selfContained bool) (gc gatedContext, err error) {
+	rc, err := newReadContext(connectors, kind, selfContained)
 	if err != nil {
 		return gatedContext{}, err
 	}

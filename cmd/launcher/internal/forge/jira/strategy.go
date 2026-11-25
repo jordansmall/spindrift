@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"spindrift.dev/launcher/internal/backend"
-	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 )
@@ -49,7 +49,10 @@ var Strategy = backendkit.Strategy{
 		if err != nil {
 			return nil, err
 		}
-		row, ok := backendrows.Lookup(backend.Jira.Name)
+		if s.Connectors == nil {
+			return nil, fmt.Errorf("jira: %w", connectorruntime.ErrNoRuntime)
+		}
+		row, ok := s.Connectors.Row(backend.Jira.Name)
 		if !ok {
 			return nil, errNoConnectorRow
 		}

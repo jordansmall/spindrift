@@ -710,7 +710,7 @@ func TestMainRun_FlagSettingKnob_NotAmbientAndLeavesEnvUntouched(t *testing.T) {
 	if v, ok := os.LookupEnv("MAX_JOBS"); ok {
 		t.Errorf("MAX_JOBS = %q in the process environment, want a flag never written there", v)
 	}
-	if got := loadConfig().MaxJobs; got != 5 {
+	if got := loadConfig(nil).MaxJobs; got != 5 {
 		t.Errorf("loadConfig().MaxJobs = %d, want 5 from --max-jobs", got)
 	}
 }
@@ -819,7 +819,7 @@ func TestConfigHasNoModelFields(t *testing.T) {
 func TestRunnerConfig_DriverMountTargets(t *testing.T) {
 	setArtifact(t, "DRIVER_SESSION_CACHE_DIR", "/home/agent/.claude/projects")
 
-	c := loadConfig()
+	c := loadConfig(nil)
 	rc := runnerConfig(c)
 
 	if rc.DriverSessionCacheDir != "/home/agent/.claude/projects" {
@@ -835,7 +835,7 @@ func TestRunnerConfig_LimitsSkillsOverrides(t *testing.T) {
 	setKnob(t, "MEMORY_LIMIT", "2g")
 	setKnob(t, "SPINDRIFT_SKILLS_DIR", "/host/skills")
 
-	rc := runnerConfig(loadConfig())
+	rc := runnerConfig(loadConfig(nil))
 
 	if rc.PidsLimit != "256" {
 		t.Errorf("PidsLimit = %q, want 256", rc.PidsLimit)
@@ -864,7 +864,7 @@ func TestLoadConfig_BwrapArtifactsLandOnArtifacts(t *testing.T) {
 	setArtifact(t, "NIX_CONFIG_FILE_DRV", "/nix/store/abc-nix-conf.drv")
 	setArtifact(t, "NIX_STORE_WRITABLE", "true")
 
-	b := loadConfig().artifacts.Bwrap
+	b := loadConfig(nil).artifacts.Bwrap
 	if b == nil {
 		t.Fatal("artifacts.Bwrap = nil, want the document's bwrap part")
 	}
@@ -891,7 +891,7 @@ func TestLoadConfig_BwrapNixStoreWritable_AbsentIsFalse(t *testing.T) {
 	setRunner(t, "bwrap", "bwrap")
 	setArtifact(t, "NIX_CONFIG_FILE", "/nix/store/abc-nix-conf")
 
-	b := loadConfig().artifacts.Bwrap
+	b := loadConfig(nil).artifacts.Bwrap
 	if b == nil {
 		t.Fatal("artifacts.Bwrap = nil, want the document's bwrap part")
 	}
@@ -905,13 +905,13 @@ func TestLoadConfig_BwrapNixStoreWritable_AbsentIsFalse(t *testing.T) {
 func TestLoadConfig_NixVolume_FromDocumentOnly(t *testing.T) {
 	setRunner(t, "podman", "oci")
 	t.Setenv("NIX_VOLUME", "ambient")
-	c := loadConfig()
+	c := loadConfig(nil)
 	if o := c.artifacts.OCI; o != nil && o.NixVolume.String() != "" {
 		t.Errorf("artifacts.OCI.NixVolume = %q, want empty when the document has no NIX_VOLUME", o.NixVolume.String())
 	}
 
 	setArtifact(t, "NIX_VOLUME", "custom-nix-vol")
-	c = loadConfig()
+	c = loadConfig(nil)
 	if o := c.artifacts.OCI; o == nil || o.NixVolume.String() != "custom-nix-vol" {
 		t.Errorf("artifacts.OCI = %+v, want NIX_VOLUME custom-nix-vol", o)
 	}
@@ -920,7 +920,7 @@ func TestLoadConfig_NixVolume_FromDocumentOnly(t *testing.T) {
 // An unset DRIVER_SESSION_CACHE_DIR (a Driver declaring no session-state dir)
 // reaches runner.Config as empty, not a fallback literal.
 func TestRunnerConfig_DriverSessionCacheDirUnset(t *testing.T) {
-	c := loadConfig()
+	c := loadConfig(nil)
 	rc := runnerConfig(c)
 
 	if rc.DriverSessionCacheDir != "" {
@@ -935,7 +935,7 @@ func TestRunnerConfig_DriverSessionCacheDirUnset(t *testing.T) {
 func TestResolveCapabilitySignals_LocalTracker_InBoxUnreachable(t *testing.T) {
 	setKnob(t, "ISSUE_TRACKER", "local")
 
-	c := loadConfig()
+	c := loadConfig(nil)
 	sig := resolveCapabilitySignals(c.CodeForge, c.IssueTracker)
 
 	if !sig.inBoxUnreachableTracker {
@@ -951,7 +951,7 @@ func TestRunnerConfig_LocalIssuesDirNeverReachesRunnerConfig(t *testing.T) {
 	setKnob(t, "ISSUE_TRACKER", "local")
 	setKnob(t, "LOCAL_ISSUES_DIR", dir)
 
-	c := loadConfig()
+	c := loadConfig(nil)
 	rc := runnerConfig(c)
 
 	if got := fmt.Sprintf("%+v", rc); strings.Contains(got, dir) {
@@ -966,7 +966,7 @@ func TestLoadConfig_CodeForgeLocal_DefaultsAccumulationRepoDir(t *testing.T) {
 	setKnob(t, "CODE_FORGE", "local")
 	setKnob(t, "CODE_FORGE_ACCUMULATION_REPO_DIR", "")
 
-	c := loadConfig()
+	c := loadConfig(nil)
 
 	wd, err := os.Getwd()
 	if err != nil {
@@ -984,7 +984,7 @@ func TestLoadConfig_CodeForgeLocal_RelativeAccumulationRepoDirResolvedAbsolute(t
 	setKnob(t, "CODE_FORGE", "local")
 	setKnob(t, "CODE_FORGE_ACCUMULATION_REPO_DIR", "custom-accum-dir")
 
-	c := loadConfig()
+	c := loadConfig(nil)
 
 	wd, err := os.Getwd()
 	if err != nil {
@@ -1006,7 +1006,7 @@ func TestLoadConfig_NonLocalForge_AccumulationRepoDirStaysEmpty(t *testing.T) {
 		setKnob(t, "CODE_FORGE", cf)
 		setKnob(t, "CODE_FORGE_ACCUMULATION_REPO_DIR", "")
 
-		c := loadConfig()
+		c := loadConfig(nil)
 
 		if got := c.hostRepoDir(); got != "" {
 			t.Errorf("CODE_FORGE=%s: loadConfig().hostRepoDir() = %q, want empty", cf, got)
@@ -1028,7 +1028,7 @@ func TestHostRepoDir_CodeForgeLocal_DefaultsAbsoluteAndFeedsLanding(t *testing.T
 	setKnob(t, "CODE_FORGE", "local")
 	setKnob(t, "CODE_FORGE_ACCUMULATION_REPO_DIR", "")
 
-	c := loadConfig()
+	c := loadConfig(nil)
 	if cf := mustNewCodeForge(t, c, local.SanitizedParent{}, nil); cf == nil {
 		t.Fatal("newCodeForge(CODE_FORGE=local) = nil")
 	}
@@ -1049,6 +1049,7 @@ func TestNewIssueTracker_JiraNeedsTheConnectorRow(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := minimalValidConfig()
+	c.connectors = connectorRuntime(t)
 	c.IssueTracker = "jira"
 	c.setRowKnob("JIRA_BASE_URL", "https://jira.example")
 	c.setRowKnob("JIRA_PROJECT_KEY", "PROJ")
@@ -1063,6 +1064,7 @@ func TestNewIssueTracker_JiraNeedsTheConnectorRow(t *testing.T) {
 // backend row the build fails and never falls back to a native REST adapter.
 func TestNewIssueTracker_ForgejoNeedsAConnectorRow(t *testing.T) {
 	c := minimalValidConfig()
+	c.connectors = connectorRuntime(t)
 	c.IssueTracker = "forgejo"
 	c.setRowKnob("FORGEJO_BASE_URL", "https://forgejo.example")
 	c.setRowKnob("FORGEJO_TOKEN", "tok")
@@ -1142,7 +1144,7 @@ func TestApplyDispatchKind_ValueEmbed_DoesNotAliasOriginal(t *testing.T) {
 func TestApplyDispatchKind_Butler_PreservesConfiguredWorkLabel(t *testing.T) {
 	setKnob(t, "LABEL", "agent-go")
 
-	c := applyDispatchKind(loadConfig(), dispatchkind.Butler)
+	c := applyDispatchKind(loadConfig(nil), dispatchkind.Butler)
 
 	if c.workLabel != "agent-go" {
 		t.Errorf("workLabel = %q, want %q", c.workLabel, "agent-go")
@@ -1245,7 +1247,7 @@ func TestMaxParallelEdgeCases(t *testing.T) {
 	}
 	for _, tc := range cases {
 		setKnob(t, "MAX_PARALLEL", tc.env)
-		c := loadConfig()
+		c := loadConfig(nil)
 		if c.MaxParallel != tc.want {
 			t.Errorf("MAX_PARALLEL=%q: got %d, want %d", tc.env, c.MaxParallel, tc.want)
 		}
@@ -1267,7 +1269,7 @@ func TestMaxJobsEdgeCases(t *testing.T) {
 	}
 	for _, tc := range cases {
 		setKnob(t, "MAX_JOBS", tc.env)
-		c := loadConfig()
+		c := loadConfig(nil)
 		if c.MaxJobs != tc.want {
 			t.Errorf("MAX_JOBS=%q: got %d, want %d", tc.env, c.MaxJobs, tc.want)
 		}
@@ -1290,7 +1292,7 @@ func TestLoadConfig_LabelDefaultComesFromSchemaTable(t *testing.T) {
 	}
 	withSchemaFlags(t, patched)
 
-	c := loadConfig()
+	c := loadConfig(nil)
 	if c.Label != "custom-default-from-table" {
 		t.Errorf("label should come from inputdoc.SchemaFlags table, got %q", c.Label)
 	}
@@ -1307,7 +1309,7 @@ func TestLoadConfig_SpindriftDirsDefaultComesFromSchemaTable(t *testing.T) {
 		{Env: "SPINDRIFT_SKILLS_DIR", Dflt: "custom-skills-default"},
 	})
 
-	c := loadConfig()
+	c := loadConfig(nil)
 	if c.SpindriftPromptDir != "custom-prompt-default" {
 		t.Errorf("spindriftPromptDir should come from inputdoc.SchemaFlags table, got %q", c.SpindriftPromptDir)
 	}
@@ -1328,7 +1330,7 @@ func TestLoadConfig_SpindriftDirsEnvBeatsSchemaTable(t *testing.T) {
 		{Env: "SPINDRIFT_SKILLS_DIR", Dflt: "custom-skills-default"},
 	})
 
-	c := loadConfig()
+	c := loadConfig(nil)
 	if c.SpindriftPromptDir != "from-env-prompt" {
 		t.Errorf("spindriftPromptDir = %q, want from-env-prompt", c.SpindriftPromptDir)
 	}
@@ -1347,7 +1349,7 @@ func TestLoadConfig_SpindriftDirsEnvBeatsSchemaTable_Mixed(t *testing.T) {
 		{Env: "SPINDRIFT_SKILLS_DIR", Dflt: "custom-skills-default"},
 	})
 
-	c := loadConfig()
+	c := loadConfig(nil)
 	if c.SpindriftPromptDir != "from-env-prompt" {
 		t.Errorf("spindriftPromptDir = %q, want from-env-prompt", c.SpindriftPromptDir)
 	}
@@ -1399,7 +1401,7 @@ func TestLoadConfig_EmptyDisablesLimit(t *testing.T) {
 			// useRealTable cases call no withSchemaFlags: previous subtests'
 			// stubs are already restored by their own t.Cleanup.
 
-			got := tc.getGot(loadConfig())
+			got := tc.getGot(loadConfig(nil))
 			if got != tc.want {
 				t.Errorf("%s = %q, want %q", tc.env, got, tc.want)
 			}
@@ -1491,7 +1493,7 @@ func TestLoadConfig_DocumentSettingBeatsSchemaDefault(t *testing.T) {
 
 	useDoc(t, &inputdoc.Document{Settings: map[string]string{"BASE_BRANCH": "from-document"}})
 
-	c := loadConfig()
+	c := loadConfig(nil)
 	if c.BaseBranch != "from-document" {
 		t.Errorf("baseBranch = %q, want from-document", c.BaseBranch)
 	}
@@ -1505,7 +1507,7 @@ func TestLoadConfig_EnvBeatsDocument(t *testing.T) {
 	useDoc(t, &inputdoc.Document{Settings: map[string]string{"BASE_BRANCH": "from-document"}})
 	setKnob(t, "BASE_BRANCH", "from-env")
 
-	c := loadConfig()
+	c := loadConfig(nil)
 	if c.BaseBranch != "from-env" {
 		t.Errorf("baseBranch = %q, want from-env", c.BaseBranch)
 	}
@@ -1522,7 +1524,7 @@ func TestLoadConfig_LabelEnvOverridesDocumentAndDefaults(t *testing.T) {
 	setKnob(t, "IN_PROGRESS_LABEL", "wip")
 	setKnob(t, "FAILED_LABEL", "broken")
 
-	l := dispatchLabels(loadConfig())
+	l := dispatchLabels(loadConfig(nil))
 	if l.InProgress != "wip" {
 		t.Errorf("InProgress = %q, want wip", l.InProgress)
 	}
@@ -1538,7 +1540,7 @@ func TestLoadConfig_PromptDirDocumentSettingBeatsSchemaDefault(t *testing.T) {
 
 	useDoc(t, &inputdoc.Document{Settings: map[string]string{"SPINDRIFT_PROMPT_DIR": "from-document-prompt"}})
 
-	c := loadConfig()
+	c := loadConfig(nil)
 	if c.SpindriftPromptDir != "from-document-prompt" {
 		t.Errorf("spindriftPromptDir = %q, want from-document-prompt", c.SpindriftPromptDir)
 	}
@@ -1551,7 +1553,7 @@ func TestLoadConfig_PromptDirEnvBeatsDocument(t *testing.T) {
 	useDoc(t, &inputdoc.Document{Settings: map[string]string{"SPINDRIFT_PROMPT_DIR": "from-document-prompt"}})
 	setKnob(t, "SPINDRIFT_PROMPT_DIR", "from-env-prompt")
 
-	c := loadConfig()
+	c := loadConfig(nil)
 	if c.SpindriftPromptDir != "from-env-prompt" {
 		t.Errorf("spindriftPromptDir = %q, want from-env-prompt", c.SpindriftPromptDir)
 	}
@@ -1576,7 +1578,7 @@ func TestLoadConfig_ArtifactsFromDocument(t *testing.T) {
 		"BOX_ENV_VARS":  "MODEL BASE_BRANCH",
 	})})
 
-	c := loadConfig()
+	c := loadConfig(nil)
 	if o := c.artifacts.OCI; o == nil || o.ImageArchive.String() != "/nix/store/doc-image" {
 		t.Errorf("artifacts.OCI = %+v, want IMAGE_ARCHIVE /nix/store/doc-image", o)
 	}
@@ -3731,7 +3733,7 @@ func TestDispatchConfig_ResolveEnv_ExplicitGitIdentitySkipsHostGitConfig(t *test
 	calls := fakeHostGitConfig(t, map[string]string{"user.name": "Host Name", "user.email": "host@example.com"})
 	setKnob(t, "GIT_USER_NAME", "Env Name")
 	useDoc(t, &inputdoc.Document{Settings: map[string]string{"GIT_USER_EMAIL": "doc@example.com"}})
-	snap := loadConfig()
+	snap := loadConfig(nil)
 	c := minimalValidConfig()
 	c.CodeForge = "github"
 	c.GitUserName, c.GitUserEmail = snap.GitUserName, snap.GitUserEmail
@@ -3802,7 +3804,7 @@ func snapshotGitIdentityConfig(t *testing.T, vals map[string]string) (config, *[
 	t.Helper()
 	useDoc(t, nil)
 	calls := fakeHostGitConfig(t, vals)
-	snap := loadConfig()
+	snap := loadConfig(nil)
 	*calls = nil
 	c := minimalValidConfig()
 	c.CodeForge = "github"
@@ -4230,7 +4232,7 @@ func TestSettleConfig_Local_CodeForgeForIssueResolvesEachIssuesOwnParent(t *test
 func TestSettleConfig_CapabilitiesThreadsFromReadContext(t *testing.T) {
 	setFullyLocalEnv(t)
 
-	rc, err := newReadContext(dispatchkind.Work, false)
+	rc, err := newReadContext(nil, dispatchkind.Work, false)
 	if err != nil {
 		t.Fatalf("newReadContext: %v", err)
 	}
@@ -6206,7 +6208,7 @@ func TestTriageLabelMeta_ColorsAreDistinct(t *testing.T) {
 func TestLoadConfig_RunnerKind_NoRuntimeFallback_Bwrap(t *testing.T) {
 	setArtifact(t, "RUNTIME", "bwrap")
 
-	c := loadConfig()
+	c := loadConfig(nil)
 
 	if c.runnerKind != "" {
 		t.Errorf("loadConfig().runnerKind = %q, want %q (RUNTIME must not be consulted)", c.runnerKind, "")
@@ -6219,7 +6221,7 @@ func TestLoadConfig_RunnerKind_NoRuntimeFallback_Bwrap(t *testing.T) {
 func TestLoadConfig_RunnerKind_ReadsArtifactRegardlessOfRuntime(t *testing.T) {
 	setRunner(t, "bwrap", "oci")
 
-	c := loadConfig()
+	c := loadConfig(nil)
 
 	if c.runnerKind != "oci" {
 		t.Errorf("loadConfig().runnerKind = %q, want %q (RUNNER_KIND read verbatim)", c.runnerKind, "oci")
@@ -6233,7 +6235,7 @@ func TestLoadConfig_RunnerKind_ReadsArtifactRegardlessOfRuntime(t *testing.T) {
 func TestLoadConfig_FlakeLauncherAttr_ReadsArtifact(t *testing.T) {
 	setArtifact(t, "FLAKE_LAUNCHER_ATTR", ".#launcher-currency")
 
-	c := loadConfig()
+	c := loadConfig(nil)
 
 	if c.flakeLauncherAttr != ".#launcher-currency" {
 		t.Errorf("loadConfig().flakeLauncherAttr = %q, want %q", c.flakeLauncherAttr, ".#launcher-currency")
@@ -6248,7 +6250,7 @@ func TestLoadConfig_FlakeLauncherAttr_ReadsArtifact(t *testing.T) {
 func TestLoadConfig_LoadedLauncherHash_ReadsArtifact(t *testing.T) {
 	setArtifact(t, "LAUNCHER_CURRENCY_HASH", "abc123")
 
-	c := loadConfig()
+	c := loadConfig(nil)
 
 	if c.loadedLauncherHash != "abc123" {
 		t.Errorf("loadConfig().loadedLauncherHash = %q, want %q", c.loadedLauncherHash, "abc123")
@@ -6376,7 +6378,7 @@ func TestValidateConfigChecks_DegradedRequiredRowIsNotAConfigError(t *testing.T)
 // "socket" in loadConfig, which feeds dispatch.Config.SignalCarrier and the
 // doctor/choice registries.
 func TestLoadConfig_SignalCarrierDefaultsToSocket(t *testing.T) {
-	c := loadConfig()
+	c := loadConfig(nil)
 	if c.SignalCarrier != "socket" {
 		t.Fatalf("loadConfig().signalCarrier with knob unset = %q, want %q", c.SignalCarrier, "socket")
 	}
@@ -6411,7 +6413,7 @@ func TestDispatchConfig_SignalCarrierBoxEnv(t *testing.T) {
 				setKnob(t, "BOX_SIGNAL_CARRIER", tc.set)
 			}
 			it := forge.NewFake()
-			cfg := dispatchConfig(loadConfig(), "", it, testWired(it), forge.NewFake(), forge.Capabilities{})
+			cfg := dispatchConfig(loadConfig(nil), "", it, testWired(it), forge.NewFake(), forge.Capabilities{})
 			if cfg.SignalCarrier != tc.want {
 				t.Errorf("dispatchConfig() SignalCarrier = %q, want %q", cfg.SignalCarrier, tc.want)
 			}
@@ -6424,7 +6426,7 @@ func TestDispatchConfig_SignalCarrierBoxEnv(t *testing.T) {
 
 func TestLoadConfig_SignalCarrierExplicitLogKept(t *testing.T) {
 	setKnob(t, "BOX_SIGNAL_CARRIER", "log")
-	if got := loadConfig().SignalCarrier; got != "log" {
+	if got := loadConfig(nil).SignalCarrier; got != "log" {
 		t.Errorf("loadConfig().signalCarrier with BOX_SIGNAL_CARRIER=log = %q, want %q", got, "log")
 	}
 }

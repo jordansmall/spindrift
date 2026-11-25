@@ -558,7 +558,7 @@ func connectorBackend() backendBuilder {
 
 		l := mapLookup(map[string]string{forgejo.ForgejoBaseURLEnv: front.URL, forgejo.ForgejoTokenEnv: token})
 		s := backendkit.Shared{RepoSlug: repo, BaseBranch: "main", GitUserName: "Harness", GitUserEmail: "harness@harness.local", MergeMethod: "rebase",
-			Labels: testLabels, VerdictLabels: forge.ResearchVerdictLabels()}
+			Labels: testLabels, VerdictLabels: forge.ResearchVerdictLabels(), Connectors: newRuntime(t)}
 		tr, err := forgejo.Strategy.NewIssueTracker(s, l)
 		if err != nil {
 			t.Fatalf("issue tracker: %v", err)

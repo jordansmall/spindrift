@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
@@ -55,7 +56,7 @@ func TestBuildDemandSources_LocalTrackerPerKindLabel(t *testing.T) {
 		"LOCAL_ISSUES_DIR": dir,
 		"LABEL":            "ready-for-agent",
 	})
-	src, _ := buildDemandSources(doc, allDemandKinds)
+	src, _ := buildDemandSources(nil, doc, allDemandKinds)
 
 	if _, ok := src[daemon.KindOf(dispatchkind.Butler)]; ok {
 		t.Error("butler (DemandChildReported) got a tracker demand source")
@@ -83,7 +84,7 @@ func TestBuildDemandSources_ConfiguredWorkLabel(t *testing.T) {
 	dir := t.TempDir()
 	writeIssueFileT(t, dir, "a", "go-agent")
 	writeIssueFileT(t, dir, "b", "ready-for-agent")
-	src, _ := buildDemandSources(demandDocT(map[string]string{
+	src, _ := buildDemandSources(nil, demandDocT(map[string]string{
 		"ISSUE_TRACKER":    "local",
 		"LOCAL_ISSUES_DIR": dir,
 		"LABEL":            "go-agent",
@@ -104,7 +105,7 @@ func TestBuildDemandSources_RelativeDirResolvesAgainstCwd(t *testing.T) {
 	t.Chdir(cwd)
 
 	for _, dir := range []string{".spindrift/issues", "./.spindrift/issues"} {
-		src, _ := buildDemandSources(demandDocT(map[string]string{
+		src, _ := buildDemandSources(nil, demandDocT(map[string]string{
 			"ISSUE_TRACKER":    "local",
 			"LOCAL_ISSUES_DIR": dir,
 			"LABEL":            "ready-for-agent",
@@ -124,7 +125,7 @@ func TestBuildDemandSources_GitHubBuildsProbeSource(t *testing.T) {
 	t.Setenv("GH_TOKEN", "test-token")
 	for name, tracker := range map[string]string{"github": "github", "blank": ""} {
 		t.Run(name, func(t *testing.T) {
-			src, _ := buildDemandSources(demandDocT(map[string]string{
+			src, _ := buildDemandSources(nil, demandDocT(map[string]string{
 				"ISSUE_TRACKER": tracker, "REPO_SLUG": "o/r", "LABEL": "ready-for-agent",
 			}), allDemandKinds)
 			if len(src) != 2 {
@@ -143,7 +144,7 @@ func TestBuildDemandSources_GitHubReadsAmbientRepoSlug(t *testing.T) {
 	clearKnobEnvT(t)
 	t.Setenv("GH_TOKEN", "test-token")
 	t.Setenv("REPO_SLUG", "o/r")
-	src, _ := buildDemandSources(demandDocT(map[string]string{
+	src, _ := buildDemandSources(nil, demandDocT(map[string]string{
 		"ISSUE_TRACKER": "github", "LABEL": "ready-for-agent",
 	}), allDemandKinds)
 	if len(src) != 2 {
@@ -160,7 +161,9 @@ func TestBuildDemandSources_JiraWithoutAConnectorRowHasNoSource(t *testing.T) {
 	if err := backendrows.Use(nil, func(string) string { return "" }); err != nil {
 		t.Fatal(err)
 	}
-	src, missing := buildDemandSources(demandDocT(map[string]string{
+	connectors := connectorruntime.FromRegistries()
+	t.Cleanup(func() { _ = connectors.Close() })
+	src, missing := buildDemandSources(connectors, demandDocT(map[string]string{
 		"ISSUE_TRACKER":       "jira",
 		"JIRA_BASE_URL":       "https://jira.example",
 		"JIRA_PROJECT_KEY":    "PROJ",
@@ -190,7 +193,7 @@ func TestBuildDemandSources_NoAdapterOrMissingKnobsHasNoSource(t *testing.T) {
 		"absent":                              {},
 	} {
 		t.Run(name, func(t *testing.T) {
-			src, _ := buildDemandSources(demandDocT(settings), allDemandKinds)
+			src, _ := buildDemandSources(nil, demandDocT(settings), allDemandKinds)
 			if len(src) != 0 {
 				t.Errorf("sources = %v, want none (kind stays exit-driven)", src)
 			}
@@ -212,7 +215,7 @@ func TestBuildDemandSources_AmbientOverrideOfDocumentKnobIgnored(t *testing.T) {
 	t.Setenv("LABEL", "ambient-label")
 	t.Setenv("ISSUE_TRACKER", "github")
 
-	src, _ := buildDemandSources(demandDocT(map[string]string{
+	src, _ := buildDemandSources(nil, demandDocT(map[string]string{
 		"ISSUE_TRACKER":    "local",
 		"LOCAL_ISSUES_DIR": docDir,
 		"LABEL":            "ready-for-agent",
@@ -231,7 +234,7 @@ func TestBuildDemandSources_AmbientKnobAbsentFromDocumentHonoured(t *testing.T) 
 	writeIssueFileT(t, dir, "a", "ready-for-agent")
 	t.Setenv("LOCAL_ISSUES_DIR", dir)
 
-	src, _ := buildDemandSources(demandDocT(map[string]string{
+	src, _ := buildDemandSources(nil, demandDocT(map[string]string{
 		"ISSUE_TRACKER": "local",
 		"LABEL":         "ready-for-agent",
 	}), allDemandKinds)
@@ -243,7 +246,7 @@ func TestBuildDemandSources_AmbientKnobAbsentFromDocumentHonoured(t *testing.T) 
 
 func TestBuildDemandSources_OnlyConfiguredKinds(t *testing.T) {
 	clearKnobEnvT(t)
-	src, _ := buildDemandSources(demandDocT(map[string]string{
+	src, _ := buildDemandSources(nil, demandDocT(map[string]string{
 		"ISSUE_TRACKER": "local", "LOCAL_ISSUES_DIR": t.TempDir(), "LABEL": "ready-for-agent",
 	}), []daemon.Kind{daemon.KindOf(dispatchkind.Research)})
 	if len(src) != 1 {
@@ -312,7 +315,7 @@ func TestHostRunnerDemand(t *testing.T) {
 	clearKnobEnvT(t)
 	dir := t.TempDir()
 	writeIssueFileT(t, dir, "a", "ready-for-agent")
-	src, _ := buildDemandSources(demandDocT(map[string]string{
+	src, _ := buildDemandSources(nil, demandDocT(map[string]string{
 		"ISSUE_TRACKER": "local", "LOCAL_ISSUES_DIR": dir, "LABEL": "ready-for-agent",
 	}), allDemandKinds)
 	r := mustHostRunner(t, hostRunnerConfig{env: []string{}, demand: src})
@@ -354,7 +357,7 @@ func TestBuildDemandSources_UnsetKnobsResolveToSchemaDefaults(t *testing.T) {
 		clearKnobEnvT(t)
 		dir := t.TempDir()
 		writeIssueFileT(t, dir, "w", "ready-for-agent")
-		src, _ := buildDemandSources(demandDocT(map[string]string{
+		src, _ := buildDemandSources(nil, demandDocT(map[string]string{
 			"ISSUE_TRACKER": "local", "LOCAL_ISSUES_DIR": dir,
 		}), allDemandKinds)
 		c, ok := src[daemon.KindOf(dispatchkind.Work)]
@@ -373,7 +376,7 @@ func TestBuildDemandSources_UnsetKnobsResolveToSchemaDefaults(t *testing.T) {
 		cwd := t.TempDir()
 		writeIssueFileT(t, filepath.Join(cwd, ".spindrift", "issues"), "x", "ready-for-agent")
 		t.Chdir(cwd)
-		src, _ := buildDemandSources(demandDocT(map[string]string{"ISSUE_TRACKER": "local"}), allDemandKinds)
+		src, _ := buildDemandSources(nil, demandDocT(map[string]string{"ISSUE_TRACKER": "local"}), allDemandKinds)
 		c, ok := src[daemon.KindOf(dispatchkind.Work)]
 		if !ok {
 			t.Fatal("work has no source though LOCAL_ISSUES_DIR defaults to .spindrift/issues")
@@ -389,7 +392,7 @@ func TestBuildDemandSources_UnsetKnobsResolveToSchemaDefaults(t *testing.T) {
 		if got := issueTrackerName(doc); got != "github" {
 			t.Fatalf("issueTrackerName() = %q, want github", got)
 		}
-		src, _ := buildDemandSources(doc, allDemandKinds)
+		src, _ := buildDemandSources(nil, doc, allDemandKinds)
 		if len(src) != 2 {
 			t.Fatalf("sources = %v, want work and research over the default github tracker", src)
 		}
@@ -404,7 +407,7 @@ func TestBuildDemandSources_ForgejoWithoutAConnectorRowHasNoSource(t *testing.T)
 	if err := backendrows.Use(nil, func(string) string { return "" }); err != nil {
 		t.Fatal(err)
 	}
-	src, missing := buildDemandSources(demandDocT(map[string]string{
+	src, missing := buildDemandSources(connectorruntime.FromRegistries(), demandDocT(map[string]string{
 		"ISSUE_TRACKER": "forgejo",
 		"REPO_SLUG":     "owner/repo",
 		"FORGEJO_TOKEN": "tok",
@@ -430,7 +433,7 @@ func TestBuildDemandSources_ForgejoMissingKnobHasNoSource(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			settings["ISSUE_TRACKER"] = "forgejo"
 			settings["LABEL"] = "ready-for-agent"
-			if src, _ := buildDemandSources(demandDocT(settings), allDemandKinds); len(src) != 0 {
+			if src, _ := buildDemandSources(nil, demandDocT(settings), allDemandKinds); len(src) != 0 {
 				t.Errorf("sources = %v, want none (kind stays exit-driven)", src)
 			}
 		})
@@ -455,7 +458,7 @@ func TestBuildDemandSources_TokenCmdFormHintNamesKnobNotValue(t *testing.T) {
 			const cmd = "rbw get hush-hush-entry"
 			t.Setenv(tc.cmdKnob, cmd)
 			tc.settings["LABEL"] = "ready-for-agent"
-			_, missing := buildDemandSources(demandDocT(tc.settings), allDemandKinds)
+			_, missing := buildDemandSources(nil, demandDocT(tc.settings), allDemandKinds)
 			got := missing[work]
 			if !strings.Contains(got, tc.want) {
 				t.Errorf("reason = %q, want it to contain %q", got, tc.want)
@@ -472,7 +475,7 @@ func TestBuildDemandSources_TokenCmdFormHintNamesKnobNotValue(t *testing.T) {
 func TestBuildDemandSources_TokenCmdHintOnlyForTokenErrors(t *testing.T) {
 	clearKnobEnvT(t)
 	t.Setenv("GH_TOKEN_CMD", "rbw get hush-hush-entry")
-	_, missing := buildDemandSources(demandDocT(map[string]string{
+	_, missing := buildDemandSources(nil, demandDocT(map[string]string{
 		"ISSUE_TRACKER": "github", "LABEL": "ready-for-agent",
 	}), allDemandKinds)
 	got := missing[daemon.KindOf(dispatchkind.Work)]
@@ -486,7 +489,7 @@ func TestBuildDemandSources_TokenCmdHintOnlyForTokenErrors(t *testing.T) {
 
 func TestBuildDemandSources_NoTokenCmdNoHint(t *testing.T) {
 	clearKnobEnvT(t)
-	_, missing := buildDemandSources(demandDocT(map[string]string{
+	_, missing := buildDemandSources(nil, demandDocT(map[string]string{
 		"ISSUE_TRACKER": "forgejo", "REPO_SLUG": "o/r", "FORGEJO_BASE_URL": "http://x", "LABEL": "ready-for-agent",
 	}), allDemandKinds)
 	if got := missing[daemon.KindOf(dispatchkind.Work)]; strings.Contains(got, "_CMD") {
@@ -551,7 +554,7 @@ func TestBuildDemandSources_EmptyDocumentValueFallsBackToAmbient(t *testing.T) {
 				t.Setenv(k, v)
 			}
 			tt.doc["LABEL"] = "ready-for-agent"
-			src, _ := buildDemandSources(demandDocT(tt.doc), allDemandKinds)
+			src, _ := buildDemandSources(nil, demandDocT(tt.doc), allDemandKinds)
 			if len(src) != 2 {
 				t.Errorf("sources = %v, want work and research", src)
 			}
@@ -644,7 +647,7 @@ func TestBuildDemandSources_MissingReasonPerProbedKind(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			clearKnobEnvT(t)
-			_, missing := buildDemandSources(demandDocT(tc.settings), allDemandKinds)
+			_, missing := buildDemandSources(nil, demandDocT(tc.settings), allDemandKinds)
 			if _, ok := missing[butler]; ok {
 				t.Errorf("butler (never probed) has a missing entry: %v", missing)
 			}
@@ -668,7 +671,7 @@ func TestBuildDemandSources_NonTrackerNameFailsWithValidList(t *testing.T) {
 	for _, name := range []string{"bogus", "git"} {
 		t.Run(name, func(t *testing.T) {
 			clearKnobEnvT(t)
-			src, missing := buildDemandSources(demandDocT(map[string]string{"ISSUE_TRACKER": name, "LABEL": "ready-for-agent"}), allDemandKinds)
+			src, missing := buildDemandSources(nil, demandDocT(map[string]string{"ISSUE_TRACKER": name, "LABEL": "ready-for-agent"}), allDemandKinds)
 			for _, kind := range []daemon.Kind{daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Research)} {
 				if _, ok := src[kind]; ok {
 					t.Errorf("%s has a source for ISSUE_TRACKER=%s", kind, name)
@@ -687,7 +690,7 @@ func TestBuildDemandSources_NonTrackerNameFailsWithValidList(t *testing.T) {
 
 func TestBuildDemandSources_NoProbedKindHasNoMissingEntry(t *testing.T) {
 	clearKnobEnvT(t)
-	_, missing := buildDemandSources(demandDocT(map[string]string{"ISSUE_TRACKER": "bogus"}), []daemon.Kind{daemon.KindOf(dispatchkind.Butler)})
+	_, missing := buildDemandSources(nil, demandDocT(map[string]string{"ISSUE_TRACKER": "bogus"}), []daemon.Kind{daemon.KindOf(dispatchkind.Butler)})
 	if len(missing) != 0 {
 		t.Errorf("missing = %v, want none for a butler-only daemon", missing)
 	}
@@ -696,7 +699,7 @@ func TestBuildDemandSources_NoProbedKindHasNoMissingEntry(t *testing.T) {
 func TestWarnUnprobedKinds_OneStderrLineAndEventPerKindNoSecret(t *testing.T) {
 	clearKnobEnvT(t)
 	const secret = "s3cr3t-token-value"
-	_, missing := buildDemandSources(demandDocT(map[string]string{
+	_, missing := buildDemandSources(nil, demandDocT(map[string]string{
 		"ISSUE_TRACKER": "jira", "JIRA_PROJECT_KEY": "P", "JIRA_TOKEN": secret, "LABEL": "ready-for-agent",
 	}), allDemandKinds)
 
@@ -928,7 +931,9 @@ func TestBuildDemandSources_ForgejoConnectorRowBuildsProbeSource(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	src, missing := buildDemandSources(demandDocT(map[string]string{
+	connectors := connectorruntime.FromRegistries()
+	t.Cleanup(func() { _ = connectors.Close() })
+	src, missing := buildDemandSources(connectors, demandDocT(map[string]string{
 		"ISSUE_TRACKER": "forgejo", "REPO_SLUG": "owner/repo", "FORGEJO_TOKEN": "tok", "LABEL": "ready-for-agent",
 	}), allDemandKinds)
 	if len(src) != 2 {
@@ -956,7 +961,7 @@ func TestBuildDemandSources_IssueRouteNarrowsCount(t *testing.T) {
 		if route != "" {
 			settings["ISSUE_ROUTE"] = route
 		}
-		src, _ := buildDemandSources(demandDocT(settings), allDemandKinds)
+		src, _ := buildDemandSources(nil, demandDocT(settings), allDemandKinds)
 		n, err := src[daemon.KindOf(dispatchkind.Work)].CountReady(false)
 		if err != nil {
 			t.Fatal(err)
@@ -985,7 +990,7 @@ func TestBuildDemandSources_BadIssueRouteHasNoSource(t *testing.T) {
 			if settings["LOCAL_ISSUES_DIR"] == "" && settings["ISSUE_TRACKER"] == "local" {
 				settings["LOCAL_ISSUES_DIR"] = t.TempDir()
 			}
-			src, missing := buildDemandSources(demandDocT(settings), allDemandKinds)
+			src, missing := buildDemandSources(nil, demandDocT(settings), allDemandKinds)
 			work := daemon.KindOf(dispatchkind.Work)
 			if _, ok := src[work]; ok {
 				t.Error("work has a demand source despite a bad ISSUE_ROUTE")

@@ -74,23 +74,23 @@ func countConnectorSandboxInstalls(t *testing.T) *int {
 func TestConnectorSandboxInstalledOnEveryLoadingPath(t *testing.T) {
 	paths := map[string]func(t *testing.T){
 		"newReadContext": func(t *testing.T) {
-			rc, err := newReadContext(nil, false)
+			rc, err := newReadContext(nil, nil, false)
 			if err != nil {
 				t.Fatal(err)
 			}
 			rc.closeSandbox()
 		},
 		"newGatedContext": func(t *testing.T) {
-			gc, err := newGatedContext(io.Discard, nil, false)
+			gc, err := newGatedContext(nil, io.Discard, nil, false)
 			if err != nil {
 				t.Fatal(err)
 			}
 			gc.closeSandbox()
 		},
-		"doctor":      func(t *testing.T) { cmdDoctor(doctorOptions{}, io.Discard, io.Discard) },
-		"reconcile":   func(t *testing.T) { cmdReconcile(io.Discard, io.Discard) },
-		"preview":     func(t *testing.T) { _ = preview(io.Discard, nil) },
-		"completions": func(t *testing.T) { cmdCompleteIssues() },
+		"doctor":      func(t *testing.T) { cmdDoctor(nil, doctorOptions{}, io.Discard, io.Discard) },
+		"reconcile":   func(t *testing.T) { cmdReconcile(nil, io.Discard, io.Discard) },
+		"preview":     func(t *testing.T) { _ = preview(nil, io.Discard, nil) },
+		"completions": func(t *testing.T) { cmdCompleteIssues(nil) },
 	}
 	for name, run := range paths {
 		t.Run(name, func(t *testing.T) {

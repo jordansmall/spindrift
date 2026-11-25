@@ -28,6 +28,7 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/chore"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers
@@ -721,6 +722,10 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return refuse(err)
 	}
 	defer installConnectorSandbox(doc, sandboxWD)()
+	// Deferred after the sandbox so it closes first: a Connector closes through
+	// the sandbox that hosts it.
+	connectors := connectorruntime.FromRegistries()
+	defer func() { _ = connectors.Close() }()
 
 	// Reused for the runner config, so the warning and the strip agree.
 	stripped := strippedKeys(doc)
@@ -848,7 +853,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		startConnectorCredentialWatch(refreshConnectorCreds, connectorCredentialRefresh)
 	}
 
-	demand, demandMissing := buildDemandSources(doc, args.Kinds)
+	demand, demandMissing := buildDemandSources(connectors, doc, args.Kinds)
 	// The github Demand probe runs gh in this process: an expired token fails
 	// every probe, and probe failures feed the breaker.
 	if f := childKnob(doc, "GH_TOKEN_REFRESH_FILE", os.Getenv("GH_TOKEN_REFRESH_FILE")); f != "" {

@@ -48,16 +48,16 @@ func TestQuickstartCheckConfig_MapsFields(t *testing.T) {
 // must still report these flags accurately.
 func TestQuickstartCheckDeps_BackendAxisMembership(t *testing.T) {
 	a := validAnswers()
-	deps := quickstartCheckDeps(a)
+	deps := quickstartCheckDeps(nil, a)
 	b, ok := deps.Backend("jira")
 	if !ok {
-		t.Fatal(`quickstartCheckDeps(a).Backend("jira") ok = false, want true`)
+		t.Fatal(`quickstartCheckDeps(nil, a).Backend("jira") ok = false, want true`)
 	}
 	if !b.ValidAsTracker {
-		t.Error(`quickstartCheckDeps(a).Backend("jira").ValidAsTracker = false, want true`)
+		t.Error(`quickstartCheckDeps(nil, a).Backend("jira").ValidAsTracker = false, want true`)
 	}
 	if b.ValidAsCodeForge {
-		t.Error(`quickstartCheckDeps(a).Backend("jira").ValidAsCodeForge = true, want false`)
+		t.Error(`quickstartCheckDeps(nil, a).Backend("jira").ValidAsCodeForge = true, want false`)
 	}
 }
 
@@ -65,9 +65,9 @@ func TestQuickstartCheckDeps_BackendAxisMembership(t *testing.T) {
 // REGISTRY_PROXY_ROUTES_FILE knob.
 func TestQuickstartCheckDeps_ExtraCrossKnobIsNil(t *testing.T) {
 	a := validAnswers()
-	deps := quickstartCheckDeps(a)
+	deps := quickstartCheckDeps(nil, a)
 	if deps.ExtraCrossKnob != nil {
-		t.Errorf("quickstartCheckDeps(a).ExtraCrossKnob = %v, want nil", deps.ExtraCrossKnob)
+		t.Errorf("quickstartCheckDeps(nil, a).ExtraCrossKnob = %v, want nil", deps.ExtraCrossKnob)
 	}
 }
 
@@ -75,19 +75,19 @@ func TestQuickstartCheckDeps_ExtraCrossKnobIsNil(t *testing.T) {
 // ValidAsTracker/ValidAsCodeForge flags.
 func TestQuickstartCheckDeps_TrackerAndCodeForgeNames(t *testing.T) {
 	a := validAnswers()
-	deps := quickstartCheckDeps(a)
+	deps := quickstartCheckDeps(nil, a)
 
 	trackers := deps.TrackerNames()
 	for _, name := range []string{"github", "jira", "local", "forgejo"} {
 		if !slices.Contains(trackers, name) {
-			t.Errorf("quickstartCheckDeps(a).TrackerNames() = %v, want it to contain %q", trackers, name)
+			t.Errorf("quickstartCheckDeps(nil, a).TrackerNames() = %v, want it to contain %q", trackers, name)
 		}
 	}
 
 	forges := deps.CodeForgeNames()
 	for _, name := range []string{"github", "git", "forgejo"} {
 		if !slices.Contains(forges, name) {
-			t.Errorf("quickstartCheckDeps(a).CodeForgeNames() = %v, want it to contain %q", forges, name)
+			t.Errorf("quickstartCheckDeps(nil, a).CodeForgeNames() = %v, want it to contain %q", forges, name)
 		}
 	}
 }
@@ -97,7 +97,7 @@ func TestQuickstartCheckDeps_TrackerAndCodeForgeNames(t *testing.T) {
 // launcherchecks reintroduces one.
 func TestQuickstartLauncherRows_NoRuntimeRow(t *testing.T) {
 	a := validAnswers()
-	rows := launcherchecks.All(quickstartCheckConfig(a), quickstartCheckDeps(a))
+	rows := launcherchecks.All(quickstartCheckConfig(a), quickstartCheckDeps(nil, a))
 	for _, ch := range rows {
 		if ch.Name == runner.RuntimePrerequisiteName {
 			t.Fatalf("launcherchecks row set contains the %q row, want none (doctor.Config.Runtime reports it)", runner.RuntimePrerequisiteName)
@@ -222,7 +222,7 @@ func harnessEnvFor(name, token string, creds []credential) string {
 // special-cased by name; github's needs only the repo slug the wizard holds.
 func TestQuickstartCheckDeps_BindsEachStrategyValidators(t *testing.T) {
 	a := validAnswers()
-	deps := quickstartCheckDeps(a)
+	deps := quickstartCheckDeps(nil, a)
 	for _, s := range backendkit.Strategies() {
 		b, ok := deps.Backend(s.Name)
 		if !ok {
@@ -256,7 +256,7 @@ func TestQuickstartCheckDeps_BlankSlugFailsOnlyRepoSlugRow(t *testing.T) {
 			a := tc.a
 			a.repoSlug = ""
 			var failed []string
-			for _, ch := range launcherchecks.All(quickstartCheckConfig(a), quickstartCheckDeps(a)) {
+			for _, ch := range launcherchecks.All(quickstartCheckConfig(a), quickstartCheckDeps(nil, a)) {
 				if _, err := ch.Probe(); err != nil {
 					failed = append(failed, ch.Name)
 				}
@@ -280,7 +280,7 @@ func forgejoAnswers() answers {
 
 func launcherRow(t *testing.T, a answers, name string) doctor.Check {
 	t.Helper()
-	for _, ch := range launcherchecks.All(quickstartCheckConfig(a), quickstartCheckDeps(a)) {
+	for _, ch := range launcherchecks.All(quickstartCheckConfig(a), quickstartCheckDeps(nil, a)) {
 		if ch.Name == name {
 			return ch
 		}

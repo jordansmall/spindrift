@@ -1,6 +1,7 @@
 package jira_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,10 @@ import (
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectorrecord"
+	"spindrift.dev/launcher/internal/connectorruntime"
+	"spindrift.dev/launcher/internal/connectorsandbox"
+	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
+	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/jira"
@@ -43,7 +48,7 @@ func newJiraTracker(t *testing.T) (forge.IssueTracker, error) {
 	t.Helper()
 	t.Chdir(t.TempDir()) // the audit file lands under the host log dir
 	env := map[string]string{"JIRA_BASE_URL": "https://jira.example", "JIRA_PROJECT_KEY": "PROJ", "JIRA_TOKEN": "tok"}
-	return jira.Strategy.NewIssueTracker(backendkit.Shared{}, func(k string) (string, bool) {
+	return jira.Strategy.NewIssueTracker(backendkit.Shared{Connectors: newRuntime(t)}, func(k string) (string, bool) {
 		v, ok := env[k]
 		return v, ok
 	})
@@ -330,6 +335,48 @@ func TestConnectorTracker_FailedIssueReadReportsTransient(t *testing.T) {
 			}
 			if got := connectorhost.ErrorClass(err); got != connectorhost.Transient {
 				t.Errorf("ErrorClass(%v) = %q, want %q", err, got, connectorhost.Transient)
+			}
+		})
+	}
+}
+
+// newRuntime is the Connector runtime over the rows the test applied and the
+// sandbox TestMain installed, closed with the test.
+func newRuntime(t *testing.T) *connectorruntime.Runtime {
+	t.Helper()
+	rt := connectorruntime.FromRegistries()
+	t.Cleanup(func() { _ = rt.Close() })
+	return rt
+}
+
+// withoutCapability is the installed sandbox's Loader, with one capability
+// struck from every Connector's handshake.
+type withoutCapability struct {
+	connectorsandbox.Loader
+	drop string
+}
+
+func (l withoutCapability) LoadNetwork(ctx context.Context, wasm []byte, n connectorhost.Network) (*connectorhost.Connector, error) {
+	c, err := l.Loader.LoadNetwork(ctx, wasm, n)
+	if err == nil {
+		c.Capabilities = slices.DeleteFunc(slices.Clone(c.Capabilities), func(s string) bool { return s == l.drop })
+	}
+	return c, err
+}
+
+// The Connector has no native writes behind it, so one that omits a method
+// core drives is refused at load rather than panicking on first use.
+func TestConnectorMissingARequiredCapabilityIsRefused(t *testing.T) {
+	for _, capability := range []string{
+		connectortracker.CapTransition, connectortracker.CapEditLabels, connectortracker.CapLabels,
+		connectortracker.CapComment, connectortracker.CapProbe, connectortracker.CapFileIssue,
+		connectortracker.CapLabeled,
+	} {
+		t.Run(capability, func(t *testing.T) {
+			t.Cleanup(connectorsandbox.Use(withoutCapability{connectorsandboxtest.InProcess(), capability}))
+			_, err := tryProductionHarness(t, true, dispatchkind.TrackerWork, "", jira.LifecycleHybrid, "Task")
+			if !errors.Is(err, connectorruntime.ErrMissingCapabilities) || !strings.Contains(err.Error(), capability) {
+				t.Fatalf("err = %v without %q, want ErrMissingCapabilities naming it", err, capability)
 			}
 		})
 	}

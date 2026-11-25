@@ -2,6 +2,7 @@ package main
 
 import (
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
@@ -30,8 +31,8 @@ type readContext struct {
 // it through the same seam. It builds the adapters before any validate(), so
 // an unregistered ISSUE_TRACKER or CODE_FORGE is an error here rather than a
 // github fallback.
-func newReadContext(kind *dispatchkind.Descriptor, selfContained bool) (rc readContext, err error) {
-	c := applyDispatchKind(loadConfig(), kind)
+func newReadContext(connectors *connectorruntime.Runtime, kind *dispatchkind.Descriptor, selfContained bool) (rc readContext, err error) {
+	c := applyDispatchKind(loadConfig(connectors), kind)
 	c.selfContained = selfContained
 	if err := checkBackendsRegistered(c); err != nil {
 		// Carried so doctor can still report the bad name as a config finding.

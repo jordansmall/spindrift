@@ -82,6 +82,7 @@ func backendShared(c config) backendkit.Shared {
 		MergeMethod:   c.MergeMethod,
 		SyncMethod:    c.SyncMethod,
 		Tracker:       c.kind().Tracker,
+		Connectors:    c.connectors,
 	}
 }
 

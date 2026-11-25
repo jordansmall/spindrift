@@ -4401,5 +4401,5 @@ func runQuickstartT(t *testing.T, dir string, env Environment, cmdRunner Command
 			t.Setenv(d.TokenEnvVar, os.Getenv(d.TokenEnvVar))
 		}
 	}
-	return runQuickstart(dir, env, cmdRunner, forgeBuilder, w, stdin, interactive, force)
+	return runQuickstart(nil, dir, env, cmdRunner, forgeBuilder, w, stdin, interactive, force)
 }
