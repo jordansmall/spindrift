@@ -4269,21 +4269,33 @@ load with `ErrNoConnectorSandbox`, never falling back to its own process.
 - **Isolation.** The sandbox image is built minimal, holding only
   `connector-host`, and carries no `Env`. On an OCI runtime the Launcher runs
   it as `run -i --rm --name spindrift-connector-sandbox-<owner>-<pid>-<nanos>
-  --network=none --cap-drop=all --security-opt=no-new-privileges --read-only
-  --pids-limit=128 --memory=512m`: no `-t` (a tty would corrupt the frame
-  stream), no env, no host volumes or bind mounts (podman adds its default in-memory tmpfs under a read-only root), no network. These are fixed, not the Box's knobs,
-  so nothing a Box is configured with reaches it.
+  --network=none --pull=never --cap-drop=all --security-opt=no-new-privileges
+  --read-only --pids-limit=128 --memory=512m sha256:<id>`: no `-t` (a tty
+  would corrupt the frame stream), no env, no host volumes or bind mounts
+  (podman adds its default in-memory tmpfs under a read-only root), no
+  network. These are fixed, not the Box's knobs, so nothing a Box is
+  configured with reaches it. The image is run by its content-addressed ID
+  (under nerdctl, the containerd target digest, the one its `run` resolves),
+  never its tag, and never pulled: the Launcher loads it from its Nix archive
+  when absent, then reads the ID with `image inspect`. An image still missing
+  after that fails the start, naming the image, rather than letting the
+  runtime fetch whatever answers to the tag.
 - **Isolation under bwrap.** There is no image: the Launcher runs `bwrap
   --unshare-all --clearenv --cap-drop ALL --new-session --die-with-parent
-  --proc /proc --dev /dev --ro-bind <host> <host> --seccomp 3 --
-  <host>/bin/connector-host`, where `<host>` is the static `connector-host`
+  --proc /proc --dev /dev --ro-bind <host> <host> --remount-ro / --seccomp 3
+  -- <host>/bin/connector-host`, where `<host>` is the static `connector-host`
   store path from the run document's `CONNECTOR_HOST` (realized from
   `CONNECTOR_HOST_DRV` when absent). Only that one store path is bound, never
   the whole `/nix/store` a Box sees, and the ADR 0054 seccomp filter is
-  required: without it the sandbox does not start. It runs in its own cgroup,
-  so `ListRunning` lists it under its `spindrift-connector-sandbox-` name, with
+  required: without it the sandbox does not start. The root bwrap builds is a
+  tmpfs; `--remount-ro /` makes it read-only once every mount point is in
+  place, so the Connector can write nowhere. It runs in its own cgroup, so
+  `ListRunning` lists it under its `spindrift-connector-sandbox-` name, with
   the same fixed `pids.max` 128 and `memory.max` 512 MiB caps as above, not
-  the Box's knobs.
+  the Box's knobs. Those caps are best-effort under bwrap, as a Box's are: a
+  host that does not delegate a writable cgroup subtree, or one whose
+  `pids.max` and `memory.max` stay unwritable (a user systemd scope that does
+  not delegate those controllers), warns and starts the sandbox uncapped.
 - **Failure.** A sandbox that cannot start fails the run with
   `ErrConnectorSandboxStart`, naming the runner and its stderr; there is no
   in-process fallback. On a bwrap host that denies unprivileged user
@@ -4353,8 +4365,8 @@ load with `ErrNoConnectorSandbox`, never falling back to its own process.
   start it in a real sandbox and assert the operator's home, SSH keys,
   runtime control sockets, the rest of `/nix/store`, a write under `/`, every
   network target and every Launcher variable are out of reach, and that an
-  undeclared route is refused into the Launcher's audit log; a control in `runnertest/escape` proves the same
-  probes succeed unsandboxed. The
+  undeclared route is refused into the Launcher's audit log; a control in
+  `runnertest/escape` proves the same probes succeed unsandboxed. The
   `connector-host-escapeprobe-absent-from-release` check keeps the tag out of
   the Launcher, the daemon, the Box's binaries, the release `connector-host`
   and the release sandbox image.
