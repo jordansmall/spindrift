@@ -1,7 +1,9 @@
 # The Connector protocol, described once as data (issue #7504). `nix run .#regen`
 # renders it through render.nix into cmd/launcher/internal/connectorprotocol:
 # protocol_gen.go (constants and the method table) and protocol.schema.json, and,
-# through the binding in sdk.nix, into the SDK's sdk/<pkg>/protocol_gen.go.
+# through the binding in sdk.nix, into the SDK's sdk/<pkg>/protocol_gen.go. The
+# admitCases table also renders two generated tests and the admit-rule table in
+# docs/reference.md.
 #
 # It describes protocol 0.4.0. Core's own hand-written constants stay as they
 # are, and agreement tests (the protocol_test.go and wirefields_test.go files

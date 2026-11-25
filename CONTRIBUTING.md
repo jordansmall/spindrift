@@ -285,7 +285,10 @@ and in the in-box `box` program; the only bash left is the generated shim that
   `connector-protocol-gen` and `connector-protocol-schema-gen` checks;
   `sdk.nix` binds the SDK's Go spelling, and `render.nix`'s `renderSDK` also
   renders each `sdk/*/protocol_gen.go`, drift-guarded by the
-  `connector-protocol-sdk-gen` check),
+  `connector-protocol-sdk-gen` check; `renderAdmitCases` renders the two
+  `admitcases_gen_test.go` files, drift-guarded by
+  `connector-protocol-admit-cases-gen`, and `renderAdmitCasesDoc` the
+  admit-rule table in `docs/reference.md`),
   `backends/default.nix` (the backend descriptor registry — one row per
   ISSUE_TRACKER/CODE_FORGE backend, each in its own `backends/<name>.nix`
   file; `env-schema.nix`'s tracker/forge choices derive from it),

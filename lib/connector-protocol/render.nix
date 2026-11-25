@@ -1523,6 +1523,32 @@ let
           }
         '';
     };
+
+  # The admit-case table as Markdown for docs/reference.md (issue #7569): the
+  # declaration, then every case grouped by rule. A rule with no cases still gets
+  # a row, so a rule added without cases reads as one.
+  renderAdmitCasesDoc =
+    description:
+    let
+      ac = (validate description).admitCases;
+      cell = builtins.replaceStrings [ "|" ] [ "\\|" ];
+      routeLine = r: "- `${r.method} ${r.host}${r.path}`\n";
+      verdict = c: if c ? refuse then "refused: `${cell c.refuse}`" else "admitted";
+      row =
+        rule: i: c:
+        "| ${if i == 0 then ruleCell rule else ""} | `${cell c.method} ${cell c.url}` | ${verdict c} |\n";
+      ruleCell = rule: "**`${rule.name}`**: ${cell rule.doc}";
+      ruleRows =
+        rule:
+        if rule.cases == [ ] then
+          "| ${ruleCell rule} | (no cases) | |\n"
+        else
+          concat (genList (i: row rule i (elemAt rule.cases i)) (length rule.cases));
+    in
+    "The routes the cases run against:\n\n"
+    + concat (map routeLine ac.routes)
+    + "\n| Rule | Request | Verdict |\n|---|---|---|\n"
+    + concat (map ruleRows ac.rules);
 in
 {
   inherit
@@ -1530,5 +1556,6 @@ in
     renderSchema
     renderSDK
     renderAdmitCases
+    renderAdmitCasesDoc
     ;
 }

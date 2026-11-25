@@ -3639,6 +3639,53 @@ leaves `forge.PRs.Open` unset, so set it to let the host open the PR for a
 branch it pushed itself. Its `<name>ConnectorBaseURL` knob names the forge's
 base URL.
 
+**The admit rule.** What a Route admits is a case table, not prose: the
+protocol description's `admitCases` (`lib/connector-protocol/default.nix`)
+lists each rule with the requests it admits and refuses and the exact refusal
+reason, and regen renders it below. Core's Network host and the SDK fake host
+(`connector.NewFakeHost`) each run every case in a generated test,
+`cmd/launcher/internal/connectorhost/admitcases_gen_test.go` and
+`sdk/connector/admitcases_gen_test.go`, so a side that breaks a written case
+fails its own test. The cases pin the two only where written: the conformance
+run against the real host stays the backstop, and the table leaves out address
+policy, which only the real host applies. A rule nobody wrote cases for shows
+as `(no cases)`.
+
+<!-- BEGIN GENERATED CONNECTOR ADMIT CASES -- nix run .#regen -- DO NOT EDIT -->
+The routes the cases run against:
+
+- `GET jira.example.com/rest/api/2`
+- `POST jira.example.com/rest/api/2/issue`
+- `GET other.example.com:8443/`
+
+| Rule | Request | Verdict |
+|---|---|---|
+| **`methodSet`**: A request's method must be one of GET, HEAD, POST, PUT, PATCH, DELETE, compared case-sensitively. | `TRACE https://jira.example.com/rest/api/2` | refused: `method is not one of GET, HEAD, POST, PUT, PATCH, DELETE` |
+|  | `get https://jira.example.com/rest/api/2` | refused: `method is not one of GET, HEAD, POST, PUT, PATCH, DELETE` |
+|  | `GET https://jira.example.com/rest/api/2` | admitted |
+| **`exactMethod`**: A method matches a route's method exactly, so another route's method is refused. | `POST https://jira.example.com/rest/api/2` | refused: `no route admits POST jira.example.com/rest/api/2` |
+| **`httpsOnly`**: Only an https url is admitted, and one that does not parse is refused. | `GET http://jira.example.com/rest/api/2` | refused: `GET jira.example.com/rest/api/2: only https urls without userinfo or fragment are allowed` |
+|  | `GET https://jira.example.com/%zz` | refused: `GET: unparseable url` |
+| **`noUserinfoOrFragment`**: A url carrying userinfo or a fragment is refused. | `GET https://u:p@jira.example.com/rest/api/2` | refused: `GET jira.example.com/rest/api/2: only https urls without userinfo or fragment are allowed` |
+|  | `GET https://jira.example.com/rest/api/2#f` | refused: `GET jira.example.com/rest/api/2: only https urls without userinfo or fragment are allowed` |
+| **`canonicalPath`**: A path must be canonical: no dot segments, trailing slash, empty segment, escaped slash or empty path. | `GET https://jira.example.com/rest/api/2/a/../b` | refused: `no route admits GET jira.example.com/rest/api/2/a/../b` |
+|  | `GET https://jira.example.com/rest/api/2/` | refused: `no route admits GET jira.example.com/rest/api/2/` |
+|  | `GET https://jira.example.com/rest/api/2/a//b` | refused: `no route admits GET jira.example.com/rest/api/2/a//b` |
+|  | `GET https://jira.example.com/rest/api/2/a%2Fb` | refused: `no route admits GET jira.example.com/rest/api/2/a/b` |
+|  | `GET https://jira.example.com` | refused: `no route admits GET jira.example.com` |
+| **`caseInsensitiveHost`**: A host matches a route's host without regard to case, and its port is significant. | `GET https://JIRA.example.com/rest/api/2` | admitted |
+|  | `GET https://other.example.com/x` | refused: `no route admits GET other.example.com/x` |
+|  | `GET https://evil.example.com/rest/api/2` | refused: `no route admits GET evil.example.com/rest/api/2` |
+| **`pathPattern`**: A route admits its path and everything beneath it on a segment boundary, and the query is not part of the path. | `GET https://jira.example.com/rest/api/2` | admitted |
+|  | `GET https://jira.example.com/rest/api/2/issue/X-1` | admitted |
+|  | `GET https://other.example.com:8443/anything/at/all` | admitted |
+|  | `GET https://jira.example.com/rest/api/2?x=1` | admitted |
+|  | `GET https://jira.example.com/rest/api/2issuefoo` | refused: `no route admits GET jira.example.com/rest/api/2issuefoo` |
+|  | `POST https://jira.example.com/rest/api/2/issuefoo` | refused: `no route admits POST jira.example.com/rest/api/2/issuefoo` |
+| **`semicolon`**: A path containing a semicolon is not matched, so a path parameter or a `..;` segment cannot slip past a route. | `GET https://jira.example.com/rest/api/2/..;/x` | refused: `no route admits GET jira.example.com/rest/api/2/..;/x` |
+|  | `GET https://jira.example.com/rest/api/2/issue;x=1` | refused: `no route admits GET jira.example.com/rest/api/2/issue;x=1` |
+<!-- END GENERATED CONNECTOR ADMIT CASES -->
+
 **The data.** `data.nix` is a function of `core` returning a flat attribute
 set. It sets no other spindrift option: core builds the
 `spindrift.connectors.<name>` row and the flake module from it with
@@ -3833,7 +3880,8 @@ structs), and into
 the machine-readable contract for a Connector author not writing Go: each
 method's `params` and `result` under `methods`, the shared shapes under
 `$defs`. The `connector-protocol-gen`, `connector-protocol-sdk-gen` and
-`connector-protocol-schema-gen` checks fail when a rendered file is stale.
+`connector-protocol-schema-gen` checks fail when a rendered file is stale, and
+`connector-protocol-admit-cases-gen` does for the two generated admit-case tests.
 Core's own hand-written types are pinned to the same description by agreement
 tests against `connectorprotocol`, so a protocol change is one edit to the
 description and a regen.
