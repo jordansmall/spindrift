@@ -95,6 +95,9 @@ func podmanFake(tool string, args []string, stdout, stderr io.Writer) int {
 	case "image":
 		if sub(1) == "inspect" || sub(1) == "exists" {
 			if cfg.ImagePresent {
+				if slices.Contains(args, "--format") {
+					fmt.Fprintln(stdout, fakeImageID)
+				}
 				return 0
 			}
 			return 1
@@ -235,6 +238,12 @@ func sandboxRun(tool string, cfg PodmanConfig, args []string, stderr io.Writer) 
 	}
 	return execConnectorHost(tool, cfg.ConnectorHost, cfg.Record, stderr)
 }
+
+// fakeImageID is the image ID `image inspect --format` reports for a present
+// image, so a sandbox run by ID passes the digest policy. It duplicates
+// runnertest.SandboxImageID on purpose: the backends-*-go-test checks compile
+// this file without the runnertest package vendored.
+const fakeImageID = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 // sandboxPidSuffix names, next to the argv record, the file a sandbox run
 // appends its pid to.

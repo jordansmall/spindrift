@@ -33,8 +33,12 @@ case "${1:-}" in
     ;;
   image)
     if [ "${2:-}" = "inspect" ] || [ "${2:-}" = "exists" ]; then
-      [ "${FAKE_PODMAN_IMAGE_PRESENT:-0}" = "1" ]
-      exit $?
+      [ "${FAKE_PODMAN_IMAGE_PRESENT:-0}" = "1" ] || exit 1
+      # The sandbox start resolves its image by ID; podman prints it bare.
+      if [[ " $* " == *" --format "* ]]; then
+        printf '%064d\n' 0
+      fi
+      exit 0
     fi
     ;;
   inspect)

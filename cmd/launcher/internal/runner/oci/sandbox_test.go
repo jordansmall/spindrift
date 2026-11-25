@@ -24,6 +24,8 @@ import (
 const (
 	sandboxTag       = "spindrift-connector-sandbox:test"
 	sandboxFlakeAttr = ".#packages.x86_64-linux.connector-sandbox-image"
+	sandboxHex       = runnertest.SandboxImageHex
+	sandboxID        = runnertest.SandboxImageID
 )
 
 // hostModeEnv makes the test binary serve the Connector host protocol instead
@@ -56,7 +58,7 @@ func sandboxAdapter(t *testing.T, runtime string) *ociAdapter {
 func TestSandboxRenderingContract(t *testing.T) {
 	contract.SandboxRender(t, func(t *testing.T, rt string) []string {
 		script, dir := runnertest.NewFakeCLIBySubcommand(t, map[string]runnertest.Call{
-			"image": {}, "run": {},
+			"image": {Stdout: sandboxID}, "run": {},
 		})
 		bin := t.TempDir()
 		if err := os.Symlink(script, filepath.Join(bin, runner.BinaryFor(rt))); err != nil {
@@ -75,8 +77,8 @@ func TestSandboxRenderingContract(t *testing.T) {
 		}
 		for i := 0; i < runnertest.CallCount(t, dir); i++ {
 			if argv := runnertest.ReadCall(t, dir, i); argv[0] == "run" {
-				if !slices.Contains(argv, sandboxTag) {
-					t.Errorf("run argv does not name the sandbox image %q: %v", sandboxTag, argv)
+				if argv[len(argv)-1] != sandboxID || !slices.Contains(argv, "--pull=never") {
+					t.Errorf("run argv does not pin image %q and never pull: %v", sandboxID, argv)
 				}
 				return argv
 			}
@@ -92,7 +94,7 @@ func TestSandboxArgsIgnoreBoxNetwork(t *testing.T) {
 	a := sandboxAdapter(t, "podman")
 	a.network = runner.OCINetwork{Arg: "host"}
 	a.pidsLimit, a.memoryLimit = "9999", "99g"
-	args := a.buildSandboxArgs(runner.ConnectorSandboxPrefix + "x")
+	args := a.buildSandboxArgs(runner.ConnectorSandboxPrefix+"x", sandboxID)
 	if slices.Contains(args, "host") || slices.Contains(args, "--pids-limit=9999") || slices.Contains(args, "--memory=99g") {
 		t.Errorf("sandbox argv took a Box knob: %v", args)
 	}
@@ -121,7 +123,7 @@ func (h *ociSandboxHarness) Sandbox(t *testing.T, name string) runner.Runner {
 	// the liveness probes can see it go.
 	const live = `[ -e started ] && [ ! -e killed ] && kill -0 "$(cat pid)" 2>/dev/null`
 	script, _ := runnertest.NewFakeCLIBySubcommand(t, map[string]runnertest.Call{
-		"image": {},
+		"image": {Stdout: sandboxID},
 		"run":   {Shell: fmt.Sprintf("echo $$ > pid; touch started; exec env %s=1 %q", hostModeEnv, self)},
 		"rm":    {Shell: `touch killed; kill -9 "$(cat pid)" 2>/dev/null; exit 0`},
 		"inspect": {
@@ -156,7 +158,7 @@ func serveHostMode() {
 func TestStartConnectorSandbox_LoadsAbsentImage(t *testing.T) {
 	redirectImageLockDir(t)
 	script, dir := runnertest.NewFakeCLIBySubcommand(t, map[string]runnertest.Call{
-		"image": {Exit: 1}, "load": {}, "tag": {}, "run": {},
+		"image": imageAfterLoad(), "load": {Shell: "touch loaded"}, "tag": {}, "run": {},
 	})
 	nixScript, nixDir := runnertest.NewFakeCLI(t, runnertest.Call{})
 	orig := execCommand
@@ -182,10 +184,11 @@ func TestStartConnectorSandbox_LoadsAbsentImage(t *testing.T) {
 		calls = append(calls, strings.Join(runnertest.ReadCall(t, dir, i), " "))
 	}
 	want := []string{
-		"image inspect " + sandboxTag,
+		"image inspect --format {{.Id}} " + sandboxTag,
 		"image inspect " + sandboxTag, // re-probe under the realize lock
 		"load -i /nix/store/sandbox-archive",
 		"tag spindrift-connector-sandbox:latest " + sandboxTag,
+		"image inspect --format {{.Id}} " + sandboxTag,
 	}
 	for i, w := range want {
 		if i >= len(calls) || calls[i] != w {
@@ -221,7 +224,7 @@ func TestStartConnectorSandbox_NoBuilderFallsBackToContainerBuild(t *testing.T) 
 	redirectImageLockDir(t)
 	nixDir := stubHostNix(t, "error: a Linux system is required to build a Linux derivation")
 	script, dir := runnertest.NewFakeCLIBySubcommand(t, map[string]runnertest.Call{
-		"image": {Exit: 1}, "load": {}, "tag": {}, "run": {},
+		"image": imageAfterLoad(), "load": {Shell: "touch loaded"}, "tag": {}, "run": {},
 	})
 	r, err := New(runner.Config{Runtime: script}, sandboxArtifacts(), runnertest.Lookup(nil), "/work")
 	if err != nil {
@@ -296,7 +299,7 @@ func TestStartConnectorSandbox_GenuineNixFailureSkipsContainerBuild(t *testing.T
 func TestStartConnectorSandbox_OwnProcessGroup(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "pid")
 	script, _ := runnertest.NewFakeCLIBySubcommand(t, map[string]runnertest.Call{
-		"image": {},
+		"image": {Stdout: sandboxID},
 		"run":   {Shell: fmt.Sprintf("echo $$ > %[1]s.tmp; mv %[1]s.tmp %[1]s; exec cat", pidFile)},
 	})
 	sb, err := sandboxAdapter(t, script).StartConnectorSandbox(runner.ConnectorSandboxPrefix + "pgrp")
@@ -319,5 +322,107 @@ func TestStartConnectorSandbox_OwnProcessGroup(t *testing.T) {
 	}
 	if pgid == syscall.Getpgrp() {
 		t.Errorf("sandbox client pgid %d is the Launcher's own; Ctrl-C would reach it before settle", pgid)
+	}
+}
+
+// imageAfterLoad scripts `image`: absent until the fake `load` touches its
+// marker, then reporting sandboxID.
+func imageAfterLoad() runnertest.Call {
+	return runnertest.Call{Shell: "[ -e loaded ] || exit 1", Stdout: sandboxID}
+}
+
+// The sandbox is started by image ID with pulling off; podman's bare-hex ID is
+// normalised to the sha256: form the policy checks.
+func TestStartConnectorSandbox_PinsTheImageIDAndNeverPulls(t *testing.T) {
+	script, dir := runnertest.NewFakeCLIBySubcommand(t, map[string]runnertest.Call{
+		"image": {Stdout: sandboxHex}, "run": {},
+	})
+	sb, err := sandboxAdapter(t, script).StartConnectorSandbox(runner.ConnectorSandboxPrefix + "pin")
+	if err != nil {
+		t.Fatalf("StartConnectorSandbox: %v", err)
+	}
+	_ = sb.Stdin.Close()
+	_ = sb.Wait()
+	var run []string
+	for i := 0; i < runnertest.CallCount(t, dir); i++ {
+		if argv := runnertest.ReadCall(t, dir, i); argv[0] == "run" {
+			run = argv
+		}
+	}
+	if run == nil || run[len(run)-1] != sandboxID || !slices.Contains(run, "--pull=never") {
+		t.Errorf("run argv = %v, want --pull=never and the image %s", run, sandboxID)
+	}
+}
+
+// The reference the sandbox runs by must be one the runtime's own `run`
+// resolves: nerdctl's {{.Id}} is the config digest, which `run` cannot find, so
+// it is asked for the containerd target digest instead.
+func TestStartConnectorSandbox_InspectsTheReferenceRunResolves(t *testing.T) {
+	for _, tc := range []struct {
+		runtime string
+		inspect []string
+	}{
+		{"podman", []string{"--format", "{{.Id}}"}},
+		{"docker", []string{"--format", "{{.Id}}"}},
+		{"rancher", []string{"--mode=native", "--format", "{{.Image.Target.Digest}}"}},
+	} {
+		t.Run(tc.runtime, func(t *testing.T) {
+			script, dir := runnertest.NewFakeCLIBySubcommand(t, map[string]runnertest.Call{
+				"image": {Stdout: sandboxID}, "run": {},
+			})
+			bin := t.TempDir()
+			if err := os.Symlink(script, filepath.Join(bin, runner.BinaryFor(tc.runtime))); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			sb, err := sandboxAdapter(t, tc.runtime).StartConnectorSandbox(runner.ConnectorSandboxPrefix + "ref")
+			if err != nil {
+				t.Fatalf("StartConnectorSandbox: %v", err)
+			}
+			_ = sb.Stdin.Close()
+			_ = sb.Wait()
+			var inspect, run []string
+			for i := 0; i < runnertest.CallCount(t, dir); i++ {
+				switch argv := runnertest.ReadCall(t, dir, i); argv[0] {
+				case "image":
+					inspect = argv
+				case "run":
+					run = argv
+				}
+			}
+			want := append(append([]string{"image", "inspect"}, tc.inspect...), sandboxTag)
+			if !slices.Equal(inspect, want) {
+				t.Errorf("inspect argv = %v, want %v", inspect, want)
+			}
+			if run == nil || run[len(run)-1] != sandboxID {
+				t.Errorf("run argv = %v, want it to end with %s", run, sandboxID)
+			}
+		})
+	}
+}
+
+// A sandbox image still absent after realizing it fails the start naming the
+// image; the runtime is never left to pull it.
+func TestStartConnectorSandbox_ImageMissingAfterRealizeFails(t *testing.T) {
+	redirectImageLockDir(t)
+	nixScript, _ := runnertest.NewFakeCLI(t, runnertest.Call{})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(_ string, args ...string) *exec.Cmd { return exec.Command(nixScript, args...) }
+	script, dir := runnertest.NewFakeCLIBySubcommand(t, map[string]runnertest.Call{
+		"image": {Exit: 1}, "load": {}, "tag": {}, "run": {},
+	})
+	r, err := New(runner.Config{Runtime: script}, sandboxArtifacts(), runnertest.Lookup(nil), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = r.StartConnectorSandbox(runner.ConnectorSandboxPrefix + "missing")
+	if err == nil || !strings.Contains(err.Error(), sandboxTag) {
+		t.Fatalf("StartConnectorSandbox error = %v, want one naming %s", err, sandboxTag)
+	}
+	for i := 0; i < runnertest.CallCount(t, dir); i++ {
+		if argv := runnertest.ReadCall(t, dir, i); argv[0] == "run" {
+			t.Errorf("runtime ran %v with the image absent", argv)
+		}
 	}
 }

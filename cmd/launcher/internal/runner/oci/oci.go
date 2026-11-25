@@ -558,33 +558,66 @@ var hardeningArgs = []string{"--cap-drop=all", "--security-opt=no-new-privileges
 
 // buildSandboxArgs assembles `run` for the Connector sandbox. It shares no
 // Box state: no network config, env, mounts or add-host, and no -t, which
-// would corrupt the binary frame stream.
-func (a *ociAdapter) buildSandboxArgs(name string) []string {
-	args := []string{"run", "-i", "--rm", "--name", name, "--network=none"}
+// would corrupt the binary frame stream. image is a sha256: reference the
+// runtime's `run` resolves locally (see sandboxImageID): a loaded archive has
+// no registry digest, and --pull=never keeps the runtime from ever fetching
+// the sandbox image.
+func (a *ociAdapter) buildSandboxArgs(name, image string) []string {
+	args := []string{"run", "-i", "--rm", "--name", name, "--network=none", "--pull=never"}
 	args = append(args, hardeningArgs...)
-	return append(args, "--read-only", "--pids-limit="+runner.SandboxPidsLimit, "--memory="+runner.SandboxMemoryLimit, a.sandboxImg.tag)
+	return append(args, "--read-only", "--pids-limit="+runner.SandboxPidsLimit, "--memory="+runner.SandboxMemoryLimit, image)
 }
 
-// ensureSandboxImage loads the Connector sandbox image exactly as EnsureReady
-// loads the Box image (realizeImage: lock, host build or container-build
-// fallback, load, re-tag), minus the image_build report.
-func (a *ociAdapter) ensureSandboxImage() error {
+// sandboxImageID returns the sha256:<hex> reference `run` resolves for the
+// local sandbox image. podman's {{.Id}} prints the hex bare, docker's with the
+// sha256: prefix. nerdctl's {{.Id}} is the image config digest, which its `run`
+// cannot look up (it matches the containerd target digest), so under nerdctl
+// inspect the target digest instead.
+func (a *ociAdapter) sandboxImageID() (string, error) {
+	args := []string{"image", "inspect", "--format", "{{.Id}}", a.sandboxImg.tag}
+	if a.cli == "nerdctl" {
+		args = []string{"image", "inspect", "--mode=native", "--format", "{{.Image.Target.Digest}}", a.sandboxImg.tag}
+	}
+	out, err := exec.Command(a.cli, args...).Output()
+	if err != nil {
+		return "", err
+	}
+	id := strings.TrimSpace(string(out))
+	if id == "" {
+		return "", errors.New("the runtime reported no image ID")
+	}
+	return "sha256:" + strings.TrimPrefix(id, "sha256:"), nil
+}
+
+// ensureSandboxImage returns the sandbox image's ID, loading the image exactly
+// as EnsureReady loads the Box image when absent (realizeImage: lock, host
+// build or container-build fallback, load, re-tag), minus the image_build
+// report.
+func (a *ociAdapter) ensureSandboxImage() (string, error) {
 	if a.sandboxImg.tag == "" {
-		return errors.New("no Connector sandbox image in the input document")
+		return "", errors.New("no Connector sandbox image in the input document")
 	}
-	if a.imagePresent(a.sandboxImg.tag) {
-		return nil
+	if id, err := a.sandboxImageID(); err == nil {
+		return id, nil
 	}
-	return a.realizeImage(a.sandboxImg)
+	if err := a.realizeImage(a.sandboxImg); err != nil {
+		return "", err
+	}
+	id, err := a.sandboxImageID()
+	if err != nil {
+		return "", fmt.Errorf("Connector sandbox image %s is not in the %s image store after realizing it: %w", a.sandboxImg.tag, a.cli, err)
+	}
+	return id, nil
 }
 
 // StartConnectorSandbox runs the Connector sandbox image detached from any
 // terminal, with stdin and stdout piped to the caller.
 func (a *ociAdapter) StartConnectorSandbox(name string) (runner.ConnectorSandbox, error) {
-	if err := a.ensureSandboxImage(); err != nil {
+	image, err := a.ensureSandboxImage()
+	if err != nil {
 		return runner.ConnectorSandbox{}, err
 	}
-	cmd := exec.Command(a.cli, a.buildSandboxArgs(name)...)
+	cmd := exec.Command(a.cli, a.buildSandboxArgs(name, image)...)
 	// Own process group: a terminal Ctrl-C must not reach the sandbox before
 	// settle (issue #7302).
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

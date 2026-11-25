@@ -177,31 +177,33 @@ func TestPodmanRunFailsWhenAFixtureCannotBeCopied(t *testing.T) {
 // sandbox, written out here so a drift in either side fails a test.
 func sandboxArgv(extra ...string) []string {
 	args := []string{"run", "-i", "--rm", "--name", runner.ConnectorSandboxPrefix + "1", "--network=none",
-		"--cap-drop=all", "--security-opt=no-new-privileges", "--read-only", "--pids-limit=128", "--memory=512m"}
-	return append(append(args, extra...), "spindrift-connector-sandbox:x")
+		"--cap-drop=all", "--security-opt=no-new-privileges", "--read-only", "--pull=never", "--pids-limit=128", "--memory=512m"}
+	return append(append(args, extra...), fakeImageID)
 }
 
 func TestPodmanSandboxRunRefusesWeakenedIsolation(t *testing.T) {
 	for name, argv := range map[string][]string{
-		"tty":        sandboxArgv("-t"),
-		"tty long":   sandboxArgv("--tty"),
-		"tty merged": append([]string{"run", "-it"}, sandboxArgv()[2:]...),
-		"env":        sandboxArgv("-e", "A=b"),
-		"env long":   sandboxArgv("--env=A=b"),
-		"env file":   sandboxArgv("--env-file", "f"),
-		"volume":     sandboxArgv("-v", "/a:/b"),
-		"mount":      sandboxArgv("--mount", "type=bind"),
-		"tmpfs":      sandboxArgv("--tmpfs", "/tmp"),
-		"add-host":   sandboxArgv("--add-host", "h:1.2.3.4"),
-		"privileged": sandboxArgv("--privileged"),
-		"cap-add":    sandboxArgv("--cap-add=NET_ADMIN"),
-		"network":    sandboxArgv("--network=host"),
-		"no -i":      slices.DeleteFunc(sandboxArgv(), func(a string) bool { return a == "-i" }),
-		"no --rm":    slices.DeleteFunc(sandboxArgv(), func(a string) bool { return a == "--rm" }),
-		"no none":    slices.DeleteFunc(sandboxArgv(), func(a string) bool { return a == "--network=none" }),
-		"no ro":      slices.DeleteFunc(sandboxArgv(), func(a string) bool { return a == "--read-only" }),
-		"no caps":    slices.DeleteFunc(sandboxArgv(), func(a string) bool { return a == "--cap-drop=all" }),
-		"no nnp":     slices.DeleteFunc(sandboxArgv(), func(a string) bool { return a == "--security-opt=no-new-privileges" }),
+		"tty":           sandboxArgv("-t"),
+		"tty long":      sandboxArgv("--tty"),
+		"tty merged":    append([]string{"run", "-it"}, sandboxArgv()[2:]...),
+		"env":           sandboxArgv("-e", "A=b"),
+		"env long":      sandboxArgv("--env=A=b"),
+		"env file":      sandboxArgv("--env-file", "f"),
+		"volume":        sandboxArgv("-v", "/a:/b"),
+		"mount":         sandboxArgv("--mount", "type=bind"),
+		"tmpfs":         sandboxArgv("--tmpfs", "/tmp"),
+		"add-host":      sandboxArgv("--add-host", "h:1.2.3.4"),
+		"privileged":    sandboxArgv("--privileged"),
+		"cap-add":       sandboxArgv("--cap-add=NET_ADMIN"),
+		"network":       sandboxArgv("--network=host"),
+		"no -i":         slices.DeleteFunc(sandboxArgv(), func(a string) bool { return a == "-i" }),
+		"no --rm":       slices.DeleteFunc(sandboxArgv(), func(a string) bool { return a == "--rm" }),
+		"no none":       slices.DeleteFunc(sandboxArgv(), func(a string) bool { return a == "--network=none" }),
+		"no ro":         slices.DeleteFunc(sandboxArgv(), func(a string) bool { return a == "--read-only" }),
+		"no caps":       slices.DeleteFunc(sandboxArgv(), func(a string) bool { return a == "--cap-drop=all" }),
+		"no nnp":        slices.DeleteFunc(sandboxArgv(), func(a string) bool { return a == "--security-opt=no-new-privileges" }),
+		"no pull=never": slices.DeleteFunc(sandboxArgv(), func(a string) bool { return a == "--pull=never" }),
+		"image by tag":  append(sandboxArgv()[:len(sandboxArgv())-1], "spindrift-connector-sandbox:x"),
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := PodmanConfig{Record: filepath.Join(t.TempDir(), "rec"), ConnectorHost: "/nonexistent/host"}
