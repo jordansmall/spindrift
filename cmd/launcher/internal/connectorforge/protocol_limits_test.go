@@ -9,6 +9,7 @@ import (
 // The agreement test for the token-grant bounds; the constants are unexported,
 // so the test is internal.
 func TestProtocolLimitsAgree(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name      string
 		got, want int

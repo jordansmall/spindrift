@@ -9,6 +9,7 @@ import (
 // One token authorizes Connector requests and core's git alike, and both read
 // it at each use: a token rotated mid-run reaches the next request and the
 // next push, and the stale one no longer does.
+// Serial: WithGitOverHTTPS -> gitexectest.ServeTLS t.Setenv GIT_SSL_CAINFO, and the token env.
 func TestRotatedTokenReachesTheNextConnectorRequestAndPush(t *testing.T) {
 	const env = "FORGEJO_TOKEN"
 	t.Setenv(env, "token-a")

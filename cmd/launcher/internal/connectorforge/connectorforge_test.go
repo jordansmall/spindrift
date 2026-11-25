@@ -53,6 +53,7 @@ func newTestForge(t *testing.T, replies map[string]string) (*reads, *[]recordedC
 }
 
 func TestNewReaderRequiresCapability(t *testing.T) {
+	t.Parallel()
 	c := &connectorhost.Connector{Capabilities: []string{"tracker"}}
 	_, err := NewReader(c, testTarget, testWebHost)
 	if !errors.Is(err, ErrNotForge) {
@@ -61,6 +62,7 @@ func TestNewReaderRequiresCapability(t *testing.T) {
 }
 
 func TestNewReaderRefusesEmptyWebHost(t *testing.T) {
+	t.Parallel()
 	c := &connectorhost.Connector{Capabilities: []string{"forge"}}
 	_, err := NewReader(c, testTarget, "")
 	if !errors.Is(err, ErrNoWebHost) {
@@ -69,6 +71,7 @@ func TestNewReaderRefusesEmptyWebHost(t *testing.T) {
 }
 
 func TestOpenPRForBranchPicksFirstOpen(t *testing.T) {
+	t.Parallel()
 	replies := map[string]string{"forge.prsForBranch": `{"prs":[
 		{"number":"9","url":"https://github.com/o/r/pull/9","state":"closed","merged":true},
 		{"number":"8","url":"https://github.com/o/r/pull/8","state":"open","merged":false},
@@ -89,6 +92,7 @@ func TestOpenPRForBranchPicksFirstOpen(t *testing.T) {
 }
 
 func TestOpenPRForBranchOnlyClosedOrEmpty(t *testing.T) {
+	t.Parallel()
 	for name, reply := range map[string]string{
 		"closed": `{"prs":[{"number":"9","url":"https://github.com/o/r/pull/9","state":"closed","merged":false}]}`,
 		"empty":  `{"prs":[]}`,
@@ -104,6 +108,7 @@ func TestOpenPRForBranchOnlyClosedOrEmpty(t *testing.T) {
 }
 
 func TestPRForBranchPicksFirstOfAnyState(t *testing.T) {
+	t.Parallel()
 	f, _ := newTestForge(t, map[string]string{"forge.prsForBranch": `{"prs":[
 		{"number":"9","url":"https://github.com/o/r/pull/9","state":"closed","merged":true},
 		{"number":"8","url":"https://github.com/o/r/pull/8","state":"open","merged":false}]}`})
@@ -120,6 +125,7 @@ func TestPRForBranchPicksFirstOfAnyState(t *testing.T) {
 }
 
 func TestBranchReadsFailClosedOnAnyBadPR(t *testing.T) {
+	t.Parallel()
 	good := `{"number":"8","url":"https://github.com/o/r/pull/8","state":"open","merged":false}`
 	bad := map[string]string{
 		"zero number":       `{"number":"0","url":"https://github.com/o/r/pull/0","state":"open","merged":false}`,
@@ -155,6 +161,7 @@ func TestBranchReadsFailClosedOnAnyBadPR(t *testing.T) {
 }
 
 func TestPRStateMapsStates(t *testing.T) {
+	t.Parallel()
 	for name, tc := range map[string]struct {
 		reply string
 		want  forge.PRState
@@ -182,6 +189,7 @@ func TestPRStateMapsStates(t *testing.T) {
 }
 
 func TestPRStateFailsClosed(t *testing.T) {
+	t.Parallel()
 	f, calls := newTestForge(t, map[string]string{
 		"forge.pr": `{"number":"8","url":"https://github.com/o/r/pull/8","state":"open","merged":false}`,
 	})
@@ -221,6 +229,7 @@ func TestPRStateFailsClosed(t *testing.T) {
 }
 
 func TestPRStateRejectsBadAnswer(t *testing.T) {
+	t.Parallel()
 	for name, reply := range map[string]string{
 		"unknown state": `{"number":"7","url":"https://github.com/o/r/pull/7","state":"weird","merged":false}`,
 		"merged open":   `{"number":"7","url":"https://github.com/o/r/pull/7","state":"open","merged":true}`,
@@ -236,6 +245,7 @@ func TestPRStateRejectsBadAnswer(t *testing.T) {
 }
 
 func TestCheckStateMapsRollup(t *testing.T) {
+	t.Parallel()
 	for state, want := range map[string]forge.RollupState{
 		"":         forge.StateNone,
 		"SUCCESS":  forge.StateSuccess,
@@ -275,6 +285,7 @@ func rollupJSON(t *testing.T, checks []wireCheck) string {
 }
 
 func TestFailureDetailFiltersAndRenders(t *testing.T) {
+	t.Parallel()
 	checks := []wireCheck{
 		{Kind: "CheckRun", Name: "build", Conclusion: "SUCCESS", Summary: "ok"},
 		{Kind: "CheckRun", Name: "lint", Conclusion: "FAILURE", Summary: "bad style"},
@@ -313,6 +324,7 @@ func TestFailureDetailFiltersAndRenders(t *testing.T) {
 }
 
 func TestFailureDetailEmptyWhenNothingFails(t *testing.T) {
+	t.Parallel()
 	f, _ := newTestForge(t, map[string]string{"forge.checks": rollupJSON(t, []wireCheck{
 		{Kind: "CheckRun", Name: "build", Conclusion: "SUCCESS"},
 		{Kind: "StatusContext", Name: "ci", Conclusion: "PENDING"},
@@ -324,6 +336,7 @@ func TestFailureDetailEmptyWhenNothingFails(t *testing.T) {
 }
 
 func TestFailureDetailIsCappedByCore(t *testing.T) {
+	t.Parallel()
 	huge := strings.Repeat("x", 10*forge.MaxFailureDetailBytes)
 	f, _ := newTestForge(t, map[string]string{"forge.checks": rollupJSON(t, []wireCheck{
 		{Kind: "CheckRun", Name: "build", Conclusion: "FAILURE", Summary: huge},
@@ -338,6 +351,7 @@ func TestFailureDetailIsCappedByCore(t *testing.T) {
 }
 
 func TestGuestErrorsPropagate(t *testing.T) {
+	t.Parallel()
 	f, _ := newTestForge(t, nil) // the stub guest has no methods
 	if _, _, err := f.OpenPRForBranch("b"); err == nil || errors.Is(err, ErrAnswer) {
 		t.Errorf("OpenPRForBranch err = %v, want the guest's error", err)
@@ -354,6 +368,7 @@ func TestGuestErrorsPropagate(t *testing.T) {
 }
 
 func TestFailureDetailCarriesTheFailingJobLog(t *testing.T) {
+	t.Parallel()
 	replies := map[string]string{
 		"forge.checks": rollupJSON(t, []wireCheck{
 			{Kind: "CheckRun", Name: "build", Conclusion: "SUCCESS", JobID: "1"},
@@ -393,6 +408,7 @@ func TestFailureDetailCarriesTheFailingJobLog(t *testing.T) {
 }
 
 func TestFailureDetailSurvivesAnUnreadableLog(t *testing.T) {
+	t.Parallel()
 	// The stub guest has no forge.jobLog, as with a Connector that predates it
 	// or a log the forge refuses.
 	f, _ := newTestForge(t, map[string]string{"forge.checks": rollupJSON(t, []wireCheck{
@@ -408,6 +424,7 @@ func TestFailureDetailSurvivesAnUnreadableLog(t *testing.T) {
 }
 
 func TestFailureDetailCapsAHostileLog(t *testing.T) {
+	t.Parallel()
 	huge, _ := json.Marshal(strings.Repeat("x\n", 10*forge.MaxFailureDetailBytes))
 	f, _ := newTestForge(t, map[string]string{
 		"forge.checks": rollupJSON(t, []wireCheck{{Kind: "CheckRun", Name: "unit", Conclusion: "FAILURE", JobID: "42"}}),
@@ -422,6 +439,7 @@ func TestFailureDetailCapsAHostileLog(t *testing.T) {
 	}
 }
 
+// Serial: jobLogsBudget is a package global.
 func TestFailureDetailSkipsLogsOnceTheBudgetIsSpent(t *testing.T) {
 	old := jobLogsBudget
 	jobLogsBudget = -time.Second
@@ -449,6 +467,7 @@ func TestFailureDetailSkipsLogsOnceTheBudgetIsSpent(t *testing.T) {
 // Forgejo names a PR's web page /<owner>/<repo>/pulls/<n>, where GitHub's is
 // /pull/<n>; both name the target repository's PR.
 func TestBranchReadsAcceptForgejoPullsPath(t *testing.T) {
+	t.Parallel()
 	f, _ := newTestForge(t, map[string]string{"forge.prsForBranch": `{"prs":[{"number":"8","url":"https://github.com/o/r/pulls/8","state":"open","merged":false}]}`})
 	pr, ok, err := f.OpenPRForBranch("b")
 	if err != nil || !ok || pr.URL != "https://github.com/o/r/pulls/8" {
@@ -459,6 +478,7 @@ func TestBranchReadsAcceptForgejoPullsPath(t *testing.T) {
 // A forge served under a subpath keeps its PR URLs and run links under that
 // prefix, matched by whole segments.
 func TestURLChecksStripTheWebBasePath(t *testing.T) {
+	t.Parallel()
 	r := &reads{target: testTarget, webHost: "example.org", webPath: "/forgejo"}
 	for _, tc := range []struct {
 		name, url string

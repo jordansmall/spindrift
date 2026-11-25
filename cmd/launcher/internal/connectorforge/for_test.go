@@ -20,6 +20,7 @@ func declaredTable(methods ...string) []connectorhost.Route {
 }
 
 func TestNewForRunsTheCodeForgeContractOverADeclaredTable(t *testing.T) {
+	t.Parallel()
 	c := connectorforgetest.Connector{
 		Wasm:   connectorforgetest.FixtureWasm(t, "forge.wasm"),
 		Routes: declaredTable(http.MethodGet, http.MethodDelete),
@@ -28,6 +29,7 @@ func TestNewForRunsTheCodeForgeContractOverADeclaredTable(t *testing.T) {
 }
 
 func TestNewPRForRunsThePRForgeContractOverADeclaredTable(t *testing.T) {
+	t.Parallel()
 	c := connectorforgetest.Connector{
 		Wasm:   connectorforgetest.FixtureWasm(t, connectorforgetest.PRWasm),
 		Routes: declaredTable(http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodDelete),
@@ -36,6 +38,7 @@ func TestNewPRForRunsThePRForgeContractOverADeclaredTable(t *testing.T) {
 }
 
 func TestScriptedResponseIsServedBeforeTheModel(t *testing.T) {
+	t.Parallel()
 	c := connectorforgetest.Connector{
 		Wasm:   connectorforgetest.FixtureWasm(t, "forge.wasm"),
 		Routes: declaredTable(http.MethodGet, http.MethodDelete),

@@ -9,6 +9,7 @@ import (
 // TestWireShapesAgree holds core's forge wire structs to the shapes the
 // protocol description gives them, which the SDK's twins are rendered from.
 func TestWireShapesAgree(t *testing.T) {
+	t.Parallel()
 	for key, v := range map[string]any{
 		"target": Target{},
 		"pr":     wirePR{},

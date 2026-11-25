@@ -81,6 +81,7 @@ func newPRHarness(t *testing.T, caps []string, replies map[string]any) *prHarnes
 func (h *prHarness) pr() forge.PRForge { return h.caps.PRForge }
 
 func TestMergeMapsTransientToTheRetriedSentinel(t *testing.T) {
+	t.Parallel()
 	h := newPRHarness(t, nil, map[string]any{"forge.merge": classed(connectorhost.Transient)})
 	err := h.pr().(forge.CodeForge).Merge(prURL7)
 	if !errors.Is(err, forge.ErrMergeTransient) {
@@ -97,6 +98,7 @@ func TestMergeMapsTransientToTheRetriedSentinel(t *testing.T) {
 // An unregistered primitive reaches the caller as the guest's own error, after
 // exactly one guest call: nothing wraps, classifies, or falls back.
 func TestUnregisteredPrimitiveFailsWithTheGuestsError(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		method string
 		call   func(forge.PRForge) error
@@ -120,6 +122,7 @@ func TestUnregisteredPrimitiveFailsWithTheGuestsError(t *testing.T) {
 }
 
 func TestMarkReadyMapsTransientToTheRetriedSentinel(t *testing.T) {
+	t.Parallel()
 	h := newPRHarness(t, nil, map[string]any{"forge.setDraft": classed(connectorhost.Transient)})
 	err := h.pr().MarkReady(prURL7)
 	if !errors.Is(err, forge.ErrMarkReadyTransient) {
@@ -138,6 +141,7 @@ func TestMarkReadyMapsTransientToTheRetriedSentinel(t *testing.T) {
 }
 
 func TestMergeFailureIsClassifiedFromThePR(t *testing.T) {
+	t.Parallel()
 	notMergeable := classed(connectorhost.NotMergeable)
 	for _, tc := range []struct {
 		name   string
@@ -183,6 +187,7 @@ func notSentinel(e error) bool {
 }
 
 func TestMergeRereadsAConflictingPROnceAfterAPause(t *testing.T) {
+	t.Parallel()
 	conflicting, mergeable := prJSON+`,"mergeable":"CONFLICTING"}`, prJSON+`,"mergeable":"MERGEABLE"}`
 	for _, tc := range []struct {
 		name       string
@@ -218,6 +223,7 @@ func TestMergeRereadsAConflictingPROnceAfterAPause(t *testing.T) {
 }
 
 func TestMergeDoesNotPauseForAMergedOrDraftPR(t *testing.T) {
+	t.Parallel()
 	for name, pr := range map[string]string{
 		"merged": `{"number":"7","url":"` + prURL7 + `","state":"closed","merged":true,"mergeable":"CONFLICTING"}`,
 		"draft":  prJSON + `,"draft":true,"mergeable":"CONFLICTING"}`,
@@ -233,6 +239,7 @@ func TestMergeDoesNotPauseForAMergedOrDraftPR(t *testing.T) {
 }
 
 func TestMergeLeavesRateLimitAndAuthUnclassified(t *testing.T) {
+	t.Parallel()
 	rl := &forge.RateLimitError{}
 	h := newPRHarness(t, nil, map[string]any{"forge.merge": rl})
 	if err := h.f.Merge(prURL7); !errors.Is(err, forge.ErrRateLimit) {
@@ -248,6 +255,7 @@ func TestMergeLeavesRateLimitAndAuthUnclassified(t *testing.T) {
 }
 
 func TestMergeReturnsARefusedCallAsIsWithoutRereadingThePR(t *testing.T) {
+	t.Parallel()
 	refused := fmt.Errorf("%w: %w", connectorhost.ErrCall, connectorhost.ErrRouteRefused)
 	h := newPRHarness(t, nil, map[string]any{"forge.merge": refused})
 	err := h.f.Merge(prURL7)
@@ -260,6 +268,7 @@ func TestMergeReturnsARefusedCallAsIsWithoutRereadingThePR(t *testing.T) {
 }
 
 func TestClassifyDoesNotRetryNonIdempotentWrites(t *testing.T) {
+	t.Parallel()
 	clock := retry.Clock{Now: time.Now, Sleep: func(time.Duration) {}}
 	var forgeCaps []string
 	for name, axis := range connectorprotocol.Capabilities {
@@ -286,6 +295,7 @@ func TestClassifyDoesNotRetryNonIdempotentWrites(t *testing.T) {
 }
 
 func TestCanAutoMergeNeedsTheCapability(t *testing.T) {
+	t.Parallel()
 	h := newPRHarness(t, nil, nil)
 	if ok, err := h.pr().CanAutoMerge(); ok || err != nil {
 		t.Fatalf("CanAutoMerge = (%v, %v), want (false, nil)", ok, err)
@@ -308,6 +318,7 @@ func TestCanAutoMergeNeedsTheCapability(t *testing.T) {
 }
 
 func TestOptionalSurfacesFollowTheCapabilities(t *testing.T) {
+	t.Parallel()
 	h := newPRHarness(t, nil, nil)
 	if h.caps.PRForge == nil || h.caps.BranchDeleter == nil || h.caps.MergeCommitReader == nil {
 		t.Errorf("base capabilities missing: %+v", h.caps)
@@ -342,6 +353,7 @@ func TestOptionalSurfacesFollowTheCapabilities(t *testing.T) {
 }
 
 func TestCheckRunDropsAForeignRunLink(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ name, link, want string }{
 		{"own repo run", runURL, runURL},
 		{"own repo, mixed case", "https://GitHub.com/O/R/actions/runs/1", "https://GitHub.com/O/R/actions/runs/1"},
@@ -375,6 +387,7 @@ func TestCheckRunDropsAForeignRunLink(t *testing.T) {
 }
 
 func TestMergeFailureKeepsTheCauseWhenThePRLookupFails(t *testing.T) {
+	t.Parallel()
 	h := newPRHarness(t, nil, map[string]any{"forge.merge": classed(connectorhost.NotMergeable), "forge.pr": classed(connectorhost.Permanent)})
 	err := h.f.Merge(prURL7)
 	if err == nil || errors.Is(err, forge.ErrMergeConflict) || errors.Is(err, forge.ErrMergeBlockedByChecks) {
@@ -386,6 +399,7 @@ func TestMergeFailureKeepsTheCauseWhenThePRLookupFails(t *testing.T) {
 }
 
 func TestMergeableFailsClosed(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		mergeable string
 		want      forge.MergeableState
@@ -408,6 +422,7 @@ func TestMergeableFailsClosed(t *testing.T) {
 const sha40 = "0123456789abcdef0123456789abcdef01234567"
 
 func TestMergeCommitMustBeFullHex(t *testing.T) {
+	t.Parallel()
 	for name, tc := range map[string]struct {
 		commit  string
 		wantErr bool
@@ -439,6 +454,7 @@ func TestMergeCommitMustBeFullHex(t *testing.T) {
 }
 
 func TestHeadCommitSHAAndMergeCommit(t *testing.T) {
+	t.Parallel()
 	h := newPRHarness(t, nil, map[string]any{"forge.pr": prJSON + `,"headSha":"abc","mergeCommit":"` + sha40 + `"}`})
 	if sha, err := h.pr().HeadCommitSHA(prURL7); sha != "abc" || err != nil {
 		t.Errorf("HeadCommitSHA = (%q, %v)", sha, err)
@@ -456,6 +472,7 @@ func TestHeadCommitSHAAndMergeCommit(t *testing.T) {
 }
 
 func TestHeadOfDecodesCrossRepo(t *testing.T) {
+	t.Parallel()
 	for name, tc := range map[string]struct {
 		extra string
 		want  bool
@@ -472,6 +489,7 @@ func TestHeadOfDecodesCrossRepo(t *testing.T) {
 }
 
 func TestNeedsUpdateAndListPRFiles(t *testing.T) {
+	t.Parallel()
 	for reply, want := range map[string]bool{`{"behindBy":0}`: false, `{"behindBy":3}`: true} {
 		h := newPRHarness(t, nil, map[string]any{"forge.behind": reply})
 		if got, err := h.pr().NeedsUpdate(prURL7); got != want || err != nil {
@@ -488,6 +506,7 @@ func TestNeedsUpdateAndListPRFiles(t *testing.T) {
 }
 
 func TestListPRFilesRefusesAnUnreadableList(t *testing.T) {
+	t.Parallel()
 	for name, reply := range map[string]string{
 		"missing field":   `{}`,
 		"null":            `{"files":null}`,
@@ -518,6 +537,7 @@ func TestListPRFilesRefusesAnUnreadableList(t *testing.T) {
 }
 
 func TestListPRFilesNamesAMissingField(t *testing.T) {
+	t.Parallel()
 	h := newPRHarness(t, nil, map[string]any{"forge.prFiles": `{}`})
 	_, err := h.pr().ListPRFiles(prURL7)
 	if !errors.Is(err, ErrAnswer) || !strings.Contains(err.Error(), "PR 7 file list is missing") {
@@ -526,6 +546,7 @@ func TestListPRFilesNamesAMissingField(t *testing.T) {
 }
 
 func TestListPRFilesKeepsCleanPaths(t *testing.T) {
+	t.Parallel()
 	h := newPRHarness(t, nil, map[string]any{"forge.prFiles": `{"files":[".github/workflows/ci.yml","a..b/c","..hidden","dir/file with space.txt"]}`})
 	files, err := h.pr().ListPRFiles(prURL7)
 	if want := ".github/workflows/ci.yml,a..b/c,..hidden,dir/file with space.txt"; err != nil || strings.Join(files, ",") != want {
@@ -534,6 +555,7 @@ func TestListPRFilesKeepsCleanPaths(t *testing.T) {
 }
 
 func TestMarkDraftCommentAndURLPinning(t *testing.T) {
+	t.Parallel()
 	h := newPRHarness(t, nil, map[string]any{"forge.setDraft": `{}`, "forge.comment": `{}`})
 	for _, err := range []error{h.pr().MarkReady(prURL7), h.pr().MarkDraft(prURL7), h.pr().CommentPR(prURL7, "hi")} {
 		if err != nil {
@@ -549,6 +571,7 @@ func TestMarkDraftCommentAndURLPinning(t *testing.T) {
 }
 
 func TestRebasePRHeadPinsTheHeadBranch(t *testing.T) {
+	t.Parallel()
 	const want = "agent/issue-7"
 	reply := func(head string) map[string]any {
 		return map[string]any{"forge.pr": prJSON + `,"head":"` + head + `"}`}
@@ -589,6 +612,7 @@ func TestRebasePRHeadPinsTheHeadBranch(t *testing.T) {
 }
 
 func TestCreateDraftPR(t *testing.T) {
+	t.Parallel()
 	created := prJSON + `}`
 	h := newPRHarness(t, []string{capDraftPRs}, map[string]any{"forge.openPR": created})
 	if url, ok, err := h.caps.DraftPRCreator.CreateDraftPR("t", "b", "main", "agent/issue-1"); url != prURL7 || !ok || err != nil {
@@ -625,6 +649,7 @@ func TestCreateDraftPR(t *testing.T) {
 }
 
 func TestRebaseRebasesTheHeadBranch(t *testing.T) {
+	t.Parallel()
 	h := newPRHarness(t, nil, map[string]any{"forge.pr": prJSON + `,"head":"agent/issue-1"}`})
 	if err := h.caps.PRHeadRebaser.RebasePRHead(prURL7, "agent/issue-1"); err != nil {
 		t.Fatal(err)
@@ -641,6 +666,7 @@ func TestRebaseRebasesTheHeadBranch(t *testing.T) {
 // A plain Rebase has no expected head to pin, so it refuses before reading the
 // PR or running any git (issue #6961).
 func TestPlainRebaseIsRefused(t *testing.T) {
+	t.Parallel()
 	for _, head := range []string{"agent/issue-7", "main", "release"} {
 		h := newPRHarness(t, nil, map[string]any{"forge.pr": prJSON + `,"head":"` + head + `"}`})
 		if err := h.f.Rebase(prURL7); !errors.Is(err, ErrAnswer) {
@@ -656,6 +682,7 @@ func TestPlainRebaseIsRefused(t *testing.T) {
 }
 
 func TestRebaseWithoutGitFailsNamed(t *testing.T) {
+	t.Parallel()
 	h := newPRHarness(t, nil, map[string]any{"forge.pr": prJSON + `,"head":"agent/issue-1"}`})
 	h.f.(*prForge).push.git = nil
 	if err := h.caps.PRHeadRebaser.RebasePRHead(prURL7, "agent/issue-1"); !errors.Is(err, ErrNoGit) {
@@ -664,6 +691,7 @@ func TestRebaseWithoutGitFailsNamed(t *testing.T) {
 }
 
 func TestProbe(t *testing.T) {
+	t.Parallel()
 	h := newPRHarness(t, []string{capProbe}, map[string]any{"forge.probe": `{"repo":"o/r"}`})
 	if repo, err := h.f.Probe(); repo != "o/r" || err != nil {
 		t.Fatalf("Probe = (%q, %v)", repo, err)
