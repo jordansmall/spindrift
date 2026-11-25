@@ -27,6 +27,7 @@ in
 {
   # Limits the SDK publishes.
   connector.limits = [
+    "maxHeaderName"
     "maxHTTPResponse"
     "maxHTTPURL"
   ];
