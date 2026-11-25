@@ -2689,16 +2689,6 @@ func stubSecretCmd(t *testing.T, template string, run func(cmd string) (string, 
 	return func() []string { return ran }
 }
 
-// useConnectorCredential installs one github backend row whose credential env
-// is SHADOW_TEST_TOKEN with every form of it unset, with github the active
-// backend, and stubs secretCmdRunner.
-func useConnectorCredential(t *testing.T, template string, run func(cmd string) (string, error)) func() []string {
-	t.Helper()
-	setKnob(t, "CODE_FORGE", "github")
-	setKnob(t, "ISSUE_TRACKER", "github")
-	return useCredentialRows(t, credentialRowDoc("github", ""), template, run)
-}
-
 // unsetCredential unsets every form of SHADOW_TEST_TOKEN and stubs
 // secretCmdRunner.
 func unsetCredential(t *testing.T, template string, run func(cmd string) (string, error)) func() []string {
@@ -2728,10 +2718,10 @@ func credentialRowDoc(name, extra string) string {
 
 // A row that is not the active tracker (a jira Connector imported by
 // a Consumer on another tracker) must not fetch or fail on the credential.
-func TestApplyConnectorCredentials_TemplateSkipsRowNothingReads(t *testing.T) {
+func TestApplyRowCredentials_TemplateSkipsRowNothingReads(t *testing.T) {
 	ran := useCredentialRows(t, credentialRowDoc("jira", ""), "vault get {name}", failingVault)
 	setKnob(t, "ISSUE_TRACKER", "local")
-	if err := applyConnectorCredentials(); err != nil {
+	if err := applyRowCredentials(); err != nil {
 		t.Fatal(err)
 	}
 	if got := ran(); len(got) != 0 {
@@ -2741,10 +2731,10 @@ func TestApplyConnectorCredentials_TemplateSkipsRowNothingReads(t *testing.T) {
 
 // jira's tracker is its Connector, so the active jira tracker's credential
 // resolves like a routed row's.
-func TestApplyConnectorCredentials_TemplateRunsForJiraRow(t *testing.T) {
+func TestApplyRowCredentials_TemplateRunsForJiraRow(t *testing.T) {
 	ran := useCredentialRows(t, credentialRowDoc("jira", ""), "vault get {name}", failingVault)
 	setKnob(t, "ISSUE_TRACKER", "jira")
-	err := applyConnectorCredentials()
+	err := applyRowCredentials()
 	if err == nil || !strings.Contains(err.Error(), "SHADOW_TEST_TOKEN") {
 		t.Fatalf("err = %v, want the template failure naming the env var", err)
 	}
@@ -2755,7 +2745,7 @@ func TestApplyConnectorCredentials_TemplateRunsForJiraRow(t *testing.T) {
 
 // forgejo's Code Forge and issue tracker are both its Connector, so its
 // credential resolves for the active forgejo row on either axis.
-func TestApplyConnectorCredentials_TemplateRunsForForgejoRow(t *testing.T) {
+func TestApplyRowCredentials_TemplateRunsForForgejoRow(t *testing.T) {
 	for _, axis := range []struct{ name, forge, tracker string }{
 		{"forge", "forgejo", "local"},
 		{"tracker", "git", "forgejo"},
@@ -2764,7 +2754,7 @@ func TestApplyConnectorCredentials_TemplateRunsForForgejoRow(t *testing.T) {
 			ran := useCredentialRows(t, credentialRowDoc("forgejo", ""), "vault get {name}", func(string) (string, error) { return "tok", nil })
 			setKnob(t, "CODE_FORGE", axis.forge)
 			setKnob(t, "ISSUE_TRACKER", axis.tracker)
-			if err := applyConnectorCredentials(); err != nil {
+			if err := applyRowCredentials(); err != nil {
 				t.Fatal(err)
 			}
 			if want := []string{"vault get shadow-test-token"}; !reflect.DeepEqual(ran(), want) {
@@ -2774,11 +2764,11 @@ func TestApplyConnectorCredentials_TemplateRunsForForgejoRow(t *testing.T) {
 	}
 }
 
-func TestApplyConnectorCredentials_TemplateSkipsInactiveBackend(t *testing.T) {
+func TestApplyRowCredentials_TemplateSkipsInactiveBackend(t *testing.T) {
 	ran := useCredentialRows(t, credentialRowDoc("github", ""), "vault get {name}", failingVault)
 	setKnob(t, "CODE_FORGE", "local")
 	setKnob(t, "ISSUE_TRACKER", "jira")
-	if err := applyConnectorCredentials(); err != nil {
+	if err := applyRowCredentials(); err != nil {
 		t.Fatal(err)
 	}
 	if got := ran(); len(got) != 0 {
@@ -2786,134 +2776,32 @@ func TestApplyConnectorCredentials_TemplateSkipsInactiveBackend(t *testing.T) {
 	}
 }
 
-func TestApplyConnectorCredentials_ExplicitCmdRunsForInactiveRow(t *testing.T) {
+// A row nothing reads is skipped whole, `_CMD` included: its credential is not
+// this run's to fetch.
+func TestApplyRowCredentials_ExplicitCmdSkipsUnreadRow(t *testing.T) {
 	ran := useCredentialRows(t, credentialRowDoc("jira", ""), "", failingVault)
 	setKnob(t, "CODE_FORGE", "local")
 	setKnob(t, "ISSUE_TRACKER", "local")
 	t.Setenv("SHADOW_TEST_TOKEN_CMD", "vault get tok")
-	if err := applyConnectorCredentials(); err == nil {
-		t.Fatal("expected the failing explicit command to be fatal")
+	if err := applyRowCredentials(); err != nil {
+		t.Fatal(err)
 	}
-	if want := []string{"vault get tok"}; !reflect.DeepEqual(ran(), want) {
-		t.Errorf("ran %q, want %q", ran(), want)
+	if got := ran(); len(got) != 0 {
+		t.Errorf("runner called: %q", got)
 	}
 }
 
-// The first row sharing an env is not needed, so it must not claim the env.
-func TestApplyConnectorCredentials_SharedEnvTemplateRunsForNeededRow(t *testing.T) {
-	doc := `[{"name":"jira","module":"/nonexistent.wasm","credentialEnv":"SHADOW_TEST_TOKEN",
-"routes":[{"method":"GET","host":"jira.example","path":"/a"}]},
-{"name":"github","module":"/nonexistent.wasm","credentialEnv":"SHADOW_TEST_TOKEN",
-"routes":[{"method":"GET","host":"github.example","path":"/b"}]}]`
-	ran := useCredentialRows(t, doc, "vault get {name}", func(string) (string, error) { return "tok", nil })
+// The Launcher leaves a missing credential to validate and the launch gates, so
+// doctor runs without one.
+func TestApplyRowCredentials_UnsetReadRowIsNotAnError(t *testing.T) {
+	ran := useCredentialRows(t, credentialRowDoc("github", ""), "", failingVault)
 	setKnob(t, "CODE_FORGE", "github")
-	setKnob(t, "ISSUE_TRACKER", "jira")
-	if err := applyConnectorCredentials(); err != nil {
-		t.Fatal(err)
+	setKnob(t, "ISSUE_TRACKER", "github")
+	if err := applyRowCredentials(); err != nil {
+		t.Fatalf("err = %v, want nil for an unset credential", err)
 	}
-	if want := []string{"vault get shadow-test-token"}; !reflect.DeepEqual(ran(), want) {
-		t.Errorf("ran %q, want %q", ran(), want)
-	}
-}
-
-func TestApplyConnectorCredentials_CmdEnvRuns(t *testing.T) {
-	ran := useConnectorCredential(t, "", func(string) (string, error) { return "from-cmd\n", nil })
-	t.Setenv("SHADOW_TEST_TOKEN_CMD", "vault get tok")
-	if err := applyConnectorCredentials(); err != nil {
-		t.Fatal(err)
-	}
-	if got := os.Getenv("SHADOW_TEST_TOKEN"); got != "from-cmd" {
-		t.Errorf("SHADOW_TEST_TOKEN = %q, want from-cmd", got)
-	}
-	if !reflect.DeepEqual(ran(), []string{"vault get tok"}) {
-		t.Errorf("ran %q", ran())
-	}
-}
-
-func TestApplyConnectorCredentials_CmdWinsOverPlain(t *testing.T) {
-	useConnectorCredential(t, "", func(string) (string, error) { return "from-cmd", nil })
-	t.Setenv("SHADOW_TEST_TOKEN", "plain")
-	t.Setenv("SHADOW_TEST_TOKEN_CMD", "vault get tok")
-	if err := applyConnectorCredentials(); err != nil {
-		t.Fatal(err)
-	}
-	if got := os.Getenv("SHADOW_TEST_TOKEN"); got != "from-cmd" {
-		t.Errorf("SHADOW_TEST_TOKEN = %q, want from-cmd", got)
-	}
-}
-
-func TestApplyConnectorCredentials_PlainWinsOverTemplate(t *testing.T) {
-	ran := useConnectorCredential(t, "vault get {name}", func(string) (string, error) { return "from-template", nil })
-	t.Setenv("SHADOW_TEST_TOKEN", "plain")
-	if err := applyConnectorCredentials(); err != nil {
-		t.Fatal(err)
-	}
-	if got := os.Getenv("SHADOW_TEST_TOKEN"); got != "plain" {
-		t.Errorf("SHADOW_TEST_TOKEN = %q, want plain", got)
-	}
-	if len(ran()) != 0 {
-		t.Errorf("runner called: %q", ran())
-	}
-}
-
-func TestApplyConnectorCredentials_TemplateFillsUnset(t *testing.T) {
-	ran := useConnectorCredential(t, "vault get {name}", func(string) (string, error) { return "from-template", nil })
-	if err := applyConnectorCredentials(); err != nil {
-		t.Fatal(err)
-	}
-	if got := os.Getenv("SHADOW_TEST_TOKEN"); got != "from-template" {
-		t.Errorf("SHADOW_TEST_TOKEN = %q, want from-template", got)
-	}
-	if !reflect.DeepEqual(ran(), []string{"vault get shadow-test-token"}) {
-		t.Errorf("ran %q", ran())
-	}
-}
-
-func TestApplyConnectorCredentials_FailureNamesEnvNotCommand(t *testing.T) {
-	useConnectorCredential(t, "", func(string) (string, error) {
-		return "", exec.Command("sh", "-c", "exit 3").Run()
-	})
-	t.Setenv("SHADOW_TEST_TOKEN_CMD", "vault get hunter2-item")
-	err := applyConnectorCredentials()
-	if err == nil {
-		t.Fatal("expected error for a failing command")
-	}
-	if !strings.Contains(err.Error(), "SHADOW_TEST_TOKEN") {
-		t.Errorf("error should name the env var, got: %v", err)
-	}
-	if strings.Contains(err.Error(), "hunter2-item") {
-		t.Errorf("error leaks the command, got: %v", err)
-	}
-}
-
-func TestApplyConnectorCredentials_NeitherSetRunsNothing(t *testing.T) {
-	ran := useConnectorCredential(t, "", func(string) (string, error) { return "x", nil })
-	if err := applyConnectorCredentials(); err != nil {
-		t.Fatal(err)
-	}
-	if got := os.Getenv("SHADOW_TEST_TOKEN"); got != "" {
-		t.Errorf("SHADOW_TEST_TOKEN = %q, want unset", got)
-	}
-	if len(ran()) != 0 {
-		t.Errorf("runner called: %q", ran())
-	}
-}
-
-func TestApplyConnectorCredentials_SharedEnvRunsOnce(t *testing.T) {
-	ran := useConnectorCredential(t, "", func(string) (string, error) { return "from-cmd", nil })
-	doc := `[{"name":"a","module":"/nonexistent.wasm","credentialEnv":"SHADOW_TEST_TOKEN",
-"routes":[{"method":"GET","host":"a.example","path":"/a"}]},
-{"name":"b","module":"/nonexistent.wasm","credentialEnv":"SHADOW_TEST_TOKEN",
-"routes":[{"method":"GET","host":"b.example","path":"/b"}]}]`
-	if err := backendrows.Use([]byte(doc), func(string) string { return "" }); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("SHADOW_TEST_TOKEN_CMD", "vault get tok")
-	if err := applyConnectorCredentials(); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(ran(), []string{"vault get tok"}) {
-		t.Errorf("ran %q, want one run", ran())
+	if got := ran(); len(got) != 0 {
+		t.Errorf("runner called: %q", got)
 	}
 }
 
@@ -2946,15 +2834,15 @@ func useGithubGHTokenRow(t *testing.T, run func(string) (string, error)) func() 
 }
 
 // GH_TOKEN is both a core secret knob and the github row's credential, so
-// parseFlags already resolved GH_TOKEN_CMD: the Connector pass and the
-// template fallback must not run the vault command a second time.
+// parseFlags already resolved GH_TOKEN_CMD: the row pass and the template
+// fallback must not run the vault command a second time.
 func TestGHTokenCmd_GithubRunResolvesOnce(t *testing.T) {
 	ran := useGithubGHTokenRow(t, func(string) (string, error) { return "from-cmd\n", nil })
 	t.Setenv("GH_TOKEN_CMD", "vault get gh")
 	if _, err := parseResolved(t, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := applyConnectorCredentials(); err != nil {
+	if err := applyRowCredentials(); err != nil {
 		t.Fatal(err)
 	}
 	if err := applySecretCmdFallback(); err != nil {
@@ -2973,7 +2861,7 @@ func TestSecretCmdTemplate_GithubRunSuppliesGHTokenOnce(t *testing.T) {
 	if _, err := parseResolved(t, []string{"--secret-cmd", "vault get {name}"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := applyConnectorCredentials(); err != nil {
+	if err := applyRowCredentials(); err != nil {
 		t.Fatal(err)
 	}
 	if err := applySecretCmdFallback(); err != nil {
@@ -2990,7 +2878,7 @@ func TestSecretCmdTemplate_GithubRunSuppliesGHTokenOnce(t *testing.T) {
 // A row may name a core secret knob as its credential (forgejo's FORGEJO_TOKEN,
 // issue #7500). parseFlags already ran that knob's `_CMD`, so this pass must
 // not run the vault a second time.
-func TestApplyConnectorCredentials_SkipsRowCredentialACoreSecretResolved(t *testing.T) {
+func TestApplyRowCredentials_SkipsRowCredentialACoreSecretResolved(t *testing.T) {
 	t.Cleanup(backendrows.Snapshot())
 	doc := `[{"name":"forgejo","module":"/nonexistent.wasm","credentialEnv":"FORGEJO_TOKEN",
 "routes":[{"method":"GET","host":"forgejo.example","path":"/x"}]}]`
@@ -3002,10 +2890,74 @@ func TestApplyConnectorCredentials_SkipsRowCredentialACoreSecretResolved(t *test
 	t.Setenv("FORGEJO_TOKEN", "already-resolved")
 	t.Setenv("FORGEJO_TOKEN_CMD", "vault get forgejo")
 	ran := stubSecretCmd(t, "", failingVault)
-	if err := applyConnectorCredentials(); err != nil {
+	if err := applyRowCredentials(); err != nil {
 		t.Fatal(err)
 	}
 	if got := ran(); len(got) != 0 {
 		t.Errorf("runner called: %q, want none (the core secret pass owns FORGEJO_TOKEN_CMD)", got)
+	}
+}
+
+// Each shipped row's credential resolves through the launcher's own sequence
+// (parseFlags, then the row pass, then the SECRET_CMD fallback) from one
+// command, run exactly once.
+func TestRowCredentials_ResolveOnceThroughLauncherSequence(t *testing.T) {
+	const rows = `[
+{"name":"github","module":"/nonexistent.wasm","credentialEnv":"GH_TOKEN",
+ "routes":[{"method":"GET","host":"github.example","path":"/x"}]},
+{"name":"forgejo","module":"/nonexistent.wasm","credentialEnv":"FORGEJO_TOKEN",
+ "routes":[{"method":"GET","host":"forgejo.example","path":"/x"}]},
+{"name":"jira","module":"/nonexistent.wasm","credentialEnv":"JIRA_TOKEN",
+ "credentialScheme":"basic","identityEnv":"JIRA_EMAIL",
+ "routes":[{"method":"GET","host":"jira.example","path":"/x"}]}]`
+	cases := []struct {
+		name, forge, tracker string
+		args                 []string
+		env                  map[string]string
+		token, wantRan       string
+	}{
+		{"GH_TOKEN_CMD", "github", "github", nil, map[string]string{"GH_TOKEN_CMD": "vault get gh"}, "GH_TOKEN", "vault get gh"},
+		{"FORGEJO_TOKEN_CMD", "forgejo", "forgejo", nil, map[string]string{"FORGEJO_TOKEN_CMD": "vault get fj"}, "FORGEJO_TOKEN", "vault get fj"},
+		{"JIRA_TOKEN_CMD", "local", "jira", nil, map[string]string{"JIRA_TOKEN_CMD": "vault get jt"}, "JIRA_TOKEN", "vault get jt"},
+		{"--secret-cmd github", "github", "github", []string{"--secret-cmd", "vault get {name}"}, nil, "GH_TOKEN", "vault get gh-token"},
+		{"--secret-cmd forgejo", "forgejo", "forgejo", []string{"--secret-cmd", "vault get {name}"}, nil, "FORGEJO_TOKEN", "vault get forgejo-token"},
+		{"--secret-cmd jira", "local", "jira", []string{"--secret-cmd", "vault get {name}"}, nil, "JIRA_TOKEN", "vault get jira-token"},
+		{"SECRET_CMD github", "github", "github", nil, map[string]string{"SECRET_CMD": "vault get {name}"}, "GH_TOKEN", "vault get gh-token"},
+		{"SECRET_CMD forgejo", "forgejo", "forgejo", nil, map[string]string{"SECRET_CMD": "vault get {name}"}, "FORGEJO_TOKEN", "vault get forgejo-token"},
+		{"SECRET_CMD jira", "local", "jira", nil, map[string]string{"SECRET_CMD": "vault get {name}"}, "JIRA_TOKEN", "vault get jira-token"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(backendrows.Snapshot())
+			if err := backendrows.Use([]byte(rows), func(string) string { return "" }); err != nil {
+				t.Fatal(err)
+			}
+			for _, env := range []string{"GH_TOKEN", "FORGEJO_TOKEN", "JIRA_TOKEN", "JIRA_EMAIL", "SECRET_CMD"} {
+				t.Setenv(env, "")
+				t.Setenv(env+"_CMD", "")
+			}
+			t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "existing-value")
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			ran := stubSecretCmd(t, "", func(string) (string, error) { return "resolved\n", nil })
+			setKnob(t, "CODE_FORGE", tc.forge)
+			setKnob(t, "ISSUE_TRACKER", tc.tracker)
+			if _, err := parseResolved(t, tc.args); err != nil {
+				t.Fatal(err)
+			}
+			if err := applyRowCredentials(); err != nil {
+				t.Fatal(err)
+			}
+			if err := applySecretCmdFallback(); err != nil {
+				t.Fatal(err)
+			}
+			if got := os.Getenv(tc.token); got != "resolved" {
+				t.Errorf("%s = %q, want resolved", tc.token, got)
+			}
+			if want := []string{tc.wantRan}; !reflect.DeepEqual(ran(), want) {
+				t.Errorf("ran %q, want exactly %q", ran(), want)
+			}
+		})
 	}
 }

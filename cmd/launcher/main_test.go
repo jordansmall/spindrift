@@ -6687,14 +6687,16 @@ func TestMainRun_InputDocument_InvalidBackendRowsAreConfigInvalid(t *testing.T) 
 }
 
 // A backend row's credential env resolves through <ENV>_CMD in mainRun, which
-// can only happen after backendrows.Use has installed the document's rows.
+// can only happen after backendrows.Use has installed the document's rows. The
+// row must be one this run reads (the active jira tracker): an unread row's
+// _CMD never runs.
 func TestMainRun_InputDocument_BackendRowCredentialFromCmd(t *testing.T) {
 	t.Cleanup(backendrows.Snapshot())
 	ran := stubSecretCmd(t, "", func(string) (string, error) { return "from-cmd\n", nil })
 	t.Setenv("PROBE_BASE_URL", "https://acme.example/jira")
 	t.Setenv("PROBE_TOKEN", "")
 	t.Setenv("PROBE_TOKEN_CMD", "vault get probe")
-	doc := `{"settings":{},"artifacts":{},"backends":[{"name":"probe","module":"/nonexistent.wasm",` +
+	doc := `{"settings":{},"artifacts":{},"backends":[{"name":"jira","module":"/nonexistent.wasm",` +
 		`"credentialEnv":"PROBE_TOKEN","baseEnv":"PROBE_BASE_URL",` +
 		`"routes":[{"method":"GET","host":"{base}","path":"/rest/api/3/issue"}]}]}`
 	docPath := filepath.Join(t.TempDir(), "input.json")
@@ -6702,7 +6704,7 @@ func TestMainRun_InputDocument_BackendRowCredentialFromCmd(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	mainRunT(t, []string{"--input", docPath, "research"}, &stdout, &stderr)
+	mainRunT(t, []string{"--input", docPath, "--issue-tracker", "jira", "research"}, &stdout, &stderr)
 	if got := os.Getenv("PROBE_TOKEN"); got != "from-cmd" {
 		t.Errorf("PROBE_TOKEN = %q, want from-cmd; stderr=%s", got, stderr.String())
 	}
