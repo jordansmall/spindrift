@@ -230,8 +230,8 @@ func TestMainRunDrivesFullReviewSequenceFromHandoffFixture(t *testing.T) {
 	if err := os.WriteFile(reviewPromptFile, []byte("REVIEW PROMPT TEXT"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sessionFile := filepath.Join(dir, "session.txt")
-	if err := os.WriteFile(sessionFile, []byte("--session-id fake-id"), 0o644); err != nil {
+	sessionFile := filepath.Join(dir, "session.json")
+	if err := os.WriteFile(sessionFile, []byte(`["--session-id","fake-id"]`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	stateFile := filepath.Join(dir, "run-state.json")
