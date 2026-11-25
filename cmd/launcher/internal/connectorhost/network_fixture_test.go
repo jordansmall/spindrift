@@ -257,59 +257,50 @@ const slowBackendBudget = 2 * time.Second
 
 // The call budget measures guest work, so a backend that answers after the
 // budget's length does not cost the call its answer, on every engine.
-func TestNetworkFixtureSlowBackendDoesNotSpendTheCallBudget(t *testing.T) {
-	// Set on the serial parent, before its parallel subtests start, so no
-	// other test runs under the lowered budget.
-	t.Cleanup(connectorhost.SetCallBudget(slowBackendBudget))
-	for name, ld := range netLoadersFor(t) {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			b := newBackend(t, func(w http.ResponseWriter, r *http.Request) {
-				time.Sleep(slowBackendBudget + 500*time.Millisecond)
-				fmt.Fprint(w, "slow "+r.URL.Path)
-			})
-			n := netFor(b, &bytes.Buffer{}, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
-			c := loadNetWith(t, ld, fixture(t, "network.wasm"), n)
-			params := map[string]string{"url": b.URL + "/repos/x", "method": "GET"}
-			var out fetched
-			if err := c.Call(context.Background(), "fetch", params, &out); err != nil {
-				t.Fatal(err)
-			}
-			if out.Body != "slow /repos/x" {
-				t.Errorf("body = %q, want the backend's late answer", out.Body)
-			}
-		})
-	}
-}
-
-// The paused clock stays paused across several http_requests in one call: each
-// wait is under the budget but together they pass it, so only a clock that
-// resumes between requests (or never re-pauses) would spend the call.
-func TestNetworkFixtureSeveralSlowRequestsDoNotSpendTheCallBudget(t *testing.T) {
+func TestNetworkFixtureSlowBackendsDoNotSpendTheCallBudget(t *testing.T) {
 	const times, each = 4, 600 * time.Millisecond
 	if times*each <= slowBackendBudget || each >= slowBackendBudget {
 		t.Fatalf("%d x %s must pass the budget %s with each under it", times, each, slowBackendBudget)
 	}
+	// Set on the serial parent, before its parallel groups start, so no other
+	// test runs under the lowered budget; one parent lets every group's engines
+	// sleep out their backends together rather than group after group.
 	t.Cleanup(connectorhost.SetCallBudget(slowBackendBudget))
-	for name, ld := range netLoadersFor(t) {
-		t.Run(name, func(t *testing.T) {
+
+	// The paused clock stays paused across several http_requests in one call:
+	// each wait is under the budget but together they pass it, so only a clock
+	// that resumes between requests (or never re-pauses) would spend the call.
+	for _, tc := range []struct {
+		name  string
+		sleep time.Duration
+		times int
+	}{
+		{"one slow request", slowBackendBudget + 500*time.Millisecond, 1},
+		{"several slow requests", each, times},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			b := newBackend(t, func(w http.ResponseWriter, r *http.Request) {
-				time.Sleep(each)
-				fmt.Fprint(w, "slow "+r.URL.Path)
-			})
-			n := netFor(b, &bytes.Buffer{}, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
-			c := loadNetWith(t, ld, fixture(t, "network.wasm"), n)
-			params := map[string]string{"url": b.URL + "/repos/x", "method": "GET", "times": strconv.Itoa(times)}
-			var out fetched
-			if err := c.Call(context.Background(), "fetch", params, &out); err != nil {
-				t.Fatal(err)
-			}
-			if out.Body != "slow /repos/x" {
-				t.Errorf("body = %q, want the backend's late answer", out.Body)
-			}
-			if got := int(b.hits.Load()); got != times {
-				t.Errorf("backend saw %d requests, want %d", got, times)
+			for name, ld := range netLoadersFor(t) {
+				t.Run(name, func(t *testing.T) {
+					t.Parallel()
+					b := newBackend(t, func(w http.ResponseWriter, r *http.Request) {
+						time.Sleep(tc.sleep)
+						fmt.Fprint(w, "slow "+r.URL.Path)
+					})
+					n := netFor(b, &bytes.Buffer{}, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
+					c := loadNetWith(t, ld, fixture(t, "network.wasm"), n)
+					params := map[string]string{"url": b.URL + "/repos/x", "method": "GET", "times": strconv.Itoa(tc.times)}
+					var out fetched
+					if err := c.Call(context.Background(), "fetch", params, &out); err != nil {
+						t.Fatal(err)
+					}
+					if out.Body != "slow /repos/x" {
+						t.Errorf("body = %q, want the backend's late answer", out.Body)
+					}
+					if got := int(b.hits.Load()); got != tc.times {
+						t.Errorf("backend saw %d requests, want %d", got, tc.times)
+					}
+				})
 			}
 		})
 	}
