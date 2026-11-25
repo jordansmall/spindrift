@@ -42,6 +42,25 @@ func TestConnectorsAcceptWritesTheBaselineFile(t *testing.T) {
 	}
 }
 
+func TestConnectorsAcceptWritesDeclaredHeaders(t *testing.T) {
+	rows := `[{"name":"forgejo","module":"/m.wasm","credentialEnv":"FORGEJO_TOKEN",
+"routes":[{"method":"GET","host":"h.test","path":"/p","requestHeaders":["X-Req"],"responseHeaders":["X-Resp"]}]}]`
+	path := filepath.Join(t.TempDir(), "baseline.json")
+	var stdout, stderr bytes.Buffer
+	if code := cmdConnectorsAccept(json.RawMessage(rows), []string{path}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr: %s", code, stderr.String())
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"requestHeaders":["X-Req"]`, `"responseHeaders":["X-Resp"]`} {
+		if !strings.Contains(string(got), want) {
+			t.Errorf("file lacks %s:\n%s", want, got)
+		}
+	}
+}
+
 func TestConnectorsAcceptDefaultsToTheConsumerFlakeRoot(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)

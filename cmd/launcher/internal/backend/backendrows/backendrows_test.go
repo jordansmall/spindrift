@@ -370,6 +370,11 @@ func TestLoadReportsAnUnreadableModule(t *testing.T) {
 	}
 }
 
+func withHeaders(r connectorhost.Route, req, resp []string) connectorhost.Route {
+	r.RequestHeaders, r.ResponseHeaders = req, resp
+	return r
+}
+
 func TestWidening(t *testing.T) {
 	r := func(method, host, path string) connectorhost.Route {
 		return connectorhost.Route{Method: method, Host: host, Path: path}
@@ -399,6 +404,16 @@ func TestWidening(t *testing.T) {
 			[]connectorhost.Route{{Method: "GET", Host: "api.fixture.test", Path: "/repos", FollowRedirect: true}}},
 		{"dropping the redirect opt-in is no widening", []connectorhost.Route{getRepos}, []connectorhost.Route{{Method: "GET", Host: "api.fixture.test", Path: "/repos", FollowRedirect: true}}, nil},
 		{"dropped route is no widening", nil, []connectorhost.Route{getRepos}, nil},
+		{"an added request header widens", []connectorhost.Route{withHeaders(getRepos, []string{"X-Extra"}, nil)}, []connectorhost.Route{getRepos},
+			[]connectorhost.Route{withHeaders(getRepos, []string{"X-Extra"}, nil)}},
+		{"an added response header widens", []connectorhost.Route{withHeaders(getRepos, nil, []string{"X-Extra"})}, []connectorhost.Route{getRepos},
+			[]connectorhost.Route{withHeaders(getRepos, nil, []string{"X-Extra"})}},
+		{"a request header is no response header", []connectorhost.Route{withHeaders(getRepos, nil, []string{"X-Extra"})}, []connectorhost.Route{withHeaders(getRepos, []string{"X-Extra"}, nil)},
+			[]connectorhost.Route{withHeaders(getRepos, nil, []string{"X-Extra"})}},
+		{"a second request header widens", []connectorhost.Route{withHeaders(getRepos, []string{"X-A", "X-B"}, nil)}, []connectorhost.Route{withHeaders(getRepos, []string{"X-A"}, nil)},
+			[]connectorhost.Route{withHeaders(getRepos, []string{"X-A", "X-B"}, nil)}},
+		{"the same headers in another case are covered", []connectorhost.Route{withHeaders(getRepos, []string{"x-extra"}, []string{"X-RESP"})}, []connectorhost.Route{withHeaders(getRepos, []string{"X-Extra"}, []string{"x-resp"})}, nil},
+		{"fewer headers are covered", []connectorhost.Route{getRepos}, []connectorhost.Route{withHeaders(getRepos, []string{"X-Extra"}, []string{"X-Resp"})}, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
