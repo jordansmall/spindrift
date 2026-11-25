@@ -30,6 +30,7 @@ func init() {
 	forge.RegisterBranches(forge.Branches{
 		BranchExists: branchExists,
 		DeleteBranch: deleteBranch,
+		Probe:        probe,
 	})
 	forge.RegisterPRs(forge.PRs{
 		Behind:           behind,
@@ -265,9 +266,8 @@ func jobLog(t forge.Target, jobID string) (string, error) {
 
 // restRepo is the repository JSON.
 type restRepo struct {
-	CloneURL    string `json:"clone_url"`
-	HTMLURL     string `json:"html_url"`
 	AllowRebase bool   `json:"allow_rebase"`
+	FullName    string `json:"full_name"`
 }
 
 func getRepo(t forge.Target) (restRepo, error) {
@@ -402,6 +402,11 @@ func postMerge(t forge.Target, number string, extra map[string]any) error {
 }
 
 func merge(t forge.Target, number string) error { return postMerge(t, number, nil) }
+
+func probe(t forge.Target) (string, error) {
+	r, err := getRepo(t)
+	return r.FullName, err
+}
 
 func autoMergeAllowed(t forge.Target) (bool, error) {
 	r, err := getRepo(t)

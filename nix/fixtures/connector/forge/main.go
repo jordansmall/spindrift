@@ -6,6 +6,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"spindrift.dev/sdk/connector"
@@ -16,6 +17,7 @@ func init() {
 	forge.RegisterBranches(forge.Branches{
 		BranchExists: branchExists,
 		DeleteBranch: deleteBranch,
+		Probe:        probe,
 		PushOnly:     true,
 	})
 }
@@ -48,6 +50,23 @@ func branchExists(t forge.Target, branch string) (bool, error) {
 		return false, nil
 	}
 	return false, statusErr(resp.Status)
+}
+
+// probe answers from the repository the backend serves, as a real forge's
+// repo endpoint would.
+func probe(t forge.Target) (string, error) {
+	resp, err := call(http.MethodGet, t.API+"/repos/"+t.Repo)
+	if err != nil {
+		return "", err
+	}
+	if resp.Status != http.StatusOK {
+		return "", statusErr(resp.Status)
+	}
+	var r struct {
+		FullName string `json:"full_name"`
+	}
+	err = json.Unmarshal(resp.Body, &r)
+	return r.FullName, err
 }
 
 func deleteBranch(t forge.Target, branch string) error {

@@ -58,7 +58,6 @@ func withOptionals(p PRs) PRs {
 	p.EnqueueAutoMerge = func(Target, string) error { return nil }
 	p.CIRun = func(Target, string) (string, error) { return "https://ci.example/run/1", nil }
 	p.BranchProtected = func(_ Target, branch string) (bool, error) { return branch == "main", nil }
-	p.Probe = func(Target) (string, error) { return "o/r", nil }
 	p.TokenGrant = func(tg Target, prefix string) (Grant, error) {
 		if tg != wantTarget {
 			return Grant{}, errors.New("wrong target")
@@ -89,18 +88,18 @@ func TestPRCapabilities(t *testing.T) {
 	}
 
 	caps, m = prHandlers(withOptionals(fakePRs(t)))
-	want := []string{"forge.prs", "forge.draftPRs", "forge.autoMerge", "forge.ciRun", "forge.branchProtection", "forge.probe", "forge.tokenGrant"}
+	want := []string{"forge.prs", "forge.draftPRs", "forge.autoMerge", "forge.ciRun", "forge.branchProtection", "forge.tokenGrant"}
 	if !reflect.DeepEqual(caps, want) {
 		t.Fatalf("caps = %v, want %v", caps, want)
 	}
 	for _, name := range []string{"forge.openPR", "forge.autoMergeAllowed", "forge.enqueueAutoMerge", "forge.ciRun",
-		"forge.branchProtected", "forge.probe", "forge.tokenGrant"} {
+		"forge.branchProtected", "forge.tokenGrant"} {
 		if _, ok := m[name]; !ok {
 			t.Errorf("%s handler missing", name)
 		}
 	}
-	if len(m) != len(requiredPRMethods)+7 {
-		t.Errorf("%d handlers, want %d", len(m), len(requiredPRMethods)+7)
+	if len(m) != len(requiredPRMethods)+6 {
+		t.Errorf("%d handlers, want %d", len(m), len(requiredPRMethods)+6)
 	}
 }
 
@@ -119,7 +118,6 @@ func TestPRWireShapes(t *testing.T) {
 		{"forge.enqueueAutoMerge", `{` + target + `,"number":"9"}`, `{}`},
 		{"forge.ciRun", `{` + target + `,"number":"9"}`, `{"url":"https://ci.example/run/1"}`},
 		{"forge.branchProtected", `{` + target + `,"branch":"main"}`, `{"protected":true}`},
-		{"forge.probe", `{` + target + `}`, `{"repo":"o/r"}`},
 		{"forge.tokenGrant", `{` + target + `,"tokenPrefix":"ghp_"}`,
 			`{"introspectable":true,"writeCapable":true,"reason":"why:ghp_","scopes":["repo","ghp_"]}`},
 	}
@@ -171,7 +169,6 @@ func TestPRErrorPassesThrough(t *testing.T) {
 	p.EnqueueAutoMerge = func(Target, string) error { return boom }
 	p.CIRun = func(Target, string) (string, error) { return "", boom }
 	p.BranchProtected = func(Target, string) (bool, error) { return false, boom }
-	p.Probe = func(Target) (string, error) { return "", boom }
 	p.TokenGrant = func(Target, string) (Grant, error) { return Grant{}, boom }
 	_, m := prHandlers(p)
 	for method, params := range map[string]string{
@@ -185,7 +182,6 @@ func TestPRErrorPassesThrough(t *testing.T) {
 		"forge.enqueueAutoMerge": `{` + target + `,"number":"9"}`,
 		"forge.ciRun":            `{` + target + `,"number":"9"}`,
 		"forge.branchProtected":  `{` + target + `,"branch":"b"}`,
-		"forge.probe":            `{` + target + `}`,
 		"forge.tokenGrant":       `{` + target + `,"tokenPrefix":"ghp_"}`,
 	} {
 		if _, err := m[method](json.RawMessage(params)); !errors.Is(err, boom) {
@@ -226,7 +222,6 @@ func TestPROptionalsAreIndependent(t *testing.T) {
 		"forge.draftPRs":         func(p *PRs) { p.Open = nil },
 		"forge.ciRun":            func(p *PRs) { p.CIRun = nil },
 		"forge.branchProtection": func(p *PRs) { p.BranchProtected = nil },
-		"forge.probe":            func(p *PRs) { p.Probe = nil },
 		"forge.tokenGrant":       func(p *PRs) { p.TokenGrant = nil },
 		"forge.autoMerge": func(p *PRs) {
 			p.AutoMergeAllowed, p.EnqueueAutoMerge = nil, nil
@@ -235,7 +230,7 @@ func TestPROptionalsAreIndependent(t *testing.T) {
 		p := full
 		mut(&p)
 		caps, _ := prHandlers(p)
-		if slices.Contains(caps, cap) || len(caps) != 6 {
+		if slices.Contains(caps, cap) || len(caps) != 5 {
 			t.Errorf("without %s: caps = %v", cap, caps)
 		}
 	}

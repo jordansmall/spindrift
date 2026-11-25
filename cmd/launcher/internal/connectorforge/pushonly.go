@@ -98,7 +98,7 @@ func classedCall(c *connectorhost.Connector, clock retry.Clock) guestCall {
 }
 
 // pushOnly is a Code Forge with no PR concept: the Connector answers the forge
-// questions (branch existence and deletion) and git runs in core's own
+// questions (liveness, branch existence and deletion) and git runs in core's own
 // plumbing against the clone URL core derived.
 type pushOnly struct {
 	conn hostPolicy
@@ -118,8 +118,8 @@ type pushOnly struct {
 	cred     gitexec.Credential
 }
 
-// Compose builds a Code Forge from a forge Connector advertising
-// "forge.branches" and either "forge.pushOnly" (a BranchDeleter, no PRForge) or
+// Compose builds a Code Forge from a forge Connector advertising "forge.branches"
+// and "forge.probe", and either "forge.pushOnly" (a BranchDeleter, no PRForge) or
 // "forge" with "forge.prs" (the PR surface, with each optional capability only
 // when declared; "forge.draftPRs" adds draft PRs, branch pushes and the bundle
 // relay). The returned Capabilities are the composed forge resolved by type,
@@ -133,6 +133,8 @@ func Compose(c *connectorhost.Connector, target Target, g Git) (forge.CodeForge,
 	switch {
 	case !has(CapBranches):
 		return nil, forge.Capabilities{}, fmt.Errorf("%w: capabilities %v lack %q", ErrNotForge, c.Capabilities, CapBranches)
+	case !has(capProbe):
+		return nil, forge.Capabilities{}, fmt.Errorf("%w: capabilities %v lack %q", ErrNotForge, c.Capabilities, capProbe)
 	case !isPushOnly && !(has(capForge) && has(CapPRs)):
 		return nil, forge.Capabilities{}, fmt.Errorf("%w: capabilities %v lack %q and %q", ErrPRForgeUnsupported, c.Capabilities, CapPushOnly, CapPRs)
 	}
@@ -169,16 +171,10 @@ func Compose(c *connectorhost.Connector, target Target, g Git) (forge.CodeForge,
 func (p *pushOnly) Merge(ref string) error  { return p.git.Merge(ref) }
 func (p *pushOnly) Rebase(ref string) error { return p.git.Rebase(ref) }
 
-// probeBranch is the branch Probe asks about; the answer is ignored.
-const probeBranch = "spindrift-probe"
-
-// Probe asks the Connector whether a fixed branch exists, so a Connector or
-// backend that no longer answers fails it, and returns the target repository.
+// Probe asks the Connector for the repository's name through forge.probe, so a
+// Connector or backend that no longer answers fails it.
 func (p *pushOnly) Probe() (string, error) {
-	if _, err := p.BranchExists(probeBranch); err != nil {
-		return "", err
-	}
-	return p.target.Repo, nil
+	return probeRepo(p.call, p.target)
 }
 
 func (p *pushOnly) BranchExists(branch string) (bool, error) {

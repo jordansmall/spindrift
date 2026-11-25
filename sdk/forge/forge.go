@@ -1,15 +1,15 @@
 // Package forge is the Connector author's side of the forge primitives. A
 // Connector declares a Reader and Register exports it over the Connector
-// protocol; it declares Branches (remote identity, branch exists, branch
-// delete) and RegisterBranches exports those; and it declares PRs (open,
+// protocol; it declares Branches (branch exists, branch delete, the repository
+// probe) and RegisterBranches exports those; and it declares PRs (open,
 // behind, files, draft flips, comments, merge) and RegisterPRs exports those.
 //
 // A method is in the contract only when it needs the forge's API: core does
 // every git operation itself, and derives whatever it can. The Connector
 // returns raw fields only; core makes every policy decision (which
 // conclusions fail, rendering and capping failure detail, PR URL validation).
-// Auto-merge, the CI run link, branch protection, the forge probe and the token
-// grant are optional primitives, each a handshake capability a Connector
+// Auto-merge, the CI run link, branch protection and the token grant are
+// optional primitives, each a handshake capability a Connector
 // declares by setting its funcs.
 package forge
 
@@ -60,6 +60,15 @@ func unmarshal(params json.RawMessage, v any) error {
 		return fmt.Errorf("bad params: %w", err)
 	}
 	return nil
+}
+
+// targeted decodes the {target} params of the repository-wide calls.
+func targeted(params json.RawMessage) (Target, error) {
+	var q struct {
+		Target Target `json:"target"`
+	}
+	err := unmarshal(params, &q)
+	return q.Target, err
 }
 
 // numbered decodes the {target, number} params shared by the per-PR reads.

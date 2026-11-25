@@ -52,6 +52,7 @@ func init() {
 	forge.RegisterBranches(forge.Branches{
 		BranchExists: branchExists,
 		DeleteBranch: deleteBranch,
+		Probe:        probe,
 	})
 	forge.RegisterPRs(forge.PRs{
 		Open:             open,
@@ -64,7 +65,6 @@ func init() {
 		EnqueueAutoMerge: enqueueAutoMerge,
 		BranchProtected:  branchProtected,
 		CIRun:            ciRun,
-		Probe:            probe,
 		TokenGrant:       tokenGrant,
 	})
 }
