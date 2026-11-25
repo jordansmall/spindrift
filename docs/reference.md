@@ -1450,7 +1450,8 @@ Driver entry declares:
   (`internal/forge/<name>`) edit reruns the same set, with that adapter's
   `runners-<name>-go-test` or `backends-<name>-go-test` in place of the
   Driver's check. None of the three reruns the core checks
-  (`launcher-go-test`, `launcher-go-fmt` and `launcher-go-vet`), which
+  (`launcher-go-test`, `launcher-go-test-fixtures`, `launcher-go-fmt` and
+  `launcher-go-vet`), which
   `drivers-go-test-independent`, `runners-go-test-independent` and
   `backends-go-test-independent` pin.
   Those build from a source without any Driver, runner family, bundled
