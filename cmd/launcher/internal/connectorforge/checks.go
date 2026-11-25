@@ -34,7 +34,7 @@ type (
 
 // forgeChecks is the forge axis's whole registry: every call of p, and of the
 // reads p.rd, runs through it. The bodies read p and p.rd when they run, so
-// the web host composePR pins after construction reaches them.
+// the web host and path composePR pins after construction reach them.
 func forgeChecks(p *pushOnly) connectorcall.Checks {
 	t := p.rd
 	return connectorcall.Checks{

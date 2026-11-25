@@ -455,3 +455,48 @@ func TestBranchReadsAcceptForgejoPullsPath(t *testing.T) {
 		t.Fatalf("OpenPRForBranch = (%+v, %v, %v), want the /pulls/ PR", pr, ok, err)
 	}
 }
+
+// A forge served under a subpath keeps its PR URLs and run links under that
+// prefix, matched by whole segments.
+func TestURLChecksStripTheWebBasePath(t *testing.T) {
+	r := &reads{target: testTarget, webHost: "example.org", webPath: "/forgejo"}
+	for _, tc := range []struct {
+		name, url string
+		ok        bool
+	}{
+		{"own PR", "https://example.org/forgejo/o/r/pulls/3", true},
+		{"own PR, mixed case", "https://Example.org/forgejo/O/R/pull/3", true},
+		{"no prefix", "https://example.org/o/r/pulls/3", false},
+		{"partial segment", "https://example.org/forgejoX/o/r/pulls/3", false},
+		{"other prefix", "https://example.org/other/o/r/pulls/3", false},
+		{"prefix only", "https://example.org/forgejo", false},
+		{"doubled prefix", "https://example.org/forgejo/forgejo/o/r/pulls/3", false},
+	} {
+		t.Run("PR "+tc.name, func(t *testing.T) {
+			n, err := r.prNumber(tc.url)
+			if tc.ok != (err == nil) || (tc.ok && n != "3") {
+				t.Fatalf("prNumber(%q) = %q, %v, want ok=%t", tc.url, n, err, tc.ok)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name, url string
+		ok        bool
+	}{
+		{"own run", "https://example.org/forgejo/o/r/actions/runs/1", true},
+		{"no prefix", "https://example.org/o/r/actions/runs/1", false},
+		{"partial segment", "https://example.org/forgejoX/o/r/actions/runs/1", false},
+		{"escape", "https://example.org/forgejo/o/r/../../x/y/actions/runs/1", false},
+		{"escape the prefix", "https://example.org/forgejo/../o/r/actions/runs/1", false},
+	} {
+		t.Run("run "+tc.name, func(t *testing.T) {
+			want := ""
+			if tc.ok {
+				want = tc.url
+			}
+			if got := r.ownRunLink(tc.url); got != want {
+				t.Fatalf("ownRunLink(%q) = %q, want %q", tc.url, got, want)
+			}
+		})
+	}
+}

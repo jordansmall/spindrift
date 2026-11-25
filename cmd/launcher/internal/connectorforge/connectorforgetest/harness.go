@@ -128,6 +128,7 @@ type Backend struct {
 	mu       sync.Mutex
 	clone    string
 	web      string
+	webPath  string
 	token    string
 	failures []int
 	branch   int
@@ -150,8 +151,17 @@ func newBackend(t *testing.T, bare string) *Backend {
 	return b
 }
 
-// SetRemote scripts the clone_url and html_url the backend serves, for the
-// hostile cases.
+// underWebPath moves the backend's clone and web URLs under webPath.
+func (b *Backend) underWebPath(webPath string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.webPath = webPath
+	b.clone = "https://" + b.Host + webPath + "/" + Repo + ".git"
+	b.web = "https://" + b.Host + webPath + "/" + Repo
+}
+
+// SetRemote scripts the clone_url and html_url the backend serves, which core
+// must not follow for git.
 func (b *Backend) SetRemote(clone, web string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -197,9 +207,10 @@ func (b *Backend) serve(w http.ResponseWriter, r *http.Request) {
 	b.mu.Lock()
 	b.prs.requests++
 	gitHandler := b.gitHandler
+	webPath := b.webPath
 	token := b.token
 	b.mu.Unlock()
-	isGit := gitHandler != nil && strings.HasPrefix(r.URL.Path, "/"+path.Dir(Repo)+"/")
+	isGit := gitHandler != nil && strings.HasPrefix(r.URL.Path, webPath+"/"+path.Dir(Repo)+"/")
 	if token != "" && !isGit && r.Header.Get("Authorization") != "Bearer "+token {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -370,13 +381,14 @@ func newBase(t *testing.T, eng Engine, c Connector, opts ...Option) *base {
 		pass, cred = os.Getenv(o.tokenEnv), gitexec.EnvCredential(user, o.tokenEnv)
 		s.backend.SetToken(pass)
 	}
+	s.backend.underWebPath(o.webPath)
 	h := &base{
 		t: t, eng: eng, connector: c, Repo: repo, Backend: s.backend, Conn: s.conn, Audit: s.audit, target: s.target,
-		Credential: cred, WebBase: "https://" + s.backend.Host,
+		Credential: cred, WebBase: "https://" + s.backend.Host + o.webPath,
 	}
 	if o.gitOverHTTPS {
 		t.Setenv("GIT_CONFIG_COUNT", "0")
-		g := gitexectest.ServeTLS(t, s.backend.Server, Repo+".git", repo.Bare, user, pass)
+		g := gitexectest.ServeTLS(t, s.backend.Server, strings.TrimPrefix(o.webPath+"/", "/")+Repo+".git", repo.Bare, user, pass)
 		s.backend.mu.Lock()
 		s.backend.gitHandler = g
 		s.backend.mu.Unlock()
