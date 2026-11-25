@@ -1,17 +1,16 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"time"
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
-	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/inputdoc"
+	"spindrift.dev/launcher/internal/rowcredential"
 	"spindrift.dev/launcher/internal/secretcmd"
 )
 
@@ -28,20 +27,16 @@ var secretCmdRunner = func(cmd string) (string, error) {
 }
 
 // resolveConnectorCredentials fills the credential env of each Connector row
-// the Daemon reads through, from `_CMD` or the SECRET_CMD template as the
-// Launcher does. refresh re-resolves them, keeping the old value on failure;
-// it is nil when none were sourced.
+// the Daemon reads through (see rowcredential for precedence). refresh
+// re-resolves them, keeping the old value on failure; it is nil when none were
+// sourced, and only a kind that probes the tracker resolves at all.
 //
-// `_CMD` wins over a plain value and a template value is pinned as `_CMD`
-// too, or a restart-in-place successor would inherit a frozen Setenv'd token.
-// The pin makes Launcher children run `_CMD` without their
-// connectorCredentialNeededThisRun check, harmless while they share the
-// Daemon's ISSUE_TRACKER and CODE_FORGE.
-// The CODE_FORGE row is included, though the probe reads only the tracker:
-// children inherit its pinned `_CMD`, and refusing here fails fast. A row
-// counts when backendkit.{Forge,Tracker}ReadsThroughConnector holds. A
-// Basic-scheme row's IdentityEnv has no `_CMD` form and is
-// not resolved.
+// A template value is pinned as `_CMD` too, or a restart-in-place successor
+// would inherit a frozen Setenv'd token. A Launcher child's parseFlags runs a
+// pinned core secret's `_CMD` whatever row it reads, harmless while it shares
+// the Daemon's ISSUE_TRACKER and CODE_FORGE. The CODE_FORGE row is resolved
+// though the probe reads only the tracker: children inherit its pinned `_CMD`,
+// and refusing here fails fast.
 func resolveConnectorCredentials(doc *inputdoc.Document, kinds []daemon.Kind, stderr io.Writer) (refresh func(), err error) {
 	probes := false
 	for _, k := range kinds {
@@ -61,47 +56,26 @@ func resolveConnectorCredentials(doc *inputdoc.Document, kinds []daemon.Kind, st
 	if !probes {
 		return nil, nil
 	}
-	type cmdCredential struct{ env, cmd string }
-	var sourced []cmdCredential
-	tracker, forge := issueTrackerName(doc), codeForgeName(doc)
-	tmpl := os.Getenv("SECRET_CMD")
-	seen := map[string]bool{}
-	for _, row := range backendrows.All() {
-		env := row.CredentialEnv
-		readsTracker := row.Name == tracker && backendkit.TrackerReadsThroughConnector(row.Name)
-		readsForge := row.Name == forge && backendkit.ForgeReadsThroughConnector(row.Name)
-		if !(readsTracker || readsForge) || seen[env] {
-			continue
-		}
-		seen[env] = true
-		cmd := secretcmd.Command(env, tmpl)
-		if cmd == "" {
-			if secretcmd.IsSet(env) {
-				continue
-			}
-			msg := fmt.Sprintf("the %s Connector row is read through its Connector this run but its credential is unset: set %s, %s_CMD, or SECRET_CMD", row.Name, env, env)
-			if row.CredentialKnob != "" {
-				msg += fmt.Sprintf(" (knob %s)", row.CredentialKnob)
-			}
-			return nil, errors.New(msg)
-		}
-		if err := secretcmd.Export(env, cmd, secretCmdRunner); err != nil {
-			return nil, fmt.Errorf("the %s Connector row's credential comes from %s_CMD or the SECRET_CMD template: %w", row.Name, env, err)
-		}
-		if err := secretcmd.Pin(env, cmd); err != nil {
+	res := rowcredential.Resolution{
+		Forge: codeForgeName(doc), Tracker: issueTrackerName(doc),
+		Template: os.Getenv("SECRET_CMD"), Run: secretCmdRunner,
+	}
+	recipes, err := res.Apply(backendrows.All())
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range recipes {
+		if err := secretcmd.Pin(r.Env, r.Cmd); err != nil {
 			return nil, err
 		}
-		sourced = append(sourced, cmdCredential{env, cmd})
 	}
-	if len(sourced) == 0 {
+	if len(recipes) == 0 {
 		return nil, nil
 	}
 	return func() {
-		for _, c := range sourced {
-			if err := secretcmd.Export(c.env, c.cmd, secretCmdRunner); err != nil {
-				fmt.Fprintf(stderr, "daemon: connector credential %s refresh failed, keeping the previous value: %v\n", c.env, err)
-			}
-		}
+		res.Refresh(recipes, func(env string, err error) {
+			fmt.Fprintf(stderr, "daemon: connector credential %s refresh failed, keeping the previous value: %v\n", env, err)
+		})
 	}, nil
 }
 
