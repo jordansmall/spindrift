@@ -18,7 +18,7 @@
         inputs.core.follows = "spindrift";
       };
     '';
-    moduleImport = "inputs.jira.flakeModules.default";
+    connectorData = "inputs.jira.connectorData";
   };
   # The knob holding the Tracker scope (ADR 0075 decision 3); a row without one
   # scopes by REPO_SLUG.

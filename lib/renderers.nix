@@ -1702,7 +1702,7 @@ rec {
         )
         + (if s.credential == null then "" else field "Credential" (goStr s.credential))
         + (if s.flakeInput == null then "" else field "FlakeInput" (goStr s.flakeInput))
-        + (if s.moduleImport == null then "" else field "ModuleImport" (goStr s.moduleImport))
+        + (if s.connectorData == null then "" else field "ConnectorData" (goStr s.connectorData))
         + "\t},\n";
     in
     assert
@@ -1724,7 +1724,7 @@ rec {
     + "\tSecrets []stanzaSecret // harness.env lines, in the env example's order\n"
     + "\tCredential string // env var the Connector reads its credential from; \"\" when none\n"
     + "\tFlakeInput string // \"\" when the batteries flake already carries it\n"
-    + "\tModuleImport string // likewise\n"
+    + "\tConnectorData string // likewise\n"
     + "}\n"
     + "\n"
     + "// stanzaSetting is one settings-block knob of a Consumer stanza: its env name,\n"

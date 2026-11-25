@@ -10,7 +10,7 @@
   consumerStanza = {
     connectorKnobs = [ ];
     flakeInput = null;
-    moduleImport = null;
+    connectorData = null;
   };
   validAsTracker = true;
   validAsCodeForge = true;

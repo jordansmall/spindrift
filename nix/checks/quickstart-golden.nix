@@ -42,8 +42,7 @@ let
       map
         (row: {
           inherit (row) name;
-          value.flakeModules.default =
-            ((import ../../connectors/${row.name}).lib.connector { inherit core; }).flakeModule;
+          value.connectorData = ((import ../../connectors/${row.name}).lib.connector { inherit core; }).data;
         })
         (
           builtins.filter (row: row.consumerStanza.flakeInput != null) (import ../../lib/backends/default.nix)

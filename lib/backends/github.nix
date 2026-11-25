@@ -15,7 +15,7 @@
   consumerStanza = {
     connectorKnobs = [ ];
     flakeInput = null;
-    moduleImport = null;
+    connectorData = null;
   };
   outboxRelayCapable = true;
   relayCapable = true;

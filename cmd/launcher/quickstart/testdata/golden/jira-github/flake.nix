@@ -24,10 +24,9 @@
         "x86_64-linux"
       ];
 
-      imports = [
-        spindrift.flakeModules.default
-        inputs.jira.flakeModules.default
-      ];
+      imports = [ spindrift.flakeModules.default ];
+
+      spindrift.connectorData = [ inputs.jira.connectorData ];
 
       perSystem =
         { config, pkgs, ... }:
