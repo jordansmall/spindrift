@@ -721,6 +721,47 @@ checkedMerge {
     in
     assert assertMsg (render connectorProtocol).success
       "connector-protocol-rows (issue #7504): the real lib/connector-protocol description must render with both renderers, but it failed -- the guard would be vacuous";
+    assert
+      let
+        tweakFirstRule =
+          f:
+          connectorProtocol
+          // {
+            admitCases = connectorProtocol.admitCases // {
+              rules = imap0 (i: r: if i == 0 then f r else r) connectorProtocol.admitCases.rules;
+            };
+          };
+        tweakFirstCase =
+          f: tweakFirstRule (r: r // { cases = imap0 (i: c: if i == 0 then f c else c) r.cases; });
+        firstCase = builtins.head (builtins.head connectorProtocol.admitCases.rules).cases;
+      in
+      rejects "an admit case with both admit and refuse" (tweakFirstCase (c: c // { admit = true; }))
+      && rejects "an admit case with neither admit nor refuse" (
+        tweakFirstCase (c: removeAttrs c [ "refuse" ])
+      )
+      && rejects "an admit case with an unknown field" (tweakFirstCase (c: c // { reason = "x"; }))
+      && rejects "an admit case with an empty refuse" (tweakFirstCase (c: c // { refuse = ""; }))
+      && rejects "a duplicate admit case name in a rule" (
+        tweakFirstRule (r: r // { cases = r.cases ++ [ firstCase ]; })
+      )
+      && rejects "a duplicate admit rule name" (
+        connectorProtocol
+        // {
+          admitCases = connectorProtocol.admitCases // {
+            rules = connectorProtocol.admitCases.rules ++ [
+              (builtins.head connectorProtocol.admitCases.rules)
+            ];
+          };
+        }
+      )
+      && rejects "an admit route missing path" (
+        connectorProtocol
+        // {
+          admitCases = connectorProtocol.admitCases // {
+            routes = [ (removeAttrs (builtins.head connectorProtocol.admitCases.routes) [ "path" ]) ];
+          };
+        }
+      );
     assert rejects "a method missing resultCheck" (tweakFirst (m: removeAttrs m [ "resultCheck" ]));
     assert rejects "a method missing retry" (tweakFirst (m: removeAttrs m [ "retry" ]));
     assert rejects "a method missing capability" (tweakFirst (m: removeAttrs m [ "capability" ]));
