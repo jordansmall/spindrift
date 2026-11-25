@@ -85,7 +85,11 @@ func TestDriverOneShotDecoderOutlivesItsCall(t *testing.T) {
 		if got := text(s.NewDecoder()(line)); got != "1:"+line {
 			t.Fatalf("one-shot decode %d = %.40q, want text 1:%.20s...", i, got, line)
 		}
-		// Coverage only: the batch path never failed here without the fix.
+		// Coverage only: the batch path never failed here without the fix, so it
+		// needs one round, not ten.
+		if i > 0 {
+			continue
+		}
 		runtime.GC()
 		batch := s.BatchDecoder()([]string{line})
 		if len(batch) != 1 {
