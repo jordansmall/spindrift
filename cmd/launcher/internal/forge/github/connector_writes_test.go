@@ -11,7 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/forge"
@@ -703,7 +702,7 @@ func testProbe(t *testing.T, h *connectorHarness) {
 
 func testTokenGrant(t *testing.T, h *connectorHarness) {
 	target := connectorforge.Target{API: h.backend.URL, Repo: connectorRepo}
-	for token, want := range map[string]backendkit.TokenIntrospection{
+	for token, want := range map[string]forge.TokenIntrospection{
 		"ghp_x": {Introspectable: true, WriteCapable: true, Scopes: []string{"read:org", "repo"}},
 		"ghs_x": {Introspectable: true, WriteCapable: true},
 	} {

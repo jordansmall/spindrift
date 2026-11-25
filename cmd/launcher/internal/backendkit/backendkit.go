@@ -150,23 +150,9 @@ type TokenPrompt struct {
 	RerunCmd string
 }
 
-// TokenIntrospection reports what a Box token probe learned. Introspectable is
-// false when the hook cannot determine the token's grants. WriteCapable is
-// meaningful only when Introspectable is true.
-type TokenIntrospection struct {
-	Introspectable bool
-	WriteCapable   bool
-	// Reason is an optional operator-facing explanation shown when
-	// Introspectable is false.
-	Reason string
-	// Scopes are the OAuth scopes the forge reports for the token, nil when it
-	// reports none.
-	Scopes []string
-}
-
 // TokenIntrospector probes token for write capability, scoped to repoSlug where
 // the probe itself is repo-scoped.
-type TokenIntrospector func(token, repoSlug string) (TokenIntrospection, error)
+type TokenIntrospector func(token, repoSlug string) (forge.TokenIntrospection, error)
 
 // AutoMergeForges names, in slice order, every Strategy that offers an
 // auto-merge remedy, joined with " or ".

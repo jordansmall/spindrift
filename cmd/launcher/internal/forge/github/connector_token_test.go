@@ -14,6 +14,7 @@ import (
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorrecord"
+	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/hostpaths"
 )
 
@@ -55,7 +56,7 @@ func TestIntrospect_ReportsTheGrantAndAuditsTheRequests(t *testing.T) {
 
 	got, err := introspect(githubRow(t), backendrows.Options{Client: b.Client()}, "ghp_abc", connectorRepo)
 
-	want := backendkit.TokenIntrospection{Introspectable: true, WriteCapable: true, Scopes: []string{"read:org", "repo"}}
+	want := forge.TokenIntrospection{Introspectable: true, WriteCapable: true, Scopes: []string{"read:org", "repo"}}
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("introspect = (%+v, %v), want %+v", got, err, want)
 	}
