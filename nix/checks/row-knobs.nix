@@ -167,7 +167,7 @@ let
   # Pinned regression list of the knobs moved onto rows, not a general rule.
   # Two GitHub-named knobs stay shared because the core launcher reads
   # them ungated: GH_TOKEN (Box env guard, bootstrap, and git's gh credential
-  # helper) and GH_TOKEN_REFRESH_FILE (token refresh bootstrap and daemon watch).
+  # helper) and GH_TOKEN_REFRESH_FILE (the refresh-file credential source in the launcher and daemon).
   owners = {
     git.codeForgeRemoteURL = "CODE_FORGE_REMOTE_URL";
     oci.podmanNetwork = "PODMAN_NETWORK";

@@ -155,7 +155,8 @@ What to do:
   Connectors](docs/reference.md#backend-connectors). A read-only `GH_TOKEN` no
   longer suffices for a github run.
 - **A GitHub App installation token now covers the Connector too.** A token
-  rotated through `--gh-token-refresh-file` (`GH_TOKEN_REFRESH_FILE`) reaches the
+  rotated through `--gh-token-refresh-file` (`GH_TOKEN_REFRESH_FILE`), which the
+  runtime re-reads at each use, reaches the
   next Connector request, where the old Connector token never followed it.
   `GH_TOKEN_CMD` and the `SECRET_CMD` template supply `GH_TOKEN` as before; the
   daemon re-runs the command every 30 minutes.

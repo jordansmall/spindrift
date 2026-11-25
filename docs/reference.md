@@ -2992,9 +2992,11 @@ them evaluates unchanged.
   Connector's requests (tracker and forge) and core git (push, bundle relay,
   mirror seed, Ledger), is resolved by the launcher and the daemon like any
   secret knob (the value, `_CMD`, or `SECRET_CMD`), and never reaches the Box.
-  It is read at each use from the process environment, so a change to
-  `FORGEJO_TOKEN` there reaches the next request and push; a `_CMD` runs once at
-  launch, with no mid-run re-run. `SPINDRIFT_FORGEJO_CONNECTOR_TOKEN` was
+  It is read at each use from the row's credential source in the Connector
+  runtime, so a `_CMD` the daemon re-runs every 30 minutes reaches the next
+  request and push; the launcher runs a `_CMD` once at launch. With no token
+  set, core's git fails naming `FORGEJO_TOKEN` rather than cloning anonymously.
+  `SPINDRIFT_FORGEJO_CONNECTOR_TOKEN` was
   removed (issue #7500).
 - `MERGE_METHOD` must be `rebase` or unset: the Connector merges by rebase only,
   and the launcher refuses to build the forge for `squash` or `merge` rather
@@ -3374,16 +3376,17 @@ one's session is released. A failed load is retried by the next
 read until three loads have failed in a row, then at most once a minute.
 
 A github run takes one credential, `GH_TOKEN` (issue #7499): the row names
-core's `ghToken` knob as its credential, and the Connector host's backend path
-reads `GH_TOKEN` from the environment at each request. A token that
-`--gh-token-refresh-file` (`GH_TOKEN_REFRESH_FILE`) rotates therefore reaches
-the next Connector request and the next core git op alike (see [GitHub App
-installation token](#github-app-installation-token-recommended)). It can come
+core's `ghToken` knob as its credential, and the Connector runtime owns the
+credential source for it, read at each use by a Connector request and by core's
+git alike. A token that `--gh-token-refresh-file` (`GH_TOKEN_REFRESH_FILE`)
+rotates therefore reaches the next request and the next git op (see [GitHub App
+installation token](#github-app-installation-token-recommended)); nothing
+writes the rotated token into `GH_TOKEN`. It can come
 from a vault like any core secret, through `GH_TOKEN_CMD` or the `SECRET_CMD`
 template (see [Runtime configuration](#runtime-configuration)); the template
 applies only while github is the active `CODE_FORGE` or `ISSUE_TRACKER`. The
-launcher resolves the command once; the daemon re-runs it every 30 minutes (see
-[Daemon](#daemon)). `SPINDRIFT_GITHUB_CONNECTOR_TOKEN` was removed, and setting
+launcher runs the command once; the daemon re-runs it every 30 minutes in place
+(see [Daemon](#daemon)). `SPINDRIFT_GITHUB_CONNECTOR_TOKEN` was removed, and setting
 it fails evaluation and launch ([MIGRATING.md](../MIGRATING.md)).
 
 `GH_TOKEN` must write, so every github run needs it write-capable: issues, PRs
@@ -4121,9 +4124,9 @@ description and a regen.
   most `outCap` bytes are written at `outPtr`, so a short buffer asks again.
   `Set-Cookie` is never served, and a refused, failed or oversized request
   leaves every name absent. A credential taken from
-  `GH_TOKEN_REFRESH_FILE` reaches a request through `GH_TOKEN`: the launcher
-  and the daemon poll the file (`tokenrefresh.WatchGHToken`) and the github row
-  reads `GH_TOKEN` on every request, so the first request after a rotation
+  `GH_TOKEN_REFRESH_FILE` reaches a request without touching `GH_TOKEN`: the
+  Connector runtime's credential source for the github row re-reads the file
+  on every request, so the first request after a rotation
   carries the new token and none is dropped; every rotation must replace the
   file by rename, as `gh-token-refresher` does. A backend Connector row
   declares its Route table under
@@ -4839,7 +4842,7 @@ When a vault's naming isn't uniform, fall back to the per-secret
 | ------------------------- | ---------------------- | ---------------------------------------- |
 | `REPO_SLUG`               | — (required unless `CODE_FORGE` and `ISSUE_TRACKER` are both `local` and no `ISSUE_ROUTE` is set; baked via `forge.repoSlug`) | target repo, `owner/repo` |
 | `GH_TOKEN`                | — (required unless `CODE_FORGE` is `local` or `forgejo`, and `ISSUE_TRACKER` is not `github`) | GitHub token the Launcher uses on the host; never reaches the Box (secret; env only) |
-| `GH_TOKEN_REFRESH_FILE`   | — (baked via `forge.ghTokenRefreshFile`) | path the launcher polls to keep `GH_TOKEN` current past an installation token's ~1h lifetime; the github row reads `GH_TOKEN` per request, so a rotation reaches Connector requests ([Network Connectors](#connector-protocol)) — see [GitHub App installation token](#github-app-installation-token-recommended) |
+| `GH_TOKEN_REFRESH_FILE`   | — (baked via `forge.ghTokenRefreshFile`) | path the github row's credential source re-reads at each use to stay current past an installation token's ~1h lifetime, so a rotation reaches Connector requests and core git ([Network Connectors](#connector-protocol)) — see [GitHub App installation token](#github-app-installation-token-recommended) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | — (one auth required)  | from `claude setup-token` (secret; env only) |
 | `ANTHROPIC_API_KEY`       | —                      | alternative to the OAuth token (secret; env only) |
 | `GIT_USER_NAME`           | host `git config`; baked via `git.user.name` | commit author name (applied repo-locally inside the Box — see [Hermetic git config](#hermetic-git-config); the `github` Code Forge's host-side Rebase also pins it on its throwaway clone) |
@@ -5704,7 +5707,8 @@ Userinfo replaces any ambient credential helper for that call, so a URL
 whose password lives in a helper should carry no userinfo (put the
 username in the helper's config instead). The Forgejo backend's host-side
 git calls authenticate with `FORGEJO_TOKEN` the same way, read at each git
-use so a rotated token reaches the next push.
+use from the row's credential source so a refreshed token reaches the next
+push.
 
 Under `BOX_FORGE_AND_ISSUE_ACCESS=read-only` the same `git` forge is
 host-mediated (issue #6898): the Box holds no credential for
@@ -8854,18 +8858,16 @@ memory and a runner-temp file removed when the job ends; only the resulting
 `GH_TOKEN` reaches the Box.
 
 The launcher's `--gh-token-refresh-file` flag (`GH_TOKEN_REFRESH_FILE` knob)
-points at that file: once set, `bootstrap` starts a background poll
-(`cmd/launcher/internal/tokenrefresh`) that re-reads it every 60s for the rest
-of the process (`tokenrefresh.WatchGHToken`) and swaps any new value into
-`GH_TOKEN`. The Connector reads `GH_TOKEN` at each request and core reads it at
-each git op (push, relay, rebase, merge, mirror seed, Ledger push), so all of
-them, and the terminal gh calls (merge, label edits, the final comment), draw on
+points at that file: once set, the github row's credential source in the
+Connector runtime (`credsource.File`) re-reads it at each use and keeps the last
+good token when a read fails or finds it empty. A Connector request and each
+core git op (push, relay, rebase, merge, mirror seed, Ledger push) draw on
 whatever the refresher most recently minted rather than the token captured at
-job start. The knob is
+job start; no process environment variable carries the rotation. The knob is
 optional and off by default — an unset `GH_TOKEN_REFRESH_FILE` leaves `GH_TOKEN`
 static for the whole run, as before (the fine-grained-PAT path, and any
 deployment that doesn't wire up a refresher, are unaffected). Only the
-launcher and the daemon poll the file: `agent-setup` freezes the initial token into
+launcher and the daemon read the file: `agent-setup` freezes the initial token into
 `GH_TOKEN` for every later step, so the workflows' own shell `gh` steps after
 the launcher (the dispatch blocked-release, the recover park) re-read
 `$GH_APP_TOKEN_FILE` before calling `gh` (issue #5259).
@@ -11169,7 +11171,7 @@ the tip as it was when that slot came free, not the tip at daemon startup.
 `--input` document, resolves and validates the knobs a real start checks
 before its preflight, then exits 0 with one stderr line (`daemon:
 check-only: input and config are valid`) and nothing on stdout. It stops
-before the instance lock, the token-refresh watcher, the startup
+before the instance lock, the startup
 preflight's doctor run, and any fetch, so it makes no network or tracker
 call and a live daemon holding the checkout's lock never blocks it.
 Because it skips `doctor`, config only doctor validates (the butler's
@@ -12140,7 +12142,7 @@ four further pages unconditionally and sums the issues, clamped to 100. Page
 changes (issue #4596). Past five pages the probe under-counts: a label
 with 500 or more leading PRs can read as 0. The daemon runs `gh` in its own
 environment, so it needs `GH_TOKEN` (or a `gh` login) of its own; when
-`GH_TOKEN_REFRESH_FILE` is set it polls that file into its own `GH_TOKEN` as
+`GH_TOKEN_REFRESH_FILE` is set the github row reads that file at each use, as
 a child does, so an expired App token does not fail every probe into the
 breaker. A blank `REPO_SLUG` leaves every tracker-probed kind exit-driven,
 while a `LABEL`, `ISSUE_TRACKER`, or `LOCAL_ISSUES_DIR` set in neither the
@@ -12150,24 +12152,27 @@ count a child has already consumed, a probe that counted work followed by a chil
 exiting 2 makes the next probe of that kind skip the cache and read fresh.
 
 When `ISSUE_TRACKER` is a Connector-routed backend (github today), the
-probe reads through that Connector, so the daemon resolves the row's
-credential at start-up into its own environment, `<ENV>_CMD` ahead of the plain
-variable, and the `SECRET_CMD` template (read from the daemon's environment)
-when neither is set, as in the launcher. For github the credential is
-`GH_TOKEN` (`GH_TOKEN_CMD`), the one the `gh` probe above already uses. It does
+probe reads through that Connector, so the daemon chooses the row's credential
+source at start-up and holds it in the Connector runtime, not in its
+environment: `<ENV>_CMD` ahead of the plain variable, and the `SECRET_CMD`
+template (read from the daemon's environment) when neither is set, as in the
+launcher. For github the credential is `GH_TOKEN` (`GH_TOKEN_CMD`), the one the
+`gh` probe above already uses. It does
 so only when an enabled kind probes the tracker; a row for another
 backend never runs its command. With no source set, or a command
 that fails, the daemon refuses to start, naming the variable, its `_CMD` form,
-and `SECRET_CMD`. A command-sourced credential is re-resolved every 30
-minutes, and a failed refresh keeps the previous value and logs a line naming
-the variable. That keeps a GitHub App installation token inside its hour only
-if the command mints a fresh token per call: a command that reads a cached
+and `SECRET_CMD`. A command-sourced credential is re-run every 30
+minutes in place, and a failed re-run keeps the previous value and logs a line
+naming the variable. That keeps a GitHub App installation token inside its hour
+only if the command mints a fresh token per call: a command that reads a cached
 token, such as a file a refresher rewrites every 45 minutes, can hand over one
 already 45 minutes old; `GH_TOKEN_REFRESH_FILE` is the better source for
 github. Configure one source: a daemon given both `GH_TOKEN_CMD` and
-`GH_TOKEN_REFRESH_FILE` has two independent writers of `GH_TOKEN`, and
-whichever wrote last wins. A plain variable is read per request and never
-refreshed (bar the github `GH_TOKEN` refresh file), so the operator owns its lifetime.
+`GH_TOKEN_REFRESH_FILE` uses the command's value only until the file's first
+good read, after which the file wins. A plain variable is captured once at
+startup and never refreshed, so the operator owns its lifetime; the exception
+is the github `GH_TOKEN_REFRESH_FILE`, which when set is read at each use and
+wins once readable.
 
 The Jira probe reads a count without fetching any issue, and its mode
 follows `JIRA_DEPLOYMENT`. With `cloud` (the default) it is one
