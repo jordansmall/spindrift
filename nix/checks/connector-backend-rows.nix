@@ -856,12 +856,12 @@ in
   # Issue #6805: a fixture Consumer importing a Connector from outside core
   # gets that Connector's backend row in the launcher's input document, with
   # the credential resolved from the Connector's own knob to its env var.
-  connector-backend-rows-flake-module-forwards-row =
+  connector-backend-rows-data-forwards-row =
     let
       fixtureConnector = (import ../fixtures/connector).lib.connector { core = import ../../core; };
       consumerWith = modules: fixtures.connectorConsumerVia ([ ../../lib/flakeModule.nix ] ++ modules);
-      withRow = consumerWith [ fixtureConnector.flakeModule ];
-      # A Connector row is registered by one module only (a second definition of
+      withRow = consumerWith [ (fixtures.registerData fixtureConnector.data) ];
+      # A Connector row is registered by one data entry only (a second one of
       # the same name throws), so each negative case is a fresh `probe` row
       # rather than an override of the fixture's.
       secretKnob = {
@@ -1253,41 +1253,39 @@ in
         base = "ghToken";
       };
     })) "a base may be any env-schema knob, core included";
-    pkgs.runCommand "connector-backend-rows-flake-module-forwards-row"
-      { nativeBuildInputs = [ pkgs.jq ]; }
-      ''
-        ${fixtures.runInputDocOf (programOf withRow)}
-        jq -e '.backends == [{
-            name: "fixture",
-            module: .backends[0].module,
-            routes: [{method: "GET", host: "api.fixture.test", path: "/repos"}],
-            credentialEnv: "FIXTURE_TOKEN",
-            credentialKnob: "fixtureToken"
-          }] and (.backends[0].module | endswith("/network.wasm"))' "$doc"
-        test -f "$(jq -r '.backends[0].module' "$doc")"
-        ${fixtures.runInputDocOf (
-          programOf (probe {
-            backend = basicBackend;
-          })
-        )}
-        jq -e '.backends == [{
-            name: "probe",
-            module: .backends[0].module,
-            routes: [{method: "GET", host: "{base}", path: "/repos"}],
-            credentialEnv: "PROBE_TOKEN",
-            credentialKnob: "probeToken",
-            credentialScheme: "basic",
-            identityEnv: "PROBE_EMAIL",
-            baseEnv: "PROBE_BASE_URL"
-          }]' "$doc"
-        ${fixtures.runInputDocOf (
-          programOf (probe {
-            knobs = removeAttrs probeKnobs [ "probeToken" ];
-          })
-        )}
-        jq -e '.backends[0] | .credentialEnv == "PROBE_TOKEN" and (has("credentialKnob") | not)' "$doc"
-        touch $out
-      '';
+    pkgs.runCommand "connector-backend-rows-data-forwards-row" { nativeBuildInputs = [ pkgs.jq ]; } ''
+      ${fixtures.runInputDocOf (programOf withRow)}
+      jq -e '.backends == [{
+          name: "fixture",
+          module: .backends[0].module,
+          routes: [{method: "GET", host: "api.fixture.test", path: "/repos"}],
+          credentialEnv: "FIXTURE_TOKEN",
+          credentialKnob: "fixtureToken"
+        }] and (.backends[0].module | endswith("/network.wasm"))' "$doc"
+      test -f "$(jq -r '.backends[0].module' "$doc")"
+      ${fixtures.runInputDocOf (
+        programOf (probe {
+          backend = basicBackend;
+        })
+      )}
+      jq -e '.backends == [{
+          name: "probe",
+          module: .backends[0].module,
+          routes: [{method: "GET", host: "{base}", path: "/repos"}],
+          credentialEnv: "PROBE_TOKEN",
+          credentialKnob: "probeToken",
+          credentialScheme: "basic",
+          identityEnv: "PROBE_EMAIL",
+          baseEnv: "PROBE_BASE_URL"
+        }]' "$doc"
+      ${fixtures.runInputDocOf (
+        programOf (probe {
+          knobs = removeAttrs probeKnobs [ "probeToken" ];
+        })
+      )}
+      jq -e '.backends[0] | .credentialEnv == "PROBE_TOKEN" and (has("credentialKnob") | not)' "$doc"
+      touch $out
+    '';
 
   # Issue #6806: the accepted Route baseline is read from the Consumer's own
   # source tree (spindrift-connector-routes.json), keyed by Connector name, and
@@ -1644,7 +1642,7 @@ in
       fixtureConnector = (import ../fixtures/connector).lib.connector { core = import ../../core; };
       flakeNoEntry = fixtures.connectorConsumerVia [
         ../../lib/flakeModule.nix
-        fixtureConnector.flakeModule
+        (fixtures.registerData fixtureConnector.data)
       ];
       message = builtins.concatStringsSep "\n" noEntry.internals.baselineRefusals;
     in

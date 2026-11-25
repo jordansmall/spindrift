@@ -1,6 +1,6 @@
 # A Connector registered as data: a flat attribute set core alone turns into
 # its `spindrift.connectors.<name>` row, so the Connector ships no flake-parts
-# module of its own.
+# module of its own. A Consumer lists it in `spindrift.connectorData`.
 #
 #   { name; module; routes; credential; scheme; identity; base; gitRemote;
 #     knobs; fragments; driver; }
@@ -151,60 +151,35 @@ let
         { }
     );
 
-  # `coreModule` is core's flake-parts module (a path or module value). The key
-  # keeps a Consumer importing the Connector twice from registering it twice.
-  # The module registers the data and nothing else: core builds the row.
-  toFlakeModule =
-    coreModule: data:
+  # The readers below take a `lib.connector` entry: its `data` is the whole
+  # registration. None applies a wasm `module`.
+  dataOf =
+    entry:
+    validate (
+      entry.data
+        or (throw "a lib.connector entry with no `data` (attributes: ${toString (builtins.attrNames entry)}): a Connector registers as data (lib/connector-data.nix), not as a flake module")
+    );
+
+  # `{ <name> = <row>; }`, the shape of the flake module's `spindrift.connectors`.
+  # `lib` is only used to apply a function `driver`.
+  rowsOf =
+    lib: entry:
     let
-      d = validate data;
+      d = dataOf entry;
     in
     {
-      key = "spindrift-connector-${d.name}";
-      imports = [ coreModule ];
-      spindrift.connectorData = [ d ];
+      ${d.name} = row lib d;
     };
 
-  # The readers below take a `lib.connector` entry in either form: a data
-  # Connector's `data`, or the entry-level declarations (`flakeModule`,
-  # `fragments`, `driverRow`) of one not yet moved to data. No caller branches
-  # on the form. None applies a wasm `module`.
+  fragmentsOf = entry: (dataOf entry).fragments or null;
 
-  # `{ <name> = <row>; }`, the shape of a flake module's `spindrift.connectors`.
-  # `moduleArgs` is what an entry-form flake module is applied to; a data entry
-  # reads only its `lib`, and only to apply a function `driver`.
-  rowsOf =
-    moduleArgs: entry:
-    if entry ? data then
-      let
-        d = validate entry.data;
-      in
-      {
-        ${d.name} = row (moduleArgs.lib
-          or (throw "connector ${d.name}: a function `driver` needs rowsOf's module args to carry `lib`")
-        ) d;
-      }
-    else
-      (entry.flakeModule moduleArgs).spindrift.connectors or { };
-
-  fragmentsOf =
-    entry: if entry ? data then (validate entry.data).fragments or null else entry.fragments or null;
-
-  driverRowOf =
-    lib: entry:
-    if entry ? data then
-      resolveDriver lib ((validate entry.data).driver or null)
-    else if entry ? driverRow then
-      entry.driverRow lib
-    else
-      null;
+  driverRowOf = lib: entry: resolveDriver lib ((dataOf entry).driver or null);
 in
 {
   inherit
     problem
     validate
     row
-    toFlakeModule
     rowsOf
     fragmentsOf
     driverRowOf

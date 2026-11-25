@@ -128,8 +128,9 @@ in
       # Which Connectors dogfood runs as primary (issue #6998).
       "nix/dogfood-primary.nix"
       # First-party Connectors' grant-bearing declarations: Route table
-      # (routes.nix), backend row and credential knob (data.nix or module.nix),
-      # Driver row (row.nix) (ADR 0073, issue #7465).
+      # (routes.nix), backend row and credential knob (data.nix),
+      # Driver row (row.nix) (ADR 0073, issue #7465). module.nix stays guarded
+      # so a reintroduced one cannot land unreviewed.
       "connectors/*/routes.nix"
       "connectors/*/data.nix"
       "connectors/*/module.nix"

@@ -11,5 +11,5 @@
     let
       entry = import ./.;
     in
-    entry // { flakeModules.default = (entry.lib.connector { inherit core; }).flakeModule; };
+    entry // { connectorData = (entry.lib.connector { inherit core; }).data; };
 }

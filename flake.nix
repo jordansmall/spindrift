@@ -39,14 +39,13 @@
       # ADR 0073: each Connector subflake is plain-imported here and handed
       # this root's own core, never its pinned one.
       connectorDirs = import ./nix/connector-dirs.nix;
-      connectorModuleOf = dir: ((import dir).lib.connector { inherit core; }).flakeModule;
-      connectorModules = map connectorModuleOf connectorDirs;
+      connectorDataOf = dir: ((import dir).lib.connector { inherit core; }).data;
 
       # Every Consumer of `spindrift.flakeModules.default` carries the github
       # row (#7139) and the forgejo row (#6868): each Connector answers its
       # forge's reads and writes for all.
-      githubConnectorModule = connectorModuleOf ./connectors/github;
-      forgejoConnectorModule = connectorModuleOf ./connectors/forgejo;
+      githubConnectorData = connectorDataOf ./connectors/github;
+      forgejoConnectorData = connectorDataOf ./connectors/forgejo;
 
       # Every mkHarness call handed this wrapped input shares one lazy nixpkgs
       # instantiation per system instead of paying its own fixed-point evaluation
@@ -70,7 +69,8 @@
 
         # Dogfood the declarative options: our own packages and apps come from
         # the flake-parts shim, not a direct mkHarness call.
-        imports = [ core.flakeModules.default ] ++ connectorModules;
+        imports = [ core.flakeModules.default ];
+        spindrift.connectorData = map connectorDataOf connectorDirs;
 
         # Pinned dogfood exception: shadow the Connectors listed in
         # nix/dogfood-shadow.nix (the native Strategy stays authoritative; the
@@ -94,11 +94,17 @@
         flake = {
           inherit (core) lib;
           flakeModules = core.flakeModules // {
-            default.imports = [
-              core.flakeModules.default
-              githubConnectorModule
-              forgejoConnectorModule
-            ];
+            # `_file` names the batteries module in a duplicate-registration
+            # message; no `key`, as a Connector is registered once by name, not
+            # deduplicated by module.
+            default = {
+              _file = "spindrift batteries flakeModules.default";
+              imports = [ core.flakeModules.default ];
+              spindrift.connectorData = [
+                githubConnectorData
+                forgejoConnectorData
+              ];
+            };
           };
         };
 
@@ -161,7 +167,7 @@
                   ;
                 baselineChecks = checksResult.checks;
                 rootFlakeModule = inputs.self.flakeModules.default;
-                inherit githubConnectorModule forgejoConnectorModule;
+                inherit githubConnectorData forgejoConnectorData;
                 fixtures = fixturesAt root;
                 nixpkgs = nixpkgsShared;
               };

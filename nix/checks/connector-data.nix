@@ -12,6 +12,7 @@ let
   inherit (pkgs.lib) assertMsg hasInfix;
   core = import ../../core;
   connectorData = import ../../lib/connector-data.nix;
+  names = import ../../lib/connector-names.nix;
   wasm = "${fixtures.connectorWasm}/network.wasm";
 
   knob = env: secret: {
@@ -51,17 +52,12 @@ let
   };
 
   consumerWith = modules: fixtures.connectorConsumerVia ([ ../../lib/flakeModule.nix ] ++ modules);
-  viaData = consumerWith [ (core.lib.connectorModule core good) ];
+  viaData = consumerWith [ (fixtures.registerData good) ];
   configOf = consumer: consumer.debug.config.spindrift;
   programOf = c: c.apps.${system}.connectors-accept.program;
   throws = v: !(builtins.tryEval (builtins.deepSeq v v)).success;
   evaluates = c: (builtins.tryEval (builtins.deepSeq (programOf c) true)).success;
   row = (configOf viaData).connectors.datafixture;
-
-  # The same Connector registered straight into the option the module sets.
-  direct = {
-    spindrift.connectorData = [ good ];
-  };
 
   # Each bad data set with the substrings its message must carry: the
   # Connector, the offending key or field, and the types.
@@ -206,10 +202,9 @@ let
       msg = connectorData.problem r.data;
     in
     msg != null && builtins.all (s: hasInfix s msg) r.says;
-  # A `lib.connector { core }` entry in each of its two forms: the data one,
-  # and the entry-level one a Connector not yet moved to data still returns.
-  # `module` is a lambda that throws when applied, and `driver.module` throws when
-  # forced, so a helper that applied the one or forced the other fails.
+  # A `lib.connector { core }` entry. `module` is a lambda that throws when
+  # applied, and `driver.module` throws when forced, so a helper that applied
+  # the one or forced the other fails.
   trap = _: throw "a helper applied a wasm module";
   dataEntry = {
     data = good // {
@@ -219,22 +214,14 @@ let
       };
     };
   };
-  entryForm = {
-    inherit (good) fragments;
-    driverRow = _lib: good.driver;
-    flakeModule =
-      { lib }:
-      {
-        spindrift.connectors = lib.mapAttrs (_: _: { inherit (good) knobs; }) { datafixture = null; };
-      };
+  # An entry of the withdrawn flake-module form.
+  noData = {
+    flakeModule = _: { };
   };
   badNames = [
     (removeAttrs good [ "name" ])
     (good // { name = 3; })
   ];
-  bare = {
-    flakeModule = _: { };
-  };
   # A Driver row built from core's own rows, as the opencode, pi and claude
   # Connectors do: it needs nixpkgs `lib`, so `driver` is a function of it.
   coreDerivedData =
@@ -255,27 +242,21 @@ let
         };
     };
   coreDerivedViaModule = consumerWith [
-    (core.lib.connectorModule core (coreDerivedData {
+    (fixtures.registerData (coreDerivedData {
       inherit core;
     }))
   ];
   coreDerivedRow = (configOf coreDerivedViaModule).connectors.corederived;
   # What nix/connector-knobs.nix does: a stub core `{ }`, then the backend filter.
   stubRows = pkgs.lib.filterAttrs (_: r: r ? backend) (
-    connectorData.rowsOf { inherit (pkgs) lib; } { data = coreDerivedData { core = { }; }; }
+    connectorData.rowsOf pkgs.lib { data = coreDerivedData { core = { }; }; }
   );
 in
 {
-  connector-data-readers-both-forms =
+  connector-data-readers =
     assert assertMsg (
       connectorData.fragmentsOf dataEntry == good.fragments
     ) "fragmentsOf must read a data entry's fragments";
-    assert assertMsg (
-      connectorData.fragmentsOf entryForm == good.fragments
-    ) "fragmentsOf must read an entry-form Connector's fragments";
-    assert assertMsg (
-      connectorData.fragmentsOf bare == null
-    ) "fragmentsOf must be null for a Connector with no fragments";
     assert assertMsg (
       connectorData.fragmentsOf { data.name = "knobonly"; } == null
     ) "fragmentsOf must be null for data with no fragments";
@@ -283,26 +264,19 @@ in
       (connectorData.driverRowOf pkgs.lib dataEntry).name == "datafixture"
     ) "driverRowOf must read a data entry's driver";
     assert assertMsg (
-      (connectorData.driverRowOf pkgs.lib entryForm).name == "datafixture"
-    ) "driverRowOf must read an entry-form Connector's driverRow";
-    assert assertMsg (
-      connectorData.driverRowOf pkgs.lib bare == null
-    ) "driverRowOf must be null for a Connector with no Driver row";
-    assert assertMsg (
       connectorData.driverRowOf pkgs.lib { data.name = "knobonly"; } == null
     ) "driverRowOf must be null for data with no driver";
     assert assertMsg (
-      (connectorData.rowsOf { inherit (pkgs) lib; } entryForm).datafixture.knobs == good.knobs
-    ) "rowsOf must read an entry-form Connector's module row, given its module args";
-    assert assertMsg (
-      connectorData.rowsOf { inherit (pkgs) lib; } bare == { }
-    ) "rowsOf must be empty for a module that registers no row";
-    assert assertMsg (
-      (connectorData.rowsOf { } dataEntry).datafixture.fragments == good.fragments
-    ) "rowsOf must read a data entry's set-valued row, without module args";
+      (connectorData.rowsOf pkgs.lib dataEntry).datafixture.fragments == good.fragments
+    ) "rowsOf must read a data entry's set-valued row, without forcing a driver";
     assert assertMsg (builtins.seq (connectorData.driverRowOf pkgs.lib dataEntry).name true)
       "no reader may apply a data entry's wasm module or force its driver.module";
-    pkgs.runCommand "connector-data-readers-both-forms" { } "touch $out";
+    assert assertMsg (builtins.all throws [
+      (connectorData.rowsOf pkgs.lib noData)
+      (connectorData.fragmentsOf noData)
+      (connectorData.driverRowOf pkgs.lib noData)
+    ]) "every reader must refuse an entry with no `data`: a Connector registers as data";
+    pkgs.runCommand "connector-data-readers" { } "touch $out";
 
   connector-data-registers-row =
     assert assertMsg (row.knobs == good.knobs) "a data Connector's knobs must reach its row unchanged";
@@ -339,33 +313,34 @@ in
         touch $out
       '';
 
-  # The module is a shorthand for the option, not a second registration
-  # route: both produce the same program from the same data.
-  connector-data-equals-option =
+  # A Connector registers once, by name: a second registration of the same data
+  # fails evaluation instead of deduplicating (issue #7562).
+  connector-data-duplicate-refused =
+    let
+      message = names.duplicateError "datafixture" [
+        { file = "a.nix"; }
+        { file = "b.nix"; }
+      ];
+    in
     assert assertMsg (
-      programOf viaData == programOf (consumerWith [ direct ])
-    ) "a data Connector must build the same program through its module and through the option";
-    pkgs.runCommand "connector-data-equals-option" { } "touch $out";
-
-  # The module keeps the key a hand-written Connector module carries, so a
-  # Consumer importing it twice dedups instead of failing "registered twice".
-  connector-data-module-dedups =
-    assert assertMsg (
-      core.lib.connectorModule core good ? key
-      && (core.lib.connectorModule core good).key == "spindrift-connector-datafixture"
-    ) "the module must carry the key `spindrift-connector-<name>`";
-    assert assertMsg (evaluates (consumerWith [
-      (core.lib.connectorModule core good)
-      (core.lib.connectorModule core good)
-    ])) "importing a data Connector twice must dedup, not fail with 'registered twice'";
-    pkgs.runCommand "connector-data-module-dedups" { } "touch $out";
+      !(throws (configOf (consumerWith [ (fixtures.registerData good) ])).connectors)
+    ) "control: one registration of a data Connector must evaluate";
+    assert assertMsg (throws
+      (configOf (consumerWith [
+        (fixtures.registerData good)
+        (fixtures.registerData good)
+      ])).connectors
+    ) "registering a data Connector twice must fail, not dedup";
+    assert assertMsg (hasInfix "registered twice" message)
+      "the refusal must say the name was registered twice";
+    pkgs.runCommand "connector-data-duplicate-refused" { } "touch $out";
 
   # A minimal row is just a name and, optionally, knobs: no backend, driver or
   # fragments appear on it.
   connector-data-minimal-row =
     let
       c = consumerWith [
-        (core.lib.connectorModule core {
+        (fixtures.registerData {
           name = "knobonly";
           knobs.knobOnlyGreeting = knob "KNOBONLY_GREETING" false;
         })
@@ -392,10 +367,10 @@ in
       r: throws (connectorData.validate r.data)
     ) refusals) "validate must throw on every refused data set";
     assert assertMsg (builtins.all (
-      r: throws (core.lib.connectorModule core r.data)
-    ) refusals) "core.lib.connectorModule must throw on every refused data set";
+      r: throws (configOf (consumerWith [ (fixtures.registerData r.data) ])).connectors
+    ) refusals) "registering data in spindrift.connectorData must throw on every refused data set";
     assert assertMsg (
-      !(evaluates (consumerWith [ (core.lib.connectorModule core (good // { shadow = true; })) ]))
+      !(evaluates (consumerWith [ (fixtures.registerData (good // { shadow = true; })) ]))
     ) "a Consumer importing a data Connector with an unknown key must fail evaluation";
     assert assertMsg (hasInfix "attribute set" (
       connectorData.problem [ ]
@@ -404,7 +379,7 @@ in
       connectorData.problem (removeAttrs good [ "name" ])
     )) "data with no name is refused by name";
     assert assertMsg (builtins.all (
-      d: throws (connectorData.rowsOf { } { data = d; })
+      d: throws (connectorData.rowsOf pkgs.lib { data = d; })
     ) badNames) "rowsOf must throw on a bad name";
     assert assertMsg (
       map connectorData.problem badNames == [

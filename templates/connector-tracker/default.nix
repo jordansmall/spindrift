@@ -9,7 +9,6 @@
     in
     {
       inherit data;
-      flakeModule = core.lib.connectorModule core data;
       # `pkgs` is the caller's, so the build uses its Go toolchain.
       package = pkgs: import ./package.nix { inherit pkgs core; };
       # The Route table the row registers, for a check that exports it.

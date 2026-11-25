@@ -564,7 +564,7 @@ let
     lib.concatMap (
       c:
       let
-        rows = connectorData.rowsOf { inherit lib; } c;
+        rows = connectorData.rowsOf lib c;
       in
       lib.concatMap (
         n: lib.optional ((rows.${n}.backend or null) != null) (lib.nameValuePair n rows.${n}.backend)

@@ -23,38 +23,38 @@ let
 
   withFixture = fixtures.connectorConsumerVia [
     coreModule
-    fixtureConnector.flakeModule
+    (fixtures.registerData fixtureConnector.data)
   ];
   withNone = fixtures.connectorConsumerVia [ coreModule ];
   claudeConnector = (import ../../connectors/claude).lib.connector { inherit core; };
   withClaude = fixtures.connectorConsumerVia [
     coreModule
-    claudeConnector.flakeModule
+    (fixtures.registerData claudeConnector.data)
   ];
   forgejoConnector = (import ../../connectors/forgejo).lib.connector { inherit core; };
   withForgejo = fixtures.connectorConsumerVia [
     coreModule
-    forgejoConnector.flakeModule
+    (fixtures.registerData forgejoConnector.data)
   ];
   githubConnector = (import ../../connectors/github).lib.connector { inherit core; };
   withGithub = fixtures.connectorConsumerVia [
     coreModule
-    githubConnector.flakeModule
+    (fixtures.registerData githubConnector.data)
   ];
   piConnector = (import ../../connectors/pi).lib.connector { inherit core; };
   withPi = fixtures.connectorConsumerVia [
     coreModule
-    piConnector.flakeModule
+    (fixtures.registerData piConnector.data)
   ];
   jiraConnector = (import ../../connectors/jira).lib.connector { inherit core; };
   withJira = fixtures.connectorConsumerVia [
     coreModule
-    jiraConnector.flakeModule
+    (fixtures.registerData jiraConnector.data)
   ];
   drivers = import ../../lib/drivers { inherit (pkgs) lib; };
   withTemplate = fixtures.connectorConsumerVia [
     coreModule
-    template.flakeModules.default
+    (fixtures.registerData template.connectorData)
   ];
   configOf = consumer: consumer.debug.config.spindrift;
   knobModule = name: key: env: {
@@ -132,7 +132,7 @@ in
     assert assertMsg (row.knobs == fixtureKnob) "the registered row must carry the module's knobs";
     assert assertMsg (
       ((configOf withTemplate).connectors.fixture or { }).knobs or null == fixtureKnob
-    ) "the copyable flake.nix template's flakeModules.default must register the same fixture row";
+    ) "the copyable flake.nix template's connectorData must register the same fixture row";
     pkgs.runCommand "connectors-fixture-row-registered" { } "touch $out";
 
   # Issue #6796: the claude Connector contributes claude's row, so the
@@ -204,7 +204,7 @@ in
             (fixtures.connectorConsumerVia (
               [
                 coreModule
-                connector.flakeModule
+                (fixtures.registerData connector.data)
               ]
               ++ modules
             )).apps.${system}.default.program
@@ -232,7 +232,7 @@ in
           fixtures.connectorConsumerVia (
             [
               coreModule
-              rows.${name}.flakeModule
+              (fixtures.registerData rows.${name}.data)
             ]
             ++ modules
           )
@@ -371,11 +371,8 @@ in
       }
     ) "the fixture entry point must take exactly the core it is handed";
     assert assertMsg (
-      let
-        imports = fixtureConnector.flakeModule.imports;
-      in
-      imports == [ core.flakeModules.default ]
-    ) "the fixture module must import exactly the core it was handed";
+      fixtureConnector ? data && !(fixtureConnector ? flakeModule)
+    ) "the fixture Connector must register as data and ship no flake module";
     pkgs.runCommand "connectors-fixture-takes-in-tree-core" { } "touch $out";
 
   connectors-duplicate-name-fails =

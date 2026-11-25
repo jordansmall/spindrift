@@ -6,6 +6,7 @@
 {
   pkgs,
   fixtures,
+  rootFlakeModule,
   ...
 }:
 let
@@ -28,6 +29,10 @@ let
 
   consumerWith = modules: fixtures.connectorConsumerVia ([ coreModule ] ++ modules);
   configOf = consumer: consumer.debug.config.spindrift;
+  # The definitions the module system saw, before the merge validates them.
+  definitionsOf =
+    modules: (consumerWith modules).debug.options.spindrift.connectorData.definitionsWithLocations;
+  batteries = rootFlakeModule;
   fails = v: !(builtins.tryEval (builtins.deepSeq v true)).success;
   rowsFail = modules: fails (configOf (consumerWith modules)).connectors;
   inFile = file: mod: mod // { _file = file; };
@@ -63,14 +68,14 @@ in
           "github"
         ];
       override = row: [
-        githubConnector.flakeModule
+        (registers githubData)
         (inFile "hostile.nix" { spindrift.connectors.github = mkForce row; })
       ];
       message = names.rowOutsideDataError "github" "hostile.nix" [ "knobs" ];
       dischargedSwitch = both ++ [ { spindrift.connectors.nosuch = mkIf false { primary = true; }; } ];
     in
     assert assertMsg (
-      !(rowsFail [ githubConnector.flakeModule ])
+      !(rowsFail [ (registers githubData) ])
     ) "control: the github Connector alone must evaluate";
     assert assertMsg (rowsFail (
       override hostileRow
@@ -161,29 +166,69 @@ in
     ]) "the unregistered refusal must name the Connector, the file and the rule";
     pkgs.runCommand "connector-registration-refuses-row-override" { } "touch $out";
 
-  # Hole 2: a module reusing another Connector's key. The module system
-  # drops whichever module comes later in the import graph, so a hostile
-  # module imported first replaces the real one's registration.
+  # Hole 2: a module reusing another Connector's key. A Connector export is
+  # data with no module key, so a hostile module carrying the key of the
+  # Connector module it wants to replace can drop nothing: its registration
+  # and the real one both reach the one-definer rule. Pinned on the
+  # definitions the module system saw, not on the pure function alone.
   connector-registration-refuses-key-reuse =
     let
-      reuser = row: {
-        key = "spindrift-connector-github";
-        spindrift.connectors.github = row;
+      hostileGithub = githubData // {
+        inherit (hostileRow) knobs;
       };
+      hostile = {
+        key = "spindrift-connector-github";
+        _file = "hostile.nix";
+        spindrift.connectorData = [ hostileGithub ];
+      };
+      real = inFile "real.nix" (registers githubData);
+      byHostileThenReal = [
+        hostile
+        real
+      ];
+      byHostileThenBatteries = [
+        hostile
+        batteries
+      ];
+      messageOf = modules: names.registrationError (definitionsOf modules);
+      message = messageOf byHostileThenReal;
+      batteriesMessage = messageOf byHostileThenBatteries;
     in
-    assert assertMsg (rowsFail [
-      (reuser hostileRow)
-      githubConnector.flakeModule
-    ]) "a module reusing another Connector's key must not replace its row";
-    assert assertMsg (rowsFail [
-      (reuser hostileRow)
-    ]) "a module reusing another Connector's key must not register a row of its own";
     assert assertMsg (
-      !(rowsFail [
-        githubConnector.flakeModule
-        githubConnector.flakeModule
+      connectorData.problem hostileGithub == null
+    ) "control: the hostile data must be well-formed, so only the one-definer rule can refuse it";
+    assert assertMsg (!(rowsFail [ real ])) "control: the real registration alone must evaluate";
+    assert assertMsg (
+      !(batteries ? key)
+    ) "the batteries module must carry no key, or a key reuse could drop it";
+    assert assertMsg (builtins.all (d: !(d ? key) && !(d ? imports)) [
+      githubData
+      forgejoData
+    ]) "a first-party Connector's data must carry no module key or imports";
+    assert assertMsg (rowsFail byHostileThenReal)
+      "a module reusing another Connector's key must not replace its registration";
+    assert assertMsg (rowsFail byHostileThenBatteries)
+      "a module reusing a github key must not replace the batteries' registration";
+    assert assertMsg (
+      builtins.sort builtins.lessThan (map (d: d.file) (definitionsOf byHostileThenReal)) == [
+        "hostile.nix"
+        "real.nix"
+      ]
+    ) "the real registration must reach the option beside the hostile one, not be dropped by the key";
+    assert assertMsg (hasAll message [
+      "Connector 'github'"
+      "hostile.nix"
+      "real.nix"
+      "a name has one definer"
+    ]) "the refusal must name the Connector, both definers and the rule; got ${message}";
+    assert assertMsg
+      (hasAll batteriesMessage [
+        "Connector 'github'"
+        "hostile.nix"
+        batteries._file
+        "a name has one definer"
       ])
-    ) "control: importing one Connector's module twice dedups by its key";
+      "the refusal must name the Connector, the hostile file and the batteries module; got ${batteriesMessage}";
     pkgs.runCommand "connector-registration-refuses-key-reuse" { } "touch $out";
 
   connector-registration-refuses-two-data-registrations =
@@ -192,10 +237,16 @@ in
         (inFile "a.nix" (registers githubData))
         (inFile "b.nix" (registers githubData))
       ];
-      message = names.duplicateError "github" [
-        { file = "a.nix"; }
-        { file = "b.nix"; }
-      ];
+      sameModule = inFile "a.nix" (registers githubData);
+      message = names.registrationError (definitionsOf twice);
+      batteriesTwice = names.registrationError (definitionsOf [
+        batteries
+        batteries
+      ]);
+      importedTwice = names.registrationError (definitionsOf [
+        sameModule
+        sameModule
+      ]);
     in
     assert assertMsg (
       !(rowsFail [
@@ -204,11 +255,6 @@ in
       ])
     ) "control: two Connectors registered as data must evaluate";
     assert assertMsg (rowsFail twice) "two data registrations of one name must fail evaluation";
-    assert assertMsg (rowsFail [
-      (registers githubData)
-      githubConnector.flakeModule
-      (inFile "b.nix" (registers githubData))
-    ]) "a data registration beside the Connector's own module must fail evaluation";
     assert assertMsg (rowsFail [
       {
         spindrift.connectorData = [
@@ -224,8 +270,19 @@ in
       "b.nix"
       "a name has one definer"
     ]) "the duplicate message must name the Connector, both files and the rule; got ${message}";
+    assert assertMsg (hasAll importedTwice [
+      "Connector 'github'"
+      "both times by a.nix"
+      "import it once"
+      "a name has one definer"
+    ]) "a module registered by one file twice must say so; got ${importedTwice}";
+    assert assertMsg (hasAll batteriesTwice [
+      "registered twice"
+      "both times by ${batteries._file}"
+      "import it once"
+    ]) "the batteries module imported twice must say so; got ${batteriesTwice}";
     assert assertMsg (
-      names.duplicateError "github" [ { file = "a.nix"; } ] == null
+      names.registrationError (definitionsOf [ (inFile "a.nix" (registers githubData)) ]) == null
     ) "a single registration must not be reported as a duplicate";
     pkgs.runCommand "connector-registration-refuses-two-data-registrations" { } "touch $out";
 

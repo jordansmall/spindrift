@@ -7,7 +7,8 @@
     spindrift.url = "github:jordansmall/spindrift?dir=core";
     # Unlike the batteries flake, core carries no Connector: this Consumer
     # takes only the github row. A forgejo Consumer adds the forgejo Connector
-    # subflake the same way (`?dir=connectors/forgejo`) and imports its module.
+    # subflake the same way (`?dir=connectors/forgejo`) and registers its
+    # `connectorData`.
     spindrift-github = {
       url = "github:jordansmall/spindrift?dir=connectors/github";
       inputs.core.follows = "spindrift";
@@ -28,10 +29,9 @@
         "x86_64-linux"
       ];
 
-      imports = [
-        spindrift.flakeModules.default
-        spindrift-github.flakeModules.default
-      ];
+      imports = [ spindrift.flakeModules.default ];
+
+      spindrift.connectorData = [ spindrift-github.connectorData ];
 
       perSystem =
         { config, pkgs, ... }:
