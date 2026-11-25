@@ -2371,7 +2371,8 @@ mean at runtime is issue #6751. The worked example is the fixture Connector in
   The keys are `name` (required, the row's name in `spindrift.connectors`),
   `module`, `routes`, `credential`, `scheme`, `identity`, `base` and
   `gitRemote` (the [backend row](#backend-rows-on-a-connector), declared by
-  `module`, which also needs `routes` and `credential`), and `knobs`,
+  `module`, which also needs `routes`; `credential` is a first-party row's
+  alone, a third-party one derives its credential), and `knobs`,
   `fragments` and `driver` (the row's own fields). `driver` may be a row or a
   function of nixpkgs `lib` returning one, for a row built from core's
   (`lib: (core.lib.driverEntries { inherit lib; }).<name> // { module = …; }`).
@@ -2568,21 +2569,29 @@ fixture Connector's, as the row core builds from its
 spindrift.connectors.fixture.backend = {
   module = pkgs: "${drv}/network.wasm";
   routes = [ { method = "GET"; host = "api.fixture.test"; path = "/repos"; } ];
-  credential = "fixtureToken";
 };
 ```
 
-`module` is a function of `pkgs` returning the Connector's wasm file, `routes`
-its Route table (see Network Connectors under [Connector
-protocol](#connector-protocol)) and `credential` the env-schema key of the knob
-holding its secret (bearer token). It must be one of the Connector's own
-`knobs`, secret and `boxEnv = false`, as the fixture's `FIXTURE_TOKEN`; a core
-knob is refused so a Connector never gets core's forge token (ADR 0073). The
-flake module resolves the key to its env var and hands every such row to
+`module` is a function of `pkgs` returning the Connector's wasm file and
+`routes` its Route table (see Network Connectors under [Connector
+protocol](#connector-protocol)). The row's secret (bearer token) is its
+credential, and who names it depends on whose row it is. A first-party row
+(github, forgejo, jira) names its own backend's credential with `credential`,
+the env-schema key of a knob that is secret and `boxEnv = false`. A
+third-party Connector's credential variable is `<NAME>_TOKEN` from the row
+name, upper-cased with `-` mapped to `_` (the fixture's `FIXTURE_TOKEN`); its
+row names no `credential`, and one it names is refused (issue #7560). An own
+knob that is secret and host-only, with that env, shows as the row's
+`credentialKnob`; a core knob is never a Connector's credential, so it never
+gets core's forge token (ADR 0073). The flake module hands every such row to
 `mkHarness` as `backendRows`, keyed by Connector name.
 
+`mkHarness` derives the first-party mark: a row is first-party only when its
+`module` is the batteries flake's own build of that name, and no row can claim
+it (a row that sets `firstParty` is refused). The mark is rendered nowhere.
+
 Three optional fields serve a tracker on the Consumer's own site, such as Jira.
-`scheme` is `"bearer"` (default) or `"basic"`; `basic` pairs `credential` (the
+`scheme` is `"bearer"` (default) or `"basic"`; `basic` pairs the credential (the
 API token) with `identity`, the key of another of the Connector's own host-only
 knobs holding the username, or, for a Connector whose own core backend
 declares one, that backend's identity knob (jira's core `JIRA_EMAIL`), which
@@ -2614,16 +2623,16 @@ would refuse at load: a method outside `GET`, `HEAD`, `POST`, `PUT`, `PATCH`
 and `DELETE`, a bad `host[:port]`, or a path that is not canonical, is the
 blanket `/`, or holds `?` or `#` (the registry-route rules). It also fails on a
 row named `git` or
-`local`, which stay built in, on a `credential` that is not one of the
-Connector's own secret, host-only knobs (a core knob included), on a credential
-knob with no `env` or whose `env` aliases a core one such as `GH_TOKEN`, and on
-a row missing its `module`, `routes` or `credential`, on a `basic` scheme
-without an `identity` (or an `identity` on bearer), and on an `identity` that
-is not one of the Connector's own host-only knobs or a `base` that is no
-env-schema knob.
-One exception to the own-knobs rule: a row named for a core backend may name
-that backend's own token knob as its `credential`, such as github's `GH_TOKEN`
-(issue #7498); that knob is checked as an own one is.
+`local`, which stay built in, on a third-party row that names a `credential`,
+on a derived credential variable (`<NAME>_TOKEN`) that is a core knob's env
+(such as `GH_TOKEN`) or another backend row's variable, naming the row, on an
+own knob with the derived env that is not secret and host-only, and on a row
+missing its `module` or `routes`, on a `basic` scheme without an `identity` (or
+an `identity` on bearer), and on an `identity` that is not one of the
+Connector's own host-only knobs or a `base` that is no env-schema knob.
+One exception to the own-knobs rule: a first-party row names its own backend's
+`credential`, a core token knob such as github's `GH_TOKEN` (issues #7498 and
+#7560); that knob is checked as an own one is.
 
 `mkHarness` renders each row into the Launcher input document's `backends`
 section as `{name, module, routes, acceptedRoutes, credentialEnv,
@@ -2646,12 +2655,14 @@ row: `ISSUE_TRACKER=jira` builds the tracker from the Connector, and no other
 backend is selected by its Connector alone yet (issue #6807).
 
 `nix/checks/connector-backend-rows.nix` pins the rows: the fixture's reaches the
-input document, a bad credential (a core knob, one of the Connector's own that
-is not secret or not host-only, or no knob at all), a blanket route or a row
-missing a field fails evaluation, and the launcher test applies that
-Nix-rendered document and sends a declared request through the host. A github,
-forgejo or jira row naming its own token evaluates, while a core knob on any
-other row, another backend's token or a non-token core knob on a github row
+input document with `FIXTURE_TOKEN` derived from its name, a bad credential (a
+credential named by a third-party row, a derived variable that is a core knob's
+env or another row's, or an own knob with the derived env that is not secret or
+not host-only), a blanket route or a row missing a field fails evaluation, and
+the launcher test applies that Nix-rendered document and sends a declared
+request through the host. A github, forgejo or jira row built from the
+batteries module and naming its own token evaluates, while a `firstParty` mark
+on any row, another backend's token or a non-token core knob on a github row
 fails. The refusal text of a core knob is pinned on the pure
 `backendKnobError`.
 
@@ -3555,8 +3566,9 @@ client for a forge.
 tracker's API through `http_request`. `routes.nix` is the whole
 of the Connector's network authority: list every method, host and path subtree
 it requests and no more, with `{base}` for the tracker's base URL and `{repo}`
-for the project. `module.nix` holds the row: the `<name>ConnectorToken` and
-`<name>ConnectorBaseURL` knobs, the `scheme` (`bearer` by default; `basic`
+for the project. `module.nix` holds the row: the `<name>ConnectorToken` knob
+(env `<NAME>_TOKEN`, the credential variable core derives from the row name),
+the `<name>ConnectorBaseURL` knob, the `scheme` (`bearer` by default; `basic`
 needs an extra identity knob) and the `backend` row that names the wasm and
 the routes. Prompt fragment files go under `fragments/<name>/`, listed in
 `fragments.nix`.
