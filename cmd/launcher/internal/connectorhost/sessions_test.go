@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -226,17 +227,41 @@ func TestSessionsHostSendingAMalformedChunkFailsEverySession(t *testing.T) {
 	}
 }
 
-func TestSessionsFramesForUnknownSessionsAreDropped(t *testing.T) {
+func TestSessionsFrameForASessionNeverOpenedFailsThePipe(t *testing.T) {
 	s, kills := fakeHost(t, func(in io.Reader, out io.Writer) {
-		_ = connectorhost.WriteChunk(out, 99, []byte("noise"))
-		_ = connectorhost.WriteChunk(out, 99, nil)
+		if !awaitSessions(in, 2) {
+			return
+		}
+		// Two sessions are open, so id 3 was never issued.
+		_ = connectorhost.WriteChunk(out, 3, []byte("noise"))
+	})
+	for i, err := range loadsFail(t, s) {
+		if err == nil {
+			t.Errorf("load %d succeeded", i)
+		}
+	}
+	if err := s.Dead(); !errors.Is(err, connectorhost.ErrMalformedOutput) || !strings.Contains(err.Error(), "session 3") {
+		t.Errorf("Dead = %v, want ErrMalformedOutput naming session 3", err)
+	}
+	if kills.Load() == 0 {
+		t.Error("host not killed after a frame for a session never opened")
+	}
+}
+
+func TestSessionsFrameForAnEndedSessionIsDropped(t *testing.T) {
+	s, kills := fakeHost(t, func(in io.Reader, out io.Writer) {
 		_, _, _ = connectorhost.ReadChunk(in)
+		// The host ends session 1, then a late frame for it arrives.
+		_ = connectorhost.WriteChunk(out, 1, nil)
+		_ = connectorhost.WriteChunk(out, 1, []byte("late"))
+		// Stay up until the Launcher closes the pipe.
+		_, _ = io.Copy(io.Discard, in)
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
-	// The load never gets an answer, so only its own deadline ends it.
-	if _, err := s.Load(ctx, []byte("\x00asm")); err == nil {
-		t.Fatal("Load succeeded")
+	_, _ = s.Load(ctx, []byte("\x00asm"))
+	if err := s.Dead(); err != nil {
+		t.Errorf("Dead = %v, want a pipe that still serves", err)
 	}
 	if kills.Load() > 1 {
 		t.Errorf("kills = %d, want at most the load's own", kills.Load())
