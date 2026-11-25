@@ -468,13 +468,13 @@ func TestLauncherChecks_CodeForge_FailsAndPasses(t *testing.T) {
 
 	c = minimalValidConfig()
 	c.CodeForge = "forgejo"
-	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
+	c.setRowKnob("FORGEJO_BASE_URL", "")
 	ch = checkByName(t, launcherChecks(c), "code-forge-config")
 	if _, err := ch.Probe(); err == nil {
 		t.Fatal("code-forge Probe() must fail when forgejo cross-knob fields are incomplete")
 	}
 
-	c.setRowKnob("FORGEJO_TOKEN", "tok")
+	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
 	ch = checkByName(t, launcherChecks(c), "code-forge-config")
 	if _, err := ch.Probe(); err != nil {
 		t.Errorf("code-forge Probe() unexpected error for fully configured forgejo: %v", err)
@@ -867,18 +867,18 @@ func TestLauncherChecks_BlankRepoSlugFailsOnlyRepoSlugRow(t *testing.T) {
 
 // Only the slug failure moves to repo-slug: forgejo's own knob errors still
 // fail issue-tracker-config alongside a blank slug.
-func TestLauncherChecks_BlankRepoSlugKeepsForgejoTokenError(t *testing.T) {
+func TestLauncherChecks_BlankRepoSlugKeepsForgejoBaseURLError(t *testing.T) {
 	c := minimalValidConfig()
 	c.IssueTracker = "forgejo"
 	c.CodeForge = "forgejo"
-	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
+	c.setRowKnob("FORGEJO_BASE_URL", "")
 	c.RepoSlug = ""
 	for _, ch := range launcherChecks(c) {
 		if ch.Name != "issue-tracker-config" {
 			continue
 		}
-		if _, err := ch.Probe(); err == nil || !strings.Contains(err.Error(), "FORGEJO_TOKEN") {
-			t.Errorf("issue-tracker-config Probe() = %v, want an error naming FORGEJO_TOKEN", err)
+		if _, err := ch.Probe(); err == nil || !strings.Contains(err.Error(), "FORGEJO_BASE_URL") {
+			t.Errorf("issue-tracker-config Probe() = %v, want an error naming FORGEJO_BASE_URL", err)
 		}
 		return
 	}

@@ -28,7 +28,7 @@ var Strategy = backendkit.Strategy{
 		if err != nil {
 			return err
 		}
-		return ValidateJiraEnv(k.JiraBaseURL, k.JiraProjectKey, k.JiraToken, k.JiraStatusMapping, k.JiraLifecycle)
+		return ValidateJiraEnv(k.JiraBaseURL, k.JiraProjectKey, k.JiraStatusMapping, k.JiraLifecycle)
 	},
 	IssueScope: func(sh backendkit.Shared, l backendkit.Lookup) string {
 		k, err := ReadKnobs(l)

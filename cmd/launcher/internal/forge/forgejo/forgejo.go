@@ -54,12 +54,9 @@ func MergeStyle(method string) string {
 // ValidateForgejoEnv checks the FORGEJO_* knobs required when <knob>=forgejo
 // and returns an error for the first unmet requirement. knob names the
 // selecting env var and is quoted in the error.
-func ValidateForgejoEnv(knob, baseURL, token string) error {
+func ValidateForgejoEnv(knob, baseURL string) error {
 	if baseURL == "" {
 		return errBaseURLRequired(knob)
-	}
-	if token == "" {
-		return fmt.Errorf("set FORGEJO_TOKEN when %s=forgejo", knob)
 	}
 	return nil
 }

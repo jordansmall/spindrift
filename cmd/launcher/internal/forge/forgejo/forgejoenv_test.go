@@ -7,28 +7,23 @@ import (
 	"spindrift.dev/launcher/internal/forge/forgejo"
 )
 
-// TestValidateForgejoEnv_RequiresBaseURLAndToken verifies ValidateForgejoEnv
+// TestValidateForgejoEnv_RequiresBaseURL verifies ValidateForgejoEnv
 // fails fast on an empty field, naming the knob that required it.
-func TestValidateForgejoEnv_RequiresBaseURLAndToken(t *testing.T) {
+func TestValidateForgejoEnv_RequiresBaseURL(t *testing.T) {
 	for _, tc := range []struct{ knob, other string }{
 		{"ISSUE_TRACKER", "CODE_FORGE"},
 		{"CODE_FORGE", "ISSUE_TRACKER"},
 	} {
 		knob, other := tc.knob, tc.other
 		t.Run(knob, func(t *testing.T) {
-			if err := forgejo.ValidateForgejoEnv(knob, "https://codeberg.org", "tok"); err != nil {
+			if err := forgejo.ValidateForgejoEnv(knob, "https://codeberg.org"); err != nil {
 				t.Fatalf("fully configured forgejo env should validate: %v", err)
 			}
 			want := knob + "=forgejo"
-			if err := forgejo.ValidateForgejoEnv(knob, "", "tok"); err == nil ||
+			if err := forgejo.ValidateForgejoEnv(knob, ""); err == nil ||
 				!strings.Contains(err.Error(), "FORGEJO_BASE_URL") || !strings.Contains(err.Error(), want) ||
 				strings.Contains(err.Error(), other) {
 				t.Errorf("ValidateForgejoEnv should require FORGEJO_BASE_URL when %s, not %s, got: %v", want, other, err)
-			}
-			if err := forgejo.ValidateForgejoEnv(knob, "https://codeberg.org", ""); err == nil ||
-				!strings.Contains(err.Error(), "FORGEJO_TOKEN") || !strings.Contains(err.Error(), want) ||
-				strings.Contains(err.Error(), other) {
-				t.Errorf("ValidateForgejoEnv should require FORGEJO_TOKEN when %s, not %s, got: %v", want, other, err)
 			}
 		})
 	}

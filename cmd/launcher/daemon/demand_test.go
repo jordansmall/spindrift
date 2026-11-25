@@ -121,6 +121,7 @@ func TestBuildDemandSources_RelativeDirResolvesAgainstCwd(t *testing.T) {
 // reach the real GitHub.
 func TestBuildDemandSources_GitHubBuildsProbeSource(t *testing.T) {
 	clearKnobEnvT(t)
+	t.Setenv("GH_TOKEN", "test-token")
 	for name, tracker := range map[string]string{"github": "github", "blank": ""} {
 		t.Run(name, func(t *testing.T) {
 			src, _ := buildDemandSources(demandDocT(map[string]string{
@@ -140,6 +141,7 @@ func TestBuildDemandSources_GitHubBuildsProbeSource(t *testing.T) {
 
 func TestBuildDemandSources_GitHubReadsAmbientRepoSlug(t *testing.T) {
 	clearKnobEnvT(t)
+	t.Setenv("GH_TOKEN", "test-token")
 	t.Setenv("REPO_SLUG", "o/r")
 	src, _ := buildDemandSources(demandDocT(map[string]string{
 		"ISSUE_TRACKER": "github", "LABEL": "ready-for-agent",
@@ -382,6 +384,7 @@ func TestBuildDemandSources_UnsetKnobsResolveToSchemaDefaults(t *testing.T) {
 	})
 	t.Run("ISSUE_TRACKER", func(t *testing.T) {
 		clearKnobEnvT(t)
+		t.Setenv("GH_TOKEN", "test-token")
 		doc := demandDocT(map[string]string{"REPO_SLUG": "o/r"})
 		if got := issueTrackerName(doc); got != "github" {
 			t.Fatalf("issueTrackerName() = %q, want github", got)
@@ -543,6 +546,7 @@ func TestBuildDemandSources_EmptyDocumentValueFallsBackToAmbient(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			clearKnobEnvT(t)
+			t.Setenv("GH_TOKEN", "test-token")
 			for k, v := range tt.ambient {
 				t.Setenv(k, v)
 			}

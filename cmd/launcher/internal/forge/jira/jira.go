@@ -181,15 +181,12 @@ func CheckLifecycle(lifecycle string, mapping map[forge.DispatchState]StatusTarg
 
 // ValidateJiraEnv checks the JIRA_* knobs required when ISSUE_TRACKER=jira,
 // returning an error for the first unmet requirement.
-func ValidateJiraEnv(baseURL, projectKey, token, statusMapping, lifecycle string) error {
+func ValidateJiraEnv(baseURL, projectKey, statusMapping, lifecycle string) error {
 	if baseURL == "" {
 		return fmt.Errorf("set JIRA_BASE_URL (Jira site base URL) when ISSUE_TRACKER=jira")
 	}
 	if projectKey == "" {
 		return fmt.Errorf("set JIRA_PROJECT_KEY when ISSUE_TRACKER=jira")
-	}
-	if token == "" {
-		return fmt.Errorf("set JIRA_TOKEN when ISSUE_TRACKER=jira")
 	}
 	mapping, err := ParseStatusMapping(statusMapping)
 	if err != nil {
