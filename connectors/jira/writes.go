@@ -207,5 +207,5 @@ func fileIssue(t tracker.Target, r tracker.IssueRequest) (string, error) {
 	if created.Key == "" {
 		return "", errors.New("jira: create issue response carried no key")
 	}
-	return strings.TrimRight(t.API, "/") + "/browse/" + created.Key, nil
+	return t.API + "/browse/" + created.Key, nil
 }

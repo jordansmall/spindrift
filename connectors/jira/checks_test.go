@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"net/url"
 	"reflect"
 	"strings"
@@ -28,9 +27,7 @@ func TestProbeReturnsStatusWithoutFailingOnNon2xx(t *testing.T) {
 }
 
 func TestProbeErrorsOnTransportFailure(t *testing.T) {
-	old := send
-	send = func(connector.Request) (connector.Response, error) { return connector.Response{}, errors.New("dial") }
-	t.Cleanup(func() { send = old })
+	dialFails(t)
 	if _, err := probe(cloud); err == nil {
 		t.Fatal("want transport error")
 	}

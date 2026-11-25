@@ -427,16 +427,6 @@ func TestFileIssueOmitsEmptyDedupAndNeverNullLabels(t *testing.T) {
 	}
 }
 
-func TestFileIssueTrimsTrailingSlashFromSite(t *testing.T) {
-	issueServer(t, 201, `{"key":"ENG-9"}`)
-	tg := cloud
-	tg.API = site + "/"
-	url, err := fileIssue(tg, tracker.IssueRequest{Title: "t", IssueType: "Task"})
-	if err != nil || url != site+"/browse/ENG-9" {
-		t.Errorf("url = %q, err = %v", url, err)
-	}
-}
-
 func TestFileIssueErrors(t *testing.T) {
 	for name, c := range map[string]struct {
 		status int
