@@ -1,5 +1,41 @@
 # Migration Guide
 
+## The Network host refuses an undeclared request header and hides an undeclared response header (issue #7565)
+
+**A Network Connector's `http_request` now sends and reads only the fixed
+header sets plus what its Route declares.** The host refuses a request that
+carries a header outside the fixed request set, and a guest reads only the
+fixed response set plus the matched Route's `responseHeaders`; any other
+response header is absent.
+
+- **Fixed request set:** `Accept`, `Accept-Language`, `Cache-Control`,
+  `Content-Type`, `If-Match`, `If-Modified-Since`, `If-None-Match` and
+  `If-Unmodified-Since`. Any other header the Connector sends (an API-version
+  header, say) needs a `requestHeaders` entry on each Route that carries it.
+- **Fixed response set:** `Content-Type`, `Content-Length`, `Content-Range`,
+  `Date`, `ETag`, `Last-Modified`, `Link`, `Location` and `Retry-After`. Any
+  other header the Connector reads needs a `responseHeaders` entry.
+- **Never declarable:** request `Host`, `Cookie`, `Authorization`,
+  `Forwarded`, `Via`, `X-Real-IP`, `X-Forwarded-*` and `Proxy-*`; response
+  `Set-Cookie` and `Set-Cookie2`. Declaring one fails evaluation.
+- Names are case-insensitive. The sets are listed under Network Connectors in
+  [Connector protocol](docs/reference.md#connector-protocol).
+
+```nix
+# before
+spindrift.connectors.acme.backend.routes = [
+  { method = "GET"; host = "{base}"; path = "/api/v1/repos/{repo}"; }
+];
+# after: the Connector sends X-Api-Version and reads X-Total-Count
+spindrift.connectors.acme.backend.routes = [
+  {
+    method = "GET"; host = "{base}"; path = "/api/v1/repos/{repo}";
+    requestHeaders = [ "X-Api-Version" ];
+    responseHeaders = [ "X-Total-Count" ];
+  }
+];
+```
+
 ## A third-party backend Connector's credential variable is derived from its name (issue #7560)
 
 **A third-party Connector's backend row no longer names its credential: core
