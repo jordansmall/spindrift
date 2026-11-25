@@ -1,15 +1,21 @@
 package main
 
 import (
+	"context"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorprotocol"
 	"spindrift.dev/launcher/internal/connectorruntime"
+	"spindrift.dev/launcher/internal/connectorsandbox"
+	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/inputdoc"
@@ -328,6 +334,37 @@ func (c *config) setRowKnob(env, value string) {
 func connectorRuntime(t *testing.T) *connectorruntime.Runtime {
 	t.Helper()
 	rt := connectorruntime.FromRegistries()
+	t.Cleanup(func() { _ = rt.Close() })
+	return rt
+}
+
+// capPadSandbox advertises every tracker capability on top of what the loaded
+// Connector's handshake does, so a fixture Connector that serves only the
+// forge axis passes the capability check a forgejo row's shared session makes
+// for both axes.
+type capPadSandbox struct{ connectorsandbox.Loader }
+
+func (s capPadSandbox) LoadNetwork(ctx context.Context, wasm []byte, n connectorhost.Network) (*connectorhost.Connector, error) {
+	c, err := s.Loader.LoadNetwork(ctx, wasm, n)
+	if err == nil {
+		for name, axis := range connectorprotocol.Capabilities {
+			if axis == connectorprotocol.AxisTracker && !slices.Contains(c.Capabilities, name) {
+				c.Capabilities = append(c.Capabilities, name)
+			}
+		}
+	}
+	return c, err
+}
+
+// forgejoFixtureRuntime is a Connector runtime over the forgejo fixture row,
+// loading through capPadSandbox, closed with the test.
+func forgejoFixtureRuntime(t *testing.T) *connectorruntime.Runtime {
+	t.Helper()
+	var rows []backendrows.Row
+	if row, ok := backendrows.Lookup("forgejo"); ok {
+		rows = append(rows, row)
+	}
+	rt := connectorruntime.New(rows, capPadSandbox{connectorsandboxtest.InProcess()})
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt
 }

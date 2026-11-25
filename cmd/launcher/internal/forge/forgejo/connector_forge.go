@@ -1,17 +1,14 @@
 package forgejo
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
-	"spindrift.dev/launcher/internal/connectorforge"
-	"spindrift.dev/launcher/internal/connectorrecord"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/git"
@@ -22,9 +19,6 @@ import (
 // other than rebase: the Connector always merges by rebase, so honouring the
 // knob is impossible and ignoring it would be silent.
 var ErrMergeMethod = errors.New("MERGE_METHOD must be rebase or unset: the forgejo Connector merges by rebase only")
-
-// loadRowConnector loads a backend row's Connector; a test seam.
-var loadRowConnector = backendrows.Load
 
 // connectorClient is the transport the Connector's requests go over; nil means
 // the default client. A test seam, as a real host reaches the real instance.
@@ -53,36 +47,21 @@ func connectorRow() (backendrows.Row, error) {
 // operation. Every failure is returned as is: the forge never falls back to a
 // native adapter. The Connector and core's git both read FORGEJO_TOKEN at each
 // use, so a token rotated mid-run reaches the next request and the next push.
-// The Connector and its audit file live for the process. A failed load or
-// compose, and each failed Connector call of the built forge, is recorded in
-// the connectorrecord .log.
+// The runtime reloads a dead Connector, so the forge may live as long as a
+// daemon, and it shares the Connector with the tracker of the same row. A
+// failed load or compose, and each failed Connector call of the built forge,
+// is recorded in the connectorrecord .log.
 func newConnectorCodeForge(row backendrows.Row, s backendkit.Shared, k Knobs) (forge.CodeForge, error) {
 	if MergeStyle(s.MergeMethod) != "rebase" {
 		return nil, fmt.Errorf("%w (got %q)", ErrMergeMethod, s.MergeMethod)
 	}
 	row.Routes = connectortracker.Routes(row.Routes, s.RepoSlug)
-	conn, err := loadRowConnector(context.Background(), row, backendrows.Options{Client: connectorClient})
-	if err != nil {
-		recordFailure("load the Connector", err)
-		return nil, err
-	}
-	cf, _, err := connectorforge.Compose(conn, connectorforge.Target{API: strings.TrimSuffix(k.ForgejoBaseURL, "/"), Repo: s.RepoSlug}, connectorforge.Git{
-		Credential: gitCredential,
-		WebBase:    row.GitRemote,
-		Note:       recordFailure,
+	return s.Connectors.CodeForge(row, connectorruntime.ForgeSpec{
+		SessionSpec: sessionSpec(s, k),
+		Credential:  gitCredential,
+		WebBase:     row.GitRemote,
 		Plumbing: func(cloneURL string, cred gitexec.Credential) forge.CodeForge {
 			return git.NewGitClient(cloneURL, s.BaseBranch, s.GitUserName, s.GitUserEmail, git.WithCredential(cred))
 		},
 	})
-	if err != nil {
-		recordFailure("compose the Code Forge", err)
-		_ = conn.Close(context.Background())
-		return nil, err
-	}
-	return cf, nil
-}
-
-// recordFailure records a Connector failure in the connectorrecord .log.
-func recordFailure(op string, err error) {
-	_ = connectorrecord.Note(backend.Forgejo.Name, op, err)
 }

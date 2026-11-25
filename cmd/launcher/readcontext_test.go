@@ -237,7 +237,7 @@ func TestNewReadContext_ForgejoLoadFailure_ReturnsError(t *testing.T) {
 	}
 	t.Chdir(t.TempDir())
 
-	rc, err := newReadContext(nil, dispatchkind.Work, false)
+	rc, err := newReadContext(connectorRuntime(t), dispatchkind.Work, false)
 
 	if err == nil || !strings.Contains(err.Error(), "read module") || !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("newReadContext err = %v, want the Connector's module read error", err)

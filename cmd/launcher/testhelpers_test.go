@@ -322,6 +322,9 @@ func parseResolved(t *testing.T, argv []string) ([]string, error) {
 // constructor error.
 func mustNewCodeForge(t *testing.T, c config, parent forge.SanitizedParent, it forge.IssueTracker) forge.CodeForge {
 	t.Helper()
+	if c.connectors == nil {
+		c.connectors = forgejoFixtureRuntime(t)
+	}
 	cf, err := newCodeForge(c, parent, it)
 	if err != nil {
 		t.Fatalf("newCodeForge(CODE_FORGE=%s): %v", c.CodeForge, err)

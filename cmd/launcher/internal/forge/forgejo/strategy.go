@@ -46,6 +46,9 @@ var Strategy = backendkit.Strategy{
 		if err != nil {
 			return nil, err
 		}
+		if s.Connectors == nil {
+			return nil, fmt.Errorf("forgejo: %w", connectorruntime.ErrNoRuntime)
+		}
 		row, err := connectorRow()
 		if err != nil {
 			return nil, err

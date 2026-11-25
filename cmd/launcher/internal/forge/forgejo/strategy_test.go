@@ -1,12 +1,15 @@
 package forgejo_test
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/connectorruntime"
+	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgejo"
 	"spindrift.dev/launcher/internal/gitexec"
 )
@@ -135,5 +138,13 @@ func TestStrategyLedgerSiteCarriesCredentialNotUserinfo(t *testing.T) {
 	}
 	if cred, err := site.Credential.Get(); err != nil || cred != gitexec.EnvCredential("oauth2", forgejo.ForgejoTokenEnv) {
 		t.Errorf("Credential is not the oauth2 credential read from FORGEJO_TOKEN")
+	}
+}
+
+func TestStrategyNewCodeForgeWithoutARuntimeIsErrNoRuntime(t *testing.T) {
+	l := mapLookup(map[string]string{"FORGEJO_BASE_URL": "https://forgejo.example"})
+	_, err := forgejo.Strategy.NewCodeForge(backendkit.Shared{}, l, forge.SanitizedParent{}, nil)
+	if !errors.Is(err, connectorruntime.ErrNoRuntime) {
+		t.Errorf("err = %v, want ErrNoRuntime", err)
 	}
 }
