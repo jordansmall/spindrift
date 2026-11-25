@@ -59,32 +59,28 @@ rec {
         && a.host == l.host
         && ((a.followRedirect or false) || !(l.followRedirect or false))
         && (
-          a.path == l.path
-          || (
-            builtins.substring 0 (builtins.stringLength a.path + 1) l.path == "${a.path}/"
-          )
+          a.path == l.path || (builtins.substring 0 (builtins.stringLength a.path + 1) l.path == "${a.path}/")
         );
       uncovered = builtins.filter (l: !(builtins.any (a: covers l a) accepted)) row.routes;
       routeLine =
         r:
         "\n  added Route ${r.method} ${r.host} ${r.path}"
         + (if r.followRedirect or false then " (followRedirect)" else "");
-      orNone = s: if s == "" then "none" else s;
       scheme = s: if s == "" then "bearer" else s;
-      remote =
-        g:
-        if (g.gitRemoteEnv or "") != "" then "env ${g.gitRemoteEnv}" else g.gitRemote or "";
+      remote = g: if (g.gitRemoteEnv or "") != "" then "env ${g.gitRemoteEnv}" else g.gitRemote or "";
+      # A Routes-only entry accepts no scheme; in a grant, an absent one is bearer.
+      acceptedScheme = if row ? acceptedGrant then scheme (grant.credentialScheme or "") else "";
       part =
         what: declared: was:
-        if declared != "" && declared != was then
-          [ "\n  changed ${what} ${declared} (accepted: ${orNone was})" ]
+        if declared == "" || declared == was then
+          [ ]
+        else if was == "" then
+          [ "\n  added ${what} ${declared}" ]
         else
-          [ ];
+          [ "\n  changed ${what} ${declared} (accepted: ${was})" ];
       changes =
         part "credential variable" (row.credentialEnv or "") (grant.credentialEnv or "")
-        ++ part "authorization scheme" (scheme (row.credentialScheme or "")) (
-          scheme (grant.credentialScheme or "")
-        )
+        ++ part "authorization scheme" (scheme (row.credentialScheme or "")) acceptedScheme
         ++ part "base" (row.baseEnv or "") (grant.baseEnv or "")
         ++ part "Git remote" (remote row) (remote grant);
       added = map routeLine uncovered ++ changes;

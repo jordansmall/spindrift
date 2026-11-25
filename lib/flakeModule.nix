@@ -81,10 +81,13 @@ let
         throw "spindrift-connector-routes.json: the top level must be an object keyed by Connector name"
     else
       { };
+  # No key means no entry: the row carries no baseline fields and mkHarness
+  # refuses to run it. An empty list would read as an accepted empty entry.
   baselineRowFields =
     name:
-    (import ./connector-baseline.nix).rowFields "spindrift-connector-routes.json" name (
-      acceptedRoutesBaseline.${name} or [ ]
+    lib.optionalAttrs (acceptedRoutesBaseline ? ${name}) (
+      (import ./connector-baseline.nix).rowFields "spindrift-connector-routes.json" name
+        acceptedRoutesBaseline.${name}
     );
   # Connectors whose row asks for shadow mode (ADR 0073, issues #6797, #6810).
   # A row with a `driver` is shadowed through mkHarness's `shadowDrivers`; a

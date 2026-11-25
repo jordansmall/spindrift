@@ -53,7 +53,7 @@ let
   consumerWith = modules: fixtures.connectorConsumerVia ([ ../../lib/flakeModule.nix ] ++ modules);
   viaData = consumerWith [ (core.lib.connectorModule core good) ];
   configOf = consumer: consumer.debug.config.spindrift;
-  programOf = c: c.apps.${system}.default.program;
+  programOf = c: c.apps.${system}.connectors-accept.program;
   throws = v: !(builtins.tryEval (builtins.deepSeq v v)).success;
   evaluates = c: (builtins.tryEval (builtins.deepSeq (programOf c) true)).success;
   row = (configOf viaData).connectors.datafixture;

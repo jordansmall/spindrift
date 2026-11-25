@@ -2375,6 +2375,7 @@ in
         "runInputDocumentFile"
         "backendBundleDirs"
         "backendFirstParty"
+        "baselineRefusals"
         "roster"
         "launcherCurrencyFileset"
         "readOnlyReachableFragmentRows"

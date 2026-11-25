@@ -844,7 +844,25 @@ let
       // lib.optionalAttrs (r ? baseEnv) { inherit (r) baseEnv; }
       // lib.optionalAttrs (r ? gitRemote) { inherit (r) gitRemote; }
       // lib.optionalAttrs (r ? gitRemoteEnv) { inherit (r) gitRemoteEnv; }
-    ) (lib.mapAttrs checkBackendRow backendRows);
+    ) checkedBackendRows;
+  checkedBackendRows = lib.mapAttrs checkBackendRow backendRows;
+  # A third-party Connector row beyond its accepted baseline must not run
+  # (issue #7564). Refusal gates the programs that run Connectors, never the
+  # input document: `spindrift connectors accept` reads its rows from it. A
+  # first-party row never refuses.
+  baselineRefusals = lib.concatMap (
+    name:
+    let
+      message = (import ./connector-baseline.nix).refusal {
+        inherit name;
+        row = checkedBackendRows.${name};
+      };
+    in
+    lib.optional (!backendFirstParty.${name} && message != null) message
+  ) (lib.attrNames checkedBackendRows);
+  refuseUnaccepted =
+    program:
+    if baselineRefusals == [ ] then program else throw (lib.concatStringsSep "\n" baselineRefusals);
   driverEntry =
     driverEntries.${driver}
       or (throw "mkHarness: unknown driver '${driver}'; known drivers: ${lib.concatStringsSep ", " (lib.attrNames driverEntries)}");
@@ -1769,34 +1787,42 @@ let
       "$out/share/zsh/site-functions/_spindrift"
   '';
 
-  # The spindrift CLI: passes the rendered Launcher input document via
-  # --input and execs the Go launcher (ADR 0020). The man page is joined into
-  # the same output so `man spindrift` resolves from the dev shell (nixpkgs
-  # adds share/man to MANPATH) and on install.
-  spindriftBin =
+  # One wrapper per launcher entry point: passes the rendered Launcher input
+  # document via --input and execs the Go launcher (ADR 0020). sqlite3 backs
+  # `launcher build`'s bwrap+nixInBox store-DB snapshot step (ADR 0042).
+  # Whether a command needs it is a runtime decision (the Consumer's nixInBox
+  # knob), which these derivations cannot gate, so each carries sqlite3
+  # unconditionally.
+  launcherProgram =
+    name: args:
     (hostPkgs.writeShellApplication {
-      name = "spindrift";
-      # sqlite3 backs `launcher build`'s bwrap+nixInBox store-DB snapshot
-      # step (ADR 0042). Whether a command needs it is a runtime decision (the
-      # Consumer's nixInBox knob), which this derivation cannot gate, so it
-      # carries sqlite3 unconditionally.
+      inherit name;
       runtimeInputs = with hostPkgs; [
         git
         coreutils
         sqlite
       ];
       text = runShellBody + ''
-        exec ${launcherBin}/bin/launcher --input ${runInputDocumentFile} "$@"
+        exec ${launcherBin}/bin/launcher --input ${runInputDocumentFile} ${args}"$@"
       '';
     }).overrideAttrs
       (_: {
         meta.license = lib.licenses.mit;
       });
 
+  # The spindrift CLI. The man page is joined into the same output so `man
+  # spindrift` resolves from the dev shell (nixpkgs adds share/man to MANPATH)
+  # and on install.
+  spindriftBin = launcherProgram "spindrift" "";
+
+  # The one program that runs for a Connector `refuseUnaccepted` refuses: the
+  # accept verb that writes its baseline entry. It is not gated.
+  connectorsAcceptBin = launcherProgram "spindrift-connectors-accept" "connectors accept ";
+
   spindrift = hostPkgs.symlinkJoin {
     name = "spindrift";
     paths = [
-      spindriftBin
+      (refuseUnaccepted spindriftBin)
       manpage
       bashCompletion
       fishCompletion
@@ -2076,6 +2102,7 @@ else
         runInputDocumentFile
         backendBundleDirs
         backendFirstParty
+        baselineRefusals
         ;
       driverExecBin = imageDriver.driverExecBin;
       orchestratorBin = imageDriver.orchestratorBin;
@@ -2141,6 +2168,13 @@ else
     # script.
     apps.daemon = {
       type = "app";
-      program = "${daemonWrapper}/bin/spindrift-daemon";
+      program = "${refuseUnaccepted daemonWrapper}/bin/spindrift-daemon";
+    };
+
+    # Not gated by the baseline refusal: it is how a Consumer accepts a
+    # Connector that refusal blocks.
+    apps.connectors-accept = {
+      type = "app";
+      program = "${connectorsAcceptBin}/bin/spindrift-connectors-accept";
     };
   }
