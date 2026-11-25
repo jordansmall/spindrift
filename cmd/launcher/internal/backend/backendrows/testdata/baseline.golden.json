@@ -1,0 +1,29 @@
+{
+  "forgejo": {
+    "credentialEnv": "FORGEJO_TOKEN",
+    "credentialScheme": "bearer",
+    "baseEnv": "FORGEJO_BASE_URL",
+    "gitRemoteEnv": "FORGEJO_BASE_URL",
+    "routes": [
+      {"method":"GET","host":"{base}","path":"/api/v1/orgs"},
+      {"method":"POST","host":"{base}","path":"/api/v1/repos/{repo}/labels"}
+    ]
+  },
+  "jira": {
+    "credentialEnv": "JIRA_API_TOKEN",
+    "credentialScheme": "basic",
+    "baseEnv": "JIRA_BASE_URL",
+    "routes": [
+      {"method":"GET","host":"{base}","path":"/rest/api/3/issue"}
+    ]
+  },
+  "zeta": {
+    "credentialEnv": "ZETA_TOKEN",
+    "credentialScheme": "bearer",
+    "gitRemote": "https://git.zeta.example",
+    "routes": [
+      {"method":"GET","host":"api.zeta.example","path":"/v1/repos"},
+      {"method":"POST","host":"api.zeta.example","path":"/v1/repos/{repo}/pulls","followRedirect":true}
+    ]
+  }
+}

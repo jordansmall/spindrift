@@ -505,3 +505,94 @@ func BaseError(name string) error {
 	defer mu.RUnlock()
 	return unusableBase[name]
 }
+
+// Baseline renders the Route baseline file (spindrift-connector-routes.json)
+// from raw, the launcher input document's backend rows: one object entry per
+// Connector, keyed by name in sorted order, recording its whole grant. raw
+// must be the document's own rows, not Lookup's: Use rewrites {base} hosts in
+// the stored rows, and an accepted baseline records the declaration (the {base}
+// placeholder and the knob names), never a resolved host. The scheme is always
+// written, normalized; base and Git remote only when declared, so an omitted
+// part is accepted as absent. Routes keep the row's order, one per line, so a
+// change reads as a reviewable diff.
+func Baseline(raw json.RawMessage) ([]byte, error) {
+	var rows []Row
+	if len(bytes.TrimSpace(raw)) != 0 {
+		if err := json.Unmarshal(raw, &rows); err != nil {
+			return nil, fmt.Errorf("backend rows: %w", err)
+		}
+	}
+	if len(rows) == 0 {
+		return nil, errors.New("no Connector backend rows in the configuration to accept")
+	}
+	slices.SortFunc(rows, func(a, b Row) int { return strings.Compare(a.Name, b.Name) })
+	var buf bytes.Buffer
+	buf.WriteString("{\n")
+	for i, row := range rows {
+		if err := writeBaselineEntry(&buf, row); err != nil {
+			return nil, err
+		}
+		if i < len(rows)-1 {
+			buf.WriteByte(',')
+		}
+		buf.WriteByte('\n')
+	}
+	buf.WriteString("}\n")
+	return buf.Bytes(), nil
+}
+
+func writeBaselineEntry(buf *bytes.Buffer, row Row) error {
+	name, err := marshalPlain(row.Name)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(buf, "  %s: {\n", name)
+	for _, kv := range []struct {
+		key, val string
+		always   bool
+	}{
+		{"credentialEnv", row.CredentialEnv, true},
+		{"credentialScheme", schemeOf(row.CredentialScheme), false},
+		{"baseEnv", row.BaseEnv, false},
+		{"gitRemote", row.GitRemote, false},
+		{"gitRemoteEnv", row.GitRemoteEnv, false},
+	} {
+		if kv.val == "" && !kv.always {
+			continue
+		}
+		val, err := marshalPlain(kv.val)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(buf, "    %q: %s,\n", kv.key, val)
+	}
+	buf.WriteString("    \"routes\": [")
+	for i, r := range row.Routes {
+		line, err := marshalPlain(r)
+		if err != nil {
+			return err
+		}
+		sep := "\n"
+		if i > 0 {
+			sep = ",\n"
+		}
+		fmt.Fprintf(buf, "%s      %s", sep, line)
+	}
+	if len(row.Routes) > 0 {
+		buf.WriteString("\n    ")
+	}
+	buf.WriteString("]\n  }")
+	return nil
+}
+
+// marshalPlain is json.Marshal without HTML escaping, so a path's & or <
+// stays readable in the written file.
+func marshalPlain(v any) (string, error) {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return "", err
+	}
+	return strings.TrimSuffix(b.String(), "\n"), nil
+}

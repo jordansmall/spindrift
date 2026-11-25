@@ -72,4 +72,9 @@
     usage = "discover <repo-dir> <routes-file> [--force]";
     doc = "discover registry routes from a Target repo checkout and write the routes file (ADR 0045)";
   }
+  {
+    name = "connectors";
+    usage = "accept [<baseline-file>]";
+    doc = "write every Connector's current grant (Routes, credential, scheme, base, Git remote) into the Route baseline file, default ./spindrift-connector-routes.json (ADR 0073)";
+  }
 ]
