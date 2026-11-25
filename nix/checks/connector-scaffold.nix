@@ -99,19 +99,7 @@ let
     namesProblems what want want got;
 
   load = dir: f: import (dir + "/${f}");
-  # Every template registers in `data.nix`; a reference not yet moved to data
-  # still has `module.nix`, and the compare treats the two as one skeleton file.
-  registrationFile =
-    dir: if builtins.pathExists (dir + "/data.nix") then "data.nix" else "module.nix";
-  asModuleFile = map (r: if r == "data.nix" then "module.nix" else r);
-  # `data` stands for the `fragments` and `driverRow` a module-form reference entry carries.
-  registrationAttrs = subtractLists [
-    "data"
-    "fragments"
-    "driverRow"
-  ];
-  # The `spindrift.connectors.<name>` row a Connector registers: from its
-  # `data`, or for a module-form reference from its module.nix.
+  # The `spindrift.connectors.<name>` row core builds from a Connector's data.
   registeredRow =
     dir: name: lib:
     (connectorData.rowsOf lib ((load dir "default.nix").lib.connector { inherit core; })).${name};
@@ -128,7 +116,7 @@ let
       "the template must have data.nix and no module.nix: a Connector template is data core turns into the row"
     ++ expect (
       entry ? data
-    ) "default.nix: lib.connector carries no `data` (the template is module-form)"
+    ) "default.nix: lib.connector carries no `data` for core to build the row from"
     ++ expect (
       consumed ? ${token}
     ) "a Consumer registering the template's data does not register spindrift.connectors.${token}";
@@ -162,13 +150,13 @@ let
       # The reference's and the template's `f` must take the same arguments.
       sameArgs = what: f: sameNames what (argNames (f refDir)) (argNames (f tmplDir));
 
-      tmplSet = sorted (asModuleFile (map toRef (tmplFiles (relFiles tmplDir))));
+      tmplSet = sorted (map toRef (tmplFiles (relFiles tmplDir)));
       # Guarded: a Driver reference carries no fragments.nix.
       omittedFiles = optionals (omitsFragments != [ ]) (
         omittedFragmentFiles omitsFragments (load refDir "fragments.nix").shipped
       );
       fileSet = fileSetProblems ref tmplSet (
-        sorted (asModuleFile (subtractLists omittedFiles (skeletonOf (relFiles refDir))))
+        sorted (subtractLists omittedFiles (skeletonOf (relFiles refDir)))
       );
 
       flakes = forBoth (d: load d "flake.nix");
@@ -191,9 +179,7 @@ let
         ++ sameNames "flake.nix checks" (attrNames outputs.ref.checks.${system}) (
           sorted (map toRef (attrNames outputs.tmpl.checks.${system}))
         )
-        ++ sameNames "default.nix connector attrs" (registrationAttrs (attrNames entries.ref)) (
-          registrationAttrs (attrNames entries.tmpl)
-        )
+        ++ sameNames "default.nix connector attrs" (attrNames entries.ref) (attrNames entries.tmpl)
         ++ expect (
           (connectorData.fragmentsOf entries.ref == null) == (connectorData.fragmentsOf entries.tmpl == null)
         ) "default.nix: exactly one of the template and ${ref} declares fragments"
@@ -204,7 +190,7 @@ let
           inherit consumed;
         }
         ++ sameArgs "package.nix args" (d: load d "package.nix")
-        ++ sameArgs "data.nix (or a reference's module.nix) args" (d: load d (registrationFile d))
+        ++ sameArgs "data.nix args" (d: load d "data.nix")
         ++ (
           let
             lines = d: filter (l: l != "") (pkgs.lib.splitString "\n" (builtins.readFile (d + "/go.mod")));
@@ -404,21 +390,6 @@ let
   };
 
   controls = {
-    dataFileIsModuleFile =
-      fileSetProblems "r"
-        (sorted (asModuleFile [
-          "data.nix"
-          "a.nix"
-        ]))
-        (
-          sorted (asModuleFile [
-            "a.nix"
-            "module.nix"
-          ])
-        ) == [ ];
-    registrationFilePrefersData = registrationFile ../fixtures/connector == "data.nix";
-    # nix/checks itself holds no data.nix, so no Connector's own move can flip this.
-    registrationFileDefaultsToModule = registrationFile ./. == "module.nix";
     moduleFormIsRefused =
       builtins.length (dataFormProblems {
         dir = ./.;
