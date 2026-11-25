@@ -56,6 +56,15 @@ type Row struct {
 	// the base URL's path prefix prepended to its Path; Use resolves them, so a
 	// stored Row carries concrete hosts.
 	BaseEnv string `json:"baseEnv,omitempty"`
+	// GitRemote is the forge's https web base that core derives the clone URL
+	// <GitRemote>/<owner>/<name>.git from. A row sets it literally, as an origin
+	// with no path, or names the knob in GitRemoteEnv; Use resolves the latter
+	// into it, so a stored Row carries the concrete base. A row with neither
+	// names no Git remote (a tracker); the forge code refuses it.
+	GitRemote string `json:"gitRemote,omitempty"`
+	// GitRemoteEnv names the knob env var holding the forge's web base URL,
+	// which may carry a path prefix (a Forgejo served under a subpath).
+	GitRemoteEnv string `json:"gitRemoteEnv,omitempty"`
 }
 
 // BaseHost is the Route host that stands for the host of the row's BaseEnv URL.
@@ -121,6 +130,12 @@ func Use(raw json.RawMessage, lookup func(string) string) error {
 	for _, row := range rows {
 		resolved, unusable, err := resolveBase(row, lookup)
 		if err == nil {
+			var remoteUnusable error
+			if resolved, remoteUnusable, err = resolveGitRemote(resolved, lookup); unusable == nil {
+				unusable = remoteUnusable
+			}
+		}
+		if err == nil {
 			err = validate(resolved, seen)
 		}
 		if err != nil {
@@ -177,31 +192,7 @@ func resolveBase(row Row, lookup func(string) string) (_ Row, unusable, _ error)
 	if row.BaseEnv == "" {
 		return row, nil, fmt.Errorf("backend %q: a route host is %s but the row has no baseEnv", row.Name, BaseHost)
 	}
-	raw := lookup(row.BaseEnv)
-	u, perr := url.Parse(raw)
-	if perr != nil {
-		u = &url.URL{} // url.Parse returns nil on error
-	}
-	prefix := strings.TrimSuffix(u.Path, "/")
-	var err error
-	switch {
-	case raw == "":
-		err = fmt.Errorf("backend %q: %s is not set", row.Name, row.BaseEnv)
-	case perr != nil:
-		err = fmt.Errorf("backend %q: %s is not a URL", row.Name, row.BaseEnv)
-	case u.Scheme != "https":
-		err = fmt.Errorf("backend %q: %s must be an https URL", row.Name, row.BaseEnv)
-	case u.User != nil:
-		err = fmt.Errorf("backend %q: %s must not carry userinfo", row.Name, row.BaseEnv)
-	case u.RawPath != "":
-		err = fmt.Errorf("backend %q: %s must not carry an escaped path", row.Name, row.BaseEnv)
-	case strings.ContainsAny(raw, "?#"):
-		err = fmt.Errorf("backend %q: %s must not carry a query or fragment", row.Name, row.BaseEnv)
-	case !bareHost(u):
-		err = fmt.Errorf("backend %q: %s must name a host", row.Name, row.BaseEnv)
-	case !canonicalPrefix(prefix):
-		err = fmt.Errorf("backend %q: %s must have a canonical path", row.Name, row.BaseEnv)
-	}
+	u, prefix, err := parseWebBase(row.Name, row.BaseEnv, lookup(row.BaseEnv))
 	if err != nil {
 		u, prefix, unusable = &url.URL{Scheme: "https", Host: unsetHost}, "", err
 	}
@@ -224,6 +215,61 @@ func resolveBase(row Row, lookup func(string) string) (_ Row, unusable, _ error)
 	row.Routes = apply(row.Routes)
 	row.AcceptedRoutes = apply(row.AcceptedRoutes)
 	return row, unusable, nil
+}
+
+// parseWebBase judges raw, the value of the knob env, as a web base URL: bare
+// https, no userinfo, escaped path, query or fragment, with a canonical path
+// prefix (returned without its trailing "/").
+func parseWebBase(name, env, raw string) (*url.URL, string, error) {
+	u, perr := url.Parse(raw)
+	if perr != nil {
+		u = &url.URL{} // url.Parse returns nil on error
+	}
+	prefix := strings.TrimSuffix(u.Path, "/")
+	var err error
+	switch {
+	case raw == "":
+		err = fmt.Errorf("backend %q: %s is not set", name, env)
+	case perr != nil:
+		err = fmt.Errorf("backend %q: %s is not a URL", name, env)
+	case u.Scheme != "https":
+		err = fmt.Errorf("backend %q: %s must be an https URL", name, env)
+	case u.User != nil:
+		err = fmt.Errorf("backend %q: %s must not carry userinfo", name, env)
+	case u.RawPath != "":
+		err = fmt.Errorf("backend %q: %s must not carry an escaped path", name, env)
+	case strings.ContainsAny(raw, "?#"):
+		err = fmt.Errorf("backend %q: %s must not carry a query or fragment", name, env)
+	case !bareHost(u):
+		err = fmt.Errorf("backend %q: %s must name a host", name, env)
+	case !canonicalPrefix(prefix):
+		err = fmt.Errorf("backend %q: %s must have a canonical path", name, env)
+	}
+	return u, prefix, err
+}
+
+// resolveGitRemote returns row with GitRemote set from lookup(GitRemoteEnv),
+// its trailing "/" trimmed. An unset or malformed knob value makes the row
+// unusable, dropped like an unusable base. A literal GitRemote that is not a
+// bare https origin, or a row carrying both fields, is an error.
+func resolveGitRemote(row Row, lookup func(string) string) (_ Row, unusable, _ error) {
+	switch {
+	case row.GitRemote != "" && row.GitRemoteEnv != "":
+		return row, nil, fmt.Errorf("backend %q: gitRemote and gitRemoteEnv are mutually exclusive", row.Name)
+	case row.GitRemote != "":
+		u, _, err := parseWebBase(row.Name, "gitRemote", row.GitRemote)
+		if err == nil && u.Path != "" {
+			err = fmt.Errorf("backend %q: gitRemote must be an origin with no path", row.Name)
+		}
+		return row, nil, err
+	case row.GitRemoteEnv != "":
+		raw := lookup(row.GitRemoteEnv)
+		if _, _, err := parseWebBase(row.Name, row.GitRemoteEnv, raw); err != nil {
+			return row, err, nil
+		}
+		row.GitRemote = strings.TrimSuffix(raw, "/")
+	}
+	return row, nil, nil
 }
 
 // bareHost reports whether u names a host[:port] that Route.validate would
