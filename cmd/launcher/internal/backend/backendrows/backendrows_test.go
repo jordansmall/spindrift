@@ -704,3 +704,112 @@ func TestLoadFailsWhenTheAuditFileWillNotOpen(t *testing.T) {
 		t.Errorf("sandbox saw loads %v, want none", l.networks)
 	}
 }
+
+func remoteRow(name, remote, remoteEnv string) backendrows.Row {
+	r := row(name, getRepos)
+	r.GitRemote, r.GitRemoteEnv = remote, remoteEnv
+	return r
+}
+
+func TestUseDecodesTheGitRemoteFields(t *testing.T) {
+	isolate(t)
+	raw := json.RawMessage(`[` +
+		`{"name":"lit","module":"/x/l.wasm","routes":[{"method":"GET","host":"h","path":"/a"}],"credentialEnv":"T","gitRemote":"https://github.com"},` +
+		`{"name":"knob","module":"/x/k.wasm","routes":[{"method":"GET","host":"h","path":"/a"}],"credentialEnv":"T","gitRemoteEnv":"FORGE_URL"},` +
+		`{"name":"tracker","module":"/x/t.wasm","routes":[{"method":"GET","host":"h","path":"/a"}],"credentialEnv":"T"}]`)
+	env := func(k string) string {
+		if k == "FORGE_URL" {
+			return "https://git.example.net/forgejo/"
+		}
+		return ""
+	}
+	if err := backendrows.Use(raw, env); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{"lit": "https://github.com", "knob": "https://git.example.net/forgejo", "tracker": ""} {
+		got, ok := backendrows.Lookup(name)
+		if !ok || got.GitRemote != want {
+			t.Errorf("Lookup(%s) = %q, %v; want GitRemote %q", name, got.GitRemote, ok, want)
+		}
+	}
+}
+
+func TestUseRefusesAMalformedGitRemoteNamingTheBackend(t *testing.T) {
+	for name, r := range map[string]backendrows.Row{
+		"path":     remoteRow("forge", "https://github.com/org", ""),
+		"slash":    remoteRow("forge", "https://github.com/", ""),
+		"http":     remoteRow("forge", "http://github.com", ""),
+		"userinfo": remoteRow("forge", "https://u:p@github.com", ""),
+		"query":    remoteRow("forge", "https://github.com?x=1", ""),
+		"both":     remoteRow("forge", "https://github.com", "FORGE_URL"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			isolate(t)
+			err := backendrows.Use(rows(t, []backendrows.Row{row("good", getRepos), r}), noEnv)
+			if err == nil || !strings.Contains(err.Error(), `backend "forge"`) {
+				t.Fatalf("Use() = %v, want an error naming the backend", err)
+			}
+			if _, ok := backendrows.Lookup("good"); ok {
+				t.Error("good row stored although the document was refused")
+			}
+		})
+	}
+}
+
+func TestUseResolvesGitRemoteEnv(t *testing.T) {
+	for name, tc := range map[string]struct{ base, want string }{
+		"bare host":      {"https://git.example.net", "https://git.example.net"},
+		"trailing slash": {"https://git.example.net/", "https://git.example.net"},
+		"subpath":        {"https://git.example.net/forgejo", "https://git.example.net/forgejo"},
+		"subpath slash":  {"https://git.example.net:8443/a/b/", "https://git.example.net:8443/a/b"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			isolate(t)
+			env := func(k string) string {
+				if k == "FORGE_URL" {
+					return tc.base
+				}
+				return ""
+			}
+			if err := backendrows.Use(rows(t, []backendrows.Row{remoteRow("forge", "", "FORGE_URL")}), env); err != nil {
+				t.Fatal(err)
+			}
+			if got, _ := backendrows.Lookup("forge"); got.GitRemote != tc.want {
+				t.Errorf("GitRemote = %q, want %q", got.GitRemote, tc.want)
+			}
+		})
+	}
+}
+
+func TestUseSkipsARowWithAnUnusableGitRemoteEnv(t *testing.T) {
+	for name, base := range map[string]string{
+		"unset":      "",
+		"no scheme":  "git.example.net",
+		"plaintext":  "http://git.lan:3000",
+		"userinfo":   "https://u:p@git.example.net",
+		"query":      "https://git.example.net/?x=1",
+		"dot suffix": "https://git.example.net/./forgejo",
+	} {
+		t.Run(name, func(t *testing.T) {
+			isolate(t)
+			env := func(k string) string {
+				if k == "FORGE_URL" {
+					return base
+				}
+				return ""
+			}
+			if err := backendrows.Use(rows(t, []backendrows.Row{row("good", getRepos), remoteRow("forge", "", "FORGE_URL")}), env); err != nil {
+				t.Fatalf("Use() = %v, want the row left unapplied", err)
+			}
+			if _, ok := backendrows.Lookup("forge"); ok {
+				t.Error("row with an unusable git remote applied")
+			}
+			if _, ok := backendrows.Lookup("good"); !ok {
+				t.Error("good row not applied")
+			}
+			if backendrows.BaseError("forge") == nil {
+				t.Error("BaseError(forge) = nil, want why the row was dropped")
+			}
+		})
+	}
+}
