@@ -12,6 +12,13 @@
   # subflake's `checks`.
   lib.connectorChecks = import ../lib/connector-checks.nix;
 
+  # A Connector declared as data (lib/connector-data.nix) becomes its
+  # flake-parts module here, over the `core` it was handed (the batteries root
+  # when a Consumer's Connector input follows it), so the Connector ships no
+  # module and never names core's path itself.
+  lib.connectorModule =
+    core: data: (import ../lib/connector-data.nix).module core.flakeModules.default data;
+
   # The core Driver rows (ADR 0073): a Connector contributes its Driver's row
   # through `core`, never a relative path out of its own directory.
   lib.driverEntries = { lib }: (import ../lib/drivers { inherit lib; }).entries;
