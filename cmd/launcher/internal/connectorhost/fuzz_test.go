@@ -46,7 +46,7 @@ func FuzzHandshake(f *testing.F) {
 				if h.ProtocolVersion == "" || h.Capabilities == nil {
 					t.Fatalf("accepted handshake %q lacks a required field", raw)
 				}
-				if perr := CheckProtocol(h.ProtocolVersion); perr != nil && !errors.Is(perr, ErrProtocolUnsupported) {
+				if perr := CheckProtocol(h.ProtocolVersion, h.Capabilities); perr != nil && !errors.Is(perr, ErrProtocolUnsupported) {
 					t.Fatalf("CheckProtocol(%q) failed without ErrProtocolUnsupported: %v", h.ProtocolVersion, perr)
 				}
 			}

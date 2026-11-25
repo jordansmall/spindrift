@@ -63,12 +63,61 @@ func TestLoadCurrentYieldsHandshake(t *testing.T) {
 }
 
 func TestLoadAcceptsPreviousMinor(t *testing.T) {
-	c, err := load(t, "previous.wasm")
-	if err != nil {
-		t.Fatal(err)
+	// previous.wasm declares only fixture capabilities, which sit on no axis;
+	// previous-tracker.wasm is a real tracker Connector, whose axis did not break.
+	for _, name := range []string{"previous.wasm", "previous-tracker.wasm"} {
+		t.Run(name, func(t *testing.T) {
+			c, err := load(t, name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.ProtocolVersion != "0.3.1" {
+				t.Errorf("ProtocolVersion = %q, want 0.3.1", c.ProtocolVersion)
+			}
+		})
 	}
-	if c.ProtocolVersion != "0.2.1" {
-		t.Errorf("ProtocolVersion = %q, want 0.2.1", c.ProtocolVersion)
+}
+
+// A previous-minor forge or Driver Connector speaks a method set core no longer
+// accepts (forge.remote gone, forge.probe required, driver.sessionFlags
+// reshaped), so the handshake refuses it, naming both versions.
+func TestLoadRefusesPreviousMinorOnBrokenAxes(t *testing.T) {
+	for engine, ld := range loadersFor(t) {
+		for _, name := range []string{"previous-forge.wasm", "previous-driver.wasm"} {
+			t.Run(engine+"/"+name, func(t *testing.T) {
+				_, err := loadUsing(t, ld, name)
+				if !errors.Is(err, connectorhost.ErrProtocolUnsupported) {
+					t.Fatalf("err = %v, want ErrProtocolUnsupported", err)
+				}
+				var pe *connectorhost.ProtocolError
+				if !errors.As(err, &pe) {
+					t.Fatalf("err = %v, want a *ProtocolError", err)
+				}
+				if pe.Version != "0.3.1" {
+					t.Errorf("ProtocolError.Version = %q, want 0.3.1", pe.Version)
+				}
+				for _, want := range []string{"0.3.1", "core needs 0.4.x;", "rebuild"} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error %q does not name %q", err, want)
+					}
+				}
+			})
+		}
+	}
+}
+
+// A refused network Connector is named in the error, so a human knows which
+// of several configured Connectors to rebuild.
+func TestLoadNetworkRefusalNamesConnector(t *testing.T) {
+	n := connectorhost.Network{Name: "acme", Audit: connectorhost.NewAuditLog(&bytes.Buffer{})}
+	_, err := connectorhost.LoadNetwork(context.Background(), fixture(t, "previous-forge.wasm"), n)
+	if !errors.Is(err, connectorhost.ErrProtocolUnsupported) {
+		t.Fatalf("err = %v, want ErrProtocolUnsupported", err)
+	}
+	for _, want := range []string{`connector "acme"`, "0.3.1", "0.4.x"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not name %q", err, want)
+		}
 	}
 }
 
@@ -83,10 +132,10 @@ func TestLoadRefusesFutureProtocol(t *testing.T) {
 			if !errors.As(err, &pe) {
 				t.Fatalf("err = %v, want a *ProtocolError", err)
 			}
-			if pe.Connector != "0.4.0" {
-				t.Errorf("ProtocolError.Connector = %q, want 0.4.0", pe.Connector)
+			if pe.Version != "0.5.0" {
+				t.Errorf("ProtocolError.Version = %q, want 0.5.0", pe.Version)
 			}
-			for _, want := range []string{"0.4.0", "0.2.x", "0.3.x", connectorhost.ProtocolVersion} {
+			for _, want := range []string{"0.5.0", "0.3.x", "0.4.x", connectorhost.ProtocolVersion} {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("error %q does not name %q", err, want)
 				}
@@ -146,14 +195,37 @@ func TestLoadRejectsGarbage(t *testing.T) {
 }
 
 func TestCheckProtocolWindow(t *testing.T) {
-	for _, v := range []string{"0.2.0", "0.2.1", "0.2.9", "0.3.0", "0.3.7"} {
-		if err := connectorhost.CheckProtocol(v); err != nil {
+	for _, v := range []string{"0.3.0", "0.3.1", "0.3.9", "0.4.0", "0.4.7"} {
+		if err := connectorhost.CheckProtocol(v, nil); err != nil {
 			t.Errorf("CheckProtocol(%q) = %v, want nil", v, err)
 		}
 	}
-	for _, v := range []string{"0.0.0", "0.1.0", "0.1.9", "0.4.0", "1.0.0", "1.1.0", "0.1", "v0.1.0", "0.1.0-rc1", "0.1.x", "", "0.01.0", "0.1.00", "00.1.0", "0.+1.0", "0..0", "0.1.0.0"} {
-		if err := connectorhost.CheckProtocol(v); !errors.Is(err, connectorhost.ErrProtocolUnsupported) {
+	for _, v := range []string{"0.0.0", "0.1.0", "0.2.9", "0.5.0", "1.0.0", "1.1.0", "0.1", "v0.1.0", "0.1.0-rc1", "0.1.x", "", "0.01.0", "0.1.00", "00.1.0", "0.+1.0", "0..0", "0.1.0.0"} {
+		if err := connectorhost.CheckProtocol(v, nil); !errors.Is(err, connectorhost.ErrProtocolUnsupported) {
 			t.Errorf("CheckProtocol(%q) = %v, want ErrProtocolUnsupported", v, err)
+		}
+	}
+}
+
+// The previous minor is accepted except on the forge and Driver axes, which
+// the current minor broke; the current minor is accepted on every axis.
+func TestCheckProtocolPreviousMinorAxes(t *testing.T) {
+	for _, tc := range []struct {
+		version string
+		caps    []string
+		refused bool
+	}{
+		{"0.3.0", []string{"tracker", "tracker.comments"}, false},
+		{"0.3.0", []string{"fixture.alpha"}, false},
+		{"0.3.0", []string{"tracker", "forge"}, true},
+		{"0.3.0", []string{"forge.branches"}, true},
+		{"0.3.0", []string{"tracker", "driver"}, true},
+		{"0.3.0", []string{"driver.streamFilter"}, true},
+		{"0.4.0", []string{"tracker", "forge", "driver"}, false},
+	} {
+		err := connectorhost.CheckProtocol(tc.version, tc.caps)
+		if got := errors.Is(err, connectorhost.ErrProtocolUnsupported); got != tc.refused {
+			t.Errorf("CheckProtocol(%q, %v) = %v, refused want %v", tc.version, tc.caps, err, tc.refused)
 		}
 	}
 }
@@ -344,7 +416,7 @@ func grow(pages int32) []byte {
 	return append(code, 0x46, 0x04, 0x40, unreachable, 0x0b) // i32.eq; if; unreachable; end
 }
 
-const goodHandshake = `{"protocolVersion":"0.3.0","capabilities":["a"]}`
+const goodHandshake = `{"protocolVersion":"0.4.0","capabilities":["a"]}`
 
 func TestHostileConnectorFailsWithItsOwnNamedError(t *testing.T) {
 	tests := []struct {
@@ -361,11 +433,11 @@ func TestHostileConnectorFailsWithItsOwnNamedError(t *testing.T) {
 		{"length past memory", wasmModule(nil, []byte{i64}, handshakeAt(0, 2*page), true), connectorhost.ErrMalformedOutput},
 		{"pointer past memory", wasmModule(nil, []byte{i64}, handshakeAt(page, 1), true), connectorhost.ErrMalformedOutput},
 		{"malformed JSON", wasmModule(nil, []byte{i64}, handshakeAt(0, 1), true), connectorhost.ErrMalformedOutput},
-		{"invalid UTF-8 in a string", handshakeModule("{\"protocolVersion\":\"0.3.0\",\"capabilities\":[\"\xff\"]}"), connectorhost.ErrMalformedOutput},
+		{"invalid UTF-8 in a string", handshakeModule("{\"protocolVersion\":\"0.4.0\",\"capabilities\":[\"\xff\"]}"), connectorhost.ErrMalformedOutput},
 		{"handshake null", handshakeModule("null"), connectorhost.ErrMalformedOutput},
 		{"handshake empty object", handshakeModule("{}"), connectorhost.ErrMalformedOutput},
-		{"handshake without capabilities", handshakeModule(`{"protocolVersion":"0.3.0"}`), connectorhost.ErrMalformedOutput},
-		{"handshake with null capabilities", handshakeModule(`{"protocolVersion":"0.3.0","capabilities":null}`), connectorhost.ErrMalformedOutput},
+		{"handshake without capabilities", handshakeModule(`{"protocolVersion":"0.4.0"}`), connectorhost.ErrMalformedOutput},
+		{"handshake with null capabilities", handshakeModule(`{"protocolVersion":"0.4.0","capabilities":null}`), connectorhost.ErrMalformedOutput},
 		{"JSON of the wrong shape", handshakeModule("[]"), connectorhost.ErrMalformedOutput},
 	}
 	for engine, ld := range loadersFor(t) {

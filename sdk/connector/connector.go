@@ -1,5 +1,5 @@
 // Package connector is the Connector author's side of the Connector protocol
-// (version 0.3.0, ADR 0073): it hides the wasm export plumbing and the JSON
+// (version 0.4.0, ADR 0073): it hides the wasm export plumbing and the JSON
 // encoding so an author only declares capabilities.
 //
 // A Connector is built as a wasip1 reactor

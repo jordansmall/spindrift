@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
@@ -603,5 +604,20 @@ func TestBoxFirstPartyLoadBypassesTheSandbox(t *testing.T) {
 	_, err := driver.New("first")
 	if err == nil || errors.Is(err, connectorsandbox.ErrNoConnectorSandbox) || !strings.Contains(err.Error(), "load module") {
 		t.Fatalf("New(first) = %v, want the in-process engine's rejection of the module", err)
+	}
+}
+
+// A previous-minor Driver is refused at the handshake, and the error names the
+// Driver row so an operator knows which one to rebuild.
+func TestFirstPartyPreviousMinorDriverIsRefusedByName(t *testing.T) {
+	drivertest.Isolate(t)
+	t.Cleanup(connectorsandbox.Use(nil))
+	module := fixtureWasm(t, "previous-driver.wasm")
+	if err := useFile(t, rows(t, []map[string]any{{"name": "stale", "module": module, "firstParty": true}})); err != nil {
+		t.Fatal(err)
+	}
+	_, err := driver.New("stale")
+	if !errors.Is(err, connectorhost.ErrProtocolUnsupported) || !strings.Contains(err.Error(), `driver "stale"`) {
+		t.Fatalf("New(stale) = %v, want ErrProtocolUnsupported naming the driver", err)
 	}
 }

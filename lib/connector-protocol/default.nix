@@ -3,10 +3,10 @@
 # protocol_gen.go (constants and the method table) and protocol.schema.json, and,
 # through the binding in sdk.nix, into the SDK's sdk/<pkg>/protocol_gen.go.
 #
-# It describes protocol 0.3.0 as it is today; it adds nothing to the wire. Core's
-# own hand-written constants stay as they are, and agreement tests (the
-# protocol_test.go and wirefields_test.go files under cmd/launcher/internal) fail
-# when one drifts from this file: if a value differs, this description is wrong.
+# It describes protocol 0.4.0. Core's own hand-written constants stay as they
+# are, and agreement tests (the protocol_test.go and wirefields_test.go files
+# under cmd/launcher/internal) fail when one drifts from this file: if a value
+# differs, this description is wrong.
 #
 # docs/reference.md's "Connector protocol" section is the prose contract. A method
 # row's fields are listed in render.nix, which throws on a missing, unknown or
@@ -16,7 +16,7 @@ let
   entry = name: doc: { inherit name doc; };
   # The description refers to its own events (self), so it is a lazy fixpoint.
   self = {
-    version = "0.3.0";
+    version = "0.4.0";
 
     # Capability names a Connector advertises in its handshake, per axis. A
     # capability name is its axis, or the axis and a dot-separated suffix.
@@ -44,7 +44,7 @@ let
       ];
       forge = [
         (entry "forge" "Serves forge.prsForBranch, forge.pr and forge.checks, and optionally forge.jobLog.")
-        (entry "forge.branches" "Serves forge.branchExists and forge.deleteBranch.")
+        (entry "forge.branches" "Serves forge.branchExists and forge.deleteBranch; requires forge.probe.")
         (entry "forge.pushOnly" "The forge has no pull-request concept, so core composes a push-only Code Forge.")
         (entry "forge.prs" "Serves the PR primitives: forge.behind, forge.prFiles, forge.setDraft, forge.comment and forge.merge.")
         (entry "forge.autoMerge" "Serves forge.autoMergeAllowed and forge.enqueueAutoMerge.")

@@ -20,7 +20,7 @@ pkgs.runCommand "connector-github-wasm" { nativeBuildInputs = [ pkgs.go ]; } ''
   chmod -R +w work
   cd work/connectors/github
   mkdir $out
-  # Speaks the 0.3 forge branch/PR primitives on top of the tracker reads, so
-  # it declares 0.3.x (issue #6882).
-  go build -buildmode=c-shared -ldflags=-X=spindrift.dev/sdk/connector.protocolVersion=0.3.0 -o $out/github.wasm .
+  # Speaks the 0.4 forge branch/PR primitives (forge.probe required) on top of
+  # the tracker reads, so it declares 0.4.x (issue #7510).
+  go build -buildmode=c-shared -ldflags=-X=spindrift.dev/sdk/connector.protocolVersion=0.4.0 -o $out/github.wasm .
 ''
