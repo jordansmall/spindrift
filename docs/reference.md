@@ -191,12 +191,12 @@ see [Signal socket](#signal-socket-box_signal_carriersocket).
 
 **Connector routes**
 
-For each network Connector row in the input document, a
-`connector-routes[<name>]` row listing the credential knob it attaches, that
-knob's env var and the Route table, and a `connector-routes-widened[<name>]`
-row diffing the table against the accepted baseline. Both are always Advisory
+For the network Connector row the configured `CODE_FORGE` or `ISSUE_TRACKER`
+reads through, a `connector-routes[<name>]` row listing the credential knob it
+attaches, that knob's env var and the Route table, and a `connector-routes-widened[<name>]`
+row diffing the grant against the accepted baseline. Both are always Advisory
 and never affect the exit code; see
-[Reviewing a widened Route table](#reviewing-a-widened-route-table).
+[Reviewing a widened grant](#reviewing-a-widened-grant).
 
 **Output conventions**
 
@@ -2636,9 +2636,9 @@ One exception to the own-knobs rule: a first-party row names its own backend's
 #7560); that knob is checked as an own one is.
 
 `mkHarness` renders each row into the Launcher input document's `backends`
-section as `{name, module, routes, acceptedRoutes, credentialEnv,
+section as `{name, module, routes, acceptedRoutes, acceptedGrant, credentialEnv,
 credentialKnob, credentialScheme, identityEnv, baseEnv, gitRemote,
-gitRemoteEnv}` (the last five optional); `credentialKnob` is the Consumer knob
+gitRemoteEnv}` (`acceptedGrant` and the last five optional); `credentialKnob` is the Consumer knob
 that names `credentialEnv`, and doctor shows it. The launcher and the daemon
 validate and store the rows (the `backendrows` package: `Use` validates the
 rows whole and exits `config-invalid` on a bad one). `Lookup` finds a row and
@@ -2667,50 +2667,91 @@ on any row, another backend's token or a non-token core knob on a github row
 fails. The refusal text of a core knob is pinned on the pure
 `backendKnobError`.
 
-##### Reviewing a widened Route table
+##### Reviewing a widened grant
 
-A Route table is a permissions manifest (ADR 0073), so `spindrift doctor`
-diffs each network Connector's table against an accepted baseline and prints
-two Advisory rows per Connector. `connector-routes[fixture]` lists the table:
+A Connector's Route table and credential wiring are a permissions manifest (ADR
+0073), so `spindrift doctor` diffs each network Connector's grant against an
+accepted baseline and prints two Advisory rows per Connector. The rows appear
+only for a Connector the run reads through: the one the configured `CODE_FORGE`
+reads its forge through, or the configured `ISSUE_TRACKER` reads its tracker
+through (issue #7383). `connector-routes[fixture]` lists the table:
 
 ```
 connector-routes[fixture] (credential knob fixtureToken (env FIXTURE_TOKEN); routes: GET api.fixture.test /repos)
 ```
 
-`connector-routes-widened[fixture]` prints `(within the accepted table)`, or
-fails with `routes beyond the accepted table:` and one `+ METHOD host path`
-line per added route. It is a report only: it never makes `validateConfig` exit
-2.
+`connector-routes-widened[fixture]` prints `(within the accepted baseline)`, or
+fails with `grant beyond the accepted baseline:` followed by a `routes:` heading
+with one `+ METHOD host path` line per added route (only when routes were
+added), then one `<part>: <declared> (accepted: <accepted>)` line per differing
+part the row declares that the baseline lacks or holds differently: the
+credential variable, the authorization scheme, the base and the Git remote. A
+part the row declares absent is skipped, so a narrowing is silent, as it is for
+routes. Its remedy reads `review the widened grant, then run "spindrift
+connectors accept" in the Consumer flake's root and commit the
+spindrift-connector-routes.json diff (ADR 0073)`. It is a report only: it never
+makes `validateConfig` exit 2.
 
 The baseline is `spindrift-connector-routes.json` at the Consumer flake's root.
 It is read from the flake's own source, never from an option, so a Connector's
-module cannot accept its own routes, and it must be git-tracked, since flakes
-only see tracked files. It is an object keyed by Connector name, each value a
-list of routes:
+module cannot accept its own grant, and it must be git-tracked, since flakes
+only see tracked files. It is an object keyed by Connector name. Each value is
+an object recording the whole grant:
 
 ```json
 {
-  "fixture": [
-    { "method": "GET", "host": "api.fixture.test", "path": "/repos" }
-  ]
+  "fixture": {
+    "credentialEnv": "FIXTURE_TOKEN",
+    "credentialScheme": "bearer",
+    "baseEnv": "FIXTURE_BASE_URL",
+    "gitRemote": "https://fixture.test",
+    "routes": [
+      { "method": "GET", "host": "api.fixture.test", "path": "/repos" }
+    ]
+  }
 }
 ```
 
+| Key | Accepts |
+|---|---|
+| `credentialEnv` | the environment variable the host reads the credential from |
+| `credentialScheme` | the authorization scheme, `bearer` or `basic`; always written |
+| `baseEnv` | the variable the `{base}` route host resolves from; omit for a fixed-host row |
+| `gitRemote` | the fixed Git remote URL; omit when the row has none |
+| `gitRemoteEnv` | the variable the Git remote URL is read from; omit when the row has none |
+| `routes` | the Route table, one `{method, host, path}` per route, `followRedirect` where set |
+
+Every key is a string except `routes`. A part the entry omits is accepted as
+absent, so a row that declares it shows the part as widened. The older shape,
+a bare list of routes, still loads and is read as Routes only: doctor compares
+the routes and none of the other parts until the entry is regenerated. An
+unknown key, a non-string value, a `credentialScheme` other than `bearer` or
+`basic`, or both `gitRemote` and `gitRemoteEnv` fails evaluation.
+
 A missing file or key accepts nothing, so every route shows as added. That is
 how a Connector newly arriving, or an existing one whose table grew in a
-`flake.lock` bump, reaches the operator. A live route is covered when an
+`flake.lock` bump, reaches the operator. A Connector with no entry has no
+accepted grant to diff, so doctor lists its added routes but names no other
+part until the first `connectors accept`. A live route is covered when an
 accepted one has the same method and host (compared literally) and its path is
 equal or an ancestor of the live path, and it sets `followRedirect` whenever
 the live one does. A new host, method or path, a new `followRedirect`,
 or a broader path (accepted `/repos/x`, live `/repos`), is a widening. A
 narrower or unchanged table shows nothing, and stale baseline entries are
-harmless. A non-empty entry must pass the Route-table rules above, so `/`
+harmless. A non-empty `routes` must pass the Route-table rules above, so `/`
 or a non-canonical path fails evaluation; an empty list is fine.
 
-To accept a widening, review the `+` lines, add them under the Connector's name
-in the file and commit. Doctor then reports `within the accepted table`. A
-direct `mkHarness` caller passes `acceptedRoutes` on its `backendRows` entry; a
-row without it accepts nothing.
+To accept a widening, review the doctor lines, then run `spindrift connectors
+accept [<baseline-file>]` in the Consumer flake's root and commit the diff. The
+verb writes every backend row of the Launcher input document into the file
+(default `./spindrift-connector-routes.json`) from the Route table and credential
+wiring the rows declare now, with the scheme always written. It replaces the
+whole file, so a hand-added entry or a stale one is dropped, and it prints
+`wrote <file>; review its diff, then commit it`. Doctor then reports `within
+the accepted baseline`. The file is on the default merge guard paths ([Merge
+guard](#merge-guard)), so an Agent cannot land an acceptance: a human merges
+it. A direct `mkHarness` caller passes `acceptedRoutes` and `acceptedGrant` on
+its `backendRows` entry; a row without them accepts nothing.
 
 #### The github Connector
 
@@ -2844,7 +2885,8 @@ create), and
 `POST /rest/api/3/search/approximate-count`. The writes and the label read widen
 the table beyond a Consumer's accepted baseline, so doctor's
 `connector-routes-widened[jira]` row lists them as `+` lines until the
-Consumer adds them to `spindrift-connector-routes.json`. Its row authorizes
+Consumer runs `spindrift connectors accept` and commits
+`spindrift-connector-routes.json`. Its row authorizes
 with Basic credentials from core's host-only `JIRA_TOKEN` and `JIRA_EMAIL`,
 with `JIRA_BASE_URL` as the base. The row takes no `shadow` or `primary`:
 the Connector answers every jira call ([Running jira through its
@@ -2903,8 +2945,9 @@ with `FORGEJO_BASE_URL` as the base.
 and host-mediation contracts, and the tracker half to the tracker,
 host-posted-comment and issue-filer contracts, in
 `cmd/launcher/internal/forge/forgejo`. The row
-is registered, and the table is baselined in
-`spindrift-connector-routes.json` so doctor's `connector-routes-widened[forgejo]`
+is registered, and the grant is baselined in
+`spindrift-connector-routes.json` (by `spindrift connectors accept`) so
+doctor's `connector-routes-widened[forgejo]`
 row reports it as accepted.
 
 `FORGEJO_BASE_URL` must be an https URL: the row's routes are https only, and a
@@ -2992,7 +3035,8 @@ github reads with `ErrNoRoute`, has no such variable, and doctor prints no
 Connectors listed in `nix/dogfood-shadow.nix` (opencode, issue #6874, and pi,
 issue #6876) and runs those in `nix/dogfood-primary.nix` (none today) as
 primary, a pinned exception to mimicking a new Consumer; its accepted github
-Route table is baselined in `spindrift-connector-routes.json`.
+Route table is baselined in `spindrift-connector-routes.json` by `spindrift
+connectors accept`.
 
 ##### Driver replay
 
