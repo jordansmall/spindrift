@@ -38,15 +38,6 @@ const (
 // declares "forge.prs", so no Code Forge can be composed from it.
 var ErrPRForgeUnsupported = errors.New("connector forge is neither push-only nor PR-capable")
 
-// ErrRemoteCredentials marks a Connector remote URL that carries credentials.
-// Core's git attaches its own, so a URL's userinfo is never honoured.
-var ErrRemoteCredentials = errors.New("connector remote URL carries credentials")
-
-// ErrRemoteHost marks a Connector remote URL that is not https or names a host
-// other than the one core derived from the forge's Git remote declaration. A
-// Connector's own URLs are never used, only held to that host.
-var ErrRemoteHost = errors.New("connector remote URL is not https on the derived host")
-
 // ErrGitRemote marks a Git remote declaration or Target repository core cannot
 // derive a clone URL from.
 var ErrGitRemote = errors.New("cannot derive a clone URL")
@@ -93,7 +84,7 @@ type Git struct {
 	// WebBase is the forge's https web base from its row's Git remote
 	// declaration. Compose derives the clone URL and the web host the PR URLs
 	// are pinned to from it and Target.Repo; the Connector's own answer to
-	// forge.remote is never used.
+	// forge.remote is never asked for.
 	WebBase string
 	// Note, when set, sees each guest call of the composed forge that fails
 	// after retries and classification, by method. Compose's own refusals are
@@ -123,8 +114,6 @@ type pushOnly struct {
 	clock  retry.Clock
 	target Target
 	git    forge.CodeForge
-	// webHost is the host derived from Git.WebBase: the only one checkURL accepts.
-	webHost string
 	// cloneURL and cred are what core's own git (relayClone) clones with.
 	cloneURL string
 	cred     gitexec.Credential
@@ -156,7 +145,6 @@ func Compose(c *connectorhost.Connector, target Target, g Git) (forge.CodeForge,
 		return nil, forge.Capabilities{}, err
 	}
 	p := newPushOnly(c, target, g.Clock)
-	p.webHost = webHost
 	if g.Note != nil {
 		raw := p.raw
 		p.raw = func(ctx context.Context, method string, params, result any) error {
@@ -179,47 +167,16 @@ func Compose(c *connectorhost.Connector, target Target, g Git) (forge.CodeForge,
 	return cf, forge.ResolveCodeForge(cf), nil
 }
 
-// remote asks the Connector for the repository's identity as a liveness read:
-// checkURL holds its URLs to the derived host and they are otherwise ignored.
-func (p *pushOnly) remote() (wireRemote, error) {
-	var r wireRemote
-	params := struct {
-		Target Target `json:"target"`
-	}{p.target}
-	if err := p.call(context.Background(), "forge.remote", params, &r); err != nil {
-		return wireRemote{}, err
-	}
-	return r, nil
-}
-
-// checkURL refuses raw unless it is an https URL, with no userinfo, on the web
-// host core derived. The errors describe the URL without its userinfo: they
-// reach the audit log.
-func (p *pushOnly) checkURL(name, raw string) error {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return fmt.Errorf("%w: %s is not a parseable URL", ErrRemoteHost, name)
-	}
-	hasUser := u.User != nil
-	u.User = nil
-	switch {
-	case hasUser:
-		return fmt.Errorf("%w: %s %q", ErrRemoteCredentials, name, u.String())
-	case u.Scheme != "https" || u.Host == "":
-		return fmt.Errorf("%w: %s %q is not https with a host", ErrRemoteHost, name, u.String())
-	case !strings.EqualFold(p.webHost, u.Host):
-		return fmt.Errorf("%w: %s host %q is not %q", ErrRemoteHost, name, u.Host, p.webHost)
-	}
-	return nil
-}
-
 func (p *pushOnly) Merge(ref string) error  { return p.git.Merge(ref) }
 func (p *pushOnly) Rebase(ref string) error { return p.git.Rebase(ref) }
 
-// Probe reads the Connector's remote as a liveness check, so a Connector or
+// probeBranch is the branch Probe asks about; the answer is ignored.
+const probeBranch = "spindrift-probe"
+
+// Probe asks the Connector whether a fixed branch exists, so a Connector or
 // backend that no longer answers fails it, and returns the target repository.
 func (p *pushOnly) Probe() (string, error) {
-	if _, err := p.remote(); err != nil {
+	if _, err := p.BranchExists(probeBranch); err != nil {
 		return "", err
 	}
 	return p.target.Repo, nil

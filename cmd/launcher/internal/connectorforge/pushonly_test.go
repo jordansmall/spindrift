@@ -160,26 +160,27 @@ func TestComposeRefusesATargetRepositoryThatIsNotOwnerSlashName(t *testing.T) {
 	}
 }
 
-// The PR URLs are pinned to the host core derived: a Connector's remote on
-// any other host, a declared route's included, is refused when it is read.
-func TestProbeRefusesARemoteOnAnotherHostThanTheDerivedOne(t *testing.T) {
+// Probe reads liveness through a request the backend answers, never through
+// the Connector's own remote.
+func TestProbeReachesTheBackendWithoutAskingForTheRemote(t *testing.T) {
 	h := connectorforgetest.New(t)
-	h.WebBase = "https://github.example"
-	cf, _, err := h.Compose()
-	if err != nil {
-		t.Fatalf("Compose = %v", err)
+	before := h.Backend.BranchRequests()
+	repo, err := h.Forge().Probe()
+	if err != nil || repo != connectorforgetest.Repo {
+		t.Fatalf("Probe = (%q, %v), want (%q, nil)", repo, err, connectorforgetest.Repo)
 	}
-	if _, err := cf.Probe(); !errors.Is(err, connectorforge.ErrRemoteHost) {
-		t.Fatalf("Probe = %v, want ErrRemoteHost for a remote on %s", err, h.Backend.Host)
+	if n := h.Backend.BranchRequests() - before; n != 1 {
+		t.Errorf("Probe sent %d backend branch requests, want 1", n)
 	}
+	if n := h.Backend.RemoteRequests(); n != 0 {
+		t.Errorf("Probe asked the Connector for its remote %d times, want 0", n)
+	}
+}
 
-	h.WebBase = "https://" + h.Backend.Host
-	cf, _, err = h.Compose()
-	if err != nil {
-		t.Fatalf("Compose = %v", err)
-	}
-	if _, err := cf.Probe(); err != nil {
-		t.Errorf("Probe = %v, want a remote on the derived host accepted", err)
+func TestProbeFailsWhenTheBackendIsUnreachable(t *testing.T) {
+	h := connectorforgetest.New(t)
+	if _, err := h.Unreachable().Probe(); err == nil {
+		t.Fatal("Probe succeeded against a closed backend")
 	}
 }
 
@@ -203,47 +204,6 @@ func TestComposePinsPRURLsToTheDerivedHostNotTheBackendHost(t *testing.T) {
 	pr, ok, err := caps.PRForge.OpenPRForBranch(branch)
 	if err != nil || !ok || pr.URL != h.Backend.PRURL(7) {
 		t.Errorf("OpenPRForBranch = %+v, %v, %v, want the PR on %s accepted", pr, ok, err, derived)
-	}
-}
-
-// Compose does not read the Connector's remote, so a hostile one is met only
-// at Probe, where it is refused and audited without leaking its userinfo.
-func TestProbeRefusesAHostileRemote(t *testing.T) {
-	const secret = "s3cr3t"
-	cases := []struct {
-		name       string
-		clone, web func(host string) string
-		want       error
-	}{
-		{"credentialed clone", func(h string) string { return "https://user:" + secret + "@" + h + "/o/r.git" },
-			func(h string) string { return "https://" + h + "/o/r" }, connectorforge.ErrRemoteCredentials},
-		{"credentialed web", func(h string) string { return "https://" + h + "/o/r.git" },
-			func(h string) string { return "https://" + secret + "@" + h + "/o/r" }, connectorforge.ErrRemoteCredentials},
-		{"other clone host", func(string) string { return "https://evil.example/o/r.git" },
-			func(h string) string { return "https://" + h + "/o/r" }, connectorforge.ErrRemoteHost},
-		{"other web host", func(h string) string { return "https://" + h + "/o/r.git" },
-			func(string) string { return "https://evil.example/o/r" }, connectorforge.ErrRemoteHost},
-		{"plain http", func(h string) string { return "http://" + h + "/o/r.git" },
-			func(h string) string { return "https://" + h + "/o/r" }, connectorforge.ErrRemoteHost},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			h := connectorforgetest.New(t)
-			host := h.Backend.Host
-			h.Backend.SetRemote(tc.clone(host), tc.web(host))
-			h.Audit.Reset()
-			_, perr := h.Forge().Probe()
-			if !errors.Is(perr, tc.want) {
-				t.Fatalf("Probe = %v, want %v", perr, tc.want)
-			}
-			audit := h.Audit.String()
-			if !strings.Contains(audit, "refused") || !strings.Contains(audit, "forge.remote") {
-				t.Errorf("audit = %q, want a refused entry naming forge.remote", audit)
-			}
-			if strings.Contains(perr.Error(), secret) || strings.Contains(audit, secret) {
-				t.Errorf("secret leaked: error %q, audit %q", perr, audit)
-			}
-		})
 	}
 }
 

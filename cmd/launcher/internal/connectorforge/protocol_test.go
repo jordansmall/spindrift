@@ -90,6 +90,10 @@ func TestProtocolForgeAxisAgrees(t *testing.T) {
 	}
 	slices.Sort(methods)
 	slices.Sort(caps)
+	// forge.remote stays declared for Connectors built against it, but core no
+	// longer calls it. It leaves the description at protocol 0.4.0: drop this
+	// filter and the CheckRemoteURLs body in checks.go then.
+	methods = slices.DeleteFunc(methods, func(m string) bool { return m == "forge.remote" })
 	if !slices.Equal(methods, coreMethods) {
 		t.Errorf("the description declares forge methods %v, connectorforge calls %v", methods, coreMethods)
 	}

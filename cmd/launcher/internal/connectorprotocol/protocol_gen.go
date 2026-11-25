@@ -343,19 +343,19 @@ const (
 	CheckPrAnswer = "prAnswer"
 	// CheckPrFiles: connectorforge's body refuses a missing or empty list, and an entry that is not a clean repository-relative path (cleanRepoPath), because the merge guard reads it.
 	CheckPrFiles = "prFiles"
-	// CheckPrShape: connectorforge's body refuses a PR whose number is not a canonical positive integer, whose URL is not a plain https URL on the forge's web host naming the target repository and that same number, or whose state and merged pair is impossible (anything but open and unmerged, closed and merged, or closed and unmerged).
+	// CheckPrShape: connectorforge's body refuses a PR whose number is not a canonical positive integer, whose URL is not a plain https URL on the forge's web host, under its web base's path, naming the target repository and that same number, or whose state and merged pair is impossible (anything but open and unmerged, closed and merged, or closed and unmerged).
 	CheckPrShape = "prShape"
 	// CheckProbeRepo: connectorforge's body refuses an empty repo.
 	CheckProbeRepo = "probeRepo"
 	// CheckProbeStatus: connectortracker's body reads the status: 2xx proves the repository, 401 and 403 are an auth failure, any other status means the repository is unreachable.
 	CheckProbeStatus = "probeStatus"
-	// CheckRemoteURLs: connectorforge's body refuses a clone or web URL that is not https with a host, carries userinfo, or names a host other than the one core derived from the forge's Git remote declaration (checkURL); a refusal is audited.
+	// CheckRemoteURLs: Core never calls forge.remote: it derives the clone URL and web base from the forge's Git remote declaration, so the body only decodes.
 	CheckRemoteURLs = "remoteURLs"
 	// CheckResolveExitGuard: connectorhost.DriverStrategy refuses an answer that resolves a non-zero exit to 0.
 	CheckResolveExitGuard = "resolveExitGuard"
 	// CheckRollupState: connectorforge's body, which runs on every forge.checks answer (CheckState and FailureDetail both read it), fails closed on a rollup state outside SUCCESS, PENDING, EXPECTED, FAILURE and ERROR; an empty state reads as no checks.
 	CheckRollupState = "rollupState"
-	// CheckRunLink: connectorforge's body drops, rather than fails on, a URL that is not a plain https URL on the web host under the target repository's path; a backslash is refused.
+	// CheckRunLink: connectorforge's body drops, rather than fails on, a URL that is not a plain https URL on the web host under the web base's path and the target repository's; a backslash is refused.
 	CheckRunLink = "runLink"
 	// CheckTokenGrant: connectorforge's body refuses writeCapable or scopes without introspectable and a scope that is not a well-formed token (wellFormedScope); cleanReason then sanitises the reason and caps it at maxReasonLen; a scope is capped at maxScopeLen.
 	CheckTokenGrant = "tokenGrant"

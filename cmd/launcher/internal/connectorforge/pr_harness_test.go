@@ -112,7 +112,7 @@ func TestComposeResolvesAForgeWithoutTheUndeclaredCapabilities(t *testing.T) {
 	if h.AutoMergeEnqueued(url) || h.Backend.MergeRequests() != 0 {
 		t.Error("EnqueueAutoMerge reached the backend")
 	}
-	// Probe falls back to re-reading the remote's identity.
+	// Probe falls back to a liveness branch lookup.
 	if repo, err := h.CodeForge().Probe(); err != nil || repo != "o/r" {
 		t.Fatalf("Probe = (%q, %v), want o/r", repo, err)
 	}

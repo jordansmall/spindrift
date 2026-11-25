@@ -34,7 +34,7 @@ type (
 
 // forgeChecks is the forge axis's whole registry: every call of p, and of the
 // reads p.rd, runs through it. The bodies read p and p.rd when they run, so
-// the web host composePR pins after the remote read reaches them.
+// the web host composePR pins after construction reaches them.
 func forgeChecks(p *pushOnly) connectorcall.Checks {
 	t := p.rd
 	return connectorcall.Checks{
@@ -52,8 +52,11 @@ func forgeChecks(p *pushOnly) connectorcall.Checks {
 			}
 			return nil
 		}),
-		connectorprotocol.CheckPrFiles:    connectorcall.Typed(checkPRFiles),
-		connectorprotocol.CheckRemoteURLs: connectorcall.Typed(p.remoteBody),
+		connectorprotocol.CheckPrFiles: connectorcall.Typed(checkPRFiles),
+		// Core never calls forge.remote, but the axis test wants a body for every
+		// method. Drop it with forge.remote at protocol 0.4.0, together with the
+		// filter in protocol_test.go.
+		connectorprotocol.CheckRemoteURLs: connectorcall.Decode,
 		connectorprotocol.CheckProbeRepo: connectorcall.Typed(func(_ any, r *wireProbe) error {
 			if r.Repo == "" {
 				return fmt.Errorf("%w: probe named no repository", ErrAnswer)
@@ -117,15 +120,6 @@ func checkPRFiles(p numberedParams, res *wireFiles) error {
 	for _, f := range *res.Files {
 		if !cleanRepoPath(f) {
 			return fmt.Errorf("%w: PR %s file list entry %q is not a clean repository-relative path", ErrAnswer, p.Number, f)
-		}
-	}
-	return nil
-}
-
-func (p *pushOnly) remoteBody(_ any, r *wireRemote) error {
-	for _, field := range []struct{ name, raw string }{{"clone URL", r.CloneURL}, {"web URL", r.WebURL}} {
-		if err := p.checkURL(field.name, field.raw); err != nil {
-			return p.conn.AuditRefusal("forge.remote", err)
 		}
 	}
 	return nil

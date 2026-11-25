@@ -11,7 +11,6 @@ import (
 func TestWireShapesAgree(t *testing.T) {
 	for key, v := range map[string]any{
 		"target": Target{},
-		"remote": wireRemote{},
 		"pr":     wirePR{},
 		"check":  wireCheck{},
 		"rollup": wireRollup{},
