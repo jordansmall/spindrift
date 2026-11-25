@@ -331,7 +331,6 @@ let
       "seamtest"
       "shadowrecord"
       "testutil"
-      "tokenrefresh"
       "unixsocket"
       "usage"
     ]

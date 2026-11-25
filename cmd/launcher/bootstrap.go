@@ -21,11 +21,9 @@ import (
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/localloop"
-	"spindrift.dev/launcher/internal/panicguard"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/terminate"
-	"spindrift.dev/launcher/internal/tokenrefresh"
 )
 
 // errConfigInvalid wraps validate's own error (issue #2568) so a caller can tell
@@ -134,15 +132,6 @@ func bootstrap(connectors *connectorruntime.Runtime, stdout io.Writer, ensureRea
 		return nil, fmt.Errorf("%w: %w", errConfigInvalid, err)
 	}
 	c.registryProxyRoutes = routes
-
-	// A run that outlives the minter's token lifetime would otherwise 401 at the
-	// terminal gh calls (merge, label edits, final comment), so poll the file
-	// the minter rewrites in place (issue #1027). No-op when unset.
-	if c.GhTokenRefreshFile != "" {
-		panicguard.Go(func() {
-			tokenrefresh.WatchGHToken(c.GhTokenRefreshFile, tokenrefresh.Interval, nil)
-		})
-	}
 
 	rc := runnerConfig(c)
 	r, err := runnerForKind(c, rc, pwd)
