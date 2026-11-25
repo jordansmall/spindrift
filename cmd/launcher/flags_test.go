@@ -631,7 +631,8 @@ func TestPrintSubcommands_ExactOutput(t *testing.T) {
 		"  reconcile                                                                                                                                      bookkeeping sweep: record PRs merged after settle for stats; on a local tracker, also close issues whose recorded landing PR merged\n" +
 		"  stats [--json] [--reingest] [--root <dir>]... [--since <time>] [--kind <kind>] [--include-inferred=false] [--by <dimension>[,<dimension>...]]  summarise Dispatch cost per pass role from the logs under .spindrift (notional API-equivalent USD), across one or more --root checkouts; --json emits one Dispatch Record per line\n" +
 		"  shadow-replay --driver <name> [--connector <driver.wasm>] [<log-dir>]                                                                          replay archived Pass logs through one Driver's shadow Connector beside its native Strategy, writing each log's comparison to a .shadow-replay.jsonl sidecar (see docs/reference.md)\n" +
-		"  registry discover <repo-dir> <routes-file> [--force]                                                                                           discover registry routes from a Target repo checkout and write the routes file (ADR 0045)\n"
+		"  registry discover <repo-dir> <routes-file> [--force]                                                                                           discover registry routes from a Target repo checkout and write the routes file (ADR 0045)\n" +
+		"  connectors accept [<baseline-file>]                                                                                                            write every Connector's current grant (Routes, credential, scheme, base, Git remote) into the Route baseline file, default ./spindrift-connector-routes.json (ADR 0073)\n"
 
 	var buf bytes.Buffer
 	printSubcommands(&buf)
@@ -2559,8 +2560,9 @@ func TestParseFlags_ShadowReplayFlagsPassThrough(t *testing.T) {
 // the verb) and a non-empty one.
 func TestSubcommandUsage(t *testing.T) {
 	cases := map[string]string{
-		"build":    "usage: spindrift build",
-		"registry": "usage: spindrift registry discover <repo-dir> <routes-file> [--force]",
+		"build":      "usage: spindrift build",
+		"connectors": "usage: spindrift connectors accept [<baseline-file>]",
+		"registry":   "usage: spindrift registry discover <repo-dir> <routes-file> [--force]",
 	}
 	for name, want := range cases {
 		if got := subcommandUsage(name); got != want {

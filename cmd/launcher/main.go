@@ -2091,6 +2091,13 @@ var verbHandlers = map[string]verbHandler{
 		}
 		return cmdRegistryDiscover(ecosystem.Registered(), args[1:], stdout, stderr)
 	},
+	"connectors": func(connectors *connectorruntime.Runtime, args []string, stdout, stderr io.Writer) int {
+		if len(args) == 0 || args[0] != "accept" {
+			fmt.Fprintln(stderr, subcommandUsage("connectors"))
+			return 1
+		}
+		return cmdConnectorsAccept(launcherInput.Backends, args[1:], stdout, stderr)
+	},
 }
 
 // mainRunIntercepts maps each spelling mainRun acts on before parseFlags to

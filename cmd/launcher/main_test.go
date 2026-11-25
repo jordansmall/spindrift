@@ -758,8 +758,8 @@ func TestMainRun_InputDocument_SeedsConfig_FlagOverridesDocument(t *testing.T) {
 // subcommands exist (issue #1574). The hidden __complete-issues and
 // daemon.LateMergeSweepVerb verbs dispatch before the table lookup, so neither
 // may appear here.
-func TestVerbHandlers_CoversExactlyElevenRealVerbs(t *testing.T) {
-	want := []string{"build", "butler", "dispatch", "doctor", "preview", "reconcile", "recover", "registry", "research", "shadow-replay", "stats"}
+func TestVerbHandlers_CoversExactlyTwelveRealVerbs(t *testing.T) {
+	want := []string{"build", "butler", "connectors", "dispatch", "doctor", "preview", "reconcile", "recover", "registry", "research", "shadow-replay", "stats"}
 
 	got := make([]string, 0, len(verbHandlers))
 	for verb := range verbHandlers {
