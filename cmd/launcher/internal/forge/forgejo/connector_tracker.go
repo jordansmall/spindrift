@@ -11,15 +11,31 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// connectorCapabilities are what the forgejo tracker needs, so none silently
-// disappears. A missing one would reach a nil layer, and a missing CapLabeled
-// would degrade the finding dedup to open issues.
+// connectorCapabilities are what a forgejo Connector must advertise for either
+// axis, so none silently disappears: the session keeps the first opener's check,
+// so a forge-only forgejo Connector is refused at load. A missing one would
+// reach a nil layer, and a missing CapLabeled would degrade the finding dedup
+// to open issues.
 var connectorCapabilities = []string{
 	connectortracker.CapTransition, connectortracker.CapEditLabels, connectortracker.CapLabels,
 	connectortracker.CapComment, connectortracker.CapFileIssue, connectortracker.CapCloseIssue,
 	connectortracker.CapComments, connectortracker.CapNativeDeps, connectortracker.CapBlocks,
 	connectortracker.CapProbe, connectortracker.CapCount, connectortracker.CapLabeled,
 	connectortracker.CapSearchIssues,
+}
+
+// sessionSpec is the session both axes open, the same fields for each so a row
+// serving both loads one Connector.
+func sessionSpec(s backendkit.Shared, k Knobs) connectorruntime.SessionSpec {
+	return connectorruntime.SessionSpec{
+		Target: connectortracker.Target{
+			API:  strings.TrimSuffix(k.ForgejoBaseURL, "/"),
+			Repo: s.RepoSlug,
+		},
+		Requires: connectorCapabilities,
+		Record:   backend.Forgejo.Name,
+		Options:  backendrows.Options{Client: connectorClient},
+	}
 }
 
 // newConnectorTracker builds the issue tracker from row's Connector alone:
@@ -29,15 +45,7 @@ var connectorCapabilities = []string{
 func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (forge.IssueTracker, error) {
 	row.Routes = connectortracker.Routes(row.Routes, s.RepoSlug)
 	return s.Connectors.Tracker(row, connectorruntime.TrackerSpec{
-		SessionSpec: connectorruntime.SessionSpec{
-			Target: connectortracker.Target{
-				API:  strings.TrimSuffix(k.ForgejoBaseURL, "/"),
-				Repo: s.RepoSlug,
-			},
-			Requires: connectorCapabilities,
-			Record:   backend.Forgejo.Name,
-			Options:  backendrows.Options{Client: connectorClient},
-		},
+		SessionSpec: sessionSpec(s, k),
 		Lifecycle: connectortracker.Lifecycle{
 			Labels:        s.Labels,
 			Route:         s.Route,

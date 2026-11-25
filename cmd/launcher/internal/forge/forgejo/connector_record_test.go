@@ -1,7 +1,6 @@
 package forgejo_test
 
 import (
-	"context"
 	"errors"
 	"net/http/httptest"
 	"os"
@@ -13,6 +12,7 @@ import (
 	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectorrecord"
+	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgejo"
 	"spindrift.dev/launcher/internal/hostpaths"
@@ -103,7 +103,7 @@ func TestConnectorForge_LoadFailureIsRecorded(t *testing.T) {
 	useForgejoRow(t, srv.URL, func(r *backendrows.Row) { r.Module = filepath.Join(t.TempDir(), "missing.wasm") })
 	t.Chdir(t.TempDir())
 
-	if _, err := buildForge(srv, ""); err == nil {
+	if _, err := buildForge(t, srv, ""); err == nil {
 		t.Fatal("want the load error")
 	}
 
@@ -119,7 +119,7 @@ func TestConnectorForge_FailedCallIsRecordedByMethod(t *testing.T) {
 	t.Setenv(connectorCredentialEnv, connectorToken)
 	t.Cleanup(forgejo.SetConnectorClient(srv.Client()))
 	t.Chdir(t.TempDir())
-	cf, err := buildForge(srv, "")
+	cf, err := buildForge(t, srv, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,16 +143,10 @@ func TestConnectorForge_ComposeFailureIsRecorded(t *testing.T) {
 	useForgejoRow(t, srv.URL, func(*backendrows.Row) {})
 	t.Setenv(connectorCredentialEnv, connectorToken)
 	t.Cleanup(forgejo.SetConnectorClient(srv.Client()))
-	t.Cleanup(forgejo.SetLoadRowConnector(func(ctx context.Context, row backendrows.Row, o backendrows.Options) (*connectorhost.Connector, error) {
-		c, err := backendrows.Load(ctx, row, o)
-		if err == nil {
-			c.Capabilities = nil
-		}
-		return c, err
-	}))
+	rt := runtimeOver(t, &strippedSandbox{Loader: connectorsandboxtest.InProcess(), drop: []string{connectorforge.CapBranches}})
 	t.Chdir(t.TempDir())
 
-	if _, err := buildForge(srv, ""); !errors.Is(err, connectorforge.ErrNotForge) {
+	if _, err := buildForgeOn(rt, srv.URL, ""); !errors.Is(err, connectorforge.ErrNotForge) {
 		t.Fatalf("buildForge = %v, want ErrNotForge", err)
 	}
 

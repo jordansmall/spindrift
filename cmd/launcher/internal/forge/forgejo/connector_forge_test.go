@@ -59,14 +59,22 @@ func useForgejoRow(t *testing.T, baseURL string, adjust func(*backendrows.Row)) 
 
 // buildForge runs the production constructor; git and the Connector both read
 // FORGEJO_TOKEN from the environment.
-func buildForge(srv *httptest.Server, mergeMethod string) (forge.CodeForge, error) {
-	return buildForgeAt(srv, srv.URL, mergeMethod)
+func buildForge(t *testing.T, srv *httptest.Server, mergeMethod string) (forge.CodeForge, error) {
+	t.Helper()
+	return buildForgeAt(t, srv.URL, mergeMethod)
 }
 
 // buildForgeAt is buildForge for an instance served under base, which may carry a subpath.
-func buildForgeAt(srv *httptest.Server, base, mergeMethod string) (forge.CodeForge, error) {
+func buildForgeAt(t *testing.T, base, mergeMethod string) (forge.CodeForge, error) {
+	t.Helper()
+	return buildForgeOn(newRuntime(t), base, mergeMethod)
+}
+
+// buildForgeOn is buildForgeAt over rt, so a test chooses the sandbox the
+// Connector loads into.
+func buildForgeOn(rt *connectorruntime.Runtime, base, mergeMethod string) (forge.CodeForge, error) {
 	l := mapLookup(map[string]string{forgejo.ForgejoBaseURLEnv: base, forgejo.ForgejoTokenEnv: connectorToken})
-	s := backendkit.Shared{RepoSlug: connectorRepo, BaseBranch: "main", GitUserName: "Test Bot", GitUserEmail: "bot@example.com", MergeMethod: mergeMethod}
+	s := backendkit.Shared{RepoSlug: connectorRepo, BaseBranch: "main", GitUserName: "Test Bot", GitUserEmail: "bot@example.com", MergeMethod: mergeMethod, Connectors: rt}
 	return forgejo.Strategy.NewCodeForge(s, l, forge.SanitizedParent{}, nil)
 }
 
@@ -86,7 +94,7 @@ func productionForgeAt(t *testing.T, srv *httptest.Server, base string) (forge.C
 	t.Cleanup(forgejo.SetConnectorClient(srv.Client()))
 	dir := t.TempDir()
 	t.Chdir(dir)
-	cf, err := buildForgeAt(srv, base, "")
+	cf, err := buildForgeAt(t, base, "")
 	row, _ := backendrows.Lookup("forgejo")
 	return cf, connectortracker.Routes(row.Routes, connectorRepo), filepath.Join(hostpaths.LogDir(dir), connectorrecord.Name("forgejo", ".audit.jsonl")), err
 }
@@ -99,7 +107,7 @@ func TestConnectorForge_LoadFailureFailsConstruction(t *testing.T) {
 	useForgejoRow(t, srv.URL, func(r *backendrows.Row) { r.Module = filepath.Join(t.TempDir(), "absent.wasm") })
 	t.Chdir(t.TempDir())
 
-	cf, err := buildForge(srv, "")
+	cf, err := buildForge(t, srv, "")
 
 	if err == nil || !strings.Contains(err.Error(), "read module") {
 		t.Errorf("err = %v, want the module read error", err)
@@ -128,7 +136,7 @@ func TestConnectorForge_UnopenableAuditFileFailsConstruction(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cf, err := buildForge(srv, "")
+	cf, err := buildForge(t, srv, "")
 
 	want := filepath.Join(logDir, connectorrecord.Name("forgejo", ".audit.jsonl"))
 	if err == nil || !strings.Contains(err.Error(), want) || cf != nil {
@@ -144,12 +152,10 @@ func TestConnectorForge_LoadErrorIsReturnedAsIs(t *testing.T) {
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
 	useForgejoRow(t, srv.URL, func(*backendrows.Row) {})
-	t.Cleanup(forgejo.SetLoadRowConnector(func(context.Context, backendrows.Row, backendrows.Options) (*connectorhost.Connector, error) {
-		return nil, boom
-	}))
+	rt := runtimeOver(t, &failingSandbox{Loader: connectorsandboxtest.InProcess(), err: boom})
 	t.Chdir(t.TempDir())
 
-	if cf, err := buildForge(srv, ""); !errors.Is(err, boom) || cf != nil {
+	if cf, err := buildForgeOn(rt, srv.URL, ""); !errors.Is(err, boom) || cf != nil {
 		t.Errorf("buildForge = (%v, %v), want (nil, the load error)", cf, err)
 	}
 }
@@ -167,7 +173,7 @@ func TestConnectorForge_RefusedRouteFailsTheOperation(t *testing.T) {
 	t.Cleanup(forgejo.SetConnectorClient(srv.Client()))
 	t.Chdir(t.TempDir())
 
-	cf, err := buildForge(srv, "")
+	cf, err := buildForge(t, srv, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +201,7 @@ func TestConnectorForge_RefusesAMergeMethodTheConnectorCannotHonour(t *testing.T
 	t.Cleanup(srv.Close)
 	useForgejoRow(t, srv.URL, func(*backendrows.Row) {})
 	for _, method := range []string{"squash", "merge"} {
-		cf, err := buildForge(srv, method)
+		cf, err := buildForge(t, srv, method)
 		if !errors.Is(err, forgejo.ErrMergeMethod) || !strings.Contains(err.Error(), "MERGE_METHOD") || cf != nil {
 			t.Errorf("MERGE_METHOD=%s: buildForge = (%v, %v), want (nil, ErrMergeMethod)", method, cf, err)
 		}
@@ -211,7 +217,7 @@ func TestPlainRow_BuildsTheConnectorForgeAndTracker(t *testing.T) {
 	t.Chdir(t.TempDir())
 
 	useForgejoRow(t, srv.URL, func(*backendrows.Row) {})
-	if _, err := buildForge(srv, ""); err != nil {
+	if _, err := buildForge(t, srv, ""); err != nil {
 		t.Fatal(err)
 	}
 	tr, err := buildTracker(t, srv)
@@ -228,15 +234,15 @@ func TestPlainRow_BuildsTheConnectorForgeAndTracker(t *testing.T) {
 func TestNoConnectorRow_RefusesTheCodeForgeAndTheTracker(t *testing.T) {
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
-	t.Cleanup(forgejo.SetLoadRowConnector(func(context.Context, backendrows.Row, backendrows.Options) (*connectorhost.Connector, error) {
+	rt := connectorruntime.New(nil, &failingSandbox{Loader: connectorsandboxtest.InProcess(), err: errors.New("unexpected load"), onLoad: func() {
 		t.Error("a Connector loaded without a usable row")
-		return nil, errors.New("unexpected load")
-	}))
-	cf, err := buildForge(srv, "squash")
+	}})
+	t.Cleanup(func() { _ = rt.Close() })
+	cf, err := buildForgeOn(rt, srv.URL, "squash")
 	if !errors.Is(err, forgejo.ErrNoConnectorRow) || cf != nil {
 		t.Errorf("buildForge = (%v, %v), want (nil, ErrNoConnectorRow)", cf, err)
 	}
-	tr, err := buildTracker(t, srv)
+	tr, err := buildTrackerOn(rt, srv)
 	if !errors.Is(err, forgejo.ErrNoConnectorRow) || tr != nil {
 		t.Errorf("buildTracker = (%v, %v), want (nil, ErrNoConnectorRow)", tr, err)
 	}
@@ -249,7 +255,7 @@ func TestPlainRow_PlaintextBaseNamesTheBase(t *testing.T) {
 	t.Cleanup(srv.Close)
 	useForgejoRow(t, "http://forgejo.lan:3000", func(*backendrows.Row) {})
 
-	cf, err := buildForge(srv, "squash")
+	cf, err := buildForge(t, srv, "squash")
 	if !errors.Is(err, forgejo.ErrNoConnectorRow) || cf != nil {
 		t.Fatalf("buildForge = (%v, %v), want (nil, ErrNoConnectorRow)", cf, err)
 	}
@@ -461,4 +467,31 @@ func TestConnectorTracker_ExposesTheNativeCapabilitySet(t *testing.T) {
 func asOK[T any](it forge.IssueTracker) bool {
 	_, ok := forge.As[T](it)
 	return ok
+}
+
+// failingSandbox fails every load with err, after calling onLoad if set.
+type failingSandbox struct {
+	connectorsandbox.Loader
+	err    error
+	onLoad func()
+}
+
+func (s *failingSandbox) LoadNetwork(context.Context, []byte, connectorhost.Network) (*connectorhost.Connector, error) {
+	if s.onLoad != nil {
+		s.onLoad()
+	}
+	return nil, s.err
+}
+
+// runtimeOver is the Connector runtime over the forgejo row the test applied,
+// loading into sb, closed with the test.
+func runtimeOver(t *testing.T, sb connectorsandbox.Loader) *connectorruntime.Runtime {
+	t.Helper()
+	row, ok := backendrows.Lookup("forgejo")
+	if !ok {
+		t.Fatal("no forgejo row")
+	}
+	rt := connectorruntime.New([]backendrows.Row{row}, sb)
+	t.Cleanup(func() { _ = rt.Close() })
+	return rt
 }

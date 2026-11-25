@@ -14,7 +14,7 @@ import (
 // production does (newCodeForge) and reports every disagreement between the
 // row's RelayCapable and OutboxRelayCapable bits and the interfaces that forge
 // implements.
-func relayCapabilityViolations(forgejoBase string) []string {
+func relayCapabilityViolations(t *testing.T, forgejoBase string) []string {
 	var out []string
 	for _, row := range backendkit.Strategies() {
 		if !row.ValidAsCodeForge {
@@ -25,6 +25,7 @@ func relayCapabilityViolations(forgejoBase string) []string {
 		if row.Name == "forgejo" {
 			c.setRowKnob("FORGEJO_BASE_URL", forgejoBase)
 		}
+		c.connectors = forgejoFixtureRuntime(t)
 		cf, err := newCodeForge(c, local.SanitizedParent{}, forge.NewFake())
 		if err != nil {
 			out = append(out, row.Name+": newCodeForge: "+err.Error())
@@ -61,7 +62,7 @@ func relayCapabilityViolations(forgejoBase string) []string {
 // TestStrategiesCoverRegistry plus nix/checks/schema-drift.nix's
 // backend-registry-gen already catch a nix-only row with no Go row.
 func TestRelayCapableMatchesForgeInterfaces(t *testing.T) {
-	if v := relayCapabilityViolations(useForgejoFixtureRow(t)); len(v) > 0 {
+	if v := relayCapabilityViolations(t, useForgejoFixtureRow(t)); len(v) > 0 {
 		t.Errorf("RelayCapable or OutboxRelayCapable disagrees with the forge's interfaces:\n%s", strings.Join(v, "\n"))
 	}
 }
@@ -132,7 +133,7 @@ func TestRelayCapabilityViolations_ReportsLyingRows(t *testing.T) {
 			}
 			t.Cleanup(backendkit.ReplaceRegistryForTest([]backendkit.Strategy{row}))
 
-			got := relayCapabilityViolations("")
+			got := relayCapabilityViolations(t, "")
 			if len(got) != 1 || !strings.Contains(got[0], tc.want) {
 				t.Errorf("violations = %q, want exactly one containing %q", got, tc.want)
 			}
