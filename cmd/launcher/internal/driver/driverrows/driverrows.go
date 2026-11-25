@@ -206,7 +206,7 @@ func loader(name, module string, p loadPolicy) func() (driverkit.Strategy, error
 		}
 		c, err := p.load(context.Background(), wasm)
 		if err != nil {
-			return driverkit.Strategy{}, fmt.Errorf("load module %s: %w", module, err)
+			return driverkit.Strategy{}, fmt.Errorf("load module %s for driver %q: %w", module, name, err)
 		}
 		s, err := c.DriverStrategy()
 		if err != nil {

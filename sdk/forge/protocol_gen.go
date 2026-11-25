@@ -6,7 +6,7 @@ package forge
 const (
 	// capForge: Serves forge.prsForBranch, forge.pr and forge.checks, and optionally forge.jobLog.
 	capForge = "forge"
-	// CapBranches: Serves forge.branchExists and forge.deleteBranch.
+	// CapBranches: Serves forge.branchExists and forge.deleteBranch; requires forge.probe.
 	CapBranches = "forge.branches"
 	// CapPushOnly: The forge has no pull-request concept, so core composes a push-only Code Forge.
 	CapPushOnly = "forge.pushOnly"

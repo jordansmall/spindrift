@@ -7,7 +7,7 @@
 package connectorprotocol
 
 // Version is the protocol version.
-const Version = "0.3.0"
+const Version = "0.4.0"
 
 // Axis is a family of Connector: its name is the prefix of its methods.
 type Axis string
@@ -60,7 +60,7 @@ const (
 	CapTrackerIdsProjectKey = "tracker.ids.projectKey"
 	// CapForge: Serves forge.prsForBranch, forge.pr and forge.checks, and optionally forge.jobLog.
 	CapForge = "forge"
-	// CapForgeBranches: Serves forge.branchExists and forge.deleteBranch.
+	// CapForgeBranches: Serves forge.branchExists and forge.deleteBranch; requires forge.probe.
 	CapForgeBranches = "forge.branches"
 	// CapForgePushOnly: The forge has no pull-request concept, so core composes a push-only Code Forge.
 	CapForgePushOnly = "forge.pushOnly"

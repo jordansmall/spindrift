@@ -34,8 +34,13 @@ pkgs.runCommand "connector-wasm-fixtures" { nativeBuildInputs = [ pkgs.go ]; } '
   mkdir $out
   build() { go build -buildmode=c-shared -o "$out/$1" "''${@:2}"; }
   build current.wasm ./handshake
-  build previous.wasm -ldflags=-X=${versionSymbol}=0.2.1 ./handshake
-  build future.wasm -ldflags=-X=${versionSymbol}=0.4.0 ./handshake
+  build previous.wasm -ldflags=-X=${versionSymbol}=0.3.1 ./handshake
+  build future.wasm -ldflags=-X=${versionSymbol}=0.5.0 ./handshake
+  # A previous-minor Connector on each axis: core refuses the forge and the
+  # Driver one (the 0.4 breaks) and accepts the tracker one.
+  build previous-forge.wasm "-ldflags=-X=${versionSymbol}=0.3.1 -X=main.caps=forge,forge.branches" ./handshake
+  build previous-driver.wasm "-ldflags=-X=${versionSymbol}=0.3.1 -X=main.caps=driver" ./handshake
+  build previous-tracker.wasm "-ldflags=-X=${versionSymbol}=0.3.1 -X=main.caps=tracker" ./handshake
   build probe.wasm ./probe
   build call.wasm ./call
   build escape.wasm ./escape

@@ -5,7 +5,7 @@ package connector
 // protocolVersion is the protocol version the SDK speaks. It is a var, not a
 // const, so a test fixture can override it with
 // -ldflags=-X spindrift.dev/sdk/connector.protocolVersion=<version>.
-var protocolVersion = "0.3.0"
+var protocolVersion = "0.4.0"
 
 // Class is the canonical error class a Connector reports with a failure. Core
 // decides on retries from the class alone, so it must describe the failure and

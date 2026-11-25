@@ -8,15 +8,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"spindrift.dev/launcher/internal/connectorprotocol"
 )
 
 // ProtocolVersion is the Connector protocol core speaks.
-const ProtocolVersion = "0.3.0"
+const ProtocolVersion = "0.4.0"
 
 // Limits on every call into a Connector. The bases are wide multiples of what
 // a Go reactor needs in the interpreter, because Nix CI runs under load. A
@@ -117,6 +120,13 @@ var currentMinor = func() int {
 	return minor
 }()
 
+// brokenAxes are the axes whose methods the current minor changed
+// incompatibly: 0.4 dropped forge.remote, made forge.probe required and
+// reshaped driver.sessionFlags, so a previous-minor Connector on any of them
+// would load and then fail its first call. Reconsider the list on the next
+// minor bump.
+var brokenAxes = []connectorprotocol.Axis{connectorprotocol.AxisForge, connectorprotocol.AxisDriver}
+
 var (
 	// ErrProtocolUnsupported marks a Connector whose protocol version is outside
 	// the window core accepts; the concrete error is a *ProtocolError.
@@ -184,21 +194,34 @@ var (
 	ErrUnusable = errors.New("connector unusable")
 )
 
-// ProtocolError is a Connector protocol version outside core's window.
+// ProtocolError is a Connector protocol version core refuses: outside its
+// window, or inside it on an axis the current minor broke.
 type ProtocolError struct {
-	Connector string // the Connector's protocolVersion as it declared it
+	Version string // the Connector's protocolVersion as it declared it
+	Name    string // the Connector's row name; empty when the load has none
+	Axis    string // the broken axis a previous-minor Connector declared; empty when outside the window
 }
 
 func (e *ProtocolError) Error() string {
-	return fmt.Sprintf("connector protocol %q is outside core's supported range %s (core speaks %s)",
-		e.Connector, supportedRange(), ProtocolVersion)
+	who := "connector"
+	if e.Name != "" {
+		who = fmt.Sprintf("connector %q", e.Name)
+	}
+	if e.Axis != "" {
+		return fmt.Sprintf("%s declares protocol %q on the %s axis, which changed in %s: core needs %s; rebuild it against the current SDK",
+			who, e.Version, e.Axis, ProtocolVersion, minorSeries(currentMinor))
+	}
+	return fmt.Sprintf("%s protocol %q is outside core's supported range %s (core speaks %s); rebuild it against the current SDK or upgrade core to match",
+		who, e.Version, supportedRange(), ProtocolVersion)
 }
 
 func (e *ProtocolError) Unwrap() error { return ErrProtocolUnsupported }
 
 func supportedRange() string {
-	return fmt.Sprintf("0.%d.x to 0.%d.x", currentMinor-1, currentMinor)
+	return fmt.Sprintf("%s to %s", minorSeries(currentMinor-1), minorSeries(currentMinor))
 }
+
+func minorSeries(minor int) string { return fmt.Sprintf("0.%d.x", minor) }
 
 // ProtocolMinor returns the minor of a strict MAJOR.MINOR.PATCH version of
 // decimal digits without leading zeros, major 0; ok is false for anything else.
@@ -211,13 +234,22 @@ func ProtocolMinor(version string) (minor int, ok bool) {
 	return minor, err == nil
 }
 
-// CheckProtocol reports whether core accepts a Connector declaring version: a
-// valid ProtocolMinor equal to core's or the one before it.
-func CheckProtocol(version string) error {
-	if minor, ok := ProtocolMinor(version); ok && (minor == currentMinor || minor == currentMinor-1) {
-		return nil
+// CheckProtocol reports whether core accepts a Connector declaring version and
+// capabilities: a valid ProtocolMinor equal to core's, or the one before it
+// unless the Connector declares a capability on a brokenAxes axis.
+func CheckProtocol(version string, capabilities []string) error {
+	minor, ok := ProtocolMinor(version)
+	if !ok || (minor != currentMinor && minor != currentMinor-1) {
+		return &ProtocolError{Version: version}
 	}
-	return &ProtocolError{Connector: version}
+	if minor == currentMinor-1 {
+		for _, c := range capabilities {
+			if axis := connectorprotocol.Capabilities[c]; slices.Contains(brokenAxes, axis) {
+				return &ProtocolError{Version: version, Axis: string(axis)}
+			}
+		}
+	}
+	return nil
 }
 
 func canonical(p string) bool {
@@ -480,9 +512,13 @@ func loadWith(ctx context.Context, wasm []byte, mk engineFactory, network *Netwo
 	}
 	h, err := handshakeOver(ctx, e)
 	if err == nil {
-		err = CheckProtocol(h.ProtocolVersion)
+		err = CheckProtocol(h.ProtocolVersion, h.Capabilities)
 	}
 	if err != nil {
+		var pe *ProtocolError
+		if network != nil && errors.As(err, &pe) {
+			pe.Name = network.Name
+		}
 		_ = e.close(context.WithoutCancel(ctx))
 		return nil, err
 	}

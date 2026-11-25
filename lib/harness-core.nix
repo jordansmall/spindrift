@@ -50,6 +50,13 @@ let
       );
 
   ecosystemBundleFile = ../cmd/launcher/internal/driver/bundle/ecosystems.go;
+  # connectorhost reads the capability table to refuse a previous-minor
+  # Connector on a broken axis; schema.go embeds the schema.
+  connectorProtocolFiles = lib.fileset.unions [
+    ../cmd/launcher/internal/connectorprotocol/protocol_gen.go
+    ../cmd/launcher/internal/connectorprotocol/schema.go
+    ../cmd/launcher/internal/connectorprotocol/protocol.schema.json
+  ];
 
   # internal/backend without backendrows: only the host and the backend
   # adapters load Connector rows, and backendrows imports connectorrecord, which
@@ -152,6 +159,7 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/connectorhost)
+        connectorProtocolFiles
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/panicguard)
@@ -296,6 +304,7 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/connectorhost)
+        connectorProtocolFiles
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/panicguard)
@@ -424,6 +433,7 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/connectorhost)
+        connectorProtocolFiles
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/panicguard)

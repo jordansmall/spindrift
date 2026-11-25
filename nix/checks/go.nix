@@ -165,6 +165,7 @@ let
   # or another Driver's directory (internal/driver/closure_test.go).
   driverGoTestShared = map (p: ../../cmd/launcher/internal + "/${p}") [
     "connectorhost"
+    "connectorprotocol"
     "dispatchkey"
     "dispatchkind"
     "driver/corpus"
@@ -386,6 +387,7 @@ let
       "backendkit"
       "chore"
       "connectorhost"
+      "connectorprotocol"
       "connlimit"
       "dispatch"
       "dispatchkey"

@@ -674,10 +674,10 @@ func loadGithubConnectorAs(t *testing.T, host, repo string, client *http.Client,
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = conn.Close(context.Background()) })
-	// The guest speaks the 0.3 forge write surface; its version
+	// The guest speaks the 0.4 forge write surface; its version
 	// comes from the ldflag in connectors/github/package.nix, not the SDK default.
-	if !strings.HasPrefix(conn.ProtocolVersion, "0.3.") {
-		t.Fatalf("handshake protocol version = %q, want 0.3.x (the protocolVersion ldflag in connectors/github/package.nix)", conn.ProtocolVersion)
+	if !strings.HasPrefix(conn.ProtocolVersion, "0.4.") {
+		t.Fatalf("handshake protocol version = %q, want 0.4.x (the protocolVersion ldflag in connectors/github/package.nix)", conn.ProtocolVersion)
 	}
 	return conn, routes
 }

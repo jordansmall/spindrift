@@ -20,6 +20,6 @@ pkgs.runCommand "connector-forgejo-wasm" { nativeBuildInputs = [ pkgs.go ]; } ''
   chmod -R +w work
   cd work/connectors/forgejo
   mkdir $out
-  # Declares 0.3.x, the protocol of the forge branch and PR primitives.
-  go build -buildmode=c-shared -ldflags=-X=spindrift.dev/sdk/connector.protocolVersion=0.3.0 -o $out/forgejo.wasm .
+  # Declares 0.4.x, the protocol of the forge branch, PR and probe primitives.
+  go build -buildmode=c-shared -ldflags=-X=spindrift.dev/sdk/connector.protocolVersion=0.4.0 -o $out/forgejo.wasm .
 ''
