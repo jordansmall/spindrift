@@ -13,6 +13,7 @@
 let
   inherit (pkgs.lib) assertMsg;
   routes = import ../../lib/connector-routes.nix;
+  names = import ../../lib/connector-names.nix;
   mkHarness =
     extra:
     import ../../lib/mkHarness.nix (
@@ -30,8 +31,23 @@ let
   row = {
     module = p: "${fixtures.connectorWasm}/network.wasm";
     routes = [ goodRoute ];
-    credentialEnv = "FIXTURE_TOKEN";
   };
+  # The batteries Connectors' own modules: a row built from one is first-party,
+  # as nix/fixtures.nix builds the dogfood rows. Only the module carries the
+  # mark; the routes are the fixture's.
+  batteries =
+    name: credentialEnv:
+    let
+      c = (import (../../connectors + "/${name}")).lib.connector { core = import ../../core; };
+    in
+    {
+      module = p: "${c.package p}/${name}.wasm";
+      routes = [ goodRoute ];
+      inherit credentialEnv;
+    };
+  ghRow = batteries "github" "GH_TOKEN";
+  fjRow = batteries "forgejo" "FORGEJO_TOKEN";
+  jiraRow = batteries "jira" "JIRA_TOKEN";
   withRows = rows: mkHarness { backendRows = rows; };
   basicRow = row // {
     credentialScheme = "basic";
@@ -269,18 +285,26 @@ in
         };
       }))
     ) "a module that is not a function of pkgs must fail";
+    assert assertMsg (evaluates (withRows {
+      github = ghRow // {
+        gitRemote = "https://github.com";
+      };
+    })) "control: a first-party row naming its credentialEnv must evaluate";
     assert assertMsg (
       !(evaluates (withRows {
-        fixture = removeAttrs row [ "credentialEnv" ];
+        github = removeAttrs ghRow [ "credentialEnv" ] // {
+          gitRemote = "https://github.com";
+        };
       }))
-    ) "a row without a credentialEnv must fail";
+    ) "a first-party row without a credentialEnv must fail";
     assert assertMsg (
       !(evaluates (withRows {
-        fixture = row // {
+        github = ghRow // {
+          gitRemote = "https://github.com";
           credentialEnv = "";
         };
       }))
-    ) "a row with an empty credentialEnv must fail";
+    ) "a first-party row with an empty credentialEnv must fail";
     assert assertMsg (
       !(evaluates (withRows {
         fixture = row // {
@@ -333,37 +357,37 @@ in
     # A Code Forge row (github, forgejo) declares its Git remote, either
     # `gitRemote` (a bare https origin) or `gitRemoteEnv`; other rows may omit it.
     assert assertMsg (evaluates (withRows {
-      github = row // {
+      github = ghRow // {
         gitRemote = "https://github.com";
       };
     })) "control: a forge row with a literal gitRemote must evaluate";
     assert assertMsg (evaluates (withRows {
-      forgejo = row // {
+      forgejo = fjRow // {
         gitRemoteEnv = "FORGEJO_BASE_URL";
       };
     })) "control: a forge row with a gitRemoteEnv must evaluate";
     assert assertMsg (
       !(evaluates (withRows {
-        github = row;
+        github = ghRow;
       }))
     ) "a forge row with no Git remote declaration must fail";
     assert assertMsg (
       !(evaluates (withRows {
-        github = row // {
+        github = ghRow // {
           gitRemote = "https://github.com/o";
         };
       }))
     ) "a gitRemote with a path must fail";
     assert assertMsg (
       !(evaluates (withRows {
-        github = row // {
+        github = ghRow // {
           gitRemote = "http://github.com";
         };
       }))
     ) "a non-https gitRemote must fail";
     assert assertMsg (
       !(evaluates (withRows {
-        github = row // {
+        github = ghRow // {
           gitRemote = "https://github.com";
           gitRemoteEnv = "GITHUB_URL";
         };
@@ -371,7 +395,7 @@ in
     ) "both gitRemote and gitRemoteEnv must fail";
     assert assertMsg (
       !(evaluates (withRows {
-        forgejo = row // {
+        forgejo = fjRow // {
           gitRemoteEnv = "";
         };
       }))
@@ -408,20 +432,322 @@ in
           }
         jq -e '.backends[0] | keys == ["credentialEnv", "gitRemote", "module", "name", "routes"] and .gitRemote == "https://github.com"' ${
           (withRows {
-            github = row // {
+            github = ghRow // {
               gitRemote = "https://github.com";
             };
           }).internals.runInputDocumentFile
         }
         jq -e '.backends[0] | keys == ["credentialEnv", "gitRemoteEnv", "module", "name", "routes"] and .gitRemoteEnv == "FORGEJO_BASE_URL"' ${
           (withRows {
-            forgejo = row // {
+            forgejo = fjRow // {
               gitRemoteEnv = "FORGEJO_BASE_URL";
             };
           }).internals.runInputDocumentFile
         }
         touch $out
       '';
+
+  # Issue #7560: a backend row is first-party when its module is the batteries
+  # Connector of the same name, never by its name. The mark is read from
+  # `internals` only; the launcher input document gains no field for it.
+  connector-backend-rows-first-party-mark-follows-wasm =
+    let
+      mark = rows: (withRows rows).internals.backendFirstParty;
+      batteriesMarks = mark {
+        github = ghRow;
+        forgejo = fjRow;
+        jira = jiraRow;
+      };
+    in
+    assert assertMsg (
+      batteriesMarks == {
+        github = true;
+        forgejo = true;
+        jira = true;
+      }
+    ) "rows built from the batteries github, forgejo and jira modules must be first-party";
+    assert assertMsg (
+      (mark { fixture = row; }) == { fixture = false; }
+    ) "a row on the fixture wasm must be third-party";
+    assert assertMsg
+      (
+        (mark {
+          github = row;
+          forgejo = ghRow;
+        }) == {
+          github = false;
+          forgejo = false;
+        }
+      )
+      "the name alone must grant no standing: a github-named fixture row and a forgejo-named github module are third-party";
+    pkgs.runCommand "connector-backend-rows-first-party-mark-follows-wasm" { } "touch $out";
+
+  # Issue #7560: a third-party row's credential variable is derived from its
+  # row name, reaching the document through the existing `credentialEnv` field.
+  connector-backend-rows-third-party-credential-derived =
+    let
+      doc =
+        (withRows {
+          my-thing = row;
+          fixture = row;
+        }).internals.runInputDocumentFile;
+    in
+    assert assertMsg (
+      names.derivedCredentialEnv "fixture" == "FIXTURE_TOKEN"
+    ) "a row named fixture must derive FIXTURE_TOKEN";
+    assert assertMsg (
+      names.derivedCredentialEnv "my-thing" == "MY_THING_TOKEN"
+    ) "a hyphen in the row name must become an underscore";
+    pkgs.runCommand "connector-backend-rows-third-party-credential-derived"
+      { nativeBuildInputs = [ pkgs.jq ]; }
+      ''
+        jq -e '.backends | map({key: .name, value: .credentialEnv}) | from_entries
+          == {"my-thing": "MY_THING_TOKEN", "fixture": "FIXTURE_TOKEN"}' ${doc}
+        jq -e '.backends | all(.[]; keys == ["credentialEnv", "module", "name", "routes"])' ${doc}
+        touch $out
+      '';
+
+  # Issue #7560: each hostile row fails evaluation, and the pure decision
+  # behind the refusal names the row and the rule (a thrown message is
+  # invisible to tryEval).
+  connector-backend-rows-credential-refusals =
+    let
+      envSchema = import ../../lib/env-schema.nix;
+      coreEnvs = builtins.listToAttrs (
+        builtins.concatMap (
+          k:
+          pkgs.lib.optional ((envSchema.${k}.env or null) != null) (
+            pkgs.lib.nameValuePair envSchema.${k}.env k
+          )
+        ) (builtins.attrNames envSchema)
+      );
+      decide =
+        {
+          name,
+          r,
+          firstParty ? false,
+          otherEnvs ? [ ],
+        }:
+        names.backendCredentialError {
+          inherit
+            name
+            firstParty
+            coreEnvs
+            otherEnvs
+            ;
+          row = r;
+        };
+      pinned =
+        args: subs:
+        let
+          msg = decide args;
+        in
+        msg != null && builtins.all (s: has s msg) ([ "mkHarness: backendRows.${args.name}" ] ++ subs);
+      forgejoRow = row // {
+        gitRemoteEnv = "FORGEJO_BASE_URL";
+      };
+    in
+    assert assertMsg (
+      decide {
+        name = "fixture";
+        r = row;
+      } == null
+    ) "control: a third-party row naming nothing must pass the decision";
+    assert assertMsg (
+      decide {
+        name = "github";
+        r = ghRow;
+        firstParty = true;
+      } == null
+    ) "control: a first-party row naming its credentialEnv must pass the decision";
+    # A third-party row naming a core knob's env as its credential.
+    assert assertMsg (
+      !(evaluates (withRows {
+        fixture = row // {
+          credentialEnv = "GH_TOKEN";
+        };
+      }))
+    ) "a third-party row naming a core knob's env must fail evaluation";
+    assert assertMsg (pinned
+      {
+        name = "fixture";
+        r = row // {
+          credentialEnv = "GH_TOKEN";
+        };
+      }
+      [
+        "third-party"
+        "cannot name its own `credentialEnv`"
+        "`FIXTURE_TOKEN`"
+      ]
+    ) "the refusal must name the row, the rule and the derived name";
+    # A third-party row naming another row's variable.
+    assert assertMsg (
+      !(evaluates (withRows {
+        fixture = row // {
+          credentialEnv = "OTHER_TOKEN";
+        };
+        other = row;
+      }))
+    ) "a third-party row naming another row's variable must fail evaluation";
+    assert assertMsg (pinned
+      {
+        name = "fixture";
+        r = row // {
+          credentialEnv = "OTHER_TOKEN";
+        };
+        otherEnvs = [
+          {
+            row = "other";
+            field = "credentialEnv";
+            env = "OTHER_TOKEN";
+          }
+        ];
+      }
+      [
+        "cannot name its own `credentialEnv`"
+        "`FIXTURE_TOKEN`"
+      ]
+    ) "the refusal must name the row and the rule, not the variable it tried to claim";
+    # A row name deriving something no shell can export.
+    assert assertMsg (
+      !(evaluates (withRows {
+        "my.thing" = row;
+      }))
+    ) "a row whose derived credential variable is not a valid name must fail evaluation";
+    assert assertMsg (pinned
+      {
+        name = "my.thing";
+        r = row;
+      }
+      [
+        "`MY.THING_TOKEN`"
+        "not a valid environment variable name"
+        "rename the row"
+      ]
+    ) "the refusal must name the row and the derived name";
+    assert assertMsg (
+      names.derivedCredentialClashError {
+        name = "widget";
+        derived = "WIDGET_TOKEN";
+        owner = null;
+      } == null
+    ) "control: no owning Connector must pass the clash decision";
+    assert assertMsg (
+      let
+        msg = names.derivedCredentialClashError {
+          name = "widget";
+          derived = "WIDGET_TOKEN";
+          owner = "acme";
+        };
+      in
+      msg != null
+      && builtins.all (s: has s msg) [
+        "'widget'"
+        "`WIDGET_TOKEN`"
+        "'acme'"
+        "rename the row"
+      ]
+    ) "the clash refusal must name the row, the derived name, the owner and the fix";
+    # A row claiming the mark in data.
+    assert assertMsg (
+      !(evaluates (withRows {
+        fixture = row // {
+          firstParty = true;
+        };
+      }))
+    ) "a third-party row setting firstParty must fail evaluation";
+    assert assertMsg (
+      !(evaluates (withRows {
+        github = ghRow // {
+          gitRemote = "https://github.com";
+          firstParty = true;
+        };
+      }))
+    ) "a first-party row setting firstParty must fail evaluation";
+    assert assertMsg (pinned
+      {
+        name = "fixture";
+        r = row // {
+          firstParty = true;
+        };
+      }
+      [
+        "sets `firstParty`"
+        "no row may set it"
+      ]
+    ) "the refusal must name the row and the rule";
+    # A first-party row must name its own backend's credential.
+    assert assertMsg (pinned {
+      name = "github";
+      r = removeAttrs ghRow [ "credentialEnv" ];
+      firstParty = true;
+    } [ "must carry a non-empty string `credentialEnv`" ]) "the refusal must name the row and the rule";
+    # A derived name that is a core knob's env: a third-party row named for a
+    # core backend (forgejo, jira) would otherwise shadow that backend's token.
+    assert assertMsg (
+      !(evaluates (withRows {
+        forgejo = forgejoRow;
+      }))
+    ) "a third-party row named forgejo (FORGEJO_TOKEN) must fail evaluation";
+    assert assertMsg (
+      !(evaluates (withRows {
+        jira = row;
+      }))
+    ) "a third-party row named jira (JIRA_TOKEN) must fail evaluation";
+    assert assertMsg (pinned
+      {
+        name = "forgejo";
+        r = forgejoRow;
+      }
+      [
+        "`FORGEJO_TOKEN`"
+        "core knob `forgejoToken`"
+      ]
+    ) "the refusal must name the row, the derived name and the core knob";
+    assert assertMsg (pinned
+      {
+        name = "jira";
+        r = row;
+      }
+      [
+        "`JIRA_TOKEN`"
+        "core knob `jiraToken`"
+      ]
+    ) "the refusal must name the row, the derived name and the core knob";
+    # A derived name that is another row's variable.
+    assert assertMsg (
+      !(evaluates (withRows {
+        a-b = row;
+        a_b = row;
+      }))
+    ) "two third-party rows deriving the same variable must fail evaluation";
+    assert assertMsg (
+      !(evaluates (withRows {
+        fixture = row;
+        basic = basicRow // {
+          identityEnv = "FIXTURE_TOKEN";
+        };
+      }))
+    ) "a third-party row deriving another row's identityEnv must fail evaluation";
+    assert assertMsg (pinned
+      {
+        name = "fixture";
+        r = row;
+        otherEnvs = [
+          {
+            row = "basic";
+            field = "identityEnv";
+            env = "FIXTURE_TOKEN";
+          }
+        ];
+      }
+      [
+        "`FIXTURE_TOKEN`"
+        "backendRows.basic's `identityEnv`"
+      ]
+    ) "the refusal must name the row, the derived name, the other row and its field";
+    pkgs.runCommand "connector-backend-rows-credential-refusals" { } "touch $out";
 
   # No backend row: the document has no `backends` key and is the plain
   # Harness's own derivation, so existing Consumers build unchanged.
@@ -473,11 +799,15 @@ in
         probeEmail = emailKnob;
         probeBase = baseKnob;
       };
+      # A third-party row: the fixture wasm, and no credential (core derives
+      # PROBE_TOKEN from the row name, which `probeToken` above carries).
       probeBackend = {
         module = p: "${fixtures.connectorWasm}/network.wasm";
         routes = [ goodRoute ];
-        credential = "probeToken";
       };
+      # A first-party row of core backend `rowName`: the batteries Connector's
+      # own wasm, the only thing that grants it a credential of its own.
+      firstParty = rowName: probeBackend // { module = (batteries rowName null).module; };
       basicBackend = probeBackend // {
         scheme = "basic";
         identity = "probeEmail";
@@ -492,11 +822,34 @@ in
         consumerWith [ { spindrift.connectors.probe = { inherit knobs backend; }; } ];
       names = import ../../lib/connector-names.nix;
       coreBackends = import ../../lib/backends/default.nix;
-      # A row of core backend `rowName` naming core knob `knob` as its own credential.
+      # A first-party row of core backend `rowName` naming core knob `knob` as
+      # its own credential.
       probeRow = rowName: knob: probeGitRow rowName knob "probeBase";
       # The same row declaring `gitRemote` as `git` (null leaves it undeclared).
       probeGitRow =
         rowName: knob: git:
+        probeBackendRow rowName (
+          (firstParty rowName)
+          // {
+            credential = knob;
+            base = "probeBase";
+            gitRemote = git;
+          }
+        );
+      # A third-party row named `rowName` (the fixture wasm) naming core knob
+      # `knob` as its credential: the name alone must grant no standing.
+      thirdPartyRow =
+        rowName: knob:
+        probeBackendRow rowName (
+          probeBackend
+          // {
+            credential = knob;
+            base = "probeBase";
+            gitRemote = "probeBase";
+          }
+        );
+      probeBackendRow =
+        rowName: backend:
         consumerWith [
           {
             spindrift.connectors.${rowName} = {
@@ -504,16 +857,12 @@ in
               # holds `{base}` routes for the forgejo and jira rows, which
               # mkHarness refuses without a `baseEnv`.
               knobs.probeBase = baseKnob;
-              backend = probeBackend // {
-                credential = knob;
-                base = "probeBase";
-                gitRemote = git;
-              };
+              inherit backend;
             };
           }
         ];
-      # A basic row of core backend `rowName` with its own credential, naming
-      # core knob `knob` as its identity.
+      # A basic first-party row of core backend `rowName` with its own
+      # credential, naming core knob `knob` as its identity.
       probeIdentityRow =
         rowName: knob:
         consumerWith [
@@ -522,6 +871,8 @@ in
               knobs.probeBase = baseKnob;
               knobs.probeToken = secretKnob;
               backend = basicBackend // {
+                inherit (firstParty rowName) module;
+                credential = "probeToken";
                 identity = knob;
               };
             };
@@ -532,6 +883,15 @@ in
     in
     assert assertMsg (builds withRow) "control: the fixture Connector's row must evaluate";
     assert assertMsg (builds (probe { })) "control: a secret host-only knob must be accepted";
+    # A third-party row names no credential at all (issue #7560): core derives
+    # it, so even its own secret knob, a missing knob or a core knob is refused.
+    assert assertMsg (
+      !(builds (probe {
+        backend = probeBackend // {
+          credential = "probeToken";
+        };
+      }))
+    ) "a third-party row naming its own credential knob must fail evaluation";
     assert assertMsg (
       !(builds (probe {
         backend = probeBackend // {
@@ -546,6 +906,45 @@ in
         };
       }))
     ) "a credential naming a core knob must fail evaluation";
+    # The point of issue #7560: registering under a core backend's name, with
+    # a module that is not the batteries build, buys no core token.
+    assert assertMsg (
+      !(builds (thirdPartyRow "github" "ghToken"))
+    ) "a third-party row named github must not name GH_TOKEN";
+    assert assertMsg (
+      !(builds (thirdPartyRow "forgejo" "forgejoToken"))
+    ) "a third-party row named forgejo must not name its core token";
+    assert assertMsg (
+      !(builds (thirdPartyRow "jira" "jiraToken"))
+    ) "a third-party row named jira must not name its core token";
+    assert assertMsg (
+      !(builds (probeBackendRow "github" (firstParty "github" // { credential = null; })))
+    ) "a first-party row must name its credential";
+    # A third-party row with no knob of the derived env still evaluates; the
+    # credential then has no doctor-visible knob.
+    assert assertMsg (builds (probe {
+      knobs = removeAttrs probeKnobs [ "probeToken" ];
+    })) "a third-party row with no credential knob must evaluate";
+    # Another Connector's knob already carries the derived variable: the host
+    # would hand that knob's value to this row's routes.
+    assert assertMsg (
+      !(builds (consumerWith [
+        {
+          spindrift.connectors.acme.knobs.acmeWidget = secretKnob // {
+            env = "WIDGET_TOKEN";
+          };
+          spindrift.connectors.widget.backend = probeBackend;
+        }
+      ]))
+    ) "a derived credential variable that is another Connector's knob must fail evaluation";
+    assert assertMsg (builds (consumerWith [
+      {
+        spindrift.connectors.acme.knobs.acmeWidget = secretKnob // {
+          env = "OTHER_WIDGET_TOKEN";
+        };
+        spindrift.connectors.widget.backend = probeBackend;
+      }
+    ])) "control: a distinct knob env on another Connector must evaluate";
     # A row may name its own backend's core token (issue #7498). `probe` is
     # no core backend, so a core knob stays refused there above.
     assert assertMsg (builds (
@@ -678,17 +1077,19 @@ in
       }))
     ) "a credential knob that is not secret must fail evaluation";
     assert assertMsg (
-      !(builds (probe {
-        knobs.probeToken = secretKnob // {
-          env = "GH_TOKEN";
-        };
-      }))
-    ) "a credential knob aliasing a core env var must fail evaluation";
+      !(builds (probeBackendRow "gh" probeBackend))
+    ) "a third-party row whose derived credential variable is a core env var must fail evaluation";
     assert assertMsg (
-      !(builds (probe {
-        knobs.probeToken = removeAttrs secretKnob [ "env" ];
-      }))
-    ) "a credential knob without an env var must fail evaluation";
+      names.backendKnobError {
+        backends = coreBackends;
+        name = "probe";
+        field = "credential";
+        secret = true;
+        key = "probeToken";
+        ownKnob = removeAttrs secretKnob [ "env" ];
+        coreEntry = null;
+      } == "Connector 'probe': backend credential 'probeToken' has no `env`"
+    ) "a credential knob without an env var must be refused";
     assert assertMsg (
       !(builds (probe {
         backend = probeBackend // {
@@ -696,11 +1097,6 @@ in
         };
       }))
     ) "a blanket-root route must fail evaluation";
-    assert assertMsg (
-      !(builds (probe {
-        backend = removeAttrs probeBackend [ "credential" ];
-      }))
-    ) "a backend row without a credential must fail evaluation";
     assert assertMsg (
       !(builds (probe {
         backend = removeAttrs probeBackend [ "module" ];
@@ -798,6 +1194,12 @@ in
             baseEnv: "PROBE_BASE_URL",
             acceptedRoutes: []
           }]' "$doc"
+        ${fixtures.runInputDocOf (
+          programOf (probe {
+            knobs = removeAttrs probeKnobs [ "probeToken" ];
+          })
+        )}
+        jq -e '.backends[0] | .credentialEnv == "PROBE_TOKEN" and (has("credentialKnob") | not)' "$doc"
         touch $out
       '';
 
@@ -886,7 +1288,6 @@ in
           backend = {
             module = p: "${fixtures.connectorWasm}/network.wasm";
             routes = [ goodRoute ];
-            credential = "probeToken";
           };
         };
       };

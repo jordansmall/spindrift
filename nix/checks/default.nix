@@ -392,6 +392,8 @@ let
     "connector-checks-any-name:templates/connector-driver" =
       "builds and golden-diffs the scaffold; its text is matched by ci-comment-readers";
     "connector-checks-parity:connectors" = "imports each Connector's flake.nix, never reads its text";
+    "connector-backend-rows:connectors" =
+      "imports each batteries Connector's default.nix to compare its wasm, never reads its text";
     "dashboard-js:dashboard" = "a fileset root over the JS tree only";
     "default:." = "the coverage guards' path probes";
     "default:cmd/launcher" = "launcherGoModules' vendor source";

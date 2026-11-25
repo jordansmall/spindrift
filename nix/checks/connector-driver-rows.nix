@@ -695,7 +695,6 @@ in
                 path = "/api";
               }
             ];
-            credential = "nativelessToken";
           };
         }
         // pkgs.lib.optionalAttrs primary { primary = true; };

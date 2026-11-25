@@ -121,10 +121,11 @@
   driverRows ? { },
   # Backend rows network Connectors declare (lib/flakeModule.nix's
   # spindrift.connectors.<name>.backend), keyed by Connector name, each
-  # `{ module = pkgs: <wasm file path>; routes = [ { method; host; path; } ];
-  # credentialEnv = "<env var>"; }`, plus optional `credentialScheme`
-  # ("bearer" or "basic"), `identityEnv` (Basic identity) and `baseEnv` (the
-  # site base URL a `{base}` route host resolves from). They reach the host
+  # `{ module = pkgs: <wasm file path>; routes = [ { method; host; path; } ]; }`,
+  # plus optional `credentialScheme` ("bearer" or "basic"), `identityEnv`
+  # (Basic identity) and `baseEnv` (the site base URL a `{base}` route host
+  # resolves from). `credentialEnv = "<env var>"` is a first-party row's only
+  # (see `derivedCredentialEnv` in lib/connector-names.nix). They reach the host
   # through the input document's `backends` section (ADR 0073, issue #6805).
   backendRows ? { },
   # Prompt fragment files Connectors contribute (lib/flakeModule.nix's
@@ -539,18 +540,40 @@ let
   # renders it iff the row's module is the one the batteries flake itself
   # builds under that name. Overriding `module` or renaming a batteries row
   # yields no mark, and no row may set the attribute.
+  batteriesConnectors = map (dir: (import dir).lib.connector { core = import ../core; }) (
+    import ../nix/connector-dirs.nix
+  );
   batteriesRows = lib.listToAttrs (
     lib.concatMap (
-      dir:
+      c:
       let
-        row = connectorData.driverRowOf lib ((import dir).lib.connector { core = import ../core; });
+        row = connectorData.driverRowOf lib c;
       in
       lib.optional (row != null) (lib.nameValuePair row.name row)
-    ) (import ../nix/connector-dirs.nix)
+    ) batteriesConnectors
   );
   wasmOf = p: r: builtins.unsafeDiscardStringContext (r.module p);
-  isBatteriesBuild =
-    p: r: batteriesRows ? ${r.name} && wasmOf p r == wasmOf p batteriesRows.${r.name};
+  sameWasmAs =
+    p: rows: name: r:
+    rows ? ${name} && wasmOf p r == wasmOf p rows.${name};
+  isBatteriesBuild = p: r: sameWasmAs p batteriesRows r.name r;
+
+  # The same derived mark for backend rows: a row is first-party when its
+  # module is the batteries Connector of that name, never by its name alone.
+  batteriesBackendRows = lib.listToAttrs (
+    lib.concatMap (
+      c:
+      let
+        rows = connectorData.rowsOf { inherit lib; } c;
+      in
+      lib.concatMap (
+        n: lib.optional ((rows.${n}.backend or null) != null) (lib.nameValuePair n rows.${n}.backend)
+      ) (lib.attrNames rows)
+    ) batteriesConnectors
+  );
+  backendFirstParty = lib.mapAttrs (
+    name: r: builtins.isFunction (r.module or null) && sameWasmAs pkgs batteriesBackendRows name r
+  ) backendRows;
 
   # Driver rows a Connector declares (ADR 0073), checked as the core entries
   # are. The Go fallback reads the generated Descriptors and the generated
@@ -693,17 +716,64 @@ let
         throw "mkHarness: the accepted baseline (spindrift-connector-routes.json) is invalid:\n${lib.concatStringsSep "\n" ps}";
   isNonEmptyStr = v: builtins.isString v && v != "";
   connectorNames = import ./connector-names.nix;
+  coreEnvs = lib.listToAttrs (
+    lib.concatMap (
+      k: lib.optional ((schema.${k}.env or null) != null) (lib.nameValuePair schema.${k}.env k)
+    ) (lib.attrNames schema)
+  );
+  # The variable a row's credential resolves to, first-party or derived.
+  credentialEnvOf =
+    name: r:
+    if backendFirstParty.${name} && builtins.isString (r.credentialEnv or null) then
+      r.credentialEnv
+    else
+      connectorNames.derivedCredentialEnv name;
+  otherBackendEnvs =
+    name:
+    lib.concatMap (
+      other:
+      let
+        r = backendRows.${other};
+      in
+      [
+        {
+          row = other;
+          field = "credentialEnv";
+          env = credentialEnvOf other r;
+        }
+      ]
+      ++
+        lib.concatMap
+          (
+            field:
+            lib.optional (builtins.isString (r.${field} or null)) {
+              row = other;
+              inherit field;
+              env = r.${field};
+            }
+          )
+          [
+            "identityEnv"
+            "baseEnv"
+            "gitRemoteEnv"
+          ]
+    ) (lib.filter (n: n != name) (lib.attrNames backendRows));
   checkBackendRow =
     name: row:
     let
       scheme = row.credentialScheme or "bearer";
+      credentialErr = connectorNames.backendCredentialError {
+        inherit name row coreEnvs;
+        firstParty = backendFirstParty.${name};
+        otherEnvs = otherBackendEnvs name;
+      };
     in
     if lib.elem name coreBackendNames then
       throw "mkHarness: backendRows.${name} is a built-in backend and cannot be replaced by a Connector row"
     else if !(builtins.isFunction (row.module or null)) then
       throw "mkHarness: backendRows.${name} must carry `module`, a function of pkgs returning the Connector's wasm path"
-    else if !(builtins.isString (row.credentialEnv or null) && row.credentialEnv != "") then
-      throw "mkHarness: backendRows.${name} must carry a non-empty string `credentialEnv`"
+    else if credentialErr != null then
+      throw credentialErr
     else if
       !(lib.elem scheme [
         "bearer"
@@ -743,6 +813,9 @@ let
       row
       // {
         routes = (import ./connector-routes.nix).check name (row.routes or null);
+      }
+      // lib.optionalAttrs (!backendFirstParty.${name}) {
+        credentialEnv = connectorNames.derivedCredentialEnv name;
       }
       // lib.optionalAttrs (row ? acceptedRoutes) {
         acceptedRoutes = checkAcceptedRoutes name row.acceptedRoutes;
@@ -1994,6 +2067,7 @@ else
         agentPathsPreambleFile
         runInputDocumentFile
         backendBundleDirs
+        backendFirstParty
         ;
       driverExecBin = imageDriver.driverExecBin;
       orchestratorBin = imageDriver.orchestratorBin;

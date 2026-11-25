@@ -34,7 +34,6 @@ let
     name = "datafixture";
     module = _: wasm;
     inherit routes;
-    credential = "dataFixtureToken";
     knobs = {
       dataFixtureToken = knob "DATAFIXTURE_TOKEN" true;
       dataFixtureGreeting = (knob "DATAFIXTURE_GREETING" false) // {
@@ -70,7 +69,6 @@ let
       backend = {
         module = _: wasm;
         inherit routes;
-        credential = "dataFixtureToken";
       };
     };
   };
@@ -201,7 +199,6 @@ let
       says = [
         "datafixture"
         "'routes'"
-        "'credential'"
         "'module'"
       ];
     }
@@ -210,13 +207,6 @@ let
       says = [
         "datafixture"
         "'routes'"
-      ];
-    }
-    {
-      data = removeAttrs good [ "credential" ];
-      says = [
-        "datafixture"
-        "'credential'"
       ];
     }
   ];
@@ -266,7 +256,6 @@ let
       };
       module = _: wasm;
       inherit routes;
-      credential = "coreDerivedToken";
       driver =
         lib:
         (core.lib.driverEntries { inherit lib; }).opencode
@@ -335,8 +324,11 @@ in
       row.routes == routes && row.backend.routes == routes
     ) "a data Connector's routes must reach the row and its backend";
     assert assertMsg (
-      row.backend.credential == "dataFixtureToken" && row.backend.scheme == "bearer"
-    ) "a data Connector's backend must carry its credential and default to bearer";
+      row.backend.credential == null && row.backend.scheme == "bearer"
+    ) "a data Connector's backend must name no credential and default to bearer";
+    assert assertMsg (
+      connectorData.problem (good // { credential = "dataFixtureToken"; }) == null
+    ) "data may still name a credential, for a first-party row";
     assert assertMsg (
       (configOf viaData).envSchema.dataFixtureToken.env == "DATAFIXTURE_TOKEN"
       && (configOf viaData).envSchema.dataFixtureGreeting.default == "hello"
@@ -350,6 +342,7 @@ in
         ${fixtures.runInputDocOf (programOf viaData)}
         jq -e '[.backends[] | select(.name == "datafixture")] | length == 1
           and (.[0].credentialEnv == "DATAFIXTURE_TOKEN")
+          and (.[0].credentialKnob == "dataFixtureToken")
           and (.[0].routes == [{method: "GET", host: "api.datafixture.test", path: "/repos"}])
           and (.[0].module | endswith("/network.wasm"))' "$doc"
         jq -e '[.drivers[].name] | index("datafixture") != null' "$doc"
