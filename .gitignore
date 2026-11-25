@@ -23,7 +23,13 @@ ab-results/
 # OS
 .DS_Store
 
-# go build output in the launcher and Dashboard modules
+# go build output in the launcher, Dashboard and Connector modules
+/connectors/claude/claude
+/connectors/forgejo/forgejo
+/connectors/github/github
+/connectors/jira/jira
+/connectors/opencode/opencode
+/connectors/pi/pi
 /cmd/launcher/launcher
 /cmd/launcher/daemon/daemon
 /dashboard/dashboard
