@@ -520,7 +520,7 @@ withRowKnobs {
     secret = true;
     hostConfig = true;
     placeholder = "fake-token";
-    doc = "fine-grained PAT scoped to the target repo — Contents/PR/Issues/Metadata RW; required unless CODE_FORGE is local or forgejo, and ISSUE_TRACKER is not github";
+    doc = "fine-grained PAT scoped to the target repo — Contents/PR/Issues/Metadata RW; required when CODE_FORGE or ISSUE_TRACKER is github";
     boxEnv = false;
   };
   ghTokenRefreshFile = {
