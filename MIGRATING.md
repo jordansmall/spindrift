@@ -501,12 +501,16 @@ What changed for a Consumer:
   directory (`SPINDRIFT_PROMPT_DIR`), so an override of one of the nine files
   no longer takes effect, and nothing reports it. Fork the Connector's
   fragment directory to change one of these steps, declaring only the files
-  you change, and register the fork as `spindrift.connectors.forgejo.fragments`
-  (with `lib.mkForce` if you import the forgejo Connector's module, which sets
-  it): each `<folder>/<fragment>` path it declares replaces the batteries
-  file, and mkHarness still ships the rest. A fork registered under another
-  name works only when the module is not imported; with it, both entries
-  declare the path and evaluation fails.
+  you change, and register the forgejo Connector's data with the fork as its
+  `fragments`: `forgejoData // { fragments = { name = "forgejo"; dir = ./fork;
+  shipped."fix-ci-read.md" = [ "forgejo" ]; }; }` in `spindrift.connectorData`.
+  Each `<folder>/<fragment>` path the fork declares replaces the batteries
+  file, and mkHarness still ships the rest. The batteries root module already
+  registers forgejo, so import `core.flakeModules.default` instead and register
+  github and your forked forgejo data beside it. A `lib.mkForce` of
+  `spindrift.connectors.forgejo.fragments`, or a second forgejo entry in
+  `spindrift.connectorData` beside the batteries one, fails evaluation: a row
+  is built from its data alone, and a name has one definer.
 
 ## The github Connector is the default for every Consumer (issue #7139)
 

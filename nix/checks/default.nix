@@ -121,7 +121,12 @@ let
     // (import ./promptassembly.nix common)
     // (import ./prompt-assembly-golden-coverage.nix common)
     // (import ./in-box-forge-cli-allowlist.nix common)
-    // (import ./fragment-paths.nix common)
+    // (import ./fragment-paths.nix (
+      common
+      // {
+        inherit rootFlakeModule githubConnectorData forgejoConnectorData;
+      }
+    ))
     // (import ./baked-skills.nix common)
     // (import ./seccomp.nix common)
     // (import ./adr-numbers.nix common)

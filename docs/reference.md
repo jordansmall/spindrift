@@ -2315,9 +2315,9 @@ mean at runtime is issue #6751. The worked example is the fixture Connector in
   A Connector that compiles to wasm also exports `package`, a function of the
   caller's `pkgs` returning the build (`connectors/claude` returns
   `$out/claude.wasm`). A Connector that ships prompt fragment files also
-  exports `fragments`, the `{ name; dir; shipped }` contribution its module
-  sets as `spindrift.connectors.<name>.fragments` (`connectors/jira`,
-  `connectors/forgejo`).
+  exports `fragments`, the `{ name; dir; shipped }` contribution its data
+  carries as `fragments`, which becomes `spindrift.connectors.<name>.fragments`
+  (`connectors/jira`, `connectors/forgejo`).
 - **Module.** `module.nix` is a flake-parts module. It imports
   `core.flakeModules.default` (the module system dedups by path, so a Consumer
   that imports the same core is unaffected) and registers its data in

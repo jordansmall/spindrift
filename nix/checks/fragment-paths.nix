@@ -7,6 +7,10 @@
   pkgs,
   nixpkgs,
   system,
+  fixtures,
+  rootFlakeModule,
+  githubConnectorData,
+  forgejoConnectorData,
   ...
 }:
 let
@@ -15,7 +19,10 @@ let
     filter
     hasInfix
     hasSuffix
+    mapAttrsToList
+    mkForce
     ;
+  names = import ../../lib/connector-names.nix;
 
   fragmentPaths = import ../../lib/fragment-paths.nix;
   shippedDir = ../../templates/default/prompts/fragments;
@@ -136,6 +143,27 @@ let
       };
       packages = p: [ p.hello ];
     };
+
+  # A flake-level Consumer's fragment contributions, mapped as
+  # lib/flakeModule.nix's `connectorFragments` does: flake outputs expose no
+  # promptDir, so the harness is rebuilt from the debug config.
+  coreModule = ../../lib/flakeModule.nix;
+  fragmentsOf =
+    modules:
+    filter (f: f != null) (
+      mapAttrsToList (_: r: r.fragments)
+        (fixtures.connectorConsumerVia modules).debug.config.spindrift.connectors
+    );
+  forgejoFork = {
+    name = "forgejo";
+    dir = forkDir;
+    shipped."fix-ci-read.md" = [ "forgejo" ];
+  };
+  forkData = forgejoConnectorData // {
+    fragments = forgejoFork;
+  };
+  evalFails = v: !(builtins.tryEval (builtins.deepSeq v true)).success;
+  hasAll = msg: builtins.all (s: hasInfix s msg);
 in
 {
   fragment-paths =
@@ -266,4 +294,92 @@ in
       cmp ${jiraForkDir}/jira/issue-blocked-comment-relay.md ${jiraFork.internals.promptDir}/fragments/jira/issue-blocked-comment-relay.md
       touch $out
     '';
+
+  # Issue #7293, route (a): a Consumer of the batteries root module registers
+  # forgejo as data, and its fragments ship the Connector's folder unchanged.
+  fragment-paths-forgejo-batteries =
+    let
+      harness = harnessWith (fragmentsOf [ rootFlakeModule ]);
+    in
+    pkgs.runCommand "fragment-paths-forgejo-batteries" { } ''
+      diff -r ${../../connectors/forgejo/fragments/forgejo} ${harness.internals.promptDir}/fragments/forgejo
+      touch $out
+    '';
+
+  # Issue #7293, route (b): a Consumer of core alone forks forgejo's fragments
+  # by registering its data with a `fragments` of its own; the fork's file
+  # replaces the Connector's at its path and the rest still ship.
+  fragment-paths-forgejo-fork-data =
+    let
+      contributions = fragmentsOf [
+        coreModule
+        {
+          spindrift.connectorData = [
+            githubConnectorData
+            forkData
+          ];
+        }
+      ];
+      harness = harnessWith contributions;
+      dir = "${harness.internals.promptDir}/fragments/forgejo";
+    in
+    assert assertMsg (
+      builtins.length contributions == 1
+    ) "fragment-paths: the fork's data must register exactly one fragment contribution";
+    pkgs.runCommand "fragment-paths-forgejo-fork-data" { } ''
+      cmp ${forkDir}/forgejo/fix-ci-read.md ${dir}/fix-ci-read.md
+      for f in ${../../connectors/forgejo/fragments/forgejo}/*; do
+        b=$(basename "$f")
+        [ "$b" = fix-ci-read.md ] || cmp "$f" ${dir}/"$b"
+      done
+      touch $out
+    '';
+
+  # The module routes #7293 documented are gone: a row field is not a
+  # Consumer's to set, and the batteries root already registers forgejo.
+  fragment-paths-forgejo-fork-refused =
+    let
+      rowsOf = modules: (fixtures.connectorConsumerVia modules).debug.config.spindrift.connectors;
+      forced = [
+        rootFlakeModule
+        {
+          _file = "fork.nix";
+          spindrift.connectors.forgejo.fragments = mkForce forgejoFork;
+        }
+      ];
+      second = [
+        rootFlakeModule
+        {
+          _file = "fork.nix";
+          spindrift.connectorData = [ forkData ];
+        }
+      ];
+      forcedMessage = names.rowOutsideDataError "forgejo" "fork.nix" [ "fragments" ];
+      secondMessage = names.duplicateError "forgejo" [
+        { file = rootFlakeModule._file; }
+        { file = "fork.nix"; }
+      ];
+    in
+    assert assertMsg (
+      !(evalFails (rowsOf [ rootFlakeModule ]))
+    ) "control: the batteries root alone must evaluate";
+    assert assertMsg (evalFails (rowsOf forced))
+      "fragment-paths: mkForce on spindrift.connectors.forgejo.fragments beside the batteries module must fail evaluation";
+    assert assertMsg (hasAll forcedMessage [
+      "Connector 'forgejo'"
+      "fork.nix"
+      "'fragments'"
+      "spindrift.connectorData"
+    ]) "fragment-paths: the row refusal must name the Connector, file and key; got ${forcedMessage}";
+    assert assertMsg (evalFails (
+      rowsOf second
+    )) "fragment-paths: a second forgejo data entry beside the batteries one must fail evaluation";
+    assert assertMsg
+      (hasAll secondMessage [
+        "Connector 'forgejo'"
+        "registered twice"
+        "fork.nix"
+      ])
+      "fragment-paths: the duplicate refusal must name the Connector and both files; got ${secondMessage}";
+    pkgs.runCommand "fragment-paths-forgejo-fork-refused" { } "touch $out";
 }
