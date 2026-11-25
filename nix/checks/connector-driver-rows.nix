@@ -597,7 +597,7 @@ in
           | .credentialKnob == "ghToken"
             and (has("primary") | not) and (has("shadow") | not)
             and (.routes | length) > 0
-            and .acceptedRoutes == $b[0].github)' "$doc"
+            and .acceptedRoutes == ($b[0].github | if type == "array" then . else .routes // [] end))' "$doc"
         touch $out
       '';
 
