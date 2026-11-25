@@ -92,7 +92,7 @@ const sandboxHost = "/nix/store/x-connector-host"
 
 func bwrapSandboxArgv(drop ...string) []string {
 	args := []string{"--unshare-all", "--clearenv", "--cap-drop", "ALL", "--new-session", "--die-with-parent",
-		"--proc", "/proc", "--dev", "/dev", "--ro-bind", sandboxHost, sandboxHost, "--seccomp", "3", "--", sandboxHost + "/bin/connector-host"}
+		"--proc", "/proc", "--dev", "/dev", "--ro-bind", sandboxHost, sandboxHost, "--remount-ro", "/", "--seccomp", "3", "--", sandboxHost + "/bin/connector-host"}
 	return slices.DeleteFunc(args, func(a string) bool { return slices.Contains(drop, a) })
 }
 

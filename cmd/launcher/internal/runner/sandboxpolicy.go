@@ -63,7 +63,7 @@ func SandboxViolations(argv []string) []string {
 var bwrapSandboxRequired = [][]string{
 	{"--unshare-all"}, {"--clearenv"}, {"--cap-drop", "ALL"}, {"--new-session"},
 	{"--die-with-parent"}, {"--proc", "/proc"}, {"--dev", "/dev"},
-	{"--seccomp", "3"},
+	{"--remount-ro", "/"}, {"--seccomp", "3"},
 }
 
 // bwrapSandboxForbidden are the flags that would widen the sandbox past the one
@@ -73,7 +73,7 @@ var bwrapSandboxForbidden = []string{
 	"--bind-fd", "--ro-bind-fd", "--file", "--bind-data", "--ro-bind-data",
 	"--overlay", "--overlay-src", "--ro-overlay", "--tmp-overlay",
 	"--setenv", "--share-net", "--cap-add", "--userns", "--userns2", "--pidns",
-	"--args",
+	"--args", "--tmpfs", "--dir",
 }
 
 // BwrapSandboxViolations lists how a bwrap argv for a Connector sandbox departs
