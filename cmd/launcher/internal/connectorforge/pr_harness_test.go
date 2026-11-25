@@ -3,11 +3,9 @@ package connectorforge_test
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -339,29 +337,11 @@ func TestSeedMirrorClonesTheRepoBareWithCoresCredential(t *testing.T) {
 	}
 }
 
-// pointGitAtMissingRepo repoints the harness's insteadOf rewrite at a repo that
-// does not exist, so the next clone fails.
-func pointGitAtMissingRepo(t *testing.T) {
-	t.Helper()
-	n, err := strconv.Atoi(os.Getenv("GIT_CONFIG_COUNT"))
-	if err != nil {
-		t.Fatalf("GIT_CONFIG_COUNT: %v", err)
-	}
-	for i := 0; i < n; i++ {
-		key := fmt.Sprintf("GIT_CONFIG_KEY_%d", i)
-		if strings.HasSuffix(os.Getenv(key), ".insteadOf") {
-			t.Setenv(key, "url."+filepath.Join(t.TempDir(), "missing.git")+".insteadOf")
-			return
-		}
-	}
-	t.Fatal("harness set no insteadOf rewrite")
-}
-
 func TestRelayCloneFailureNamesGitsCauseWithoutTheCredential(t *testing.T) {
 	h := connectorforgetest.NewHostMediation(t)
 	const ref = "agent/issue-9003"
 	outbox := h.SeedBundle(ref)
-	pointGitAtMissingRepo(t)
+	h.PointGitAt(filepath.Join(t.TempDir(), "missing.git"))
 	_, err := h.Capabilities().BundleCommitSubjects.CommitSubjects(outbox, "main", ref)
 	if err == nil {
 		t.Fatal("CommitSubjects against a missing repo succeeded")
@@ -376,7 +356,7 @@ func TestRelayCloneFailureNamesGitsCauseWithoutTheCredential(t *testing.T) {
 
 func TestSeedMirrorFailureNamesGitsCauseWithoutTheCredential(t *testing.T) {
 	h := connectorforgetest.NewHostMediation(t)
-	pointGitAtMissingRepo(t)
+	h.PointGitAt(filepath.Join(t.TempDir(), "missing.git"))
 	err := h.Capabilities().MirrorSeeder.SeedMirror(filepath.Join(t.TempDir(), "mirror"))
 	if err == nil {
 		t.Fatal("SeedMirror against a missing repo succeeded")

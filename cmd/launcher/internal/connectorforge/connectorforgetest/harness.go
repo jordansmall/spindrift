@@ -332,6 +332,7 @@ type base struct {
 	Note func(method string, err error)
 
 	connector Connector
+	cloneURL  string // the https URL git rewrites to Repo; empty under WithGitOverHTTPS
 	eng       Engine
 	target    connectorforge.Target
 	mu        sync.Mutex
@@ -355,10 +356,7 @@ func newBase(t *testing.T, eng Engine, c Connector, opts ...Option) *base {
 	for _, opt := range opts {
 		opt(&o)
 	}
-	t.Setenv("GIT_AUTHOR_NAME", "Test Bot")
-	t.Setenv("GIT_AUTHOR_EMAIL", "bot@example.com")
-	t.Setenv("GIT_COMMITTER_NAME", "Test Bot")
-	t.Setenv("GIT_COMMITTER_EMAIL", "bot@example.com")
+	useGitEnv(t)
 
 	repo := forgetest.NewGitRepoFixture(t, "main")
 	s := load(t, eng, repo.Bare, c, o.tokenEnv)
@@ -380,11 +378,8 @@ func newBase(t *testing.T, eng Engine, c Connector, opts ...Option) *base {
 		s.backend.gitHandler = g
 		s.backend.mu.Unlock()
 	} else {
-		// Production code is https-only, so git is pointed at the bare repo through
-		// the environment: no config file, and Credential.Apply extends the count.
-		t.Setenv("GIT_CONFIG_COUNT", "1")
-		t.Setenv("GIT_CONFIG_KEY_0", "url."+repo.Bare+".insteadOf")
-		t.Setenv("GIT_CONFIG_VALUE_0", "https://"+s.backend.Host+o.webPath+"/"+Repo+".git")
+		h.cloneURL = "https://" + s.backend.Host + o.webPath + "/" + Repo + ".git"
+		setGitRewrite(t, h.cloneURL, repo.Bare)
 	}
 
 	cf, caps, err := h.Compose()
@@ -393,6 +388,16 @@ func newBase(t *testing.T, eng Engine, c Connector, opts ...Option) *base {
 	}
 	h.cf, h.caps = cf, caps
 	return h
+}
+
+// PointGitAt repoints the harness's clone URL at the git repo at path, so a
+// clone fails when path does not exist.
+func (h *base) PointGitAt(path string) {
+	h.t.Helper()
+	if h.cloneURL == "" {
+		h.t.Fatal("harness set no insteadOf rewrite")
+	}
+	setGitRewrite(h.t, h.cloneURL, path)
 }
 
 // GitRequest is one git request the backend received over smart HTTP.
