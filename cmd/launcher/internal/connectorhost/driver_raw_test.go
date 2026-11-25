@@ -97,6 +97,7 @@ func veryLongLine() string {
 // host refuses it: it is never split, never sent, and its neighbours still
 // decode. The JSON path has no such limit, which proves the raw path is taken.
 func TestDriverRawRefusesBareNewline(t *testing.T) {
+	t.Parallel()
 	c, err := load(t, "driver.wasm")
 	if err != nil {
 		t.Fatal(err)
@@ -130,6 +131,7 @@ func TestDriverRawRefusesBareNewline(t *testing.T) {
 // A line too large for any request is sent alone and refused by the host, so it
 // is unparsed while its neighbours, in requests of their own, decode.
 func TestDriverRawRefusesOversizedLine(t *testing.T) {
+	t.Parallel()
 	c, err := load(t, "driver.wasm")
 	if err != nil {
 		t.Fatal(err)
@@ -169,6 +171,7 @@ func TestDriverRawFailsClosedWhenConnectorClosed(t *testing.T) {
 // The raw path runs through the sandboxed host's stdio link as it does in
 // process.
 func TestDriverRawMatchesJSONOnEveryEngine(t *testing.T) {
+	t.Parallel()
 	for name, ld := range loadersFor(t) {
 		t.Run(name, func(t *testing.T) {
 			c, err := loadUsing(t, ld, "driver.wasm")

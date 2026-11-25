@@ -77,6 +77,7 @@ func TestSessionsTwoConnectorsShareOneHost(t *testing.T) {
 }
 
 func TestSessionsAbortInOneConnectorLeavesTheOtherWorking(t *testing.T) {
+	t.Parallel()
 	s := sessionsHost(t)
 	bad, err := s.Load(context.Background(), fixture(t, "hostile-loop.wasm"))
 	if err != nil {
@@ -296,6 +297,7 @@ func TestServeSessionsRefusesTheReservedSession(t *testing.T) {
 
 // Two Connectors in one real connector-host process.
 func TestSessionsOverTheHostBinary(t *testing.T) {
+	t.Parallel()
 	cmd := fixturebuild.ConnectorHostCmd(t)
 	in, err := cmd.StdinPipe()
 	if err != nil {
@@ -396,6 +398,7 @@ func TestSessionsStatsCountHostCalls(t *testing.T) {
 // A Connector killed by a fatal call must not cost the host: its session is
 // released and the same Sessions loads a replacement that answers calls.
 func TestSessionsFatalCallReleasesTheSessionAndStillLoadsAReplacement(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		fixture string
 		want    error

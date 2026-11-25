@@ -602,6 +602,7 @@ func slowCloseClient(t *testing.T, b *backend) *http.Client {
 }
 
 func TestNetworkFollowRedirectHopIsCutBeforeTheCallersDeadline(t *testing.T) {
+	t.Parallel()
 	// The hop's body never ends on its own; the handler holds it open until the
 	// hop's context is cut, so the test waits no longer than the cut itself.
 	target := newBackend(t, func(w http.ResponseWriter, r *http.Request) {
@@ -777,6 +778,7 @@ func TestNetworkRequestTimeoutLeavesACallersCancellationAlone(t *testing.T) {
 // quotes the whole hop URL, and a signed redirect target carries its secret in
 // the query.
 func TestNetworkFollowRedirectHopFailureNamesOnlyTheHopHost(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct {
 		handler func(w http.ResponseWriter, r *http.Request)
 		timeout time.Duration

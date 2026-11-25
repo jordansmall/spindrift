@@ -12,6 +12,7 @@ import (
 // Every request batchEnd packs must fit under maxRequest, or the host would
 // refuse the very batches it builds; a line over the cap alone goes alone.
 func TestBatchEndPacksRequestsUnderMaxRequest(t *testing.T) {
+	t.Parallel()
 	empty, err := encodeRequest(decodeBatchMethod, map[string]any{"decoder": uint32(math.MaxUint32), "lines": []string{}})
 	if err != nil {
 		t.Fatal(err)

@@ -18,6 +18,7 @@ import (
 )
 
 func TestDriverStreamFilterIsAdvertisedOnlyWithTheCapability(t *testing.T) {
+	t.Parallel()
 	if strategy(t, "driver.wasm").NewStreamFilter == nil {
 		t.Error("driver.wasm: NewStreamFilter is nil")
 	}
@@ -57,6 +58,7 @@ func filterOut(t *testing.T, s driverkit.Strategy, chunks ...string) string {
 }
 
 func TestDriverStreamFilterDropsFinishedDeltasAndFlushesOpenOnes(t *testing.T) {
+	t.Parallel()
 	s := strategy(t, "driver.wasm")
 	for _, tc := range []struct{ in, want string }{
 		{"a\ndelta 1\ndelta 2\ndone\nb\n", "a\ndone\nb\n"},
@@ -71,6 +73,7 @@ func TestDriverStreamFilterDropsFinishedDeltasAndFlushesOpenOnes(t *testing.T) {
 }
 
 func TestDriverStreamFilterHoldsPartialLinesAcrossWrites(t *testing.T) {
+	t.Parallel()
 	s := strategy(t, "driver.wasm")
 	var buf bytes.Buffer
 	f := s.NewStreamFilter(&buf)
@@ -85,6 +88,7 @@ func TestDriverStreamFilterHoldsPartialLinesAcrossWrites(t *testing.T) {
 }
 
 func TestDriverStreamFilterChunkingDoesNotChangeTheOutput(t *testing.T) {
+	t.Parallel()
 	s := strategy(t, "driver.wasm")
 	in := "a\ndelta 1\n\xff\ndone\ndelta 2\nlast"
 	var bytewise []string
@@ -98,6 +102,7 @@ func TestDriverStreamFilterChunkingDoesNotChangeTheOutput(t *testing.T) {
 }
 
 func TestDriverStreamFilterFlushIsIdempotent(t *testing.T) {
+	t.Parallel()
 	s := strategy(t, "driver.wasm")
 	var buf bytes.Buffer
 	f := s.NewStreamFilter(&buf)
@@ -115,6 +120,7 @@ func TestDriverStreamFilterFlushIsIdempotent(t *testing.T) {
 }
 
 func TestDriverStreamFilterKeepsStatePerInstance(t *testing.T) {
+	t.Parallel()
 	s := strategy(t, "driver.wasm")
 	var a, b bytes.Buffer
 	fa, fb := s.NewStreamFilter(&a), s.NewStreamFilter(&b)
@@ -144,6 +150,7 @@ func TestDriverStreamFilterSplitsAWriteOverThePieceCap(t *testing.T) {
 }
 
 func TestDriverStreamFilterFailsClosedOnATrap(t *testing.T) {
+	t.Parallel()
 	s := strategy(t, "driver.wasm")
 	var buf bytes.Buffer
 	f := s.NewStreamFilter(&buf)
@@ -191,6 +198,7 @@ func (g *gateWriter) String() string {
 // driver-exec flushes from its SIGTERM goroutine while Write is mid-stream:
 // Flush must wait for the Write, so the held lines follow its output.
 func TestDriverStreamFilterFlushWaitsForAnInFlightWrite(t *testing.T) {
+	t.Parallel()
 	s := strategy(t, "driver.wasm")
 	g := &gateWriter{entered: make(chan struct{}), release: make(chan struct{})}
 	f := s.NewStreamFilter(g)
@@ -217,6 +225,7 @@ func TestDriverStreamFilterFlushWaitsForAnInFlightWrite(t *testing.T) {
 // The flood is compiled because under the interpreter writing it takes most of
 // the 5 s call budget, so a loaded machine fails it on time, not on output.
 func TestDriverStreamFilterFailsClosedOnOversizedOutput(t *testing.T) {
+	t.Parallel()
 	c, err := connectorhost.LoadCompiled(context.Background(), fixture(t, "driver.wasm"), sharedCache)
 	if err != nil {
 		t.Fatal(err)
@@ -309,6 +318,7 @@ func TestDriverStreamFilterBornFailedWhenTheConnectorIsClosed(t *testing.T) {
 // raw stdout fixtures through the fixture Driver's Connector filter, whole and
 // in every chunking, flush included.
 func TestFixtureDriverPassesTheConformanceStreamFilterCheck(t *testing.T) {
+	t.Parallel()
 	conformance.RunStreamFilter(t, strategy(t, "driver.wasm"), filepath.Join("testdata", "streamfilter"))
 }
 

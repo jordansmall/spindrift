@@ -41,6 +41,7 @@ func TestProductionCallBudgetIsFiveSeconds(t *testing.T) {
 // legally reads (logscan takes up to 4 MiB) must not trip the base call budget
 // and close the Connector under every later line.
 func TestDriverDecodesALargeLineWithoutWedging(t *testing.T) {
+	t.Parallel()
 	s := strategy(t, "driver.wasm")
 	d := s.NewDecoder()
 	line := strings.Repeat("a", 2<<20)
@@ -131,6 +132,7 @@ func TestDriverDecodesALongRunWithoutExhaustingMemory(t *testing.T) {
 // correct decode of such a line answers with about 6 times the line, past the
 // base cap. The host sends the line raw, so the request stays near 1.5 MiB.
 func TestDriverDecodeOutputMayExceedTheBaseCap(t *testing.T) {
+	t.Parallel()
 	c, err := connectorhost.LoadCompiled(context.Background(), fixture(t, "driver.wasm"), sharedCache)
 	if err != nil {
 		t.Fatal(err)

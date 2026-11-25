@@ -176,6 +176,7 @@ func TestRemoteHostCloseIsCleanAndIdempotent(t *testing.T) {
 }
 
 func TestRemoteNetworkRequestsCrossBackWithoutTheCredential(t *testing.T) {
+	t.Parallel()
 	var sent bytes.Buffer
 	c, b, audit, params := loadNetworkFixtureVia(t, remoteNetLoader(&sent), "network.wasm", func(*connectorhost.Network) {})
 	var out fetched
@@ -197,6 +198,7 @@ func TestRemoteNetworkRequestsCrossBackWithoutTheCredential(t *testing.T) {
 }
 
 func TestRemoteRouteRefusalComesBackAuditedOnce(t *testing.T) {
+	t.Parallel()
 	c, b, audit, params := loadNetworkFixtureVia(t, remoteNetLoader(nil), "network-host.wasm", func(*connectorhost.Network) {})
 	err := c.Call(context.Background(), "fetch", params, new(fetched))
 	if !errors.Is(err, connectorhost.ErrCall) || !errors.Is(err, connectorhost.ErrRouteRefused) {
@@ -214,6 +216,7 @@ func TestRemoteRouteRefusalComesBackAuditedOnce(t *testing.T) {
 }
 
 func TestRemoteOversizedWriteResponseIsAuditedOnce(t *testing.T) {
+	t.Parallel()
 	c, _, audit, params := loadNetworkFixtureVia(t, remoteNetLoader(nil), "network-write-oversize.wasm", func(n *connectorhost.Network) {
 		n.Routes = append(n.Routes, connectorhost.Route{Method: "PUT", Host: n.Routes[0].Host, Path: "/repos"})
 	})

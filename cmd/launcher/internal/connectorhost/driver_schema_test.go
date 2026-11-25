@@ -84,6 +84,7 @@ func requireExchangesConform(t *testing.T, exchanges []connectorhost.Exchange) {
 // fixture answers a host line with a forged host_op event, which the host
 // discards and the schema rightly refuses.
 func TestDriverBatchExchangesConformToTheSchema(t *testing.T) {
+	t.Parallel()
 	lines := []string{"a", " b ", "", `"q" \ <&>`, "c"}
 	for name, without := range map[string][]string{
 		"decodeRaw":   nil,
