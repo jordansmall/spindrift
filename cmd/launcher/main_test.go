@@ -5627,7 +5627,7 @@ func TestDeprecatedDocSpellings_SectionMarkersMatchLegacySettingsSection(t *test
 
 // flatShimGeneralizedMarkers generalizes bare-flat-shim detection to every
 // structural shim from lib/structural-paths.nix with no collision with a live
-// bare doc usage; flatShimDeliberateCollisions below holds the three that do.
+// bare doc usage; flatShimDeliberateCollisions below holds the ones that do.
 // canonicalPrefix is the dotted path that must precede a "<name> = " for it to
 // be canonical, and is empty where lib/structural-paths.nix renames the leaf.
 var flatShimGeneralizedMarkers = []struct {
@@ -5635,7 +5635,6 @@ var flatShimGeneralizedMarkers = []struct {
 	canonicalPrefix string
 }{
 	{"runtime", "infra."},
-	{"driver", "agents."},
 	{"prompt", "agents."},
 	{"skills", "agents."},
 	{"prefetch", "infra.image."},
@@ -5649,9 +5648,10 @@ var flatShimGeneralizedMarkers = []struct {
 // flatShimDeliberateCollisions lists flat marker names kept out of
 // flatShimGeneralizedMarkers because each still appears bare in the docs
 // today: docs/reference.md's mkHarness examples use `packages = p: [ p.go ];`,
-// `nixpkgs = inputs.nixpkgs;` and `roster = rosterLib.defaultRoster {...}`.
+// `nixpkgs = inputs.nixpkgs;` and `roster = rosterLib.defaultRoster {...}`, and
+// its Driver Connector data example sets `driver = import ./row.nix {...};`.
 // Adding one back turns the check into a false-positive generator.
-var flatShimDeliberateCollisions = []string{"packages", "roster", "nixpkgs"}
+var flatShimDeliberateCollisions = []string{"packages", "roster", "nixpkgs", "driver"}
 
 // findDeprecatedDocSpellings scans content for any deprecatedDocSpellings
 // substring, plus any occurrence anywhere (a bare spelling can appear
@@ -5831,12 +5831,12 @@ func TestFindDeprecatedDocSpellings_DetectsReintroducedSpelling(t *testing.T) {
 }
 
 // Enforces at the Go level the rule documented on flatShimDeliberateCollisions:
-// packages, roster and nixpkgs must never be added to
+// packages, roster, nixpkgs and driver must never be added to
 // flatShimGeneralizedMarkers. It pins that list's exact membership, order
 // insensitively, since shrinking it would leave the exclusion loop asserting
 // nothing, then confirms each name still appears bare in README.md or docs/.
 func TestFlatShimGeneralizedMarkers_ExcludesDeliberateCollisions(t *testing.T) {
-	wantCollisions := []string{"packages", "roster", "nixpkgs"}
+	wantCollisions := []string{"packages", "roster", "nixpkgs", "driver"}
 	gotCollisions := append([]string(nil), flatShimDeliberateCollisions...)
 	sort.Strings(gotCollisions)
 	sortedWant := append([]string(nil), wantCollisions...)
