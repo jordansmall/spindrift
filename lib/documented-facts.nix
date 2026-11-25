@@ -30,6 +30,8 @@ let
   rosterDefaults = (import ./roster-schema-defaults.nix { inherit lib; }).rosterDefaults;
   rosterNames = map (e: e.name) ((import ./roster.nix { inherit lib; }).defaultRoster { });
   bashHooks = import ./bash-hooks.nix;
+  connectorProtocol = import ./connector-protocol;
+  connectorProtocolRender = import ./connector-protocol/render.nix;
   inherit (import ./documented-fact-shape.nix) assertMarkerShape;
 in
 map assertMarkerShape [
@@ -225,5 +227,14 @@ map assertMarkerShape [
     beginMarker = "<!-- BEGIN GENERATED OPENCODE HOOK ORDER -- nix run .#regen -- DO NOT EDIT -->\n";
     endMarker = "<!-- END GENERATED OPENCODE HOOK ORDER -->";
     generated = renderers.renderOpencodeHookOrderDoc bashHooks.opencodeHooks;
+  }
+  {
+    name = "connector-admit-cases-doc";
+    docPath = "docs/reference.md";
+    blockName = "CONNECTOR ADMIT CASES";
+    sourceDesc = "lib/connector-protocol/default.nix's admitCases";
+    beginMarker = "<!-- BEGIN GENERATED CONNECTOR ADMIT CASES -- nix run .#regen -- DO NOT EDIT -->\n";
+    endMarker = "<!-- END GENERATED CONNECTOR ADMIT CASES -->";
+    generated = connectorProtocolRender.renderAdmitCasesDoc connectorProtocol;
   }
 ]
