@@ -6,8 +6,8 @@
 // axis (tracker, Code Forge or read-only forge view) or direct request for the
 // Connector asks for it. It owns, for every backend, the
 // load, the reload of a Connector that died, the cooldown after repeated load
-// failures, the failure note, and the one-time check of the capabilities the
-// backend requires.
+// failures, the failure note (unless the backend notes its own), and the
+// one-time check of the capabilities the backend requires.
 package connectorruntime
 
 import (
@@ -117,6 +117,10 @@ type SessionSpec struct {
 	// Options are the host's Client and Getenv for the load; the runtime
 	// supplies the sandbox.
 	Options backendrows.Options
+	// NotesOperations is a backend that notes each failed operation itself,
+	// under its own name, so the session notes only the reload, which the
+	// backend cannot see; its load, call and compose failures go unnoted.
+	NotesOperations bool
 }
 
 // TrackerSpec is what a tracker needs of its backend beyond the row.
@@ -137,7 +141,7 @@ func (r *Runtime) Tracker(row backendrows.Row, spec TrackerSpec) (forge.IssueTra
 	}
 	c, err := s.live()
 	if err != nil {
-		_ = connectorrecord.Note(s.record, "load the Connector", err)
+		s.note("load the Connector", err)
 		return nil, err
 	}
 	it, err := connectortracker.NewCalling(c, s.call, spec.Lifecycle, spec.Target, spec.Clock)
@@ -145,7 +149,7 @@ func (r *Runtime) Tracker(row backendrows.Row, spec TrackerSpec) (forge.IssueTra
 		// Unlike the Code Forge's compose, building the tracker can call the
 		// guest (the count interval), so a failure may mean a dead Connector.
 		s.drop(c)
-		_ = connectorrecord.Note(s.record, "compose the tracker", err)
+		s.note("compose the tracker", err)
 		return nil, err
 	}
 	return it, nil
@@ -173,7 +177,7 @@ func (r *Runtime) CodeForge(row backendrows.Row, spec ForgeSpec) (forge.CodeForg
 	}
 	c, err := s.live()
 	if err != nil {
-		_ = connectorrecord.Note(s.record, "load the Connector", err)
+		s.note("load the Connector", err)
 		return nil, err
 	}
 	// Dialect is tracker-only: the forge axis keys on API and Repo.
@@ -184,7 +188,7 @@ func (r *Runtime) CodeForge(row backendrows.Row, spec ForgeSpec) (forge.CodeForg
 		// Compose reads the loaded manifest and host configuration and makes no
 		// guest call, so a failure never means a dead Connector, and this one
 		// may be serving the tracker too: do not drop it.
-		_ = connectorrecord.Note(s.record, "compose the Code Forge", err)
+		s.note("compose the Code Forge", err)
 		return nil, err
 	}
 	return cf, nil
@@ -201,7 +205,7 @@ func (r *Runtime) ForgeReader(row backendrows.Row, spec SessionSpec, webHost str
 	}
 	c, err := s.live()
 	if err != nil {
-		_ = connectorrecord.Note(s.record, "load the Connector", err)
+		s.note("load the Connector", err)
 		return nil, err
 	}
 	target := connectorforge.Target{API: spec.Target.API, Repo: spec.Target.Repo}
@@ -209,7 +213,7 @@ func (r *Runtime) ForgeReader(row backendrows.Row, spec SessionSpec, webHost str
 	if err != nil {
 		// As with the Code Forge's compose, building makes no guest call and
 		// this Connector may be serving the tracker too: do not drop it.
-		_ = connectorrecord.Note(s.record, "compose the Code Forge reader", err)
+		s.note("compose the Code Forge reader", err)
 		return nil, err
 	}
 	return cf, nil
@@ -225,7 +229,7 @@ func (r *Runtime) Connector(row backendrows.Row, spec SessionSpec) (*connectorho
 	}
 	c, err := s.live()
 	if err != nil {
-		_ = connectorrecord.Note(s.record, "load the Connector", err)
+		s.note("load the Connector", err)
 		return nil, err
 	}
 	return c, nil
@@ -240,7 +244,7 @@ func (r *Runtime) session(row backendrows.Row, spec SessionSpec) (*session, erro
 	}
 	s, ok := r.sessions[key]
 	if !ok {
-		s = &session{rt: r, row: row, requires: spec.Requires, record: cmp.Or(spec.Record, row.Name), opts: spec.Options}
+		s = &session{rt: r, row: row, requires: spec.Requires, record: cmp.Or(spec.Record, row.Name), opts: spec.Options, backendNotes: spec.NotesOperations}
 		s.opts.Sandbox = r.sandbox
 		r.sessions[key] = s
 	}
@@ -256,6 +260,8 @@ type session struct {
 	requires []string
 	record   string
 	opts     backendrows.Options
+	// backendNotes is SessionSpec.NotesOperations.
+	backendNotes bool
 
 	mu  sync.Mutex
 	cur *connectorhost.Connector
@@ -270,8 +276,14 @@ type session struct {
 func (s *session) live() (*connectorhost.Connector, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.cur != nil && s.cur.Err() == nil {
-		return s.cur, nil
+	if s.cur != nil {
+		dead := s.cur.Err()
+		if dead == nil {
+			return s.cur, nil
+		}
+		// Forgotten here so a failed load is not noted as a reload on every retry.
+		s.cur = nil
+		_ = connectorrecord.Note(s.record, "reload the Connector", dead)
 	}
 	if s.failures >= maxLoadFailures && s.rt.now().Sub(s.lastFail) < loadRetryAfter {
 		return nil, fmt.Errorf("connector load failed %d times in a row; next retry allowed %s after the last failure: %w", s.failures, loadRetryAfter, s.lastErr)
@@ -308,13 +320,21 @@ func missing(required, have []string) []string {
 	return out
 }
 
+// note records a failed operation unless the backend notes its own.
+func (s *session) note(op string, err error) {
+	if !s.backendNotes {
+		_ = connectorrecord.Note(s.record, op, err)
+	}
+}
+
 // call passes every failure the Connector causes to the failure note, by
-// method: a failed reload, a refused retry, or a failed call. Errors core
+// method (unless the backend notes its own, SessionSpec.NotesOperations): a
+// failed reload, a refused retry, or a failed call. Errors core
 // raises itself, such as a refused lifecycle transition, never reach it.
 func (s *session) call(ctx context.Context, method string, params, result any) error {
 	err := s.callOnce(ctx, method, params, result)
 	if err != nil {
-		_ = connectorrecord.Note(s.record, method, err)
+		s.note(method, err)
 	}
 	return err
 }
