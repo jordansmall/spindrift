@@ -626,3 +626,82 @@ func TestCodeForgeComposeFailureLeavesTheTrackersConnector(t *testing.T) {
 		t.Errorf("loads = %d, want the one Connector kept", n)
 	}
 }
+
+// The read-only forge view shares the session with a direct Connector request,
+// and a dead guest is reloaded behind it.
+func TestForgeReaderSharesTheSessionAndSurvivesAReload(t *testing.T) {
+	e := newEnv(t, connectorforgetest.PRWasm)
+	rd, err := e.rt.ForgeReader(e.row, e.spec.SessionSpec, "forge.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := readMain(t, rd); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.rt.Connector(e.row, e.spec.SessionSpec); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(e.sb.loads()); n != 1 {
+		t.Fatalf("loads = %d, want one Connector for reader and Connector()", n)
+	}
+
+	e.sb.killGuest()
+	if err := readMain(t, rd); err == nil {
+		t.Fatal("the call on a killed guest succeeded, want it to fail")
+	}
+	if err := readMain(t, rd); err != nil {
+		t.Fatalf("read after the guest died: %v, want a reloaded Connector", err)
+	}
+	if n := len(e.sb.loads()); n != 2 {
+		t.Errorf("loads = %d, want one reload", n)
+	}
+}
+
+func TestForgeReaderOnAConnectorWithoutAForgeIsRefused(t *testing.T) {
+	e := newEnv(t, "tracker.wasm")
+	if _, err := e.rt.ForgeReader(e.row, e.spec.SessionSpec, "forge.example"); !errors.Is(err, connectorforge.ErrNotForge) {
+		t.Fatalf("err = %v, want ErrNotForge", err)
+	}
+}
+
+func TestConnectorIsTheSessionsLiveOneAndReloadsWhenDead(t *testing.T) {
+	e := newEnv(t, "tracker.wasm")
+	first, err := e.rt.Connector(e.row, e.spec.SessionSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Err() != nil || len(first.Capabilities) == 0 {
+		t.Fatalf("Connector err = %v, capabilities = %v, want a live handshake", first.Err(), first.Capabilities)
+	}
+	if again, err := e.rt.Connector(e.row, e.spec.SessionSpec); err != nil || again != first {
+		t.Fatalf("second Connector = %p, %v, want the same live one %p", again, err, first)
+	}
+	e.sb.killGuest()
+	// The host learns the guest died from a failed call, not from the abort.
+	if err := first.Call(context.Background(), "tracker.issue", nil, nil); err == nil {
+		t.Fatal("the call on a killed guest succeeded, want it to fail")
+	}
+	next, err := e.rt.Connector(e.row, e.spec.SessionSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next == first || next.Err() != nil {
+		t.Errorf("after the guest died Connector = %p (err %v), want a fresh live one, not %p", next, next.Err(), first)
+	}
+	if n := len(e.sb.loads()); n != 2 {
+		t.Errorf("loads = %d, want one reload", n)
+	}
+}
+
+func TestUnopenableAuditFileFailsConnector(t *testing.T) {
+	e := newEnv(t, "tracker.wasm")
+	if err := os.WriteFile(".spindrift", nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.rt.Connector(e.row, e.spec.SessionSpec); err == nil || !strings.Contains(err.Error(), "audit file") {
+		t.Fatalf("err = %v, want the audit file open failure", err)
+	}
+	if n := len(e.sb.loads()); n != 0 {
+		t.Errorf("loads = %d, want the Connector never to run unrecorded", n)
+	}
+}
