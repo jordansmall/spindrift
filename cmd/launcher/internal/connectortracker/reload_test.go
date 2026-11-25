@@ -176,7 +176,7 @@ func TestReloadingTrackerRetriesAReadOnTheReloadedConnector(t *testing.T) {
 		note: func(_ string, err error) { noted = append(noted, err) }}
 	clock, slept := fakeClock()
 	c := &connectorhost.Connector{Capabilities: []string{"tracker", CapComments}}
-	tr, err := newFrom(c, r.call, testLifecycle, testTarget, clock)
+	tr, err := NewCalling(c, r.call, testLifecycle, testTarget, clock)
 	if err != nil {
 		t.Fatal(err)
 	}

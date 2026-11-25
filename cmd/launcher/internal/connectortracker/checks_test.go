@@ -401,7 +401,7 @@ func TestProbeClassifiedErrorsMatchNotFoundAndTheirSentinels(t *testing.T) {
 			call, _ := stubGuestErrs(t, nil, map[string][]error{CapProbe: {&connectorhost.CallError{Class: tc.class, Message: "x"}}})
 			c := &connectorhost.Connector{Capabilities: []string{"tracker", CapProbe}, ProtocolVersion: "0.2.0"}
 			clk, _ := fakeClock()
-			tr, err := newFrom(c, call, testLifecycle, testTarget, clk)
+			tr, err := NewCalling(c, call, testLifecycle, testTarget, clk)
 			if err != nil {
 				t.Fatal(err)
 			}
