@@ -26,9 +26,7 @@ let
   # The fixture Driver Connector's own row: a full lib/drivers row plus
   # `module`, with a credential env already in core's generated scrub set.
   fixtureConnector = (import ../fixtures/connector).lib.connector { core = import ../../core; };
-  fixtureRow =
-    (import ../fixtures/connector/module.nix { core = import ../../core; })
-    .spindrift.connectors.fixture.driver;
+  fixtureRow = (import ../fixtures/connector/data.nix { core = import ../../core; }).driver;
   withRows = rows: mkHarness { driverRows = rows; };
   withFixture = mkHarness {
     driver = "fixture";
