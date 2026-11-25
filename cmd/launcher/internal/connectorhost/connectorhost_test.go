@@ -93,6 +93,7 @@ func TestLoadCurrentYieldsHandshake(t *testing.T) {
 }
 
 func TestLoadAcceptsPreviousMinor(t *testing.T) {
+	t.Parallel()
 	// previous.wasm declares only fixture capabilities, which sit on no axis;
 	// previous-tracker.wasm is a real tracker Connector, whose axis did not break.
 	for _, name := range []string{"previous.wasm", "previous-tracker.wasm"} {
@@ -112,6 +113,7 @@ func TestLoadAcceptsPreviousMinor(t *testing.T) {
 // accepts (forge.remote gone, forge.probe required, driver.sessionFlags
 // reshaped), so the handshake refuses it, naming both versions.
 func TestLoadRefusesPreviousMinorOnBrokenAxes(t *testing.T) {
+	t.Parallel()
 	for engine, ld := range loadersFor(t) {
 		for _, name := range []string{"previous-forge.wasm", "previous-driver.wasm"} {
 			t.Run(engine+"/"+name, func(t *testing.T) {
@@ -152,6 +154,7 @@ func TestLoadNetworkRefusalNamesConnector(t *testing.T) {
 }
 
 func TestLoadRefusesFutureProtocol(t *testing.T) {
+	t.Parallel()
 	for engine, ld := range loadersFor(t) {
 		t.Run(engine, func(t *testing.T) {
 			_, err := loadUsing(t, ld, "future.wasm")
@@ -175,6 +178,7 @@ func TestLoadRefusesFutureProtocol(t *testing.T) {
 }
 
 func TestLoadSandboxReachesNothing(t *testing.T) {
+	t.Parallel()
 	a, err := load(t, "probe.wasm")
 	if err != nil {
 		t.Fatal(err)

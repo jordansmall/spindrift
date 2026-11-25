@@ -58,6 +58,7 @@ func loadNetworkFixtureVia(t *testing.T, ld netLoader, wasm string, tweak func(*
 }
 
 func TestNetworkFixtureReachesTheBackendWithTheHostCredential(t *testing.T) {
+	t.Parallel()
 	c, b, audit, params := loadNetworkFixture(t, "network.wasm")
 	var out fetched
 	if err := c.Call(context.Background(), "fetch", params, &out); err != nil {
@@ -86,6 +87,7 @@ func TestNetworkFixtureReachesTheBackendWithTheHostCredential(t *testing.T) {
 }
 
 func TestNetworkFixtureRefusesUndeclaredRequestsUnsent(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		wasm   string
 		method string
@@ -126,6 +128,7 @@ func TestNetworkFixtureRefusesUndeclaredRequestsUnsent(t *testing.T) {
 // A write whose answer is over the response cap fails closed: the Connector
 // gets no body and the request, which did reach the backend, is audited once.
 func TestNetworkFixtureOversizedWriteResponseFailsClosed(t *testing.T) {
+	t.Parallel()
 	c, b, audit, params := loadNetworkFixtureWith(t, "network-write-oversize.wasm", func(n *connectorhost.Network) {
 		n.Routes = append(n.Routes, connectorhost.Route{Method: "PUT", Host: n.Routes[0].Host, Path: "/repos"})
 	})
@@ -155,6 +158,7 @@ func TestNetworkFixtureOversizedWriteResponseFailsClosed(t *testing.T) {
 // Oversized output is hostile-oversize.wasm's case: through the SDK, encoding
 // past the 8 MiB cap outruns the call budget under the interpreter on loaded CI.
 func TestNetworkFixtureMalformedOutputFailsClosedAfterItsAuditedRequest(t *testing.T) {
+	t.Parallel()
 	want := connectorhost.ErrMalformedOutput
 	c, b, audit, params := loadNetworkFixture(t, "network-malformed.wasm")
 	err := c.Call(context.Background(), "fetch", params, new(fetched))
@@ -205,6 +209,7 @@ func TestNetworkFixtureSendFailureShowsTheGuestOnlyAFixedReason(t *testing.T) {
 // serves far more requests than the host's memory cap has room for response
 // buffers.
 func TestNetworkFixtureServesManyRequestsUnderTheMemoryCap(t *testing.T) {
+	t.Parallel()
 	b := newBackend(t, func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "scripted "+r.URL.Path) })
 	n := netFor(b, &bytes.Buffer{}, connectorhost.Route{Method: "GET", Host: b.host(), Path: "/repos"})
 	c := loadNetWith(t, netLoadersFor(t)["compiled"], fixture(t, "network.wasm"), n)
@@ -221,6 +226,7 @@ func TestNetworkFixtureServesManyRequestsUnderTheMemoryCap(t *testing.T) {
 }
 
 func TestNetworkFixtureReadsResponseHeadersThroughTheHostCall(t *testing.T) {
+	t.Parallel()
 	c, _, _, params := loadNetworkFixture(t, "network.wasm")
 	for _, tc := range []struct {
 		name, header string
@@ -312,6 +318,7 @@ func TestNetworkFixtureSeveralSlowRequestsDoNotSpendTheCallBudget(t *testing.T) 
 // A guest that never stops sending http_requests stops at the limit, whichever
 // side of the sandbox counts it, with the sentinel intact.
 func TestNetworkFixtureFloodStopsAtTheHTTPRequestLimit(t *testing.T) {
+	t.Parallel()
 	for name, ld := range netLoadersFor(t) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -338,6 +345,7 @@ func ptr(s string) *string { return &s }
 // A single http_request past the per-request timeout fails as a send failure
 // the guest sees, not as a spent call budget, and leaves the Connector usable.
 func TestNetworkFixtureRequestTimeoutIsASendFailureNotABudgetOverrun(t *testing.T) {
+	t.Parallel()
 	for name, ld := range netLoadersFor(t) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

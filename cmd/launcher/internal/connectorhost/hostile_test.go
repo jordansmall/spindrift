@@ -18,10 +18,13 @@ func useShortCallBudget(t *testing.T) {
 // shortenBudgetIfExhausting lowers the call budget (until t ends) for a case
 // that must exhaust it, so the test does not wait out the production budget,
 // and returns the budget in force. Other cases keep the production budget,
-// which leaves their legitimate work room on a loaded runner.
+// which leaves their legitimate work room on a loaded runner. Those other
+// cases touch no process-global state, so they run in parallel: the budget
+// cases go first and restore the budget before any parallel sibling resumes.
 func shortenBudgetIfExhausting(t *testing.T, want error) time.Duration {
 	t.Helper()
 	if !errors.Is(want, connectorhost.ErrBudget) {
+		t.Parallel()
 		return connectorhost.CallBudget
 	}
 	useShortCallBudget(t)

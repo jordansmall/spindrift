@@ -102,6 +102,7 @@ func TestDriverOneShotDecoderOutlivesItsCall(t *testing.T) {
 }
 
 func TestDriverDecoderKeepsStatePerInstance(t *testing.T) {
+	t.Parallel()
 	s := conformingStrategy(t, "driver.wasm")
 	a, b := s.NewDecoder(), s.NewDecoder()
 	text := func(d driverkit.Decoder, line string) string {
@@ -118,6 +119,7 @@ func TestDriverDecoderKeepsStatePerInstance(t *testing.T) {
 }
 
 func TestDriverDecoderForwardsHostOpLinesButDecodesThemItself(t *testing.T) {
+	t.Parallel()
 	s := strategy(t, "driver.wasm")
 	d := s.NewDecoder()
 	line := passStart(hostop.SpindriftOp{Op: "pass_start", Pass: 2, Role: "review"})
@@ -134,6 +136,7 @@ func TestDriverDecoderForwardsHostOpLinesButDecodesThemItself(t *testing.T) {
 }
 
 func TestDriverDecoderRejectsInvalidGuestEvent(t *testing.T) {
+	t.Parallel()
 	s := strategy(t, "driver.wasm")
 	evs := s.NewDecoder()("forge")
 	want := []driverkit.Event{{Kind: driverkit.KindUnparsed, Text: "forge"}}
@@ -143,6 +146,7 @@ func TestDriverDecoderRejectsInvalidGuestEvent(t *testing.T) {
 }
 
 func TestDriverDecoderFailsClosedWhenConnectorClosed(t *testing.T) {
+	t.Parallel()
 	c, err := load(t, "driver.wasm")
 	if err != nil {
 		t.Fatal(err)
@@ -160,6 +164,7 @@ func TestDriverDecoderFailsClosedWhenConnectorClosed(t *testing.T) {
 }
 
 func TestDriverResultEventAndSessionFlags(t *testing.T) {
+	t.Parallel()
 	s := conformingStrategy(t, "driver.wasm")
 	b, err := s.ResultEvent("done")
 	if err != nil || string(b) != "result done\n" {
@@ -197,6 +202,7 @@ func TestDriverResolveExitReadsLog(t *testing.T) {
 // A log whose request would pass the cap still resolves: the host sends the
 // newest whole lines that fit, skipping any single line too large to fit alone.
 func TestDriverResolveExitSendsTheTailOfAnOversizedLog(t *testing.T) {
+	t.Parallel()
 	c, err := connectorhost.LoadCompiled(context.Background(), fixture(t, "driver.wasm"), sharedCache)
 	if err != nil {
 		t.Fatal(err)
@@ -228,6 +234,7 @@ func TestDriverWithoutResolveExit(t *testing.T) {
 }
 
 func TestDriverConcurrentDecoders(t *testing.T) {
+	t.Parallel()
 	s := strategy(t, "driver.wasm")
 	var wg sync.WaitGroup
 	for i := range 8 {
@@ -335,6 +342,7 @@ func TestDriverResolveExitRefusesZeroForFailure(t *testing.T) {
 }
 
 func TestLoadCompiledDecodesLikeLoad(t *testing.T) {
+	t.Parallel()
 	interp := strategy(t, "driver.wasm")
 	cacheDir := t.TempDir()
 	c, err := connectorhost.LoadCompiled(context.Background(), fixture(t, "driver.wasm"), cacheDir)
@@ -363,6 +371,7 @@ func TestLoadCompiledDecodesLikeLoad(t *testing.T) {
 const envelope = len(`{"method":"driver.resolveExit","params":{"exitCode":1,"log":""}}`)
 
 func TestLogWindow(t *testing.T) {
+	t.Parallel()
 	room := connectorhost.MaxRequest - envelope
 	window := func(log string) string {
 		t.Helper()
@@ -405,6 +414,7 @@ func TestLogWindow(t *testing.T) {
 }
 
 func TestDriverStrategyCarriesTuning(t *testing.T) {
+	t.Parallel()
 	s := strategy(t, "driver.wasm")
 	if want := (driverkit.ClassifyOptions{Oversized: logscan.ChunkOversized, FirstMatch: true}); s.Classify != want {
 		t.Errorf("Classify = %+v, want %+v", s.Classify, want)
@@ -492,6 +502,7 @@ func batchLines() []string {
 }
 
 func TestDriverWithoutDecodeBatchDecodesPerLine(t *testing.T) {
+	t.Parallel()
 	c, err := load(t, "driver.wasm")
 	if err != nil {
 		t.Fatal(err)
@@ -514,6 +525,7 @@ func TestDriverWithoutDecodeBatchDecodesPerLine(t *testing.T) {
 }
 
 func TestDriverBatchDecoderMatchesPerLine(t *testing.T) {
+	t.Parallel()
 	s := strategy(t, "driver.wasm")
 	if s.NewBatchDecoder == nil {
 		t.Fatal("NewBatchDecoder unset though the fixture advertises driver.decodeBatch")
@@ -547,6 +559,7 @@ func TestDriverBatchDecoderSplitsOversizedBatches(t *testing.T) {
 }
 
 func TestDriverBatchDecoderFailsOnlyTheBadElement(t *testing.T) {
+	t.Parallel()
 	s := strategy(t, "driver.wasm")
 	op := passStart(hostop.SpindriftOp{Op: "pass_start", Pass: 1})
 	// "forge" makes the guest emit an event the host rejects: that line alone is
@@ -586,6 +599,7 @@ func TestDriverBatchDecoderFailsClosedWhenConnectorClosed(t *testing.T) {
 
 // decodeRaw is a many-line method, so it batches without decodeBatch.
 func TestDriverRawBatchesWithoutDecodeBatch(t *testing.T) {
+	t.Parallel()
 	c, err := load(t, "driver.wasm")
 	if err != nil {
 		t.Fatal(err)
@@ -607,6 +621,7 @@ func TestDriverRawBatchesWithoutDecodeBatch(t *testing.T) {
 // A Connector's session answer crosses the wire as one intact Value, and the
 // row, not the Connector, then decides whether its Flag may reach argv.
 func TestDriverSessionAnswerOverTheWireMeetsTheRow(t *testing.T) {
+	t.Parallel()
 	s := conformingStrategy(t, "driver.wasm")
 	got, err := s.SessionFlags("implement", "o/r", "7", "/home/two words")
 	want := driverkit.SessionFlag{Flag: "--session-id", Value: "implement|o/r|7|/home/two words"}

@@ -12,6 +12,7 @@ import (
 )
 
 func TestCallEchoRoundTrips(t *testing.T) {
+	t.Parallel()
 	c, err := load(t, "call.wasm")
 	if err != nil {
 		t.Fatal(err)
@@ -37,6 +38,7 @@ func TestCallNilResultIgnoresResponse(t *testing.T) {
 }
 
 func TestCallLargePayload(t *testing.T) {
+	t.Parallel()
 	c, err := load(t, "call.wasm")
 	if err != nil {
 		t.Fatal(err)
