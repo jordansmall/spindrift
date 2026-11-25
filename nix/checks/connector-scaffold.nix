@@ -99,24 +99,39 @@ let
     namesProblems what want want got;
 
   load = dir: f: import (dir + "/${f}");
-  # A Connector registers in `data.nix` once it has moved to data, else in
-  # `module.nix`; the scaffold compares the two forms as one skeleton file.
+  # Every template registers in `data.nix`; a reference not yet moved to data
+  # still has `module.nix`, and the compare treats the two as one skeleton file.
   registrationFile =
     dir: if builtins.pathExists (dir + "/data.nix") then "data.nix" else "module.nix";
   asModuleFile = map (r: if r == "data.nix" then "module.nix" else r);
-  # `data` stands for the `fragments` and `driverRow` a module-form entry carries.
+  # `data` stands for the `fragments` and `driverRow` a module-form reference entry carries.
   registrationAttrs = subtractLists [
     "data"
     "fragments"
     "driverRow"
   ];
   # The `spindrift.connectors.<name>` row a Connector registers: from its
-  # `data` once it has moved there, else from its module.nix.
+  # `data`, or for a module-form reference from its module.nix.
   registeredRow =
     dir: name: modArgs:
     (connectorData.rowsOf modArgs ((load dir "default.nix").lib.connector { inherit core; })).${name};
   argNames = v: attrNames (builtins.functionArgs v);
   expect = ok: msg: if ok then [ ] else [ msg ];
+  # The Connector templates hand out data, not a flake-parts module (#7561).
+  dataFormProblems =
+    {
+      dir,
+      entry,
+      consumed,
+    }:
+    expect (builtins.pathExists (dir + "/data.nix") && !builtins.pathExists (dir + "/module.nix"))
+      "the template must have data.nix and no module.nix: a Connector template is data core turns into the row"
+    ++ expect (
+      entry ? data
+    ) "default.nix: lib.connector carries no `data` (the template is module-form)"
+    ++ expect (
+      consumed ? ${token}
+    ) "a Consumer importing the template's flakeModule does not register spindrift.connectors.${token}";
 
   hasCorpusCase = any (r: match "testdata/corpus/[^/]+/pass\\.jsonl" r != null);
 
@@ -159,6 +174,12 @@ let
       flakes = forBoth (d: load d "flake.nix");
       entries = forBoth (d: ((load d "default.nix").lib.connector { inherit core; }));
       outputs = forBoth (d: (load d "flake.nix").outputs { inherit core; });
+      # What a Consumer importing the template's flakeModule registers.
+      consumed =
+        (fixtures.connectorConsumerVia [
+          ../../lib/flakeModule.nix
+          entries.tmpl.flakeModule
+        ]).debug.config.spindrift.connectors;
 
       structure =
         sameNames "flake.nix inputs" (attrNames flakes.ref.inputs) (attrNames flakes.tmpl.inputs)
@@ -177,8 +198,13 @@ let
           (connectorData.fragmentsOf entries.ref == null) == (connectorData.fragmentsOf entries.tmpl == null)
         ) "default.nix: exactly one of the template and ${ref} declares fragments"
         ++ sameArgs "default.nix lib.connector args" (d: (load d "default.nix").lib.connector)
+        ++ dataFormProblems {
+          dir = tmplDir;
+          entry = entries.tmpl;
+          inherit consumed;
+        }
         ++ sameArgs "package.nix args" (d: load d "package.nix")
-        ++ sameArgs "module.nix or data.nix args" (d: load d (registrationFile d))
+        ++ sameArgs "data.nix (or a reference's module.nix) args" (d: load d (registrationFile d))
         ++ (
           let
             lines = d: filter (l: l != "") (pkgs.lib.splitString "\n" (builtins.readFile (d + "/go.mod")));
@@ -236,7 +262,9 @@ let
             toRef
             tmplSet
             omitsFragments
+            consumed
             ;
+          entry = entries.tmpl;
         };
     in
     {
@@ -258,6 +286,8 @@ let
       toRef,
       tmplSet,
       omitsFragments,
+      consumed,
+      entry,
     }:
     let
       frag = d: load d "fragments.nix";
@@ -268,31 +298,18 @@ let
       };
       allKnobFields = r: unique (concatMap attrNames (attrValues (r.knobs or { })));
       routeAttrs = d: unique (concatMap attrNames (load d "routes.nix"));
-      entry = (load tmplDir "default.nix").lib.connector { inherit core; };
-      # What a Consumer importing the template's flakeModule registers.
-      consumed =
-        (fixtures.connectorConsumerVia [
-          ../../lib/flakeModule.nix
-          entry.flakeModule
-        ]).debug.config.spindrift.connectors;
     in
-    # The Connector templates hand out data, not a flake-parts module (#7561).
+    # The shared data-form guards already report a template missing either side.
     expect
-      (builtins.pathExists (tmplDir + "/data.nix") && !builtins.pathExists (tmplDir + "/module.nix"))
-      "the template registers in module.nix, not data.nix: a Connector template is data core turns into the row"
-    ++ expect (
-      entry ? data
-    ) "default.nix: lib.connector carries no `data` (the template is module-form)"
-    ++
-      expect
-        (
-          entry ? data
-          && consumed ? ${token}
-          && consumed.${token}.routes == entry.data.routes
+      (
+        !(entry ? data && consumed ? ${token})
+        || (
+          consumed.${token}.routes == entry.data.routes
           && consumed.${token}.backend.credential == (entry.data.credential or null)
           && attrNames consumed.${token}.knobs == attrNames entry.data.knobs
         )
-        "a Consumer importing the template's flakeModule does not register spindrift.connectors.${token} with the data's row"
+      )
+      "a Consumer importing the template's flakeModule does not register spindrift.connectors.${token} with the data's row"
     ++
       # A first-party reference may name its own backend's core credential and
       # declare no knobs (issues #7500 and #7501); a third-party row cannot name a core
@@ -342,13 +359,12 @@ let
   # `firstParty` is in no row: mkHarness derives that mark from the batteries
   # wasm, so a row naming it falls outside the set.
   driverExtra =
-    { tmplDir, ... }:
+    { tmplDir, consumed, ... }:
     let
       row = (load tmplDir "row.nix") {
         inherit core;
         inherit (pkgs) lib;
       };
-      registered = registeredRow tmplDir token { inherit (pkgs) lib; };
       valid = builtins.tryEval (builtins.deepSeq (registry.assertRow token row) true);
     in
     namesProblems "row.nix row attrs" (registry.requiredAttrs ++ [ "module" ]) registry.knownAttrs (
@@ -356,7 +372,7 @@ let
     )
     ++ expect valid.success "row.nix: refused by the Driver registry's validators (assertRow in lib/drivers/default.nix)"
     ++ expect (
-      registered ? driver && attrNames registered.driver == attrNames row
+      consumed.${token} ? driver && attrNames consumed.${token}.driver == attrNames row
     ) "registered row: spindrift.connectors.${token}.driver is not row.nix's row";
 
   trackerScaffold = scaffold {
@@ -403,6 +419,18 @@ let
     registrationFilePrefersData = registrationFile ../fixtures/connector == "data.nix";
     # nix/checks itself holds no data.nix, so no Connector's own move can flip this.
     registrationFileDefaultsToModule = registrationFile ./. == "module.nix";
+    moduleFormIsRefused =
+      builtins.length (dataFormProblems {
+        dir = ./.;
+        entry = { };
+        consumed = { };
+      }) == 3;
+    dataFormPasses =
+      dataFormProblems {
+        dir = ../fixtures/connector;
+        entry.data = { };
+        consumed.${token} = { };
+      } == [ ];
     dataFormRowRead = (registeredRow ../fixtures/connector "fixture" { }) ? backend;
     refGainsAFile = fileSetProblems "r" [ "a.nix" ] [ "a.nix" "foo.nix" ] != [ ];
     templateGainsAFile = fileSetProblems "r" [ "a.nix" "foo.nix" ] [ "a.nix" ] != [ ];
