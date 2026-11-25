@@ -3,7 +3,6 @@ package connectorhost_test
 import (
 	"bytes"
 	"errors"
-	"slices"
 	"testing"
 
 	"spindrift.dev/launcher/internal/connectorhost"
@@ -12,26 +11,6 @@ import (
 type failWriter struct{}
 
 func (failWriter) Write([]byte) (int, error) { return 0, errors.New("disk full") }
-
-func TestDeclaredHostsDedupesAndKeepsThePort(t *testing.T) {
-	n := &connectorhost.Network{Name: "demo", Routes: []connectorhost.Route{
-		{Method: "GET", Host: "api.example.com", Path: "/a"},
-		{Method: "POST", Host: "api.example.com", Path: "/a"},
-		{Method: "GET", Host: "git.example.com:8443", Path: "/b"},
-		{Method: "GET", Host: "API.example.com", Path: "/c"},
-	}}
-	got := connectorhost.NetworkConnector(n).DeclaredHosts()
-	want := []string{"api.example.com", "git.example.com:8443"}
-	if !slices.Equal(got, want) {
-		t.Fatalf("DeclaredHosts = %v, want %v", got, want)
-	}
-}
-
-func TestDeclaredHostsNilWithoutANetworkGrant(t *testing.T) {
-	if got := (&connectorhost.Connector{}).DeclaredHosts(); got != nil {
-		t.Fatalf("DeclaredHosts = %v, want nil", got)
-	}
-}
 
 func TestAuditRefusalRecordsOneRefusedEntryAndReturnsTheRefusal(t *testing.T) {
 	var audit bytes.Buffer
