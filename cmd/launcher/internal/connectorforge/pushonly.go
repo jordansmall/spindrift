@@ -91,17 +91,11 @@ type Git struct {
 	Note func(method string, err error)
 }
 
-// classedCall is c.Call through the shared retry and error-class path, which
-// reads each method's retry safety and capability from the protocol table.
-func classedCall(c *connectorhost.Connector, clock retry.Clock) guestCall {
-	return connectorcall.Classify(c.Call, clock, c.Capabilities)
-}
-
 // pushOnly is a Code Forge with no PR concept: the Connector answers the forge
 // questions (liveness, branch existence and deletion) and git runs in core's own
 // plumbing against the clone URL core derived.
 type pushOnly struct {
-	conn hostPolicy
+	conn HostPolicy
 	// raw is the guest call after retries and classification, which Git.Note
 	// wraps; call is raw followed by the method's result check.
 	raw  guestCall
@@ -128,6 +122,13 @@ type pushOnly struct {
 // (CloneURL), so the git credential never reaches a host the Connector merely
 // named.
 func Compose(c *connectorhost.Connector, target Target, g Git) (forge.CodeForge, forge.Capabilities, error) {
+	return ComposeCalling(c, c.Call, c, target, g)
+}
+
+// ComposeCalling is Compose with guest calls routed through call and core's
+// refusals audited through policy, for a caller that owns the Connector's
+// lifetime and reloads it behind both; c supplies the handshake.
+func ComposeCalling(c *connectorhost.Connector, call connectorcall.Call, policy HostPolicy, target Target, g Git) (forge.CodeForge, forge.Capabilities, error) {
 	has := func(capName string) bool { return slices.Contains(c.Capabilities, capName) }
 	isPushOnly := has(CapPushOnly)
 	switch {
@@ -145,7 +146,7 @@ func Compose(c *connectorhost.Connector, target Target, g Git) (forge.CodeForge,
 	if err != nil {
 		return nil, forge.Capabilities{}, err
 	}
-	p := newPushOnly(c, target, g.Clock)
+	p := newPushOnly(call, c.Capabilities, policy, target, g.Clock)
 	if g.Note != nil {
 		raw := p.raw
 		p.raw = func(ctx context.Context, method string, params, result any) error {
@@ -228,14 +229,14 @@ func (p *pushOnly) pushBranch(srcDir, localRef, branch, base string) error {
 }
 
 // newPushOnly builds a pushOnly whose clock, a zero one included, sleeps.
-func newPushOnly(c *connectorhost.Connector, target Target, clock retry.Clock) *pushOnly {
+func newPushOnly(call connectorcall.Call, caps []string, policy HostPolicy, target Target, clock retry.Clock) *pushOnly {
 	clock = connectorcall.RealIfZero(clock)
-	return pushOnlyOver(c, classedCall(c, clock), clock, target)
+	return pushOnlyOver(policy, connectorcall.Classify(call, clock, caps), clock, target)
 }
 
 // pushOnlyOver is newPushOnly over a given raw guest call. Each of its calls,
 // and its reads', then runs forgeChecks.
-func pushOnlyOver(conn hostPolicy, raw guestCall, clock retry.Clock, target Target) *pushOnly {
+func pushOnlyOver(conn HostPolicy, raw guestCall, clock retry.Clock, target Target) *pushOnly {
 	p := &pushOnly{conn: conn, raw: raw, clock: clock, target: target, rd: &reads{target: target}}
 	p.call = connectorcall.Checked(func(ctx context.Context, method string, params, result any) error {
 		return p.raw(ctx, method, params, result)
@@ -244,8 +245,8 @@ func pushOnlyOver(conn hostPolicy, raw guestCall, clock retry.Clock, target Targ
 	return p
 }
 
-// hostPolicy is the part of *connectorhost.Connector core's own refusals read:
+// HostPolicy is the part of *connectorhost.Connector core's own refusals read:
 // the audit log. An interface so a test can stand in without a wasm guest.
-type hostPolicy interface {
+type HostPolicy interface {
 	AuditRefusal(method string, refusal error) error
 }

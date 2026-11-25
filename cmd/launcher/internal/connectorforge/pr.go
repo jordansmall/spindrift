@@ -277,9 +277,9 @@ func (f *prForge) EnqueueAutoMerge(prURL string) error {
 }
 
 // Merge asks the Connector to merge the PR. A transient failure is reported
-// as forge.ErrMergeTransient for the Lander's merge loop to retry (classedCall
-// never retries a merge). Only a NotMergeable refusal is classified by
-// re-reading the PR; every other failure is returned as is.
+// as forge.ErrMergeTransient for the Lander's merge loop to retry (the
+// classified call never retries a merge). Only a NotMergeable refusal is
+// classified by re-reading the PR; every other failure is returned as is.
 func (f *prForge) Merge(prURL string) error {
 	err := f.numbered("forge.merge", prURL, nil)
 	switch connectorhost.ErrorClass(err) {
