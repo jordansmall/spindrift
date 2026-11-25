@@ -19,7 +19,7 @@
     in
     entry
     // {
-      flakeModules.default = connector.flakeModule;
+      connectorData = connector.data;
       packages = builtins.listToAttrs (
         map (system: {
           name = system;

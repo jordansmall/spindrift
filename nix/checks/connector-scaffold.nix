@@ -113,8 +113,8 @@ let
   # The `spindrift.connectors.<name>` row a Connector registers: from its
   # `data`, or for a module-form reference from its module.nix.
   registeredRow =
-    dir: name: modArgs:
-    (connectorData.rowsOf modArgs ((load dir "default.nix").lib.connector { inherit core; })).${name};
+    dir: name: lib:
+    (connectorData.rowsOf lib ((load dir "default.nix").lib.connector { inherit core; })).${name};
   argNames = v: attrNames (builtins.functionArgs v);
   expect = ok: msg: if ok then [ ] else [ msg ];
   # The Connector templates hand out data, not a flake-parts module (#7561).
@@ -131,7 +131,7 @@ let
     ) "default.nix: lib.connector carries no `data` (the template is module-form)"
     ++ expect (
       consumed ? ${token}
-    ) "a Consumer importing the template's flakeModule does not register spindrift.connectors.${token}";
+    ) "a Consumer registering the template's data does not register spindrift.connectors.${token}";
 
   hasCorpusCase = any (r: match "testdata/corpus/[^/]+/pass\\.jsonl" r != null);
 
@@ -174,11 +174,11 @@ let
       flakes = forBoth (d: load d "flake.nix");
       entries = forBoth (d: ((load d "default.nix").lib.connector { inherit core; }));
       outputs = forBoth (d: (load d "flake.nix").outputs { inherit core; });
-      # What a Consumer importing the template's flakeModule registers.
+      # What a Consumer registering the template's data gets.
       consumed =
         (fixtures.connectorConsumerVia [
           ../../lib/flakeModule.nix
-          entries.tmpl.flakeModule
+          (fixtures.registerData entries.tmpl.data)
         ]).debug.config.spindrift.connectors;
 
       structure =
@@ -291,7 +291,7 @@ let
     }:
     let
       frag = d: load d "fragments.nix";
-      rowOf = dir: name: registeredRow dir name { };
+      rowOf = dir: name: registeredRow dir name pkgs.lib;
       rows = {
         tmpl = rowOf tmplDir token;
         ref = rowOf refDir ref;
@@ -309,7 +309,7 @@ let
           && attrNames consumed.${token}.knobs == attrNames entry.data.knobs
         )
       )
-      "a Consumer importing the template's flakeModule does not register spindrift.connectors.${token} with the data's row"
+      "a Consumer registering the template's data does not register spindrift.connectors.${token} with the data's row"
     ++
       # A first-party reference may name its own backend's core credential and
       # declare no knobs (issues #7500 and #7501); a third-party row cannot name a core
@@ -431,7 +431,7 @@ let
         entry.data = { };
         consumed.${token} = { };
       } == [ ];
-    dataFormRowRead = (registeredRow ../fixtures/connector "fixture" { }) ? backend;
+    dataFormRowRead = (registeredRow ../fixtures/connector "fixture" pkgs.lib) ? backend;
     refGainsAFile = fileSetProblems "r" [ "a.nix" ] [ "a.nix" "foo.nix" ] != [ ];
     templateGainsAFile = fileSetProblems "r" [ "a.nix" "foo.nix" ] [ "a.nix" ] != [ ];
     sameFiles = fileSetProblems "r" [ "a.nix" ] [ "a.nix" ] == [ ];

@@ -10,12 +10,18 @@
   fixtures,
   system,
   rootFlakeModule,
-  githubConnectorModule,
-  forgejoConnectorModule,
+  githubConnectorData,
+  forgejoConnectorData,
   ...
 }:
 let
-  inherit (pkgs.lib) assertMsg filterAttrs isDerivation;
+  inherit (pkgs.lib)
+    assertMsg
+    filterAttrs
+    hasInfix
+    isDerivation
+    ;
+  names = import ../../lib/connector-names.nix;
   drvPathsVia =
     module:
     builtins.mapAttrs (_: p: p.drvPath) (
@@ -24,10 +30,10 @@ let
   viaRoot = drvPathsVia rootFlakeModule;
   coreEntry = (import ../../core/flake.nix).outputs { };
   viaCore = drvPathsVia {
-    imports = [
-      coreEntry.flakeModules.default
-      githubConnectorModule
-      forgejoConnectorModule
+    imports = [ coreEntry.flakeModules.default ];
+    spindrift.connectorData = [
+      githubConnectorData
+      forgejoConnectorData
     ];
   };
   differing = builtins.filter (n: viaRoot.${n} or null != viaCore.${n} or null) (
@@ -39,36 +45,46 @@ let
     n: (rootLock.nodes.${n}.locked or null) != coreLock.nodes.${n}.locked
   ) (builtins.filter (n: n != "root") (builtins.attrNames coreLock.nodes));
 
-  # The most common opted-in shape: root's module plus the Connector module
-  # imported again through `lib.connector`. The module's `key` dedups the two;
-  # without it evaluation fails with "registered twice".
-  rootAndConnectorModuleDedup =
+  # The root module already registers github and forgejo, so a Consumer
+  # registering either again is refused, not deduplicated (issue #7562): a name
+  # has one definer. The message is pinned on its pure function, as
+  # builtins.tryEval cannot read a thrown message.
+  rootConfigWith =
+    modules: (fixtures.connectorConsumerVia ([ rootFlakeModule ] ++ modules)).debug.config.spindrift;
+  hasAll = msg: builtins.all (s: hasInfix s msg);
+  fails = v: !(builtins.tryEval (builtins.deepSeq v true)).success;
+  rootAndConnectorDataRefused =
     {
       name,
-      module,
-      credentialKnob,
+      data,
     }:
-    pkgs.runCommand name { nativeBuildInputs = [ pkgs.jq ]; } ''
-      ${fixtures.runInputDocOf
-        (fixtures.moduleConsumerWith [
-          rootFlakeModule
-          module
-        ]).apps.${system}.default.program
-      }
-      jq -e '[.backends[] | select(.credentialKnob == "${credentialKnob}")] | length == 1' "$doc"
-      touch $out
-    '';
+    let
+      message = names.duplicateError data.name [
+        { file = rootFlakeModule._file; }
+        { file = "consumer.nix"; }
+      ];
+    in
+    assert assertMsg (
+      !(fails (rootConfigWith [ ]).connectors)
+    ) "control: the root module alone must evaluate";
+    assert assertMsg (fails
+      (rootConfigWith [
+        {
+          _file = "consumer.nix";
+          spindrift.connectorData = [ data ];
+        }
+      ]).connectors
+    ) "the root module plus a second registration of ${data.name} must fail evaluation";
+    assert assertMsg (hasAll message [
+      "registered twice"
+      rootFlakeModule._file
+      "consumer.nix"
+    ]) "the duplicate message must name both definers; got ${message}";
+    pkgs.runCommand name { } "touch $out";
 
-  # A Consumer's jira input follows its `spindrift` input, so the Connector's
-  # `core` is the batteries root; two `lib.connector` calls give two distinct
-  # module values, which only the module's `key` can dedup.
-  rootAsCore = {
-    inherit (import ../../core) lib;
-    flakeModules.default = rootFlakeModule;
-  };
-  jiraViaRoot = (import ../../connectors/jira).lib.connector { core = rootAsCore; };
-  jiraViaRootAgain = (import ../../connectors/jira).lib.connector { core = rootAsCore; };
-  githubViaRoot = (import ../../connectors/github).lib.connector { core = rootAsCore; };
+  # A Consumer's jira input follows its `spindrift` input; the batteries root
+  # does not carry jira, so the Consumer registers it once from its own input.
+  jiraData = ((import ../../connectors/jira).lib.connector { core = import ../../core; }).data;
 in
 {
   # Issue #7139: a Consumer importing the root's `flakeModules.default` still
@@ -97,47 +113,28 @@ in
         touch $out
       '';
 
-  core-entry-root-and-forgejo-connector-module-dedup = rootAndConnectorModuleDedup {
-    name = "core-entry-root-and-forgejo-connector-module-dedup";
-    module = forgejoConnectorModule;
-    credentialKnob = "forgejoToken";
+  core-entry-root-and-forgejo-connector-data-refused = rootAndConnectorDataRefused {
+    name = "core-entry-root-and-forgejo-connector-data-refused";
+    data = forgejoConnectorData;
   };
 
-  # Issue #7417: the batteries root does not carry jira, so a Consumer imports
-  # it from its own flake input; importing it twice must not fail.
-  core-entry-jira-connector-module-imported-twice =
-    pkgs.runCommand "core-entry-jira-connector-module-imported-twice"
-      { nativeBuildInputs = [ pkgs.jq ]; }
-      ''
-        ${fixtures.runInputDocOf
-          (fixtures.moduleConsumerWith [
-            rootFlakeModule
-            jiraViaRoot.flakeModule
-            jiraViaRootAgain.flakeModule
-          ]).apps.${system}.default.program
-        }
-        jq -e '[.backends[] | select(.credentialKnob == "jiraToken")] | length == 1' "$doc"
-        touch $out
-      '';
+  # Issue #7417: the batteries root does not carry jira, so a Consumer registers
+  # it from its own flake input; registering it twice fails evaluation.
+  core-entry-jira-connector-data-registered-once =
+    assert assertMsg (
+      !(fails (rootConfigWith [ { spindrift.connectorData = [ jiraData ]; } ]).connectors)
+    ) "control: jira registered once beside the root module must evaluate";
+    assert assertMsg (fails
+      (rootConfigWith [
+        { spindrift.connectorData = [ jiraData ]; }
+        { spindrift.connectorData = [ jiraData ]; }
+      ]).connectors
+    ) "jira registered twice must fail evaluation";
+    pkgs.runCommand "core-entry-jira-connector-data-registered-once" { } "touch $out";
 
-  # A data-form Connector imports the `core` it was handed, so with the batteries
-  # root as `core` its module alone still brings the root's forgejo row.
-  core-entry-github-connector-module-imports-handed-core =
-    pkgs.runCommand "core-entry-github-connector-module-imports-handed-core"
-      { nativeBuildInputs = [ pkgs.jq ]; }
-      ''
-        ${fixtures.runInputDocOf
-          (fixtures.moduleConsumerWith [ githubViaRoot.flakeModule ]).apps.${system}.default.program
-        }
-        jq -e '[.backends[] | select(.credentialKnob == "forgejoToken")] | length == 1' "$doc"
-        jq -e '[.backends[] | select(.credentialKnob == "ghToken")] | length == 1' "$doc"
-        touch $out
-      '';
-
-  core-entry-root-and-connector-module-dedup = rootAndConnectorModuleDedup {
-    name = "core-entry-root-and-connector-module-dedup";
-    module = githubConnectorModule;
-    credentialKnob = "ghToken";
+  core-entry-root-and-connector-data-refused = rootAndConnectorDataRefused {
+    name = "core-entry-root-and-connector-data-refused";
+    data = githubConnectorData;
   };
 
   core-entry-consumer-evaluates-identically =

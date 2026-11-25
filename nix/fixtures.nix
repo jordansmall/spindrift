@@ -756,6 +756,8 @@ let
   # `debug = true` exposes the flake-level config (`.debug.config`) that the
   # plain outputs hide, for checks reading Connector registrations (#6766).
   connectorConsumerVia = consumerVia { debug = true; };
+  # A Connector's data registered the way a Consumer's flake does.
+  registerData = data: { spindrift.connectorData = [ data ]; };
   # A hand-written row as the data core builds it back into the same row, for
   # checks that probe a row's contents: a Connector registers as data only
   # (issue #7562). The backend row's fields sit flat beside the row's own.
@@ -798,7 +800,7 @@ let
   # the closure the tests run against.
   driverConnectorConsumer = connectorConsumerVia [
     ../lib/flakeModule.nix
-    ((import ./fixtures/connector).lib.connector { core = import ../core; }).flakeModule
+    (registerData ((import ./fixtures/connector).lib.connector { core = import ../core; }).data)
   ];
   # Shell that sets `doc` to the launcher-run-input document an app program
   # references.
@@ -840,7 +842,7 @@ let
     dir:
     consumerAtVia dir { debug = true; } [
       ../lib/flakeModule.nix
-      ((import ./fixtures/connector).lib.connector { core = import ../core; }).flakeModule
+      (registerData ((import ./fixtures/connector).lib.connector { core = import ../core; }).data)
     ];
   baselineConsumers = pkgs.lib.genAttrs [
     "widened"
@@ -960,6 +962,7 @@ in
     moduleConsumerVia
     moduleConsumerWith
     connectorConsumerVia
+    registerData
     rowAsData
     driverConnectorConsumer
     driverConnectorArtifacts

@@ -110,7 +110,7 @@
 
 # consumerStanza (required) declares what a Consumer of the backend
 # configures (issue #7415): `connectorKnobs`, the names of its Connector's
-# credential knobs (connectors/<name>/data.nix or module.nix), each a secret
+# credential knobs (connectors/<name>/data.nix), each a secret
 # stanza beside the row's own tokenEnvVar; `flakeInput`, the flake-input stanza; and
 # `connectorData`, the expression for the Connector's data. A null flakeInput or connectorData means
 # the batteries flake (`flakeModules.default`) already carries the backend;

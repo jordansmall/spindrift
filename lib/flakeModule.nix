@@ -841,24 +841,14 @@ in
       type = types.listOf types.raw // {
         description = "list of Connector data sets";
         # The merge sees every definition's file, which the list type's own
-        # merge discards, so a second registration names both definers.
+        # merge discards, so a second registration names every definer.
         merge =
           _: defs:
           let
-            items = lib.concatMap (
-              d:
-              map (data: {
-                inherit (d) file;
-                data = connectorData.validate data;
-              }) d.value
-            ) defs;
-            twice = lib.filterAttrs (_: is: builtins.length is > 1) (lib.groupBy (i: i.data.name) items);
-            first = lib.head (lib.attrNames twice);
+            validated = map (d: d // { value = map connectorData.validate d.value; }) defs;
+            error = names.registrationError validated;
           in
-          if twice != { } then
-            throw (names.duplicateError first (map (i: { inherit (i) file; }) twice.${first}))
-          else
-            map (i: i.data) items;
+          if error != null then throw error else lib.concatMap (d: d.value) validated;
       };
       default = [ ];
       example = lib.literalExpression "[ (import ./data.nix { inherit core; }) ]";

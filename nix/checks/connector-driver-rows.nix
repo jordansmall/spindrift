@@ -45,7 +45,7 @@ let
     (fixtures.connectorConsumerVia (
       [
         ../../lib/flakeModule.nix
-        githubConnector.flakeModule
+        (fixtures.registerData githubConnector.data)
       ]
       ++ modules
     )).apps.${system}.default.program;
@@ -168,16 +168,16 @@ in
         };
       };
       claudeWasmDir = builtins.unsafeDiscardStringContext (builtins.dirOf (claudeRow.module pkgs));
-      # A Connector registered as data reaches mkHarness through core's
-      # connectorModule, so a claim made there meets the same row validation
-      # (issue #7559). Forcing the app program's length reaches it.
+      # A Connector registered as data reaches mkHarness through
+      # `spindrift.connectorData`, so a claim made there meets the same row
+      # validation (issue #7559). Forcing the app program's length reaches it.
       dataEvaluates =
         data:
         let
           program =
             (fixtures.connectorConsumerVia [
               ../../lib/flakeModule.nix
-              (core.lib.connectorModule core data)
+              (fixtures.registerData data)
             ]).apps.${system}.connectors-accept.program;
         in
         (builtins.tryEval (builtins.stringLength program)).success;
@@ -296,23 +296,21 @@ in
 
   # The flake module hands the Connector row's `driver` to mkHarness, and only
   # when some Connector declares one.
-  connector-driver-rows-flake-module-forwards-row =
+  connector-driver-rows-data-forwards-row =
     let
       consumerWith = modules: fixtures.connectorConsumerVia ([ ../../lib/flakeModule.nix ] ++ modules);
-      withRow = consumerWith [ fixtureConnector.flakeModule ];
+      withRow = consumerWith [ (fixtures.registerData fixtureConnector.data) ];
       without = consumerWith [ ];
       programOf = c: c.apps.${system}.default.program;
     in
     assert assertMsg (
       programOf without == fixtures.moduleConsumer.apps.${system}.default.program
     ) "with no Connector Driver row the module's app must be unchanged";
-    pkgs.runCommand "connector-driver-rows-flake-module-forwards-row"
-      { nativeBuildInputs = [ pkgs.jq ]; }
-      ''
-        ${fixtures.runInputDocOf withRow.apps.${system}.connectors-accept.program}
-        jq -e '[.drivers[].name] == ["fixture", "claude"]' "$doc"
-        touch $out
-      '';
+    pkgs.runCommand "connector-driver-rows-data-forwards-row" { nativeBuildInputs = [ pkgs.jq ]; } ''
+      ${fixtures.runInputDocOf withRow.apps.${system}.connectors-accept.program}
+      jq -e '[.drivers[].name] == ["fixture", "claude"]' "$doc"
+      touch $out
+    '';
 
   # Issue #6797: shadow mode. A Connector row naming a core Driver and carrying
   # a `module` can ask for its wasm to replay each Pass log beside the native
@@ -410,7 +408,7 @@ in
         fixtures.connectorConsumerVia (
           [
             ../../lib/flakeModule.nix
-            claudeConnector.flakeModule
+            (fixtures.registerData claudeConnector.data)
           ]
           ++ modules
         );
@@ -668,8 +666,8 @@ in
         fixtures.connectorConsumerVia (
           [
             ../../lib/flakeModule.nix
-            githubConnector.flakeModule
-            claudeConnector.flakeModule
+            (fixtures.registerData githubConnector.data)
+            (fixtures.registerData claudeConnector.data)
           ]
           ++ modules
         );
@@ -747,22 +745,22 @@ in
     # jira has no native adapter (connectorOnly), so its Connector row is
     # refused `primary` with the "no native backend" message.
     assert assertMsg (evaluatesWith [
-      jiraConnector.flakeModule
+      (fixtures.registerData jiraConnector.data)
     ]) "control: the jira Connector row evaluates without `primary`";
     assert assertMsg (
       !(evaluatesWith [
-        jiraConnector.flakeModule
+        (fixtures.registerData jiraConnector.data)
         { spindrift.connectors.jira.primary = true; }
       ])
     ) "`primary` on the jira row must fail evaluation: no native backend remains";
     # forgejo's native tracker is gone (issue #7122): like github and jira it
     # is connectorOnly, so its row is refused `primary`.
     assert assertMsg (evaluatesWith [
-      forgejoConnector.flakeModule
+      (fixtures.registerData forgejoConnector.data)
     ]) "control: the forgejo Connector row evaluates without `primary`";
     assert assertMsg (
       !(evaluatesWith [
-        forgejoConnector.flakeModule
+        (fixtures.registerData forgejoConnector.data)
         { spindrift.connectors.forgejo.primary = true; }
       ])
     ) "`primary` on the forgejo row must fail evaluation: no native backend remains";

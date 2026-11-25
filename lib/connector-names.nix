@@ -8,7 +8,7 @@
 rec {
   # The Consumer switches a backend row refuses (issue #7456), in the order
   # the refusal lists them. One source for the module's `definedSwitches` and
-  # `dataRow`'s switch-only defs.
+  # the switches `dataRow` rejects as stray keys.
   switchNames = [
     "shadow"
     "shadowEvery"
@@ -198,13 +198,42 @@ rec {
     name: defs:
     let
       n = builtins.length defs;
+      files = map (d: d.file) defs;
+      sameFile = builtins.all (f: f == builtins.head files) files;
+      by =
+        if sameFile then
+          "${
+            if n == 2 then "both times" else "every time"
+          } by ${builtins.head files} (one module registers it more than once: import it once and list it once)"
+        else
+          "by ${builtins.concatStringsSep " and by " files}";
     in
     if n < 2 then
       null
     else
-      "Connector '${name}' is registered ${if n == 2 then "twice" else "${toString n} times"}: by ${
-        builtins.concatStringsSep " and by " (map (d: d.file) defs)
-      }; a Connector registers once, as data, and a name has one definer";
+      "Connector '${name}' is registered ${
+        if n == 2 then "twice" else "${toString n} times"
+      }: ${by}; a Connector registers once, as data, and a name has one definer";
+
+  # Why the definitions of `spindrift.connectorData` cannot stand, or null.
+  # `defs` is the option's definition list as the module system saw it
+  # (`definitionsWithLocations`): `{ file; value = [ data ... ]; }` per
+  # definer. It reads only `data.name`; the option's merge validates each item
+  # and throws exactly this result.
+  registrationError =
+    defs:
+    let
+      items = builtins.concatMap (
+        d:
+        map (data: {
+          inherit (d) file;
+          inherit (data) name;
+        }) d.value
+      ) defs;
+      byName = builtins.groupBy (i: i.name) items;
+      twice = builtins.filter (n: builtins.length byName.${n} > 1) (builtins.attrNames byName);
+    in
+    if twice == [ ] then null else duplicateError (builtins.head twice) byName.${builtins.head twice};
 
   # Why a definition of `spindrift.connectors.<name>` is refused: it sets
   # `keys`, which only the Connector's data may declare.
