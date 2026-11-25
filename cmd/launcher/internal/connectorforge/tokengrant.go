@@ -7,9 +7,9 @@ import (
 	"slices"
 	"strings"
 
-	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/driver/driverkit"
+	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/retry"
 )
 
@@ -32,19 +32,19 @@ func tokenPrefix(token string) string {
 // must have loaded c with token as its credential: the request carries only
 // the token's prefix. It returns ErrNoTokenGrant when c does not declare
 // "forge.tokenGrant".
-func IntrospectToken(c *connectorhost.Connector, t Target, token string) (backendkit.TokenIntrospection, error) {
+func IntrospectToken(c *connectorhost.Connector, t Target, token string) (forge.TokenIntrospection, error) {
 	return introspectToken(newPushOnly(c.Call, c.Capabilities, c, t, retry.Clock{}).call, c.Capabilities, t, token)
 }
 
-func introspectToken(call guestCall, caps []string, t Target, token string) (backendkit.TokenIntrospection, error) {
+func introspectToken(call guestCall, caps []string, t Target, token string) (forge.TokenIntrospection, error) {
 	if !slices.Contains(caps, capTokenGrant) {
-		return backendkit.TokenIntrospection{}, ErrNoTokenGrant
+		return forge.TokenIntrospection{}, ErrNoTokenGrant
 	}
 	var g wireGrant
 	if err := call(context.Background(), "forge.tokenGrant", tokenGrantParams{t, tokenPrefix(token)}, &g); err != nil {
-		return backendkit.TokenIntrospection{}, err
+		return forge.TokenIntrospection{}, err
 	}
-	return backendkit.TokenIntrospection(g), nil
+	return forge.TokenIntrospection(g), nil
 }
 
 const (

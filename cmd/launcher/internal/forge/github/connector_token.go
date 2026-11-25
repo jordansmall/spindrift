@@ -6,10 +6,10 @@ import (
 	"net/http"
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
-	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectortracker"
+	"spindrift.dev/launcher/internal/forge"
 )
 
 // connectorClient is the transport the host-side Connector loads send with; nil
@@ -21,10 +21,10 @@ var connectorClient *http.Client
 // Connector answers, so the host needs no gh; without a routed row it fails
 // with ErrNoRoute, as every read does. A Connector load is short-lived,
 // with its audit record in the run's Connector record.
-func introspectToken(token, repoSlug string) (backendkit.TokenIntrospection, error) {
+func introspectToken(token, repoSlug string) (forge.TokenIntrospection, error) {
 	row, err := routeRow()
 	if err != nil {
-		return backendkit.TokenIntrospection{}, err
+		return forge.TokenIntrospection{}, err
 	}
 	got, err := introspect(row, backendrows.Options{Client: connectorClient}, token, repoSlug)
 	return got, noteRouted("introspect the token", err)
@@ -59,7 +59,7 @@ func withConnector(row backendrows.Row, o backendrows.Options, repoSlug string, 
 // never the host's own, and reads the grant through it. A Connector that does
 // not declare forge.tokenGrant cannot introspect: the error wraps
 // backendkit.ErrUnsupported.
-func introspect(row backendrows.Row, o backendrows.Options, token, repoSlug string) (got backendkit.TokenIntrospection, err error) {
+func introspect(row backendrows.Row, o backendrows.Options, token, repoSlug string) (got forge.TokenIntrospection, err error) {
 	o.Getenv = func(k string) string {
 		if k == row.CredentialEnv {
 			return token

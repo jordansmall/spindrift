@@ -15,7 +15,6 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
-	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/forge"
@@ -271,31 +270,31 @@ func loadTokenConnector(t *testing.T, b *tokenBackend, token string) *connectorh
 func TestConnector_TokenGrant(t *testing.T) {
 	str := func(s string) *string { return &s }
 	// The shared constant, not a copy, so the token tests cannot drift.
-	notIntrospectable := backendkit.TokenIntrospection{Reason: notIntrospectableReason}
+	notIntrospectable := forge.TokenIntrospection{Reason: notIntrospectableReason}
 	for _, tc := range []struct {
 		name, token string
 		userStatus  int
 		scopes      *string
 		permissions *string
-		want        backendkit.TokenIntrospection
+		want        forge.TokenIntrospection
 		wantErr     bool
 		// reaches is whether the shape makes a request at all.
 		reaches bool
 	}{
 		{name: "classic PAT with repo scope", token: "ghp_abc", scopes: str("read:org, repo"), reaches: true,
-			want: backendkit.TokenIntrospection{Introspectable: true, WriteCapable: true, Scopes: []string{"read:org", "repo"}}},
+			want: forge.TokenIntrospection{Introspectable: true, WriteCapable: true, Scopes: []string{"read:org", "repo"}}},
 		{name: "classic PAT with only read:org", token: "ghp_abc", scopes: str("read:org"), reaches: true,
-			want: backendkit.TokenIntrospection{Introspectable: true, Scopes: []string{"read:org"}}},
+			want: forge.TokenIntrospection{Introspectable: true, Scopes: []string{"read:org"}}},
 		{name: "classic PAT with no scopes", token: "ghp_abc", scopes: str(""), reaches: true,
-			want: backendkit.TokenIntrospection{Introspectable: true}},
+			want: forge.TokenIntrospection{Introspectable: true}},
 		{name: "classic PAT with no scopes header", token: "ghp_abc", reaches: true,
-			want: backendkit.TokenIntrospection{Introspectable: true}},
+			want: forge.TokenIntrospection{Introspectable: true}},
 		{name: "OAuth token with public_repo", token: "gho_abc", scopes: str("public_repo"), reaches: true,
-			want: backendkit.TokenIntrospection{Introspectable: true, WriteCapable: true, Scopes: []string{"public_repo"}}},
+			want: forge.TokenIntrospection{Introspectable: true, WriteCapable: true, Scopes: []string{"public_repo"}}},
 		{name: "installation token with push", token: "ghs_abc", permissions: str(`{"pull":true,"push":true}`), reaches: true,
-			want: backendkit.TokenIntrospection{Introspectable: true, WriteCapable: true}},
+			want: forge.TokenIntrospection{Introspectable: true, WriteCapable: true}},
 		{name: "installation token with read only", token: "ghs_abc", permissions: str(`{"pull":true,"push":false}`), reaches: true,
-			want: backendkit.TokenIntrospection{Introspectable: true}},
+			want: forge.TokenIntrospection{Introspectable: true}},
 		{name: "installation token without permissions", token: "ghs_abc", permissions: str(""), reaches: true, wantErr: true},
 		{name: "installation token without the repository", token: "ghs_abc", reaches: true, wantErr: true},
 		{name: "fine-grained PAT", token: "github_pat_abc", want: notIntrospectable},

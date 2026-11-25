@@ -10,7 +10,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/retry"
 )
 
@@ -42,7 +42,7 @@ func TestIntrospectTokenSendsOnlyThePrefix(t *testing.T) {
 		return json.Unmarshal([]byte(`{"introspectable":true,"writeCapable":true,"scopes":["read:org","repo"]}`), result)
 	}
 	got, err := introspectToken(checked(call), []string{capTokenGrant}, testTarget, "ghp_SECRET")
-	if err != nil || !reflect.DeepEqual(got, backendkit.TokenIntrospection{Introspectable: true, WriteCapable: true, Scopes: []string{"read:org", "repo"}}) {
+	if err != nil || !reflect.DeepEqual(got, forge.TokenIntrospection{Introspectable: true, WriteCapable: true, Scopes: []string{"read:org", "repo"}}) {
 		t.Fatalf("introspectToken = %+v, %v", got, err)
 	}
 	if method != "forge.tokenGrant" {
@@ -66,7 +66,7 @@ func TestIntrospectTokenCarriesTheReason(t *testing.T) {
 		return json.Unmarshal([]byte(`{"introspectable":false,"writeCapable":false,"reason":"why"}`), result)
 	}
 	got, err := introspectToken(checked(call), []string{capTokenGrant}, testTarget, "github_pat_x")
-	if err != nil || !reflect.DeepEqual(got, backendkit.TokenIntrospection{Reason: "why"}) {
+	if err != nil || !reflect.DeepEqual(got, forge.TokenIntrospection{Reason: "why"}) {
 		t.Fatalf("introspectToken = %+v, %v", got, err)
 	}
 }

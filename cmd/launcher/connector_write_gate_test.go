@@ -12,6 +12,7 @@ import (
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/exitcode"
+	"spindrift.dev/launcher/internal/forge"
 )
 
 // ghTokenEnv is the github row's one credential: core's own GH_TOKEN.
@@ -43,9 +44,9 @@ func walkConnectorWriteGate(c config, mode walkMode) (string, error) {
 
 func TestConnectorWriteGate_RefusesAReadOnlyCredential(t *testing.T) {
 	var gotToken string
-	useGithubConnectorRow(t, func(token, _ string) (backendkit.TokenIntrospection, error) {
+	useGithubConnectorRow(t, func(token, _ string) (forge.TokenIntrospection, error) {
 		gotToken = token
-		return backendkit.TokenIntrospection{Introspectable: true, WriteCapable: false}, nil
+		return forge.TokenIntrospection{Introspectable: true, WriteCapable: false}, nil
 	})
 	out, err := walkConnectorWriteGate(minimalValidConfig(), walkEnforce)
 	if !errors.Is(err, errLaunchGateConfigInvalid) {
@@ -97,8 +98,8 @@ func TestConnectorWriteGate_OneSideRefusesAReadOnlyCredential(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			useGithubConnectorRow(t, func(string, string) (backendkit.TokenIntrospection, error) {
-				return backendkit.TokenIntrospection{Introspectable: true, WriteCapable: false}, nil
+			useGithubConnectorRow(t, func(string, string) (forge.TokenIntrospection, error) {
+				return forge.TokenIntrospection{Introspectable: true, WriteCapable: false}, nil
 			})
 			c := minimalValidConfig()
 			c.IssueTracker, c.CodeForge = tc.tracker, tc.forge
@@ -121,8 +122,8 @@ func TestConnectorWriteGate_OneSideRefusesAReadOnlyCredential(t *testing.T) {
 }
 
 func TestConnectorWriteGate_PRSideOnlyUndeterminableWarnsWithFullSet(t *testing.T) {
-	useGithubConnectorRow(t, func(string, string) (backendkit.TokenIntrospection, error) {
-		return backendkit.TokenIntrospection{Reason: "fine-grained PAT"}, nil
+	useGithubConnectorRow(t, func(string, string) (forge.TokenIntrospection, error) {
+		return forge.TokenIntrospection{Reason: "fine-grained PAT"}, nil
 	})
 	out, err := walkConnectorWriteGate(prSideOnlyConfig(), walkEnforce)
 	if err != nil {
@@ -136,9 +137,9 @@ func TestConnectorWriteGate_PRSideOnlyUndeterminableWarnsWithFullSet(t *testing.
 }
 
 func TestConnectorWriteGate_PRSideOnlyInstallationTokenWarns(t *testing.T) {
-	useGithubConnectorRow(t, func(string, string) (backendkit.TokenIntrospection, error) {
+	useGithubConnectorRow(t, func(string, string) (forge.TokenIntrospection, error) {
 		t.Error("introspector called for an installation token, want it skipped")
-		return backendkit.TokenIntrospection{}, nil
+		return forge.TokenIntrospection{}, nil
 	})
 	t.Setenv(ghTokenEnv, "ghs_installationtoken")
 	out, err := walkConnectorWriteGate(prSideOnlyConfig(), walkEnforce)
@@ -154,16 +155,16 @@ func TestConnectorWriteGate_PRSideOnlyInstallationTokenWarns(t *testing.T) {
 
 func TestConnectorWriteGate_UndeterminableWarns(t *testing.T) {
 	cases := map[string]struct {
-		result backendkit.TokenIntrospection
+		result forge.TokenIntrospection
 		err    error
 		want   string
 	}{
-		"not introspectable": {result: backendkit.TokenIntrospection{Reason: "fine-grained PAT"}, want: "fine-grained PAT"},
+		"not introspectable": {result: forge.TokenIntrospection{Reason: "fine-grained PAT"}, want: "fine-grained PAT"},
 		"unsupported":        {err: backendkit.ErrUnsupported, want: "could not be determined"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			useGithubConnectorRow(t, func(string, string) (backendkit.TokenIntrospection, error) { return tc.result, tc.err })
+			useGithubConnectorRow(t, func(string, string) (forge.TokenIntrospection, error) { return tc.result, tc.err })
 			out, err := walkConnectorWriteGate(minimalValidConfig(), walkEnforce)
 			if err != nil {
 				t.Fatalf("err = %v, want nil: undeterminable scopes warn", err)
@@ -178,8 +179,8 @@ func TestConnectorWriteGate_UndeterminableWarns(t *testing.T) {
 }
 
 func TestConnectorWriteGate_NotIntrospectableWithoutReasonFallsBack(t *testing.T) {
-	useGithubConnectorRow(t, func(string, string) (backendkit.TokenIntrospection, error) {
-		return backendkit.TokenIntrospection{}, nil
+	useGithubConnectorRow(t, func(string, string) (forge.TokenIntrospection, error) {
+		return forge.TokenIntrospection{}, nil
 	})
 	out, err := walkConnectorWriteGate(minimalValidConfig(), walkEnforce)
 	if err != nil {
@@ -191,8 +192,8 @@ func TestConnectorWriteGate_NotIntrospectableWithoutReasonFallsBack(t *testing.T
 }
 
 func TestConnectorWriteGate_IntrospectionFailureIsConnectivity(t *testing.T) {
-	useGithubConnectorRow(t, func(string, string) (backendkit.TokenIntrospection, error) {
-		return backendkit.TokenIntrospection{}, errors.New("boom")
+	useGithubConnectorRow(t, func(string, string) (forge.TokenIntrospection, error) {
+		return forge.TokenIntrospection{}, errors.New("boom")
 	})
 	_, err := walkConnectorWriteGate(minimalValidConfig(), walkEnforce)
 	if !errors.Is(err, doctor.ErrConnectivity) || !strings.Contains(err.Error(), ghTokenEnv) {
@@ -201,8 +202,8 @@ func TestConnectorWriteGate_IntrospectionFailureIsConnectivity(t *testing.T) {
 }
 
 func TestConnectorWriteGate_WriteCapablePasses(t *testing.T) {
-	useGithubConnectorRow(t, func(string, string) (backendkit.TokenIntrospection, error) {
-		return backendkit.TokenIntrospection{Introspectable: true, WriteCapable: true}, nil
+	useGithubConnectorRow(t, func(string, string) (forge.TokenIntrospection, error) {
+		return forge.TokenIntrospection{Introspectable: true, WriteCapable: true}, nil
 	})
 	out, err := walkConnectorWriteGate(minimalValidConfig(), walkEnforce)
 	if err != nil || strings.Contains(out, "WARNING") {
@@ -220,9 +221,9 @@ func TestConnectorWriteGate_NotApplicable(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			called := false
-			useGithubConnectorRow(t, func(string, string) (backendkit.TokenIntrospection, error) {
+			useGithubConnectorRow(t, func(string, string) (forge.TokenIntrospection, error) {
 				called = true
-				return backendkit.TokenIntrospection{Introspectable: true}, nil
+				return forge.TokenIntrospection{Introspectable: true}, nil
 			})
 			c := minimalValidConfig()
 			c.IssueTracker, c.CodeForge = tc.tracker, tc.forge
@@ -236,9 +237,9 @@ func TestConnectorWriteGate_NotApplicable(t *testing.T) {
 
 func TestConnectorWriteGate_InstallationTokenWarnsWithoutIntrospecting(t *testing.T) {
 	called := false
-	useGithubConnectorRow(t, func(string, string) (backendkit.TokenIntrospection, error) {
+	useGithubConnectorRow(t, func(string, string) (forge.TokenIntrospection, error) {
 		called = true
-		return backendkit.TokenIntrospection{Introspectable: true, WriteCapable: false}, nil
+		return forge.TokenIntrospection{Introspectable: true, WriteCapable: false}, nil
 	})
 	t.Setenv(ghTokenEnv, "ghs_installationtoken")
 	out, err := walkConnectorWriteGate(minimalValidConfig(), walkEnforce)
@@ -257,9 +258,9 @@ func TestConnectorWriteGate_InstallationTokenWarnsWithoutIntrospecting(t *testin
 
 func TestConnectorWriteGate_UnsetCredentialPassesSilently(t *testing.T) {
 	called := false
-	useGithubConnectorRow(t, func(string, string) (backendkit.TokenIntrospection, error) {
+	useGithubConnectorRow(t, func(string, string) (forge.TokenIntrospection, error) {
 		called = true
-		return backendkit.TokenIntrospection{}, nil
+		return forge.TokenIntrospection{}, nil
 	})
 	t.Setenv(ghTokenEnv, "")
 	out, err := walkConnectorWriteGate(minimalValidConfig(), walkEnforce)
@@ -271,17 +272,17 @@ func TestConnectorWriteGate_UnsetCredentialPassesSilently(t *testing.T) {
 func TestConnectorWriteGate_DoctorReportsWriteCapability(t *testing.T) {
 	fullSet := []string{"Issues", "Pull requests", "Contents"}
 	cases := map[string]struct {
-		result  backendkit.TokenIntrospection
+		result  forge.TokenIntrospection
 		wantErr bool
 		want    []string
 	}{
-		"read-only":      {result: backendkit.TokenIntrospection{Introspectable: true}, wantErr: true, want: append([]string{"MISSING: " + connectorWriteGateName}, fullSet...)},
-		"undeterminable": {result: backendkit.TokenIntrospection{Reason: "fine-grained PAT"}, want: append([]string{"WARNING:", "fine-grained PAT"}, fullSet...)},
-		"write-capable":  {result: backendkit.TokenIntrospection{Introspectable: true, WriteCapable: true}, want: []string{"ok: " + connectorWriteGateName}},
+		"read-only":      {result: forge.TokenIntrospection{Introspectable: true}, wantErr: true, want: append([]string{"MISSING: " + connectorWriteGateName}, fullSet...)},
+		"undeterminable": {result: forge.TokenIntrospection{Reason: "fine-grained PAT"}, want: append([]string{"WARNING:", "fine-grained PAT"}, fullSet...)},
+		"write-capable":  {result: forge.TokenIntrospection{Introspectable: true, WriteCapable: true}, want: []string{"ok: " + connectorWriteGateName}},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			useGithubConnectorRow(t, func(string, string) (backendkit.TokenIntrospection, error) {
+			useGithubConnectorRow(t, func(string, string) (forge.TokenIntrospection, error) {
 				return tc.result, nil
 			})
 			out, err := walkConnectorWriteGate(minimalValidConfig(), walkReport)
