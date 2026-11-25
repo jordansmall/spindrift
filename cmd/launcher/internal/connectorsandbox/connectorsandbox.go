@@ -17,8 +17,9 @@ import (
 )
 
 // ErrConnectorSandboxStart is why the run's Connector sandbox could not be
-// started. It is final: no later load retries, and none falls back to loading
-// in-process, which would hand the Connector the Launcher's own address space.
+// started or restarted. It fails that load and the run, though the next load
+// tries again; no load falls back to loading in-process, which would hand the
+// Connector the Launcher's own address space.
 var ErrConnectorSandboxStart = errors.New("the Connector sandbox did not start")
 
 // ErrNoConnectorSandbox is a load with no Loader installed: unlike
@@ -29,10 +30,10 @@ var ErrNoConnectorSandbox = errors.New("no Connector sandbox is installed")
 type Loader interface {
 	Load(ctx context.Context, wasm []byte) (*connectorhost.Connector, error)
 	LoadNetwork(ctx context.Context, wasm []byte, n connectorhost.Network) (*connectorhost.Connector, error)
-	// Err is the sandbox's start failure, or nil.
+	// Err is the sandbox's latest start failure, kept after a later start
+	// succeeds, or nil.
 	Err() error
-	// Stats is what the sandbox cost the run; false when none started or its
-	// start failed.
+	// Stats is what the sandbox cost the run; false when none served.
 	Stats() (Stats, bool)
 }
 
@@ -94,8 +95,8 @@ func Failure() error {
 	return nil
 }
 
-// Report is the installed sandbox's Stats; false when none is installed, none
-// started, or its start failed.
+// Report is the installed sandbox's Stats; false when none is installed or none
+// served.
 func Report() (Stats, bool) {
 	if l := installed(); l != nil {
 		return l.Stats()

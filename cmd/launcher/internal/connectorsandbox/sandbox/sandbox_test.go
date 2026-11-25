@@ -3,12 +3,15 @@ package sandbox
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectorsandbox"
@@ -88,7 +91,7 @@ func TestNoLoadStartsNothing(t *testing.T) {
 // connectorsandbox.ErrConnectorSandboxStart, so a load that falls back shows.
 var notWasm = []byte("not a wasm module")
 
-func TestStartRefusedFailsClosedAndSticks(t *testing.T) {
+func TestStartRefusedFailsClosedAndRetries(t *testing.T) {
 	f := runner.NewFake()
 	f.StartConnectorSandboxFunc = func(string) (runner.ConnectorSandbox, error) {
 		return runner.ConnectorSandbox{}, errors.New("podman: no such image")
@@ -107,8 +110,8 @@ func TestStartRefusedFailsClosedAndSticks(t *testing.T) {
 	if !errors.Is(err2, connectorsandbox.ErrConnectorSandboxStart) {
 		t.Fatalf("second load = %v, want connectorsandbox.ErrConnectorSandboxStart", err2)
 	}
-	if len(f.ConnectorSandboxStarts) != 1 {
-		t.Fatalf("starts = %v, want one: a failed start is not retried", f.ConnectorSandboxStarts)
+	if len(f.ConnectorSandboxStarts) != 2 {
+		t.Fatalf("starts = %v, want two: a failed start is retried by the next use", f.ConnectorSandboxStarts)
 	}
 	if !errors.Is(s.Err(), connectorsandbox.ErrConnectorSandboxStart) {
 		t.Fatalf("Err = %v", s.Err())
@@ -307,7 +310,7 @@ func TestFailedStopIsRetriedByCloseAndReported(t *testing.T) {
 	if before < 1 {
 		t.Fatalf("Kill calls = %v, want at least Close's own", f.KillCalls)
 	}
-	warn := "warning: stopping Connector sandbox " + s.name + ": " + f.KillErr.Error()
+	warn := "warning: stopping Connector sandbox " + s.cur.name + ": " + f.KillErr.Error()
 	if !strings.Contains(out.String(), warn) {
 		t.Fatalf("log = %q, want %q", out.String(), warn)
 	}
@@ -330,7 +333,236 @@ func TestFailedStopIsRetriedByCloseAndReported(t *testing.T) {
 	if got := killCount(f); got != before+1 {
 		t.Fatalf("Kill calls = %v, want no more once a stop succeeded", f.KillCalls)
 	}
-	if got := strings.Count(out.String(), "==> stopped Connector sandbox: "+s.name+"\n"); got != 1 {
+	if got := strings.Count(out.String(), "==> stopped Connector sandbox: "+s.cur.name+"\n"); got != 1 {
 		t.Fatalf("stopped lines = %d in %q, want exactly one", got, out.String())
+	}
+}
+
+// killableHosts starts inMemoryHost sandboxes and keeps each one's stdin, so a
+// test can end a host the way a crash would, and whether its Wait was called.
+type killableHosts struct {
+	mu     sync.Mutex
+	stdins []io.Closer
+	waited []*atomic.Bool
+}
+
+func (h *killableHosts) start(name string) (runner.ConnectorSandbox, error) {
+	sb, err := inMemoryHost(name)
+	waited := new(atomic.Bool)
+	inner := sb.Wait
+	sb.Wait = func() error { waited.Store(true); return inner() }
+	h.mu.Lock()
+	h.stdins = append(h.stdins, sb.Stdin)
+	h.waited = append(h.waited, waited)
+	h.mu.Unlock()
+	return sb, err
+}
+
+// reaped is whether the i'th host's Wait has been called.
+func (h *killableHosts) reaped(i int) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.waited[i].Load()
+}
+
+// kill ends the i'th host and waits for its Sandbox's Sessions to notice.
+func (h *killableHosts) kill(t *testing.T, i int, ss *connectorhost.Sessions) {
+	t.Helper()
+	h.mu.Lock()
+	_ = h.stdins[i].Close()
+	h.mu.Unlock()
+	deadline := time.Now().Add(5 * time.Second)
+	for ss.Dead() == nil && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if ss.Dead() == nil {
+		t.Fatal("the host's death was not noticed")
+	}
+}
+
+// reachedHost is whether a load of notWasm got as far as the host, which
+// rejects it: a dead host or a failed start fails earlier.
+func reachedHost(err error) bool {
+	return err != nil && !errors.Is(err, connectorsandbox.ErrConnectorSandboxStart) && !strings.Contains(err.Error(), "connector host exited")
+}
+
+func TestDeadSandboxRestartsOnNextUse(t *testing.T) {
+	f := runner.NewFake()
+	h := &killableHosts{}
+	f.StartConnectorSandboxFunc = h.start
+	s := New(f, "podman")
+	t.Cleanup(func() { _ = s.Close(context.Background()) })
+	if _, err := s.Load(context.Background(), notWasm); !reachedHost(err) {
+		t.Fatalf("first Load = %v, want the host's rejection", err)
+	}
+	old := s.cur.sessions
+	first, _ := s.Stats()
+	h.kill(t, 0, old)
+
+	if _, err := s.Load(context.Background(), notWasm); !reachedHost(err) {
+		t.Fatalf("Load after the host died = %v, want the restarted host's rejection", err)
+	}
+	if got := f.ConnectorSandboxStarts; len(got) != 2 || got[0] == got[1] {
+		t.Fatalf("starts = %v, want two differently named", got)
+	}
+	if s.Err() != nil {
+		t.Fatalf("Err = %v after a successful restart", s.Err())
+	}
+	// A session the dead host held is not served by its successor.
+	if _, err := old.Load(context.Background(), notWasm); !strings.Contains(fmt.Sprint(err), "connector host exited") {
+		t.Fatalf("Load on the dead generation = %v, want connector host exited", err)
+	}
+	st, ok := s.Stats()
+	if !ok || st.Calls <= s.cur.sessions.Stats().Calls || st.Start <= s.cur.start {
+		t.Fatalf("Stats = %+v, %v; want both generations totalled over the new one's %+v, start %v", st, ok, s.cur.sessions.Stats(), s.cur.start)
+	}
+	if st.Calls < first.Calls || st.Start < first.Start {
+		t.Fatalf("Stats = %+v, want at least the first generation's %+v", st, first)
+	}
+}
+
+func TestRestartReapsTheDeadGeneration(t *testing.T) {
+	f := runner.NewFake()
+	h := &killableHosts{}
+	f.StartConnectorSandboxFunc = h.start
+	s := New(f, "podman")
+	t.Cleanup(func() { _ = s.Close(context.Background()) })
+	_, _ = s.Load(context.Background(), notWasm)
+	h.kill(t, 0, s.cur.sessions)
+	if h.reaped(0) {
+		t.Fatal("the dead host was reaped before any restart")
+	}
+	if _, err := s.Load(context.Background(), notWasm); !reachedHost(err) {
+		t.Fatalf("Load after the host died = %v, want the restarted host's rejection", err)
+	}
+	if !h.reaped(0) {
+		t.Error("the restart left the dead generation unreaped until Close")
+	}
+	if h.reaped(1) {
+		t.Error("the live generation was reaped")
+	}
+	if got := killCount(f); got < 1 {
+		t.Errorf("Kill calls = %v, want the dead generation stopped on restart", f.KillCalls)
+	}
+}
+
+func TestConnectorHeldAcrossARestartIsNotServedByTheNewGeneration(t *testing.T) {
+	f := runner.NewFake()
+	h := &killableHosts{}
+	f.StartConnectorSandboxFunc = h.start
+	s := New(f, "podman")
+	t.Cleanup(func() { _ = s.Close(context.Background()) })
+	wasm := fixture(t, "call.wasm")
+	held, err := s.Load(context.Background(), wasm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.kill(t, 0, s.cur.sessions)
+	fresh, err := s.Load(context.Background(), wasm)
+	if err != nil {
+		t.Fatalf("Load after the host died = %v", err)
+	}
+	var out string
+	if err := fresh.Call(context.Background(), "echo", "new", &out); err != nil || out != "new" {
+		t.Fatalf("echo on the restarted generation = %q, %v", out, err)
+	}
+	if err := held.Call(context.Background(), "echo", "old", &out); err == nil {
+		t.Fatalf("a Connector of the dead generation was served by the new one: %q", out)
+	}
+}
+
+func TestFailedRestartFailsTheCallAndTheNextUseTriesAgain(t *testing.T) {
+	f := runner.NewFake()
+	h := &killableHosts{}
+	var refuse atomic.Bool
+	f.StartConnectorSandboxFunc = func(name string) (runner.ConnectorSandbox, error) {
+		if refuse.Load() {
+			return runner.ConnectorSandbox{}, errors.New("podman: no such image")
+		}
+		return h.start(name)
+	}
+	s := New(f, "oci (podman)")
+	t.Cleanup(func() { _ = s.Close(context.Background()) })
+	_, _ = s.Load(context.Background(), notWasm)
+	h.kill(t, 0, s.cur.sessions)
+
+	refuse.Store(true)
+	for range 2 {
+		_, err := s.Load(context.Background(), notWasm)
+		if !errors.Is(err, connectorsandbox.ErrConnectorSandboxStart) || !strings.Contains(err.Error(), "runner oci (podman)") {
+			t.Fatalf("Load = %v, want connectorsandbox.ErrConnectorSandboxStart naming the runner oci (podman)", err)
+		}
+	}
+	if got := len(f.ConnectorSandboxStarts); got != 3 {
+		t.Fatalf("starts = %v, want one try per use", f.ConnectorSandboxStarts)
+	}
+	if !errors.Is(s.Err(), connectorsandbox.ErrConnectorSandboxStart) {
+		t.Fatalf("Err = %v", s.Err())
+	}
+
+	refuse.Store(false)
+	if _, err := s.Load(context.Background(), notWasm); !reachedHost(err) {
+		t.Fatalf("Load once the runner recovers = %v, want the host's rejection", err)
+	}
+	if !errors.Is(s.Err(), connectorsandbox.ErrConnectorSandboxStart) {
+		t.Fatalf("Err = %v after a later successful start, want the earlier start failure kept", s.Err())
+	}
+}
+
+func TestLoadAfterCloseFailsWithoutStarting(t *testing.T) {
+	f := runner.NewFake()
+	f.StartConnectorSandboxFunc = inMemoryHost
+	s := New(f, "podman")
+	if err := s.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Load(context.Background(), notWasm); !errors.Is(err, errClosed) {
+		t.Fatalf("Load after Close = %v, want errClosed", err)
+	}
+	if len(f.ConnectorSandboxStarts) != 0 {
+		t.Fatalf("starts = %v, want none", f.ConnectorSandboxStarts)
+	}
+}
+
+func TestClosedSandboxIsNotRestartedAfterItsHostDied(t *testing.T) {
+	f := runner.NewFake()
+	h := &killableHosts{}
+	f.StartConnectorSandboxFunc = h.start
+	s := New(f, "podman")
+	_, _ = s.Load(context.Background(), notWasm)
+	h.kill(t, 0, s.cur.sessions)
+	if err := s.Close(context.Background()); err != nil {
+		t.Fatalf("Close = %v", err)
+	}
+	if _, err := s.LoadNetwork(context.Background(), notWasm, connectorhost.Network{}); !errors.Is(err, errClosed) {
+		t.Fatalf("LoadNetwork after Close = %v, want errClosed", err)
+	}
+	if len(f.ConnectorSandboxStarts) != 1 {
+		t.Fatalf("starts = %v, want the one", f.ConnectorSandboxStarts)
+	}
+}
+
+func TestTransitionRejectsIllegalMoves(t *testing.T) {
+	for _, tc := range []struct{ from, to state }{
+		{closed, running},
+		{closed, dead},
+		{closed, idle},
+		{running, running},
+		{running, idle},
+		{dead, idle},
+		{idle, idle},
+	} {
+		s := &Sandbox{state: tc.from}
+		panicked := func() (p any) {
+			defer func() { p = recover() }()
+			s.transition(tc.to)
+			return nil
+		}()
+		if panicked == nil {
+			t.Errorf("%s -> %s did not panic", tc.from, tc.to)
+		}
+		if s.state != tc.from {
+			t.Errorf("%s -> %s left state %s, want it unchanged", tc.from, tc.to, s.state)
+		}
 	}
 }
