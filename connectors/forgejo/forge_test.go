@@ -465,3 +465,31 @@ func TestJobLogBadIDRefusedWithoutRequest(t *testing.T) {
 		t.Fatalf("requests sent: %#v", *got)
 	}
 }
+
+func TestBranchPath(t *testing.T) {
+	for branch, want := range map[string]string{
+		"agent/issue-1": "agent/issue-1",
+		"a,b/c d":       "a,b/c%20d",
+	} {
+		if got, err := branchPath(branch); err != nil || got != want {
+			t.Errorf("branchPath(%q) = %q, %v; want %q", branch, got, err, want)
+		}
+	}
+	for _, branch := range []string{"", "a//b", "a/./b", "a/../b", "a;b"} {
+		if got, err := branchPath(branch); err == nil {
+			t.Errorf("branchPath(%q) = %q; want an error", branch, got)
+		}
+	}
+}
+
+// A send that never reaches the forge is worth retrying, unlike a refusal.
+func TestFailedSendIsTransient(t *testing.T) {
+	host.Serve(t, func(connector.Request) (connector.Response, error) {
+		return connector.Response{}, errors.New("dial")
+	})
+	_, err := probe(ftgt)
+	var ce *connector.Error
+	if !errors.As(err, &ce) || ce.Class != connector.Transient {
+		t.Errorf("probe error = %v; want a Transient *connector.Error", err)
+	}
+}

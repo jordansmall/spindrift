@@ -222,7 +222,7 @@ func TestWritesAcceptABodilessAnswer(t *testing.T) {
 		t.Errorf("comment: %v", err)
 	}
 	// setDraft reads the PR first, so drive its PATCH itself.
-	if err := call("PATCH", ftgt.API, forgePath(ftgt, "/pulls/5"), nil, nil); err != nil {
+	if err := send("PATCH", ftgt.API, forgePath(ftgt, "/pulls/5"), nil, nil); err != nil {
 		t.Errorf("PATCH: %v", err)
 	}
 }

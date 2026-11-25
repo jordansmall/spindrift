@@ -47,11 +47,6 @@ func stripWIPPrefix(title string) string {
 	}
 }
 
-func marshal(v any) []byte {
-	b, _ := json.Marshal(v) // maps of strings and bools cannot fail
-	return b
-}
-
 // open creates the PR. Forgejo has no create-time draft field, so a draft is
 // a WIP title prefix. A 409 (a PR for this head exists) surfaces as an error:
 // core adopts the branch's open PR itself.
@@ -61,8 +56,8 @@ func open(t forge.Target, p forge.NewPR) (forge.PR, error) {
 		title = wipPrefix + " " + title
 	}
 	var raw rawPR
-	body := marshal(map[string]string{"title": title, "head": p.Head, "base": p.Base, "body": p.Body})
-	if err := call("POST", t.API, forgePath(t, "/pulls"), body, &raw); err != nil {
+	body := map[string]string{"title": title, "head": p.Head, "base": p.Base, "body": p.Body}
+	if err := send("POST", t.API, forgePath(t, "/pulls"), body, &raw); err != nil {
 		return forge.PR{}, err
 	}
 	return raw.pr(), nil
@@ -87,7 +82,7 @@ func behind(t forge.Target, number string) (int, error) {
 	var cmp struct {
 		TotalCommits int `json:"total_commits"`
 	}
-	if err := call("GET", t.API, forgePath(t, "/compare/"+head+"..."+base), nil, &cmp); err != nil {
+	if err := send("GET", t.API, forgePath(t, "/compare/"+head+"..."+base), nil, &cmp); err != nil {
 		return 0, err
 	}
 	return cmp.TotalCommits, nil
@@ -134,14 +129,14 @@ func setDraft(t forge.Target, number string, draft bool) error {
 			return fmt.Errorf("PR %s title %q is empty once WIP markers are stripped; refusing to PATCH an empty title", number, raw.Title)
 		}
 	}
-	return call("PATCH", t.API, forgePath(t, "/pulls/"+number), marshal(map[string]string{"title": title}), nil)
+	return send("PATCH", t.API, forgePath(t, "/pulls/"+number), map[string]string{"title": title}, nil)
 }
 
 func comment(t forge.Target, number, body string) error {
 	if _, err := parseNumber(number); err != nil {
 		return err
 	}
-	return call("POST", t.API, forgePath(t, "/issues/"+number+"/comments"), marshal(map[string]string{"body": body}), nil)
+	return send("POST", t.API, forgePath(t, "/issues/"+number+"/comments"), map[string]string{"body": body}, nil)
 }
 
 // postMerge always rebases: the protocol carries no method (core refuses any
@@ -159,13 +154,11 @@ func postMerge(t forge.Target, number string, extra map[string]any) error {
 		body[k] = v
 	}
 	path := forgePath(t, "/pulls/"+number+"/merge")
-	resp, err := request("POST", t.API, path, marshal(body))
-	if err != nil {
-		return err
+	resp, err := connector.SendJSON(connector.Request{Method: "POST", URL: t.API + path}, body, nil)
+	if err == nil {
+		return nil
 	}
 	switch {
-	case is2xx(resp.Status):
-		return nil
 	case resp.Status == 405 || resp.Status == 409:
 		var m struct {
 			Message string `json:"message"`
@@ -175,7 +168,7 @@ func postMerge(t forge.Target, number string, extra map[string]any) error {
 		}
 		return connector.Errorf(connector.NotMergeable, "POST %s: status %d", path, resp.Status)
 	}
-	return statusError("POST", path, resp.Status)
+	return err
 }
 
 func merge(t forge.Target, number string) error { return postMerge(t, number, nil) }
@@ -191,7 +184,7 @@ func autoMergeAllowed(t forge.Target) (bool, error) {
 	var repo struct {
 		AllowRebase bool `json:"allow_rebase"`
 	}
-	err := call("GET", t.API, forgePath(t, ""), nil, &repo)
+	err := send("GET", t.API, forgePath(t, ""), nil, &repo)
 	return repo.AllowRebase, err
 }
 
@@ -206,7 +199,7 @@ func branchProtected(t forge.Target, branch string) (bool, error) {
 	var b struct {
 		Protected bool `json:"protected"`
 	}
-	err = call("GET", t.API, forgePath(t, "/branches/"+p), nil, &b)
+	err = send("GET", t.API, forgePath(t, "/branches/"+p), nil, &b)
 	return b.Protected, err
 }
 
@@ -214,6 +207,6 @@ func probe(t forge.Target) (string, error) {
 	var repo struct {
 		FullName string `json:"full_name"`
 	}
-	err := call("GET", t.API, forgePath(t, ""), nil, &repo)
+	err := send("GET", t.API, forgePath(t, ""), nil, &repo)
 	return repo.FullName, err
 }

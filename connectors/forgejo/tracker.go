@@ -60,7 +60,7 @@ func issue(t tracker.Target, number string) (tracker.Issue, error) {
 		return tracker.Issue{}, err
 	}
 	var raw rawIssue
-	if err := call("GET", t.API, path, nil, &raw); err != nil {
+	if err := send("GET", t.API, path, nil, &raw); err != nil {
 		return tracker.Issue{}, err
 	}
 	return raw.issue(), nil
@@ -131,7 +131,7 @@ func comments(t tracker.Target, number string) ([]tracker.Comment, error) {
 		CreatedAt string `json:"created_at"`
 		Body      string `json:"body"`
 	}
-	if err := call("GET", t.API, path, nil, &raw); err != nil {
+	if err := send("GET", t.API, path, nil, &raw); err != nil {
 		return nil, err
 	}
 	out := []tracker.Comment{}
