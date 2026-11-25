@@ -300,6 +300,101 @@ let
     (checkDoc what e.doc)
   ];
 
+  # The shared admit-case table: a rule may have no cases yet (it then stays
+  # visible as a rule with no rows), but each case states exactly one verdict.
+  admitCaseChecks =
+    ac:
+    let
+      caseChecks =
+        rule: c:
+        let
+          what = "admitCases rule ${rule} case ${toJSON (c.name or "?")}";
+          verdicts = filter (f: c ? ${f}) [
+            "admit"
+            "refuse"
+          ];
+        in
+        [
+          (checkKeys what c
+            [
+              "name"
+              "method"
+              "url"
+              "admit"
+              "refuse"
+            ]
+            [ "name" "method" "url" ]
+          )
+          (
+            if isString c.name && c.name != "" && isString c.method && isString c.url then
+              true
+            else
+              fail "${what}: name, method and url must be strings, name non-empty"
+          )
+          (
+            if length verdicts != 1 then
+              fail "${what}: must have exactly one of admit or refuse"
+            else if c ? admit && c.admit != true then
+              fail "${what}: admit must be true"
+            else if c ? refuse && (!isString c.refuse || c.refuse == "") then
+              fail "${what}: refuse must be a non-empty string"
+            else
+              true
+          )
+        ];
+      ruleChecks =
+        r:
+        let
+          what = "admitCases rule ${toJSON (r.name or "?")}";
+        in
+        [
+          (checkFields what r [
+            "name"
+            "doc"
+            "cases"
+          ])
+          (checkName what "[a-z][A-Za-z]*" r.name)
+          (checkDoc what r.doc)
+          (if isList r.cases then true else fail "${what}: cases must be a list")
+          (noDups "${what} cases" (map (c: c.name or "?") r.cases))
+        ]
+        ++ concatMap' (caseChecks (toJSON r.name)) r.cases;
+    in
+    [
+      (checkFields "admitCases" ac [
+        "routes"
+        "rules"
+      ])
+      (noDups "admitCases rules" (map (r: r.name or "?") ac.rules))
+    ]
+    ++ concatMap' (
+      r:
+      let
+        what = "admitCases route ${toJSON (r.path or "?")}";
+      in
+      [
+        (checkFields what r [
+          "method"
+          "host"
+          "path"
+        ])
+        (
+          if isString r.method && match "[A-Z]+" r.method != null then
+            true
+          else
+            fail "${what}: method must match [A-Z]+"
+        )
+        (if isString r.host && r.host != "" then true else fail "${what}: host must be a non-empty string")
+        (
+          if isString r.path && match "/.*" r.path != null then
+            true
+          else
+            fail "${what}: path must start with /"
+        )
+      ]
+    ) ac.routes
+    ++ concatMap' ruleChecks ac.rules;
+
   validate =
     desc:
     let
@@ -315,6 +410,7 @@ let
           "statusCategories"
           "transitionOutcomes"
           "resultChecks"
+          "admitCases"
           "types"
           "methods"
         ])
@@ -410,7 +506,8 @@ let
         (checkName "type" "[a-z][A-Za-z0-9]*" n)
         (seq (typeSchema desc.types "type ${n}" desc.types.${n}) true)
       ]) (attrNames desc.types)
-      ++ concatMap' (methodChecks desc) desc.methods;
+      ++ concatMap' (methodChecks desc) desc.methods
+      ++ admitCaseChecks desc.admitCases;
     in
     seq (deepSeq checks null) (
       # Identifier collisions are checked once the rows are known good.

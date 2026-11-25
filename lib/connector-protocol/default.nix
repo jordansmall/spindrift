@@ -529,6 +529,144 @@ let
       };
     };
 
+    # Cases both core's Network host and the SDK fake host must satisfy: one
+    # request, checked against `routes`, is admitted or refused for the exact
+    # `refuse` text that follows each host's refusal prefix. A rule with no
+    # cases stays listed, so a rule added without cases is visible. Address
+    # policy is out of scope. Rendered by `nix run .#regen`.
+    admitCases =
+      let
+        methodSet = [
+          "GET"
+          "HEAD"
+          "POST"
+          "PUT"
+          "PATCH"
+          "DELETE"
+        ];
+        methodList = builtins.concatStringsSep ", " methodSet;
+        methodReason = "method is not one of ${methodList}";
+        schemeRefused = req: "${req}: only https urls without userinfo or fragment are allowed";
+        noRoute = req: "no route admits ${req}";
+        rule = name: doc: cases: { inherit name doc cases; };
+        admitted = name: method: url: {
+          inherit name method url;
+          admit = true;
+        };
+        refused = name: method: url: refuse: {
+          inherit
+            name
+            method
+            url
+            refuse
+            ;
+        };
+      in
+      {
+        routes = [
+          {
+            method = "GET";
+            host = "jira.example.com";
+            path = "/rest/api/2";
+          }
+          {
+            method = "POST";
+            host = "jira.example.com";
+            path = "/rest/api/2/issue";
+          }
+          {
+            method = "GET";
+            host = "other.example.com:8443";
+            path = "/";
+          }
+        ];
+        rules = [
+          (rule "methodSet" "A request's method must be one of ${methodList}, compared case-sensitively." [
+            (refused "method outside the set" "TRACE" "https://jira.example.com/rest/api/2" methodReason)
+            (refused "lower-case method" "get" "https://jira.example.com/rest/api/2" methodReason)
+            (admitted "method in the set" "GET" "https://jira.example.com/rest/api/2")
+          ])
+          (rule "exactMethod"
+            "A method matches a route's method exactly, so another route's method is refused."
+            [
+              (refused "wrong method for route" "POST" "https://jira.example.com/rest/api/2" (
+                noRoute "POST jira.example.com/rest/api/2"
+              ))
+            ]
+          )
+          (rule "httpsOnly" "Only an https url is admitted, and one that does not parse is refused." [
+            (refused "http scheme" "GET" "http://jira.example.com/rest/api/2" (
+              schemeRefused "GET jira.example.com/rest/api/2"
+            ))
+            (refused "unparseable" "GET" "https://jira.example.com/%zz" "GET: unparseable url")
+          ])
+          (rule "noUserinfoOrFragment" "A url carrying userinfo or a fragment is refused." [
+            (refused "userinfo" "GET" "https://u:p@jira.example.com/rest/api/2" (
+              schemeRefused "GET jira.example.com/rest/api/2"
+            ))
+            (refused "fragment" "GET" "https://jira.example.com/rest/api/2#f" (
+              schemeRefused "GET jira.example.com/rest/api/2"
+            ))
+          ])
+          (rule "canonicalPath"
+            "A path must be canonical: no dot segments, trailing slash, empty segment, escaped slash or empty path."
+            [
+              (refused "dot-dot" "GET" "https://jira.example.com/rest/api/2/a/../b" (
+                noRoute "GET jira.example.com/rest/api/2/a/../b"
+              ))
+              (refused "trailing slash" "GET" "https://jira.example.com/rest/api/2/" (
+                noRoute "GET jira.example.com/rest/api/2/"
+              ))
+              (refused "double slash" "GET" "https://jira.example.com/rest/api/2/a//b" (
+                noRoute "GET jira.example.com/rest/api/2/a//b"
+              ))
+              (refused "escaped slash" "GET" "https://jira.example.com/rest/api/2/a%2Fb" (
+                noRoute "GET jira.example.com/rest/api/2/a/b"
+              ))
+              (refused "empty path" "GET" "https://jira.example.com" (noRoute "GET jira.example.com"))
+            ]
+          )
+          (rule "caseInsensitiveHost"
+            "A host matches a route's host without regard to case, and its port is significant."
+            [
+              (admitted "host case-insensitive" "GET" "https://JIRA.example.com/rest/api/2")
+              (refused "port is significant" "GET" "https://other.example.com/x" (
+                noRoute "GET other.example.com/x"
+              ))
+              (refused "wrong host" "GET" "https://evil.example.com/rest/api/2" (
+                noRoute "GET evil.example.com/rest/api/2"
+              ))
+            ]
+          )
+          (rule "pathPattern"
+            "A route admits its path and everything beneath it on a segment boundary, and the query is not part of the path."
+            [
+              (admitted "root itself" "GET" "https://jira.example.com/rest/api/2")
+              (admitted "under root" "GET" "https://jira.example.com/rest/api/2/issue/X-1")
+              (admitted "blanket root with port" "GET" "https://other.example.com:8443/anything/at/all")
+              (admitted "query is not path" "GET" "https://jira.example.com/rest/api/2?x=1")
+              (refused "outside the subtree" "GET" "https://jira.example.com/rest/api/2issuefoo" (
+                noRoute "GET jira.example.com/rest/api/2issuefoo"
+              ))
+              (refused "sibling prefix" "POST" "https://jira.example.com/rest/api/2/issuefoo" (
+                noRoute "POST jira.example.com/rest/api/2/issuefoo"
+              ))
+            ]
+          )
+          (rule "semicolon"
+            "A path containing a semicolon is not matched, so a path parameter or a `..;` segment cannot slip past a route."
+            [
+              (refused "dot-dot semicolon" "GET" "https://jira.example.com/rest/api/2/..;/x" (
+                noRoute "GET jira.example.com/rest/api/2/..;/x"
+              ))
+              (refused "path parameter" "GET" "https://jira.example.com/rest/api/2/issue;x=1" (
+                noRoute "GET jira.example.com/rest/api/2/issue;x=1"
+              ))
+            ]
+          )
+        ];
+      };
+
     methods =
       import ./driver.nix { inherit t; }
       ++ import ./forge.nix { inherit t; }
