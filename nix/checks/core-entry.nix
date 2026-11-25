@@ -68,6 +68,7 @@ let
   };
   jiraViaRoot = (import ../../connectors/jira).lib.connector { core = rootAsCore; };
   jiraViaRootAgain = (import ../../connectors/jira).lib.connector { core = rootAsCore; };
+  githubViaRoot = (import ../../connectors/github).lib.connector { core = rootAsCore; };
 in
 {
   # Issue #7139: a Consumer importing the root's `flakeModules.default` still
@@ -116,6 +117,20 @@ in
           ]).apps.${system}.default.program
         }
         jq -e '[.backends[] | select(.credentialKnob == "jiraToken")] | length == 1' "$doc"
+        touch $out
+      '';
+
+  # A data-form Connector imports the `core` it was handed, so with the batteries
+  # root as `core` its module alone still brings the root's forgejo row.
+  core-entry-github-connector-module-imports-handed-core =
+    pkgs.runCommand "core-entry-github-connector-module-imports-handed-core"
+      { nativeBuildInputs = [ pkgs.jq ]; }
+      ''
+        ${fixtures.runInputDocOf
+          (fixtures.moduleConsumerWith [ githubViaRoot.flakeModule ]).apps.${system}.default.program
+        }
+        jq -e '[.backends[] | select(.credentialKnob == "forgejoToken")] | length == 1' "$doc"
+        jq -e '[.backends[] | select(.credentialKnob == "ghToken")] | length == 1' "$doc"
         touch $out
       '';
 

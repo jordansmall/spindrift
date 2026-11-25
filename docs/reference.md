@@ -2519,8 +2519,8 @@ with `+`, or symlinks that point outside the Connector.
 #### Backend rows on a Connector
 
 A Connector row may carry `backend`, a network backend's row (ADR 0073). The
-fixture Connector's, in
-[`nix/fixtures/connector/module.nix`](../nix/fixtures/connector/module.nix):
+fixture Connector's, declared as data in
+[`nix/fixtures/connector/data.nix`](../nix/fixtures/connector/data.nix):
 
 ```nix
 spindrift.connectors.fixture.backend = {

@@ -39,6 +39,7 @@ let
     # Reaches the dogfood via its restated schema default, not dogfood-defaults.nix.
     "spindrift-connector-routes.json"
     "connectors/*/routes.nix"
+    "connectors/*/data.nix"
     "connectors/*/module.nix"
     "connectors/*/row.nix"
   ];

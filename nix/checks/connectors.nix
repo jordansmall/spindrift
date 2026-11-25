@@ -71,8 +71,7 @@ let
 
   programsOf = builtins.mapAttrs (_: a: a.program);
 
-  fixtureKnob =
-    (import ../fixtures/connector/module.nix { inherit core; }).spindrift.connectors.fixture.knobs;
+  fixtureKnob = (import ../fixtures/connector/data.nix { inherit core; }).knobs;
   knob = connector: key: env: { inherit connector key env; };
   oneFresh = [ (knob "clash" "clashing" "CLASH_FRESH") ];
   twoFresh = [

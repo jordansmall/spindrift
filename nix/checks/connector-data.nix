@@ -21,8 +21,7 @@ let
     flakeOption = false;
     boxEnv = false;
   };
-  fixtureRow =
-    (import ../fixtures/connector/module.nix { inherit core; }).spindrift.connectors.fixture.driver;
+  fixtureRow = (import ../fixtures/connector/data.nix { inherit core; }).driver;
   jiraFragments = import ../../connectors/jira/fragments.nix;
   routes = [
     {

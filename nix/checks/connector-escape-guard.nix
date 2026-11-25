@@ -187,9 +187,9 @@ in
           ) selfTestFailures
         )
       }";
-    assert assertMsg (elem "module.nix" (
+    assert assertMsg (elem "data.nix" (
       map (f: f.rel) scanned."nix/fixtures/connector"
-    )) "connector-escape-guard scanned no fixture module.nix; the scan is vacuous";
+    )) "connector-escape-guard scanned no fixture data.nix; the scan is vacuous";
     assert assertMsg (all (root: elem "module.nix" (map (f: f.rel) scanned.${root})) (
       attrNames scaffoldDirs
     )) "connector-escape-guard scanned no scaffold module.nix; the scan is vacuous";
