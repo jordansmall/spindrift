@@ -1,7 +1,6 @@
 package github
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -193,11 +192,7 @@ func TestConnectorRow_LoadFailureFailsTheReadAndIsRecorded(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			_, c, calls, logDir := routedLogHarness(t, useGithubRowAt)
 			boom := errors.New("github connector failed to load")
-			old := loadRowConnector
-			t.Cleanup(func() { loadRowConnector = old })
-			loadRowConnector = func(context.Context, backendrows.Row, backendrows.Options) (*connectorhost.Connector, error) {
-				return nil, boom
-			}
+			hookLoads(t, func(func() (*connectorhost.Connector, error)) (*connectorhost.Connector, error) { return nil, boom })
 
 			err := tc.read(c, "https://"+Host()+"/owner/repo/pull/1")
 
@@ -281,7 +276,7 @@ func TestConnectorRow_FatalCallFailureReloadsTheConnectorForTheNextRead(t *testi
 			}
 		})
 	})
-	loads := countLoads(t, nil)
+	loads := countLoads(t)
 
 	if _, err := c.ListOpenIssues(); !errors.Is(err, connectorhost.ErrRouteRefused) {
 		t.Fatalf("ListOpenIssues = %v, want the route refusal", err)
@@ -350,11 +345,7 @@ func TestConnectorRow_EveryReadRecordsItsFailure(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			_, c, _, logDir := routedLogHarness(t, useGithubRowAt)
 			boom := errors.New("github connector failed to load")
-			old := loadRowConnector
-			t.Cleanup(func() { loadRowConnector = old })
-			loadRowConnector = func(context.Context, backendrows.Row, backendrows.Options) (*connectorhost.Connector, error) {
-				return nil, boom
-			}
+			hookLoads(t, func(func() (*connectorhost.Connector, error)) (*connectorhost.Connector, error) { return nil, boom })
 
 			if err := read(c); !errors.Is(err, boom) {
 				t.Fatalf("err = %v, want the load error", err)

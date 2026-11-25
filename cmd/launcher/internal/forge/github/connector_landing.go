@@ -11,6 +11,7 @@ import (
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/git"
 	"spindrift.dev/launcher/internal/gitexec"
@@ -84,14 +85,37 @@ func (e *execClient) forgeWrite(row backendrows.Row, verb string, fn func(forge.
 // forgeGit is forgeWrite for the callers that also run git of their own over
 // the clone URL Compose validated.
 func (e *execClient) forgeGit(row backendrows.Row, verb string, fn func(forge.CodeForge, forge.Capabilities, *coreGit) error) error {
-	return e.connectorOp(row, connectorforge.ErrNotForge, verb, func(conn *connectorhost.Connector, api string) error {
-		cred, err := gitCredential(row)
+	return e.connectorOp(row, connectorforge.ErrNotForge, verb, func(routed backendrows.Row, spec connectorruntime.SessionSpec) error {
+		// The composed forge reads the token at each use; an unset one fails here
+		// by name instead.
+		if _, err := gitCredential(routed); err != nil {
+			return err
+		}
+		c, err := e.composedView(routed, spec)
 		if err != nil {
 			return err
 		}
+		return fn(c.cf, c.caps, c.git)
+	})
+}
+
+// composedForge is the full Code Forge over the session and the plumbing it was
+// composed with.
+type composedForge struct {
+	cf   forge.CodeForge
+	caps forge.Capabilities
+	git  *coreGit
+}
+
+// composedView is the full Code Forge, composed by the first write that needs
+// it. Its credential reads the row's env at each use, so a rotated token
+// reaches the next git call.
+func (e *execClient) composedView(row backendrows.Row, spec connectorruntime.SessionSpec) (composedForge, error) {
+	return memo(&e.mu, &e.composed, func() bool { return e.composed.cf != nil }, func() (composedForge, error) {
 		var plumbing *coreGit
-		cf, caps, err := connectorforge.Compose(conn, connectorforge.Target{API: api, Repo: e.repo}, connectorforge.Git{
-			Credential: cred,
+		cf, err := e.connectors.CodeForge(row, connectorruntime.ForgeSpec{
+			SessionSpec: spec,
+			Credential:  gitexec.EnvCredential("x-access-token", row.CredentialEnv),
 			// The Routes name only api.github.com; git and the web are on the row's
 			// declared Git remote, which core derives the clone URL and web host from.
 			WebBase: row.GitRemote,
@@ -104,9 +128,9 @@ func (e *execClient) forgeGit(row backendrows.Row, verb string, fn func(forge.Co
 			},
 		})
 		if err != nil {
-			return err
+			return composedForge{}, err
 		}
-		return fn(cf, caps, plumbing)
+		return composedForge{cf: cf, caps: forge.ResolveCodeForge(cf), git: plumbing}, nil
 	})
 }
 

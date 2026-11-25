@@ -34,7 +34,8 @@ func newRoutedContractEnv(t *testing.T) *routedContractEnv {
 	t.Helper()
 	h, _, calls, logDir := routedLogHarness(t, useGithubRowAt)
 	s := backendkit.Shared{
-		RepoSlug: connectorRepo, Labels: testLabels, VerdictLabels: forge.ResearchVerdictLabels(),
+		Connectors: testRuntime(t),
+		RepoSlug:   connectorRepo, Labels: testLabels, VerdictLabels: forge.ResearchVerdictLabels(),
 		BaseBranch: "main", GitUserName: "Test Bot", GitUserEmail: "bot@example.com",
 	}
 	tr, err := Strategy.NewIssueTracker(s, nil)
@@ -173,7 +174,7 @@ func (h routedCodeForgeHarness) Unreachable() forge.CodeForge {
 	host := srv.Listener.Addr().String()
 	srv.Close()
 	useGithubRowAt(h.t, host)
-	cf, err := Strategy.NewCodeForge(backendkit.Shared{RepoSlug: connectorRepo, Labels: testLabels}, nil, forge.SanitizedParent{}, nil)
+	cf, err := Strategy.NewCodeForge(backendkit.Shared{RepoSlug: connectorRepo, Labels: testLabels, Connectors: testRuntime(h.t)}, nil, forge.SanitizedParent{}, nil)
 	if err != nil {
 		h.t.Fatal(err)
 	}

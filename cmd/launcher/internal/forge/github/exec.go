@@ -1,9 +1,12 @@
 // Package github implements forge's IssueTracker, CodeForge, and PRForge
-// interfaces. Every call goes through the routed github Connector row; with no
-// routed row it fails with ErrNoRoute.
+// interfaces. Every call goes through the routed github Connector row, hosted
+// by the Connector runtime; with no routed row it fails with ErrNoRoute.
 package github
 
 import (
+	"sync"
+
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -17,6 +20,20 @@ type execClient struct {
 	userName      string      // committer identity Rebase sets on its clone; empty keeps ambient git config
 	userEmail     string
 	baseBranch    string // core's BASE_BRANCH; the base a routed row's Rebase syncs onto
+	connectors    *connectorruntime.Runtime
+
+	// mu guards the views, each built by the first operation that needs it and
+	// kept: the runtime's session reloads a dead Connector behind them.
+	mu       sync.Mutex
+	tracker  forge.IssueTracker
+	reader   readerForge
+	composed composedForge
+}
+
+// readerForge is the read-only forge view with its resolved capabilities.
+type readerForge struct {
+	cf   forge.CodeForge
+	caps forge.Capabilities
 }
 
 // ExecOption sets one optional execClient field. NewExecClient applies
@@ -27,6 +44,12 @@ type ExecOption func(*execClient)
 // Complete transition. Work-kind call sites omit it.
 func WithVerdictLabels(vl forge.VerdictLabels) ExecOption {
 	return func(e *execClient) { e.verdictLabels = vl }
+}
+
+// WithConnectors sets the runtime that hosts the row's Connector. Every
+// operation fails without one.
+func WithConnectors(rt *connectorruntime.Runtime) ExecOption {
+	return func(e *execClient) { e.connectors = rt }
 }
 
 // WithRoute narrows the tracker to the issues the Issue route selects. Only

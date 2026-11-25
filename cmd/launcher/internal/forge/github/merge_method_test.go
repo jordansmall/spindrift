@@ -25,7 +25,7 @@ func TestConnectorRow_MergeMethodOtherThanRebaseIsRefused(t *testing.T) {
 				h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
 				url := h.SeedLandablePR("9")
 				before := h.backend.hitCount()
-				c := NewExecClient(connectorRepo, testLabels, WithMergeMethod(method))
+				c := newClient(t, connectorRepo, testLabels, WithMergeMethod(method))
 
 				err := op.run(c, url)
 
@@ -55,7 +55,7 @@ func TestStrategy_RoutedRowRefusesMergeMethodAtBuild(t *testing.T) {
 		t.Run(tc.method, func(t *testing.T) {
 			useGithubRowAt(t, "127.0.0.1:1")
 
-			_, err := Strategy.NewCodeForge(backendkit.Shared{RepoSlug: connectorRepo, MergeMethod: tc.method}, nil, forge.SanitizedParent{}, nil)
+			_, err := Strategy.NewCodeForge(backendkit.Shared{RepoSlug: connectorRepo, MergeMethod: tc.method, Connectors: testRuntime(t)}, nil, forge.SanitizedParent{}, nil)
 
 			if tc.refused != errors.Is(err, ErrRoutedMergeMethod) || (!tc.refused && err != nil) {
 				t.Errorf("err = %v, want refused=%v", err, tc.refused)
@@ -68,7 +68,7 @@ func TestStrategy_RoutedRowRefusesMergeMethodAtBuild(t *testing.T) {
 func TestConnectorRow_MergeMethodRebasePasses(t *testing.T) {
 	h, _, _, _ := routedLogHarness(t, useGithubRowAt)
 	url := h.SeedLandablePR("9")
-	c := NewExecClient(connectorRepo, testLabels, WithMergeMethod("rebase"))
+	c := newClient(t, connectorRepo, testLabels, WithMergeMethod("rebase"))
 
 	if err := c.Merge(url); err != nil || !h.Merged(url) {
 		t.Errorf("Merge = %v (merged %v), want a landed merge", err, h.Merged(url))

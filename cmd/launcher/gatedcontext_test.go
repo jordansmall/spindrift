@@ -28,7 +28,7 @@ func TestNewGatedContext_CleanConfig_SucceedsAndPopulatesFields(t *testing.T) {
 	setArtifact(t, "RUNTIME", "echo")
 
 	var w bytes.Buffer
-	gc, err := newGatedContext(nil, &w, dispatchkind.Work, false)
+	gc, err := newGatedContext(connectorRuntime(t), &w, dispatchkind.Work, false)
 
 	if err != nil {
 		t.Fatalf("newGatedContext() = %v, want nil error for a clean config", err)
@@ -60,7 +60,7 @@ func TestNewGatedContext_ResearchKind_AppliesKindAndLabel(t *testing.T) {
 	setKnob(t, "LABEL", "ready-for-agent")
 
 	var w bytes.Buffer
-	gc, err := newGatedContext(nil, &w, dispatchkind.Research, false)
+	gc, err := newGatedContext(connectorRuntime(t), &w, dispatchkind.Research, false)
 
 	if err != nil {
 		t.Fatalf("newGatedContext() = %v, want nil error for a clean config", err)
@@ -89,7 +89,7 @@ func TestNewGatedContext_SelfContainedResearch_SetsSelfContainedField(t *testing
 	setArtifact(t, "RUNTIME", "echo")
 
 	var w bytes.Buffer
-	gc, err := newGatedContext(nil, &w, dispatchkind.Research, true)
+	gc, err := newGatedContext(connectorRuntime(t), &w, dispatchkind.Research, true)
 
 	if err != nil {
 		t.Fatalf("newGatedContext() = %v, want nil error for a clean self-contained research config", err)
@@ -114,7 +114,7 @@ func TestNewGatedContext_SelfContainedWorkKind_RejectedByValidate(t *testing.T) 
 	setArtifact(t, "RUNTIME", "echo")
 
 	var w bytes.Buffer
-	gc, err := newGatedContext(nil, &w, dispatchkind.Work, true)
+	gc, err := newGatedContext(connectorRuntime(t), &w, dispatchkind.Work, true)
 
 	if err == nil {
 		t.Fatal("newGatedContext() = nil error, want validate()'s self-contained rejection")
@@ -141,7 +141,7 @@ func TestNewGatedContext_InvalidConfig_SurfacesValidateError(t *testing.T) {
 	setArtifact(t, "RUNTIME", "echo")
 
 	var w bytes.Buffer
-	gc, err := newGatedContext(nil, &w, dispatchkind.Work, false)
+	gc, err := newGatedContext(connectorRuntime(t), &w, dispatchkind.Work, false)
 
 	if err == nil {
 		t.Fatal("newGatedContext() = nil error, want validate()'s MERGE_MODE rejection")
@@ -173,7 +173,7 @@ func TestNewGatedContext_FailingRegistryGate_SurfacesGateError(t *testing.T) {
 	setKnob(t, "BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
 
 	var w bytes.Buffer
-	gc, err := newGatedContext(nil, &w, dispatchkind.Work, false)
+	gc, err := newGatedContext(connectorRuntime(t), &w, dispatchkind.Work, false)
 
 	if err == nil {
 		t.Fatal("newGatedContext() = nil error, want checkReadOnlyCapabilityGate to reject a relay-incapable CODE_FORGE under read-only access")
@@ -212,7 +212,7 @@ func TestNewGatedContext_BwrapPastaGateRunsBeforeNetworkGates(t *testing.T) {
 	setKnob(t, "NETWORK_MODE", "open") // not host/none, so the pasta launch gate actually calls bwrap.ValidatePasta()
 
 	var w bytes.Buffer
-	gc, err := newGatedContext(nil, &w, dispatchkind.Work, false)
+	gc, err := newGatedContext(connectorRuntime(t), &w, dispatchkind.Work, false)
 
 	if err == nil {
 		t.Fatal("newGatedContext() = nil error, want the bwrap pasta launch gate's pasta-missing rejection")
@@ -256,7 +256,7 @@ func TestNewGatedContext_BwrapOverlayGateRunsBeforeNetworkGates(t *testing.T) {
 	setArtifact(t, "NIX_CONFIG_FILE", "/nix/store/somehash-nix.conf")
 
 	var w bytes.Buffer
-	gc, err := newGatedContext(nil, &w, dispatchkind.Work, false)
+	gc, err := newGatedContext(connectorRuntime(t), &w, dispatchkind.Work, false)
 
 	if err == nil {
 		t.Fatal("newGatedContext() = nil error, want the bwrap overlay launch gate's overlay-probe rejection")
@@ -297,7 +297,7 @@ func TestNewGatedContext_BwrapGatesRunAfterCapabilityAndNetworkModeGates(t *test
 	setKnob(t, "NETWORK_MODE", "open") // not host/none, so the pasta launch gate would call bwrap.ValidatePasta() if reached
 
 	var w bytes.Buffer
-	gc, err := newGatedContext(nil, &w, dispatchkind.Work, false)
+	gc, err := newGatedContext(connectorRuntime(t), &w, dispatchkind.Work, false)
 
 	if err == nil {
 		t.Fatal("newGatedContext() = nil error, want checkReadOnlyCapabilityGate to reject a relay-incapable CODE_FORGE under read-only access")
@@ -331,7 +331,7 @@ func TestNewGatedContext_FailingNetworkModeRuntimeGate_SurfacesGateError(t *test
 	setKnob(t, "NETWORK_MODE", "no-host-loopback")
 
 	var w bytes.Buffer
-	gc, err := newGatedContext(nil, &w, dispatchkind.Work, false)
+	gc, err := newGatedContext(connectorRuntime(t), &w, dispatchkind.Work, false)
 
 	if err == nil {
 		t.Fatal("newGatedContext() = nil error, want checkNetworkModeRuntimeGate to reject NETWORK_MODE=no-host-loopback under RUNNER_KIND=bwrap")

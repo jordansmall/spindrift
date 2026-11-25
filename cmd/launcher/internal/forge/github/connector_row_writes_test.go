@@ -1,7 +1,6 @@
 package github
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -53,8 +52,8 @@ var routedWrites = []struct {
 		nil},
 }
 
-func connectorWriteClient() *execClient {
-	return NewExecClient(connectorRepo, testLabels, WithVerdictLabels(forge.ResearchVerdictLabels()))
+func connectorWriteClient(t *testing.T) *execClient {
+	return newClient(t, connectorRepo, testLabels, WithVerdictLabels(forge.ResearchVerdictLabels()))
 }
 
 // Under a routed row each tracker write reaches the Connector's backend and
@@ -65,7 +64,7 @@ func TestConnectorRow_TrackerWritesGoThroughTheConnector(t *testing.T) {
 			h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
 			h.SeedIssue(tc.seed)
 
-			if err := tc.write(connectorWriteClient()); err != nil {
+			if err := tc.write(connectorWriteClient(t)); err != nil {
 				t.Fatalf("%s: %v", tc.name, err)
 			}
 
@@ -91,7 +90,7 @@ func TestConnectorRow_TrackerWritesGoThroughTheConnector(t *testing.T) {
 // settle out (nix/checks/go.nix backendGoTestShared).
 func TestConnectorRow_PostedIssueKeepsItsMarkerAndLabels(t *testing.T) {
 	h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
-	c := connectorWriteClient()
+	c := connectorWriteClient(t)
 	marker := dedupmarker.Build([]string{"pkg/a.go"})
 	labels := []string{"agent-butler-finding", "ready-for-agent"}
 
@@ -131,7 +130,7 @@ func TestConnectorRow_ClaimOfAClaimedIssueIsRefused(t *testing.T) {
 	h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
 	h.SeedIssue(forge.Issue{Number: "7", Labels: []string{testLabels.InProgress}})
 
-	err := connectorWriteClient().TransitionState("7", forge.Dispatchable, forge.InProgress)
+	err := connectorWriteClient(t).TransitionState("7", forge.Dispatchable, forge.InProgress)
 
 	if !errors.Is(err, forge.ErrAlreadyClaimed) {
 		t.Errorf("TransitionState of a claimed issue = %v, want ErrAlreadyClaimed", err)
@@ -148,7 +147,7 @@ func TestTrackerWrites_PlainRowRoutesWrites(t *testing.T) {
 			h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
 			h.SeedIssue(tc.seed)
 
-			_ = tc.write(connectorWriteClient())
+			_ = tc.write(connectorWriteClient(t))
 
 			if n := calls(); n != 0 {
 				t.Errorf("%s under a plain row ran gh %d times", tc.name, n)
@@ -164,13 +163,9 @@ func TestPlainRow_LoadFailureFailsTheWrite(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			_, _, calls, _ := routedLogHarness(t, useGithubRowAt)
 			boom := errors.New("github connector failed to load")
-			old := loadRowConnector
-			t.Cleanup(func() { loadRowConnector = old })
-			loadRowConnector = func(context.Context, backendrows.Row, backendrows.Options) (*connectorhost.Connector, error) {
-				return nil, boom
-			}
+			hookLoads(t, func(func() (*connectorhost.Connector, error)) (*connectorhost.Connector, error) { return nil, boom })
 
-			if err := tc.write(connectorWriteClient()); !errors.Is(err, boom) {
+			if err := tc.write(connectorWriteClient(t)); !errors.Is(err, boom) {
 				t.Errorf("err = %v, want the load error", err)
 			}
 			if n := calls(); n != 0 {
@@ -197,7 +192,7 @@ func TestPlainRow_RefusedRouteFailsTheWrite(t *testing.T) {
 			})
 			h.SeedIssue(tc.seed)
 
-			if err := tc.write(connectorWriteClient()); !errors.Is(err, connectorhost.ErrRouteRefused) {
+			if err := tc.write(connectorWriteClient(t)); !errors.Is(err, connectorhost.ErrRouteRefused) {
 				t.Errorf("err = %v, want the route refusal", err)
 			}
 			if n := calls(); n != 0 {
@@ -231,7 +226,7 @@ func TestConnectorRow_MissingCapabilityFailsTheWrite(t *testing.T) {
 				}
 				matched = true
 				h.SeedIssue(w.seed)
-				if err := w.write(connectorWriteClient()); !errors.Is(err, errNoCapability) {
+				if err := w.write(connectorWriteClient(t)); !errors.Is(err, errNoCapability) {
 					t.Errorf("err = %v, want errNoCapability", err)
 				}
 			}

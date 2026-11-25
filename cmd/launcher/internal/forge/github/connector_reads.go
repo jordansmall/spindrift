@@ -1,14 +1,11 @@
 package github
 
 import (
-	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"sync"
-	"time"
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
@@ -16,111 +13,14 @@ import (
 	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectorrecord"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/retry"
 )
-
-// loadRowConnector loads a backend row's Connector; a test seam.
-var loadRowConnector = backendrows.Load
 
 // errNoCapability marks a Connector whose handshake lacks a capability a read
 // needs.
 var errNoCapability = errors.New("connector does not declare the capability")
-
-// sharedConnectors holds one loaded Connector per repository and row, so the
-// doctor, the daemon's demand probe and recover share a compile. The row is
-// process-global (backendrows.Use) and a Connector serialises its own calls.
-// A Connector closed by a failed call is reloaded on the next read.
-var sharedConnectors struct {
-	mu       sync.Mutex
-	loaded   map[string]*sharedConnector
-	failures map[string]loadFailures
-}
-
-// A failed load is retried by the next read until maxLoadFailures have failed
-// in a row; after that a Connector that cannot load is retried once per
-// loadRetryAfter rather than recompiled on every read. The cache is shared
-// with the long-lived daemon, so a transient failure must heal without a
-// restart.
-const (
-	maxLoadFailures = 3
-	loadRetryAfter  = time.Minute
-)
-
-// loadClock is a test seam for the load-retry cooldown.
-var loadClock = time.Now
-
-type sharedConnector struct {
-	conn *connectorhost.Connector
-	api  string
-}
-
-// loadFailures counts a key's consecutive failed loads and keeps the last error
-// and when it happened.
-type loadFailures struct {
-	n    int
-	err  error
-	last time.Time
-}
-
-// sharedConnectorFor returns the Connector loaded for row and repoSlug, loading
-// it on first use. It reads with the host's own credential.
-func sharedConnectorFor(row backendrows.Row, repoSlug string) (*sharedConnector, error) {
-	raw, err := json.Marshal([]any{repoSlug, row})
-	if err != nil {
-		return nil, err
-	}
-	key := string(raw)
-	sharedConnectors.mu.Lock()
-	defer sharedConnectors.mu.Unlock()
-	if sc, ok := sharedConnectors.loaded[key]; ok {
-		deadErr := sc.conn.Err()
-		if deadErr == nil {
-			return sc, nil
-		}
-		// Only a failed call leaves a closed Connector cached (closeSharedConnectors
-		// deletes what it closes). The call that failed is not retried; this read
-		// loads a fresh one.
-		dropShared(key, sc)
-		noteRouted("reload the Connector", deadErr)
-	}
-	if f := sharedConnectors.failures[key]; f.n >= maxLoadFailures && loadClock().Sub(f.last) < loadRetryAfter {
-		return nil, fmt.Errorf("connector load failed %d times in a row; retried %s after the last failure: %w", f.n, loadRetryAfter, f.err)
-	}
-	conn, api, err := loadConnector(row, backendrows.Options{Client: connectorClient}, repoSlug)
-	if err != nil {
-		if sharedConnectors.failures == nil {
-			sharedConnectors.failures = map[string]loadFailures{}
-		}
-		sharedConnectors.failures[key] = loadFailures{n: sharedConnectors.failures[key].n + 1, err: err, last: loadClock()}
-		return nil, err
-	}
-	delete(sharedConnectors.failures, key)
-	sc := &sharedConnector{conn: conn, api: api}
-	if sharedConnectors.loaded == nil {
-		sharedConnectors.loaded = map[string]*sharedConnector{}
-	}
-	sharedConnectors.loaded[key] = sc
-	return sc, nil
-}
-
-// dropShared closes sc and forgets it. The caller holds sharedConnectors.mu.
-func dropShared(key string, sc *sharedConnector) {
-	_ = sc.conn.Close(context.Background())
-	delete(sharedConnectors.loaded, key)
-}
-
-// closeSharedConnectors closes every shared Connector, for tests that swap the
-// row under them.
-func closeSharedConnectors() {
-	sharedConnectors.mu.Lock()
-	defer sharedConnectors.mu.Unlock()
-	for k, sc := range sharedConnectors.loaded {
-		dropShared(k, sc)
-	}
-	clear(sharedConnectors.failures)
-}
 
 // routedRow is the github backend row when one is configured.
 func routedRow() (backendrows.Row, bool) {
@@ -151,36 +51,113 @@ func noteRouted(op string, err error) error {
 	return connectorrecord.Note(backend.GitHub.Name, op, err)
 }
 
-// connectorOp runs fn over the shared Connector for e's repository, and records
-// a failure under a routed row. A Connector lacking what the operation needs
-// (the missing sentinel, or a capability fn names through errNoCapability) is
-// unsupported, never a reason to fall back to gh. Readers run concurrently, so
-// one can hold a Connector another reader's call then kills and see
-// connectorhost.ErrUnusable from it; the next read reloads.
-func (e *execClient) connectorOp(row backendrows.Row, missing error, verb string, fn func(conn *connectorhost.Connector, api string) error) error {
-	sc, err := sharedConnectorFor(row, e.repo)
+// connectorOp runs fn over e's session with the routed row, and records a
+// failure under a routed row. A Connector lacking what the operation needs (the
+// missing sentinel, or a capability fn names through errNoCapability) is
+// unsupported, never a reason to fall back to gh. A viaRead, or trackerOp's
+// capability check, can hold a Connector another call then kills and see
+// connectorhost.ErrUnusable from it; the next call reloads.
+func (e *execClient) connectorOp(row backendrows.Row, missing error, verb string, fn func(row backendrows.Row, spec connectorruntime.SessionSpec) error) error {
+	routed, spec, err := e.sessionSpec(row)
 	if err == nil {
-		err = unsupportedWithout(fn(sc.conn, sc.api), verb, missing, errNoCapability)
+		err = unsupportedWithout(fn(routed, spec), verb, missing, errNoCapability)
 	}
 	return noteRouted(verb, err)
+}
+
+// sessionSpec is the session both axes open, and row narrowed to the
+// repository's routes. github tolerates a missing capability per operation (it
+// is unsupported), so nothing is required at load.
+func (e *execClient) sessionSpec(row backendrows.Row) (backendrows.Row, connectorruntime.SessionSpec, error) {
+	if e.connectors == nil {
+		return row, connectorruntime.SessionSpec{}, connectorruntime.ErrNoRuntime
+	}
+	row, target, err := routeTarget(row, e.repo)
+	if err != nil {
+		return row, connectorruntime.SessionSpec{}, err
+	}
+	return row, connectorruntime.SessionSpec{
+		Target:  target,
+		Record:  backend.GitHub.Name,
+		Options: backendrows.Options{Client: connectorClient},
+		// connectorOp notes each failed operation by its own verb, and some guest
+		// failures are benign to it (an already-deleted branch).
+		NotesOperations: true,
+	}, nil
+}
+
+// routeTarget is row narrowed to repo's routes, and the Target on its first.
+func routeTarget(row backendrows.Row, repo string) (backendrows.Row, connectortracker.Target, error) {
+	if len(row.Routes) == 0 {
+		return row, connectortracker.Target{}, fmt.Errorf("the %s backend row has no Route, so its API host is unknown", row.Name)
+	}
+	row.Routes = connectortracker.Routes(row.Routes, repo)
+	return row, connectortracker.Target{API: "https://" + row.Routes[0].Host, Repo: repo}, nil
+}
+
+// memo returns *slot, building it under mu until built reports it set. A failed
+// build stores nothing, so the next call builds again.
+func memo[T any](mu *sync.Mutex, slot *T, built func() bool, build func() (T, error)) (T, error) {
+	mu.Lock()
+	defer mu.Unlock()
+	var zero T
+	if built() {
+		return *slot, nil
+	}
+	v, err := build()
+	if err != nil {
+		return zero, err
+	}
+	*slot = v
+	return v, nil
+}
+
+// trackerView is the tracker over the session, built by the first operation
+// that needs it.
+func (e *execClient) trackerView(row backendrows.Row, spec connectorruntime.SessionSpec) (forge.IssueTracker, error) {
+	return memo(&e.mu, &e.tracker, func() bool { return e.tracker != nil }, func() (forge.IssueTracker, error) {
+		return e.connectors.Tracker(row, connectorruntime.TrackerSpec{
+			SessionSpec: spec,
+			Lifecycle:   connectortracker.Lifecycle{Labels: e.labels, VerdictLabels: e.verdictLabels, Route: e.route, WebHost: Host()},
+		})
+	})
+}
+
+// readerView is the read-only PR forge view over the session, with its
+// optional interfaces resolved. Its web host is the one the PR URLs carry
+// (GH_HOST, else github.com).
+func (e *execClient) readerView(row backendrows.Row, spec connectorruntime.SessionSpec) (forge.CodeForge, forge.Capabilities, error) {
+	r, err := memo(&e.mu, &e.reader, func() bool { return e.reader.cf != nil }, func() (readerForge, error) {
+		cf, err := e.connectors.ForgeReader(row, spec, Host())
+		if err != nil {
+			return readerForge{}, err
+		}
+		return readerForge{cf: cf, caps: forge.ResolveCodeForge(cf)}, nil
+	})
+	return r.cf, r.caps, err
 }
 
 // coreTracker as trackerOp's capName names an operation of the core tracker
 // contract, which every tracker Connector serves.
 const coreTracker = ""
 
-// trackerOp runs fn over a tracker view of conn that serves the capability
+// trackerOp runs fn over the tracker view, which must serve the capability
 // capName names (or coreTracker) and each of alsoCaps. A capability the
 // Connector does not serve fails with errNoCapability.
 func (e *execClient) trackerOp(row backendrows.Row, capName, verb string, fn func(forge.IssueTracker) error, alsoCaps ...string) error {
-	return e.connectorOp(row, connectortracker.ErrNotTracker, verb, func(conn *connectorhost.Connector, api string) error {
-		for _, c := range append([]string{capName}, alsoCaps...) {
-			if c != coreTracker && !slices.Contains(conn.Capabilities, c) {
-				return fmt.Errorf("%w: %s", errNoCapability, c)
+	return e.connectorOp(row, connectortracker.ErrNotTracker, verb, func(routed backendrows.Row, spec connectorruntime.SessionSpec) error {
+		if caps := slices.DeleteFunc(append([]string{capName}, alsoCaps...), func(c string) bool { return c == coreTracker }); len(caps) > 0 {
+			conn, err := e.connectors.Connector(routed, spec)
+			if err != nil {
+				return err
+			}
+			for _, c := range caps {
+				if !slices.Contains(conn.Capabilities, c) {
+					return fmt.Errorf("%w: %s", errNoCapability, c)
+				}
 			}
 		}
-		lc := connectortracker.Lifecycle{Labels: e.labels, VerdictLabels: e.verdictLabels, Route: e.route, WebHost: Host()}
-		tr, err := connectortracker.New(conn, lc, connectortracker.Target{API: api, Repo: e.repo}, retry.Clock{})
+		tr, err := e.trackerView(routed, spec)
 		if err != nil {
 			return err
 		}
@@ -200,16 +177,16 @@ func trackerCapOp[T any](e *execClient, row backendrows.Row, capName, verb strin
 	})
 }
 
-// forgeRead runs fn over a PR forge view of conn, with its PR-side and
-// optional-interface handles resolved. Its web host is the one the PR URLs carry
-// (GH_HOST, else github.com); a read the Connector does not serve fails.
+// forgeRead runs fn over the read-only PR forge view, with its PR-side and
+// optional-interface handles resolved; a read the Connector does not serve
+// fails.
 func (e *execClient) forgeRead(row backendrows.Row, verb string, fn func(forge.CodeForge, forge.Capabilities) error) error {
-	return e.connectorOp(row, connectorforge.ErrNotForge, verb, func(conn *connectorhost.Connector, api string) error {
-		cf, err := connectorforge.NewReader(conn, connectorforge.Target{API: api, Repo: e.repo}, Host())
+	return e.connectorOp(row, connectorforge.ErrNotForge, verb, func(routed backendrows.Row, spec connectorruntime.SessionSpec) error {
+		cf, caps, err := e.readerView(routed, spec)
 		if err != nil {
 			return err
 		}
-		return fn(cf, forge.ResolveCodeForge(cf))
+		return fn(cf, caps)
 	})
 }
 
@@ -222,9 +199,14 @@ func (e *execClient) prRead(row backendrows.Row, verb string, fn func(forge.PRFo
 // prRead entry points for a read that returns one value; the reads that return
 // two (a PR and whether it was found) call those directly.
 
-func viaRead[R any](e *execClient, row backendrows.Row, missing error, verb string, fn func(*connectorhost.Connector, string) (R, error)) (v R, err error) {
-	err = e.connectorOp(row, missing, verb, func(conn *connectorhost.Connector, api string) (rerr error) {
-		v, rerr = fn(conn, api)
+func viaRead[R any](e *execClient, row backendrows.Row, missing error, verb string, fn func(*connectorhost.Connector, connectorforge.Target) (R, error)) (v R, err error) {
+	err = e.connectorOp(row, missing, verb, func(routed backendrows.Row, spec connectorruntime.SessionSpec) error {
+		conn, cerr := e.connectors.Connector(routed, spec)
+		if cerr != nil {
+			return cerr
+		}
+		var rerr error
+		v, rerr = fn(conn, connectorforge.Target{API: spec.Target.API, Repo: e.repo})
 		return rerr
 	})
 	return v, err
@@ -263,8 +245,8 @@ func viaPR[R any](e *execClient, row backendrows.Row, verb string, fn func(forge
 }
 
 func (e *execClient) probe(row backendrows.Row) (string, error) {
-	slug, err := viaRead(e, row, connectorforge.ErrNoProbe, "resolve the repository", func(conn *connectorhost.Connector, api string) (string, error) {
-		return connectorforge.Probe(conn, connectorforge.Target{API: api, Repo: e.repo})
+	slug, err := viaRead(e, row, connectorforge.ErrNoProbe, "resolve the repository", func(conn *connectorhost.Connector, target connectorforge.Target) (string, error) {
+		return connectorforge.Probe(conn, target)
 	})
 	if err != nil {
 		return "", classifyProbeErr(err, e.repo)
@@ -273,14 +255,14 @@ func (e *execClient) probe(row backendrows.Row) (string, error) {
 }
 
 func (e *execClient) branchProtected(row backendrows.Row, branch string) (bool, error) {
-	return viaRead(e, row, connectorforge.ErrNoBranchProtection, "read branch protection", func(conn *connectorhost.Connector, api string) (bool, error) {
-		return connectorforge.BranchProtected(conn, connectorforge.Target{API: api, Repo: e.repo}, branch)
+	return viaRead(e, row, connectorforge.ErrNoBranchProtection, "read branch protection", func(conn *connectorhost.Connector, target connectorforge.Target) (bool, error) {
+		return connectorforge.BranchProtected(conn, target, branch)
 	})
 }
 
 func (e *execClient) canAutoMerge(row backendrows.Row) (bool, error) {
-	return viaRead(e, row, connectorforge.ErrNoAutoMerge, "read the auto-merge setting", func(conn *connectorhost.Connector, api string) (bool, error) {
-		return connectorforge.AutoMergeAllowed(conn, connectorforge.Target{API: api, Repo: e.repo})
+	return viaRead(e, row, connectorforge.ErrNoAutoMerge, "read the auto-merge setting", func(conn *connectorhost.Connector, target connectorforge.Target) (bool, error) {
+		return connectorforge.AutoMergeAllowed(conn, target)
 	})
 }
 

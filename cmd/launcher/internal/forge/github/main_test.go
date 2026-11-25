@@ -12,7 +12,7 @@ import (
 // tests apply load into the in-process engine.
 func TestMain(m *testing.M) {
 	seamtest.MainWith(m, func() error {
-		connectorsandbox.Use(connectorsandboxtest.InProcess())
+		connectorsandbox.Use(hookedSandbox{connectorsandboxtest.InProcess()})
 		return nil
 	})
 }
