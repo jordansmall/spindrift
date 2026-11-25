@@ -128,6 +128,14 @@ func composeForge(conn *connectorhost.Connector, api string) (forge.CodeForge, f
 // https-only.
 func newConnectorHarness(t *testing.T, production bool) *connectorHarness {
 	t.Helper()
+	return newConnectorHarnessAt(t, production, "")
+}
+
+// newConnectorHarnessAt is newConnectorHarness for an instance served under the
+// URL subpath prefix, as a self-hosted forgejo behind a path-routing proxy is:
+// the API and every html_url live beneath it.
+func newConnectorHarnessAt(t *testing.T, production bool, prefix string) *connectorHarness {
+	t.Helper()
 	for k, v := range map[string]string{
 		"GIT_AUTHOR_NAME": "Test Bot", "GIT_AUTHOR_EMAIL": "bot@example.com",
 		"GIT_COMMITTER_NAME": "Test Bot", "GIT_COMMITTER_EMAIL": "bot@example.com",
@@ -136,7 +144,10 @@ func newConnectorHarness(t *testing.T, production bool) *connectorHarness {
 	}
 	f := startFakeForgejo(t, httptest.NewTLSServer)
 	f.repo = forgetest.NewGitRepoFixture(t, "main")
-	f.token, f.web = connectorToken, f.srv.URL
+	f.token, f.web = connectorToken, f.srv.URL+prefix
+	if prefix != "" {
+		f.srv.Config.Handler = http.StripPrefix(prefix, http.HandlerFunc(f.handle))
+	}
 	// A PR whose head has no branch merges as a plain state flip.
 	f.mergeHook = func(num string) error {
 		f.mu.Lock()
@@ -149,12 +160,12 @@ func newConnectorHarness(t *testing.T, production bool) *connectorHarness {
 	}
 	t.Setenv("GIT_CONFIG_COUNT", "1")
 	t.Setenv("GIT_CONFIG_KEY_0", "url."+f.repo.Bare+".insteadOf")
-	t.Setenv("GIT_CONFIG_VALUE_0", f.srv.URL+"/"+connectorRepo+".git")
+	t.Setenv("GIT_CONFIG_VALUE_0", f.web+"/"+connectorRepo+".git")
 
 	h := &connectorHarness{fakeForgejo: f, t: t, audit: &bytes.Buffer{}}
 	if production {
 		var err error
-		if h.cf, h.routes, h.auditPath, err = productionForge(t, f.srv); err != nil {
+		if h.cf, h.routes, h.auditPath, err = productionForgeAt(t, f.srv, f.web); err != nil {
 			t.Fatal(err)
 		}
 		h.caps = forge.ResolveCodeForge(h.cf)
