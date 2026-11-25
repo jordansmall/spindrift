@@ -50,6 +50,10 @@ type Row struct {
 	// diffs Routes against. Unlike Routes it may be empty or absent: nothing
 	// accepted yet, so every live route counts as added.
 	AcceptedRoutes []connectorhost.Route `json:"acceptedRoutes,omitempty"`
+	// AcceptedGrant is the Consumer's accepted baseline of the non-Route parts of
+	// the grant. nil means the entry recorded Routes only (a list entry, or no
+	// entry), so GrantChanges compares nothing.
+	AcceptedGrant *Grant `json:"acceptedGrant,omitempty"`
 	// BaseEnv names the knob env var holding the site's https base URL, for a
 	// Connector whose host is the Consumer's own (a Jira site). A Route or
 	// accepted Route whose Host is BaseHost takes the base URL's host and has
@@ -65,6 +69,24 @@ type Row struct {
 	// GitRemoteEnv names the knob env var holding the forge's web base URL,
 	// which may carry a path prefix (a Forgejo served under a subpath).
 	GitRemoteEnv string `json:"gitRemoteEnv,omitempty"`
+}
+
+// Grant is the accepted non-Route parts of a Row's grant, named as the Row names
+// them. A part compared verbatim (every one but the scheme, which normalizes "" to
+// bearer) is accepted as absent when the Grant lacks it, so a Row declaring it is
+// a widening; a Row declaring less than the Grant accepts is a narrowing, and silent.
+type Grant struct {
+	CredentialEnv    string `json:"credentialEnv,omitempty"`
+	CredentialScheme string `json:"credentialScheme,omitempty"`
+	BaseEnv          string `json:"baseEnv,omitempty"`
+	GitRemote        string `json:"gitRemote,omitempty"`
+	GitRemoteEnv     string `json:"gitRemoteEnv,omitempty"`
+}
+
+// GrantChange is one non-Route part of a Row's grant that differs from the
+// accepted baseline. Declared and Accepted render an absent value as "none".
+type GrantChange struct {
+	Part, Declared, Accepted string
 }
 
 // BaseHost is the Route host that stands for the host of the row's BaseEnv URL.
@@ -94,6 +116,53 @@ func (r Row) Widening() []connectorhost.Route {
 		}
 	}
 	return added
+}
+
+// GrantChanges returns the non-Route parts of the row's grant that differ from
+// AcceptedGrant, nil when AcceptedGrant is nil. A part the row declares absent
+// is skipped, as Widening is silent on a narrowed Route. The authorization
+// scheme compares normalized ("" is "bearer"). The Git remote compares the
+// declaration: Use resolves GitRemoteEnv into GitRemote, so a row naming the
+// env is compared by that name alone, never by the resolved value.
+func (r Row) GrantChanges() []GrantChange {
+	a := r.AcceptedGrant
+	if a == nil {
+		return nil
+	}
+	var out []GrantChange
+	add := func(part, declared, accepted string) {
+		if declared != "" && declared != accepted {
+			out = append(out, GrantChange{part, orNone(declared), orNone(accepted)})
+		}
+	}
+	add("credential variable", r.CredentialEnv, a.CredentialEnv)
+	add("authorization scheme", schemeOf(r.CredentialScheme), schemeOf(a.CredentialScheme))
+	add("base", r.BaseEnv, a.BaseEnv)
+	add("Git remote", remoteDecl(r.GitRemote, r.GitRemoteEnv), remoteDecl(a.GitRemote, a.GitRemoteEnv))
+	return out
+}
+
+func schemeOf(s string) string {
+	if s == "" {
+		return SchemeBearer
+	}
+	return s
+}
+
+func orNone(s string) string {
+	if s == "" {
+		return "none"
+	}
+	return s
+}
+
+// remoteDecl renders a Git remote declaration; the env name wins over the
+// resolved literal Use stored beside it.
+func remoteDecl(literal, env string) string {
+	if env != "" {
+		return "env " + env
+	}
+	return literal
 }
 
 // coreBackends are the built-in backends a row may not replace. It mirrors the
@@ -287,6 +356,14 @@ func canonicalPrefix(prefix string) bool {
 	return prefix == "" || prefix != "/" && path.Clean(prefix) == prefix
 }
 
+func validScheme(s string) bool {
+	return s == "" || s == SchemeBearer || s == SchemeBasic
+}
+
+func schemeError(s string) error {
+	return fmt.Errorf("unknown credentialScheme %q, want bearer or basic", s)
+}
+
 func validate(row Row, seen map[string]bool) error {
 	switch {
 	case row.Name == "":
@@ -301,12 +378,16 @@ func validate(row Row, seen map[string]bool) error {
 		return fmt.Errorf("backend %q has no credentialEnv", row.Name)
 	case len(row.Routes) == 0:
 		return fmt.Errorf("backend %q has an empty route table", row.Name)
-	case row.CredentialScheme != "" && row.CredentialScheme != SchemeBearer && row.CredentialScheme != SchemeBasic:
-		return fmt.Errorf("backend %q: unknown credentialScheme %q, want bearer or basic", row.Name, row.CredentialScheme)
+	case !validScheme(row.CredentialScheme):
+		return fmt.Errorf("backend %q: %w", row.Name, schemeError(row.CredentialScheme))
 	case row.CredentialScheme == SchemeBasic && row.IdentityEnv == "":
 		return fmt.Errorf("backend %q: the basic credentialScheme needs an identityEnv", row.Name)
 	case row.CredentialScheme != SchemeBasic && row.IdentityEnv != "":
 		return fmt.Errorf("backend %q: identityEnv applies only to the basic credentialScheme", row.Name)
+	case row.AcceptedGrant != nil && !validScheme(row.AcceptedGrant.CredentialScheme):
+		return fmt.Errorf("backend %q: accepted grant: %w", row.Name, schemeError(row.AcceptedGrant.CredentialScheme))
+	case row.AcceptedGrant != nil && row.AcceptedGrant.GitRemote != "" && row.AcceptedGrant.GitRemoteEnv != "":
+		return fmt.Errorf("backend %q: accepted grant: gitRemote and gitRemoteEnv are mutually exclusive", row.Name)
 	}
 	seen[row.Name] = true
 	if err := connectorhost.ValidateRoutes(row.Routes); err != nil {

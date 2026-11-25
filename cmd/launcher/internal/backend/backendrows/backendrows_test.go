@@ -409,6 +409,84 @@ func TestWidening(t *testing.T) {
 	}
 }
 
+func TestGrantChanges(t *testing.T) {
+	base := backendrows.Row{CredentialEnv: "TOK", BaseEnv: "SITE", GitRemote: "https://forge.test"}
+	same := backendrows.Grant{CredentialEnv: "TOK", BaseEnv: "SITE", GitRemote: "https://forge.test"}
+	with := func(r backendrows.Row, g *backendrows.Grant) backendrows.Row { r.AcceptedGrant = g; return r }
+	scheme := func(s string) backendrows.Row { r := base; r.CredentialScheme = s; return r }
+	envRemote := backendrows.Row{CredentialEnv: "TOK", GitRemote: "https://forge.test", GitRemoteEnv: "FORGE_URL"}
+	cases := []struct {
+		name string
+		row  backendrows.Row
+		want []backendrows.GrantChange
+	}{
+		{"no grant records routes only", base, nil},
+		{"unchanged", with(base, &same), nil},
+		{"credential variable", with(base, &backendrows.Grant{CredentialEnv: "OLD", BaseEnv: "SITE", GitRemote: "https://forge.test"}),
+			[]backendrows.GrantChange{{"credential variable", "TOK", "OLD"}}},
+		{"scheme widens to basic", with(scheme("basic"), &same),
+			[]backendrows.GrantChange{{"authorization scheme", "basic", "bearer"}}},
+		{"empty and bearer agree", with(scheme("bearer"), &same), nil},
+		{"base declared but not accepted", with(base, &backendrows.Grant{CredentialEnv: "TOK", GitRemote: "https://forge.test"}),
+			[]backendrows.GrantChange{{"base", "SITE", "none"}}},
+		{"literal remote differs", with(base, &backendrows.Grant{CredentialEnv: "TOK", BaseEnv: "SITE", GitRemote: "https://other.test"}),
+			[]backendrows.GrantChange{{"Git remote", "https://forge.test", "https://other.test"}}},
+		{"remote declared but not accepted", with(base, &backendrows.Grant{CredentialEnv: "TOK", BaseEnv: "SITE"}),
+			[]backendrows.GrantChange{{"Git remote", "https://forge.test", "none"}}},
+		{"env remote against literal grant", with(envRemote, &backendrows.Grant{CredentialEnv: "TOK", GitRemote: "https://forge.test"}),
+			[]backendrows.GrantChange{{"Git remote", "env FORGE_URL", "https://forge.test"}}},
+		{"env remote matches", with(envRemote, &backendrows.Grant{CredentialEnv: "TOK", GitRemoteEnv: "FORGE_URL"}), nil},
+		{"narrowing is silent", with(backendrows.Row{CredentialEnv: "TOK"}, &same), nil},
+		{"several parts", with(base, &backendrows.Grant{}),
+			[]backendrows.GrantChange{{"credential variable", "TOK", "none"}, {"base", "SITE", "none"}, {"Git remote", "https://forge.test", "none"}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.row.GrantChanges(); fmt.Sprint(got) != fmt.Sprint(tc.want) {
+				t.Errorf("GrantChanges() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestUseDecodesAcceptedGrantAndResolvedGitRemoteDoesNotDiffer(t *testing.T) {
+	isolate(t)
+	raw := json.RawMessage(`[{"name":"forge","module":"/x/f.wasm","routes":[{"method":"GET","host":"h","path":"/a"}],` +
+		`"credentialEnv":"T","gitRemoteEnv":"FORGE_URL",` +
+		`"acceptedGrant":{"credentialEnv":"T","gitRemoteEnv":"FORGE_URL"}}]`)
+	env := func(k string) string {
+		if k == "FORGE_URL" {
+			return "https://forge.test/"
+		}
+		return ""
+	}
+	if err := backendrows.Use(raw, env); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := backendrows.Lookup("forge")
+	if got.GitRemote != "https://forge.test" || got.AcceptedGrant == nil || got.AcceptedGrant.GitRemoteEnv != "FORGE_URL" {
+		t.Fatalf("row = %+v, want resolved remote and decoded grant", got)
+	}
+	if c := got.GrantChanges(); len(c) != 0 {
+		t.Errorf("GrantChanges() = %v, want none", c)
+	}
+}
+
+func TestUseRefusesAnInvalidAcceptedGrant(t *testing.T) {
+	for name, grant := range map[string]string{
+		"unknown scheme":        `{"credentialScheme":"digest"}`,
+		"both git remote forms": `{"gitRemote":"https://f.test","gitRemoteEnv":"U"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			isolate(t)
+			raw := json.RawMessage(`[{"name":"x","module":"/x/x.wasm","routes":[{"method":"GET","host":"h","path":"/a"}],"credentialEnv":"T","acceptedGrant":` + grant + `}]`)
+			if err := backendrows.Use(raw, noEnv); err == nil || !strings.Contains(err.Error(), "accepted grant") {
+				t.Errorf("Use() = %v, want an accepted grant error", err)
+			}
+		})
+	}
+}
+
 func TestUseAcceptsAcceptedRoutesAndAllListsByName(t *testing.T) {
 	isolate(t)
 	raw := json.RawMessage(`[` +
