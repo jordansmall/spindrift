@@ -613,7 +613,7 @@ in
                         routes = mkOption {
                           # Items stay raw: lib/connector-routes.nix words the errors.
                           type = types.listOf types.raw;
-                          description = "The Connector's Route table, a list of `{ method; host; path; }`, each with an optional GET-only boolean `followRedirect`.";
+                          description = "The Connector's Route table, a list of `{ method; host; path; }`, each with an optional GET-only boolean `followRedirect` and optional string lists `requestHeaders` and `responseHeaders`.";
                         };
                         credential = mkOption {
                           type = types.nullOr types.str;
@@ -730,11 +730,21 @@ in
                           default = null;
                           description = "GET only: let the host follow one redirect hop.";
                         };
+                        requestHeaders = mkOption {
+                          type = types.nullOr (types.listOf types.str);
+                          default = null;
+                          description = "Request headers a guest may send beyond the fixed set. Never Authorization, Cookie, Host, Forwarded, Via, X-Real-Ip, X-Forwarded-* or Proxy-*.";
+                        };
+                        responseHeaders = mkOption {
+                          type = types.nullOr (types.listOf types.str);
+                          default = null;
+                          description = "Response headers a guest may read beyond the fixed set. Never Set-Cookie or Set-Cookie2.";
+                        };
                       };
                     }
                   );
                   # Unset (null) fields are dropped so a Route that never sets
-                  # `followRedirect` renders exactly as before the field existed.
+                  # `followRedirect` or a header list renders exactly as before the field existed.
                   apply = map (lib.filterAttrs (_: v: v != null));
                   default = [ ];
                   description = ''
@@ -743,7 +753,8 @@ in
                     uppercase, host an exact host[:port], and path a subtree
                     root; `{repo}` in a path is the tracker's owner/name slug.
                     A GET Route may set `followRedirect = true` to follow one
-                    redirect hop.
+                    redirect hop, and any Route may declare `requestHeaders` and
+                    `responseHeaders` beyond the fixed sets.
                     A backend row carries its own table in `backend.routes`.
                   '';
                 };
