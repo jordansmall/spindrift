@@ -63,11 +63,12 @@ let
   # rule but is no secret; `base` (the URL `{base}` route hosts resolve from) is
   # no secret either, so any env-schema knob may carry it.
   #
-  # `acceptedRoutes` is the Consumer's reviewed Route-table baseline, read from
-  # its own tree, never an option: a Connector's module cannot set its own, and
-  # a lock bump that widens a table leaves it untouched so doctor shows the
-  # diff. The path is built by concatenation, not "${self}", which would copy a
-  # fixture's whole repo path into the store.
+  # `acceptedRoutes` and `acceptedGrant` are the Consumer's reviewed baseline of
+  # a Connector's whole grant (Routes, credential, scheme, base, Git remote),
+  # read from its own tree, never an option: a Connector's module cannot set
+  # its own, and a lock bump that widens a grant leaves it untouched so doctor
+  # shows the diff. The path is built by concatenation, not "${self}", which
+  # would copy a fixture's whole repo path into the store.
   acceptedRoutesFile = self.outPath + "/spindrift-connector-routes.json";
   acceptedRoutesBaseline =
     if builtins.pathExists acceptedRoutesFile then
