@@ -112,8 +112,9 @@ The question was grilled on 2026-11-09. Specs #6750–#6759 carry the work.
     the batteries flake always passes its own core. The registry is the module
     system: each Connector ships a flake-parts module contributing to
     `spindrift.connectors.<name>`, so duplicate names and duplicate knobs fail
-    at evaluation. Each Connector carries its own release-please package and
-    CODEOWNERS entry.
+    at evaluation (withdrawn in favour of registration as data; see the
+    "Registration is data" amendment, decision 11). Each Connector carries its
+    own release-please package and CODEOWNERS entry.
 
     A guard forbids Connector Nix from reaching outside its own directory. A CI
     tripwire evaluates the layout under Lix and CppNix. A physical split later
@@ -212,7 +213,8 @@ A spike on 2026-11-09 tested each layout in a throwaway repository under Lix
 ## Consequences
 
 - ADR 0067 is superseded on the seam's shape and its triggers. ADR 0009's
-  closed registry opens through the module system. ADR 0068's network Backend
+  closed registry opens through the module system (since replaced by
+  registration as data, decision 11). ADR 0068's network Backend
   Strategies move into Connectors, and the built-ins keep theirs. ADR 0013's
   contract becomes primitives with handshake capabilities. ADR 0034 gains the
   credential-free Box as its end state.
@@ -1429,7 +1431,7 @@ guest RPC method, a failed load as `load the Connector`, and a failed Code
 Forge compose. Like github, it records no lost claim race, so an empty `.log`
 marks a clean run.
 
-## Amendment (2026-11-23): the review's decisions, ahead of their implementation
+## Amendment (2026-11-23): the review's decisions
 
 The Connector platform was reviewed on 2026-11-23 and the outcome grilled the
 same day. This amendment records what was decided. Some of it has landed
@@ -1438,8 +1440,9 @@ since: core's git credential answers only for the exact repository URL
 audit file fails the load (#7461, above), the Route baseline and the
 first-party Connectors' declarations are merge-guarded (#7465), the backend
 row's shadow and primary switches and the read shadow are deleted (#7456),
-and each credential-holding Connector has its own sandbox (#7550, below).
-Until the rest lands, the decisions and amendments above describe the code.
+each credential-holding Connector has its own sandbox (#7550, below), and a
+Connector registers only as data (decision 11, #7562). Until the rest lands,
+the decisions and amendments above describe the code.
 
 **Git's remote is core's, declared and disclosed (decision 6).** Core's git
 used the clone URL a forge Connector returned from `forge.remote`, checked for
@@ -1500,14 +1503,43 @@ Connector now exports plain data (module, Route table, credential, Git remote
 declaration, knobs, fragments) and core alone builds the options. First-party
 Connectors use the same path. The three flake roles are unchanged.
 
-The data path now exists (#7557): `lib/connector-data.nix` validates a
-Connector's data, naming an unknown key or a wrongly typed field, and
-`core.lib.connectorModule` turns it into the flake-parts module, over the
-`core` the Connector was handed. It ships beside the flake-module path as the
-expand step, so nothing breaks while Connectors move. The fixture Connector,
-github, forgejo and jira register as data (#7558), and the Connector templates
-and scaffold produce data registrations (#7561); `docs/reference.md` records the
-rest.
+As built (#7557, #7558, #7561, #7562): `lib/connector-data.nix` validates a
+Connector's data, naming an unknown key or a wrongly typed field. The fixture
+Connector, github, forgejo and jira registered as data (#7558), and the
+Connector templates and scaffold produce data registrations (#7561). The
+flake-module path is then withdrawn (#7562). The expand step,
+`core.lib.connectorModule`, is deleted, so a `lib.connector` entry returns its
+`data` (with `package`, `routes` and the like) and no `flakeModule`, and a
+Connector's flake exports a top-level `connectorData` output where it exported
+`flakeModules.default`. A Consumer registers a Connector by listing that data
+in the flake-level option `spindrift.connectorData`, and core builds every
+`spindrift.connectors.<name>` row from that list alone. The root
+`flakeModules.default` carries github and forgejo through the same list, and
+the launcher input for dogfood and the fixtures is byte-identical.
+
+A name has one definer, however it is expressed:
+
+- Two entries of one name fail evaluation naming both definers' files.
+  Importing a Connector twice used to dedup through its module key; that is
+  withdrawn on purpose, since a second registration may carry different data.
+- An override of the list (`lib.mkForce`, `lib.mkOverride`) is refused, because
+  it would discard other definers' registrations before the duplicate check
+  ran.
+- A module may set only the switches `shadow`, `shadowEvery` and `primary` on
+  `spindrift.connectors.<name>`. Any other key, a whole-row or field-level
+  `lib.mkForce` included, fails naming the Connector, the file and the rule, so
+  no Consumer module can adjust or replace a Connector's row. A module that
+  reused the Connector's module key has no Connector module left to replace.
+- A data key core does not know, such as one setting the Box image, hooks or
+  prompts, fails with the unknown-key message.
+- A Consumer module that redeclares the `spindrift.connectors` option with its
+  own type drops core's merge, and with it these refusals. That module is the
+  Consumer's own configuration, outside the threat model: a Connector exports
+  data, not a module, so it cannot ship such a redeclaration.
+
+`nix/checks/connector-registration.nix` pins each refusal. The row-override and
+key-reuse holes were reproduced against the full flake module before the fix.
+`docs/reference.md` records the rest. This closes #7293.
 
 **The baseline covers the whole grant and can refuse (decision 3, #6806).** The
 Route baseline records, per Connector, the Routes, the credential variable, the

@@ -1,5 +1,54 @@
 # Migration Guide
 
+## A Connector registers only as data, never as a flake module (issue #7562)
+
+**A Connector is no longer a flake module: a Consumer lists its data in
+`spindrift.connectorData`, and core builds the `spindrift.connectors.<name>`
+row from that list alone.** A flake that still imports a Connector's
+`flakeModules.default` fails evaluation, because Connector flakes now export a
+top-level `connectorData` output instead. `spindrift.flakeModules.default`
+still carries github and forgejo, so a Consumer of only those needs no edit.
+
+- **Register a third-party or jira Connector as data.** Keep importing
+  `spindrift.flakeModules.default` and drop the Connector's module from
+  `imports`. Add its `connectorData` output at flake level.
+- **A name registers once.** Importing a Connector twice used to dedup through
+  its module key. Two registrations of one name now fail evaluation naming both
+  definers, so register each Connector once, and not the batteries' github or
+  forgejo again.
+- **Import the batteries module once.** `spindrift.flakeModules.default`
+  registers github and forgejo, so importing it twice, for example from a
+  shared flake-parts module and again from the flake, now fails naming that
+  module as both definers instead of deduplicating; import it once.
+- **Do not override the list.** `lib.mkForce` or `lib.mkOverride` on
+  `spindrift.connectorData` is refused: it would discard other registrations.
+- **Set only the switches on a row.** A module may set `shadow`, `shadowEvery`
+  and `primary` on `spindrift.connectors.<name>`. Any other key, a
+  `lib.mkForce` of the whole row or of one field included, fails naming the
+  Connector, the file and the rule. To change a Connector's row, fork its data
+  and register the fork (see the forgejo fragments entry below for an example).
+- **A Connector author exports `connectorData`.** `core.lib.connectorModule` is
+  gone. A `lib.connector` entry returns `data` (plus `package`, `routes` and
+  the like) and no `flakeModule`, and the Connector's flake exports
+  `connectorData = connector.data;` where it exported `flakeModules.default`.
+  Data that sets an unknown key, such as a Box image, hooks or prompts, fails
+  with the unknown-key message.
+
+```nix
+# before
+imports = [
+  spindrift.flakeModules.default
+  inputs.jira.flakeModules.default
+];
+# after
+imports = [ spindrift.flakeModules.default ];
+
+spindrift.connectorData = [ inputs.jira.connectorData ];
+```
+
+The `spindrift quickstart` wizard writes the new form for a chosen Connector.
+See [Connector subflake shape](docs/reference.md#connector-subflake-shape).
+
 ## The Network host refuses an undeclared request header and hides an undeclared response header (issue #7565)
 
 **A Network Connector's `http_request` now sends and reads only the fixed
@@ -22,12 +71,12 @@ response header is absent.
   [Connector protocol](docs/reference.md#connector-protocol).
 
 ```nix
-# before
-spindrift.connectors.acme.backend.routes = [
+# before, in the Connector's connectorData
+routes = [
   { method = "GET"; host = "{base}"; path = "/api/v1/repos/{repo}"; }
 ];
 # after: the Connector sends X-Api-Version and reads X-Total-Count
-spindrift.connectors.acme.backend.routes = [
+routes = [
   {
     method = "GET"; host = "{base}"; path = "/api/v1/repos/{repo}";
     requestHeaders = [ "X-Api-Version" ];
@@ -481,16 +530,14 @@ What changed for a Consumer:
 
 ## The forgejo fragments ship from the forgejo Connector (issue #6867)
 
-The nine `forgejo/` prompt fragments (`filer-dedup.md`, `filer-direct-file.md`,
-`filer-direct-label.md`, `fix-ci-read.md`, `if-blocked-pr.md`,
-`issue-blocked-comment.md`, `open-pr-create.md`,
-`research-outcome-landing.md`, `research-verdict.md`) moved from
+The `forgejo/` prompt fragments moved from
 `templates/default/prompts/fragments/forgejo/` to
-`connectors/forgejo/fragments/forgejo/`, declared by
+`connectors/forgejo/fragments/forgejo/` (nine files then; the folder now ships
+two, `filer-dedup.md` and `fix-ci-read.md`), declared by
 `connectors/forgejo/fragments.nix` and contributed through
 `spindrift.connectors.forgejo.fragments`, as jira's already are. The Box still
 reads them at `prompts/fragments/forgejo/<name>.md`, and no prompt text
-changed. A Consumer need not import the forgejo Connector's flake module for
+changed. A Consumer need not register the forgejo Connector for
 them: mkHarness ships the batteries flake's forgejo fragments unless the
 Consumer registers its own.
 
@@ -498,7 +545,7 @@ What changed for a Consumer:
 
 - **A custom `forgejo/<name>.md` is now silently ignored.** A Connector's
   declared file wins over a file at the same path in a custom fragments
-  directory (`SPINDRIFT_PROMPT_DIR`), so an override of one of the nine files
+  directory (`SPINDRIFT_PROMPT_DIR`), so an override of one of these files
   no longer takes effect, and nothing reports it. Fork the Connector's
   fragment directory to change one of these steps, declaring only the files
   you change, and register the forgejo Connector's data with the fork as its

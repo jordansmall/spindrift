@@ -2305,11 +2305,11 @@ mean at runtime is issue #6751. The worked example is the fixture Connector in
 
 - **Entry point.** `default.nix` is a plain-Nix file that exports
   `lib.connector`, a `callPackage`-style function. It takes `{ core }` and
-  returns the Connector's `flakeModule`, so one Connector evaluates against
+  returns the Connector's `data`, so one Connector evaluates against
   whichever core the caller holds:
 
   ```nix
-  { lib.connector = { core }: { flakeModule = import ./module.nix { inherit core; }; }; }
+  { lib.connector = { core }: { data = import ./data.nix { inherit core; }; }; }
   ```
 
   A Connector that compiles to wasm also exports `package`, a function of the
@@ -2318,16 +2318,21 @@ mean at runtime is issue #6751. The worked example is the fixture Connector in
   exports `fragments`, the `{ name; dir; shipped }` contribution its data
   carries as `fragments`, which becomes `spindrift.connectors.<name>.fragments`
   (`connectors/jira`, `connectors/forgejo`).
-- **Module.** `module.nix` is a flake-parts module. It imports
-  `core.flakeModules.default` (the module system dedups by path, so a Consumer
-  that imports the same core is unaffected) and registers its data in
-  `spindrift.connectorData`; core builds the row `spindrift.connectors.<name>`
-  from it (issue #7562). A name has one definer: a second registration fails
-  evaluation with a one-line `Connector '<name>' is registered twice` error
-  naming both modules' files, and an override (`lib.mkForce`) of the list is
-  refused, so no definition discards another's registration. A definition of
-  `spindrift.connectors.<name>` sets only the switches below, never a field of
-  the row, so a Consumer cannot adjust or replace a Connector's row.
+- **Registration.** A Connector has no flake module of its own. A Consumer
+  registers it by listing its data, the flake's `connectorData` output, in the
+  flake-level option `spindrift.connectorData`, and core builds the row
+  `spindrift.connectors.<name>` from that list alone (ADR 0073, decision 11;
+  issue #7562). A name has one definer, however it is expressed. A second
+  registration of a name fails evaluation with a `Connector '<name>' is
+  registered twice` error naming both definers' files; importing a Connector
+  twice no longer dedups. An override (`lib.mkForce`, `lib.mkOverride`) of the
+  list is refused, so no definition discards another's registration. A
+  definition of `spindrift.connectors.<name>` sets only the switches below,
+  never another key of the row (`lib.mkForce` of the whole row or of one field
+  included), or evaluation fails naming the Connector, the file and the rule, so
+  a Consumer cannot adjust or replace a Connector's row. A data key core does
+  not know fails with the unknown-key message, which is why data cannot set a
+  Box image, hooks or prompts.
   The switches are `shadow` (issues #6797, #6810) and `primary` (issue
   #6998): a definition that sets only `spindrift.connectors.<name>.shadow =
   true` or only `primary = true` is a Consumer's switch on the registered
@@ -2350,41 +2355,35 @@ mean at runtime is issue #6751. The worked example is the fixture Connector in
   shadows the Connectors in `nix/dogfood-shadow.nix` (opencode, issue #6874,
   and pi, issue #6876) and runs those in `nix/dogfood-primary.nix` (none
   today) as primary, each until cut-over.
-- **Registering as data.** A Connector may skip the hand-written flake module
-  and declare itself as plain data (ADR 0073, decision 11; issue #7557). Its
-  `lib.connector` entry exposes `data`, a flat attribute set, and derives
-  `flakeModule` from it with `core.lib.connectorModule core data`, which
-  imports the `core` it is handed:
+- **Registering as data.** A Connector declares itself as plain data (ADR
+  0073, decision 11; issues #7557 and #7562), the only way to register one. Its
+  `lib.connector` entry exposes `data`, a flat attribute set, built over the
+  `core` it is handed:
 
   ```nix
   {
     lib.connector =
       { core }:
-      let
-        data = import ./data.nix { inherit core; };
-      in
       {
-        inherit data;
-        flakeModule = core.lib.connectorModule core data;
+        data = import ./data.nix { inherit core; };
       };
   }
   ```
 
   [Authoring a Connector](#authoring-a-connector) describes the keys field by
-  field. Core builds the `spindrift.connectors.<name>` row and the module's `key`
-  (`spindrift-connector-<name>`) itself, so the data declares only its own row
-  and sets no other option. An unknown key, a wrongly typed field, or a
-  backend field without `module` fails evaluation with a message naming the
-  Connector and the key; the deeper checks (Route rules, scheme, credential
-  ownership) stay with the row's types and validators. Core's own readers, such
-  as the knob and fragment folds, read `data` directly and need no module. The
-  fixture Connector ([`data.nix`](../nix/fixtures/connector/data.nix)),
-  github ([`data.nix`](../connectors/github/data.nix)), forgejo
-  ([`data.nix`](../connectors/forgejo/data.nix)) and jira
-  ([`data.nix`](../connectors/jira/data.nix)) register this way, as do the
-  tracker, forge and Driver templates (issue #7561); the other first-party
-  Connectors still use a flake module and move over in their own issues, after
-  which the flake-module path is withdrawn.
+  field. Core builds the `spindrift.connectors.<name>` row itself, so the data
+  declares only its own row and sets no other option. An unknown key, a wrongly
+  typed field, or a backend field without `module` fails evaluation with a
+  message naming the Connector and the key; the deeper checks (Route rules,
+  scheme, credential ownership) stay with the row's types and validators.
+  Core's own readers, such as the knob and fragment folds, read `data`
+  directly. `core.lib.connectorModule`, which once turned data into a flake
+  module, is gone. The fixture Connector
+  ([`data.nix`](../nix/fixtures/connector/data.nix)), github
+  ([`data.nix`](../connectors/github/data.nix)), forgejo
+  ([`data.nix`](../connectors/forgejo/data.nix)), jira
+  ([`data.nix`](../connectors/jira/data.nix)), claude, opencode and pi register
+  this way, as do the tracker, forge and Driver templates (issue #7561).
 
 - **Row-owned knobs.** A row's `knobs` attrset has the shape of a core row's
   (ADR 0068), keyed by env-schema key with an env-schema entry as value. The
@@ -2429,8 +2428,8 @@ mean at runtime is issue #6751. The worked example is the fixture Connector in
   }
   ```
 - **`flake.nix`.** The Connector's own flake pins core with
-  `inputs.core.url = "github:jordansmall/spindrift?dir=core"` and exposes the
-  module as `flakeModules.default`. That pin is for building the Connector
+  `inputs.core.url = "github:jordansmall/spindrift?dir=core"` and exposes its
+  data as the top-level `connectorData` output. That pin is for building the Connector
   standalone only. The batteries root plain-imports each Connector's entry
   point and passes its own `core`, so a Consumer never evaluates two cores.
   The root's list of Connector directories is
@@ -2987,8 +2986,8 @@ fails with `ErrNoConnectorRow` carrying the base error. The deleted native
 forge accepted `http`.
 
 The Connector also ships the forgejo fragment folder,
-`connectors/forgejo/fragments/forgejo/` (the nine forge and tracker steps the
-[in-Box forge CLI inventory](in-box-forge-cli.md#inventory) lists), through
+`connectors/forgejo/fragments/forgejo/` (`filer-dedup.md` and `fix-ci-read.md`),
+through
 `spindrift.connectors.forgejo.fragments`. The Box reads each at
 `prompts/fragments/forgejo/<name>.md`, as before. Because a Connector's
 declared file wins over a custom fragments directory, a `forgejo/<name>.md` in
@@ -3706,9 +3705,8 @@ The routes the cases run against:
 
 **The data.** `data.nix` is a function of `core` returning a flat attribute
 set. It sets no other spindrift option: core builds the
-`spindrift.connectors.<name>` row and the flake module from it with
-`core.lib.connectorModule core data`, which `default.nix` already calls, so the
-author writes no module. An unknown key, a wrongly typed field or a backend
+`spindrift.connectors.<name>` row from it, so the author writes no module.
+An unknown key, a wrongly typed field or a backend
 field without `module` fails evaluation naming the Connector and the key; the
 deeper checks (Route rules, scheme, credential ownership) stay with the row's
 types ([Connector subflake shape](#connector-subflake-shape) has the
@@ -3800,9 +3798,11 @@ local or fork commit pins a version Go cannot fetch; set the version by hand in
 both cases.
 
 **Wire into a Consumer.** Add the Connector as a flake input that follows the
-Consumer's core and import its `flakeModules.default`, as
+Consumer's core and list its `connectorData` output in the flake-level
+`spindrift.connectorData`, as
 [`templates/core-connector/flake.nix`](../templates/core-connector/flake.nix)
-does for github. A Connector not named after a core backend cannot yet be
+does for github. A name has one definer, so listing the same Connector twice
+fails evaluation. A Connector not named after a core backend cannot yet be
 selected as `ISSUE_TRACKER` or `CODE_FORGE` (a follow-up spec covers it), so
 today it is checked and built but not dispatched against.
 
@@ -3813,8 +3813,8 @@ For maintainers: the templates are
 `connector-scaffold` and `connector-scaffold-forge` checks pin their layouts to
 `connectors/jira` and `connectors/forgejo`. All three scaffold checks, the
 Driver template's `connector-scaffold-driver` included, also pin the data form:
-`data.nix` present, no `module.nix`, and a Consumer importing the template's
-`flakeModule` registers the row. The `connector-scaffold-builds` check builds both templates'
+`data.nix` present, no `module.nix`, and a Consumer registering the template's
+`data` gets the row. The `connector-scaffold-builds` check builds both templates'
 wasm. CI's `connector` lane runs `nix run .#connector-dev --
 templates/connector-<kind> flake check` for each, which generates it under two
 names and checks each.
