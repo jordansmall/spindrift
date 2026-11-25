@@ -22,7 +22,7 @@ func Probe(c *connectorhost.Connector, t Target) (string, error) {
 	if !slices.Contains(c.Capabilities, capProbe) {
 		return "", ErrNoProbe
 	}
-	return probeRepo(newPushOnly(c, t, retry.Clock{}).call, t)
+	return probeRepo(newPushOnly(c.Call, c.Capabilities, c, t, retry.Clock{}).call, t)
 }
 
 func probeRepo(call guestCall, t Target) (string, error) {
@@ -67,5 +67,5 @@ func AutoMergeAllowed(c *connectorhost.Connector, t Target) (bool, error) {
 
 // readOnlyForge holds only reads (push is nil): never hand it out as a Code Forge.
 func readOnlyForge(c *connectorhost.Connector, t Target) *prForge {
-	return &prForge{reads: newPushOnly(c, t, retry.Clock{}).rd}
+	return &prForge{reads: newPushOnly(c.Call, c.Capabilities, c, t, retry.Clock{}).rd}
 }

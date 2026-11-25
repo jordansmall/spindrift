@@ -125,7 +125,7 @@ func NewReader(c *connectorhost.Connector, target Target, webHost string) (forge
 	if webHost == "" {
 		return nil, ErrNoWebHost
 	}
-	p := newPushOnly(c, target, retry.Clock{})
+	p := newPushOnly(c.Call, c.Capabilities, c, target, retry.Clock{})
 	return composePR(p, c.Capabilities, webHost, ""), nil
 }
 
