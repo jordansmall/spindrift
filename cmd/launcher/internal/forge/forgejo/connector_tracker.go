@@ -29,9 +29,14 @@ var connectorCapabilities = []string{
 func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (forge.IssueTracker, error) {
 	row.Routes = connectortracker.Routes(row.Routes, s.RepoSlug)
 	return s.Connectors.Tracker(row, connectorruntime.TrackerSpec{
-		Target: connectortracker.Target{
-			API:  strings.TrimSuffix(k.ForgejoBaseURL, "/"),
-			Repo: s.RepoSlug,
+		SessionSpec: connectorruntime.SessionSpec{
+			Target: connectortracker.Target{
+				API:  strings.TrimSuffix(k.ForgejoBaseURL, "/"),
+				Repo: s.RepoSlug,
+			},
+			Requires: connectorCapabilities,
+			Record:   backend.Forgejo.Name,
+			Options:  backendrows.Options{Client: connectorClient},
 		},
 		Lifecycle: connectortracker.Lifecycle{
 			Labels:        s.Labels,
@@ -39,8 +44,5 @@ func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (for
 			VerdictLabels: s.VerdictLabels,
 			WebHost:       connectortracker.HostOf(k.ForgejoBaseURL),
 		},
-		Requires: connectorCapabilities,
-		Record:   backend.Forgejo.Name,
-		Options:  backendrows.Options{Client: connectorClient},
 	})
 }
