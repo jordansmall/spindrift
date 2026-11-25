@@ -1498,8 +1498,9 @@ The data path now exists (#7557): `lib/connector-data.nix` validates a
 Connector's data, naming an unknown key or a wrongly typed field, and
 `core.lib.connectorModule` turns it into the flake-parts module, over the
 `core` the Connector was handed. It ships beside the flake-module path as the
-expand step, so nothing breaks while Connectors move. The fixture Connector
-and github register as data; `docs/reference.md` records the rest.
+expand step, so nothing breaks while Connectors move. The fixture Connector,
+github, forgejo and jira register as data (#7558); `docs/reference.md` records
+the rest.
 
 **The baseline covers the whole grant and can refuse (decision 3, #6806).** The
 Route baseline records, per Connector, the Routes, the credential variable, the
