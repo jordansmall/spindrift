@@ -3455,8 +3455,7 @@ Connector sends any request, so a run never proceeds unrecorded.
   refused Host-call frames across the pipe, and `sandbox_hop_ns` is their wall
   time less the Launcher's Host-call handling, guest execution included. It has
   no `decision`, and it is written only when a sandbox started and the file
-  exists. Totals are run-wide, as one sandbox serves every Connector the run
-  hosts.
+  exists. Totals are run-wide, summed over every sandbox the run started.
 - `<stem>.log` gets one JSON line, `{"op":"<verb>","error":"<err>"}`, per
   failed routed read or write (`op` is its verb, such as `count demand`), a load
   failure included; doctor and daemon reads record the same way. A github or
@@ -4471,16 +4470,32 @@ description and a regen.
 
 #### Connector sandbox
 
-Every Connector the Launcher hosts, first-party included, loads into one
-sandbox container per run on every runner family, which the `connector-host`
-binary serves over the container's stdio, one session per Connector. There is
-no knob: `CONNECTOR_SANDBOX` and the flake option `infra.connector.sandbox`
-were removed (issue #7022), and a leftover setting fails preflight like any
-removed knob. The sandbox starts lazily on the first Connector load and is
-shared by every Launcher-hosted Connector in the run (the github read path,
-token introspection, Driver Connectors); a command that loads
-none starts none. A process with no sandbox installed refuses every Connector
-load with `ErrNoConnectorSandbox`, never falling back to its own process.
+Every Connector the Launcher hosts, first-party included, loads into a
+sandbox container on every runner family, which the `connector-host` binary
+serves over the container's stdio, one session per Connector. There is no
+knob: `CONNECTOR_SANDBOX` and the flake option `infra.connector.sandbox` were
+removed (issue #7022), and a leftover setting fails preflight like any removed
+knob. Each credential-holding Connector gets a sandbox of its own (issue
+#7550): the Connector runtime starts one per backend row, lazily on that row's
+first load, and reuses it across the row's Targets and reloads. Token
+introspection loads the row under the token it inspects, so that load gets a
+sandbox of its own too. Driver Connectors, which make no Host call, share one
+sandbox. A command that loads no Connector starts none. A process with no
+sandbox installed refuses every Connector load with `ErrNoConnectorSandbox`,
+never falling back to its own process.
+
+- **The pipe names the speaker.** The Launcher keeps one pipe per sandbox, and
+  a frame's Connector is the one that pipe serves. The session id inside a
+  frame, which the sandbox process writes, only picks among that pipe's own
+  sessions: a frame for a session never opened on its pipe fails the pipe as
+  malformed output, so an escaped module cannot speak as a sibling and have
+  the sibling's Route table and credential applied to its request. A frame
+  for a session that already ended is dropped. A Host call from the shared
+  Driver sandbox is refused, since no Driver session holds a Host grant, and a
+  network Connector never loads into that sandbox. The Drivers share one pipe,
+  so there the session id still picks among the Driver sessions: an escaped
+  Driver could feed a sibling Driver's session forged chunks and results, but it
+  holds no credential and gets no Host call.
 
 - **Isolation.** The sandbox image is built minimal, holding only
   `connector-host`, and carries no `Env`. On an OCI runtime the Launcher runs
@@ -4522,15 +4537,16 @@ load with `ErrNoConnectorSandbox`, never falling back to its own process.
   are not moved to the new one. A failed restart is a failed start (see
   **Failure**). A closed sandbox is never restarted: a load after the close
   fails and starts nothing.
-- **Lifetime.** A run's sandbox lasts no longer than its run; the daemon's own
-  sandbox, which serves its demand probe, lasts as long as the daemon process
-  and restarts as above after a crash. On every exit path
+- **Lifetime.** A run's sandboxes last no longer than its run; the daemon's
+  own sandboxes, which serve its demand probe, last as long as the daemon
+  process and restart as above after a crash. On every exit path
   (success, a failed or blocked run, a Launcher error, SIGINT/SIGTERM, the
   shutdown gate, and daemon shutdown with runs in flight, where each daemon
-  child is its own run with its own sandbox) the Launcher closes the run's
-  sandbox (a restart already stopped the dead one as it started this one),
-  closing its stdin, then calls the runner's `Kill` on its name as the
-  backstop, logging `==> stopped Connector sandbox: <name>` once it succeeds.
+  child is its own run with its own sandboxes) the Launcher closes every
+  sandbox the run started, including one whose row failed to load (a restart
+  already stopped the dead one as it started this one): it closes each one's
+  stdin, then calls the runner's `Kill` on its name as the backstop, logging
+  `==> stopped Connector sandbox: <name>` once it succeeds.
   A failed `Kill` logs a warning instead and is retried by the next exit step;
   a restart's failed `Kill` of the dead sandbox is logged and not retried,
   leaving it to the **Orphans** sweep once the process exits.
