@@ -25,11 +25,11 @@ const countInterval = 3 * time.Minute
 // reported as its status, not an error, so core decides what an auth failure
 // means.
 func trackerProbe(t tracker.Target) (int, error) {
-	resp, err := request("GET", t.API, issuePath(t, ""), nil)
-	if err != nil {
-		return 0, err
+	resp, err := connector.SendJSON(connector.Request{Method: "GET", URL: t.API + issuePath(t, "")}, nil, nil)
+	if resp.Status != 0 {
+		return resp.Status, nil
 	}
-	return resp.Status, nil
+	return 0, err
 }
 
 // allDefined reports whether every label exists on the repository or its
@@ -73,12 +73,14 @@ func count(t tracker.Target, q tracker.Query, limit int, _ bool) (int, error) {
 		v.Set("labels", strings.Join(required, ","))
 	}
 	path := issuePath(t, "/issues") + "?" + v.Encode()
-	resp, err := request("GET", t.API, path, nil)
-	if err != nil {
-		return 0, err
+	// The page is read only to re-check the filter below.
+	var page []rawIssue
+	var out any
+	if len(required) > 0 {
+		out = &page
 	}
-	if !is2xx(resp.Status) {
-		return 0, statusError("GET", path, resp.Status)
+	if _, err := connector.SendJSON(connector.Request{Method: "GET", URL: t.API + path}, nil, out); err != nil {
+		return 0, err
 	}
 	// Read the header before anything else sends: it belongs to the latest
 	// response.
@@ -88,10 +90,6 @@ func count(t tracker.Target, q tracker.Query, limit int, _ bool) (int, error) {
 		return 0, fmt.Errorf("count issues: missing or invalid X-Total-Count header %q", raw)
 	}
 	if len(required) > 0 {
-		var page []rawIssue
-		if err := decode("GET", path, resp.Body, &page); err != nil {
-			return 0, err
-		}
 		// Forgejo dropped a label from the filter, so total counts unrelated
 		// issues; usually allDefined answered true for a label it could not
 		// rule out.
@@ -139,18 +137,11 @@ func labeledPage(t tracker.Target, label string, route []tracker.Selector, state
 		"limit": {strconv.Itoa(perPage)}, "page": {strconv.Itoa(page)},
 	}
 	path := issuePath(t, "/issues") + "?" + v.Encode()
-	resp, err := request("GET", t.API, path, nil)
-	if err != nil {
+	var raw []rawIssue
+	if _, err := connector.SendJSON(connector.Request{Method: "GET", URL: t.API + path}, nil, &raw); err != nil {
 		return nil, "", err
-	}
-	if !is2xx(resp.Status) {
-		return nil, "", statusError("GET", path, resp.Status)
 	}
 	link, hasLink := responseHeader("Link")
-	var raw []rawIssue
-	if err := decode("GET", path, resp.Body, &raw); err != nil {
-		return nil, "", err
-	}
 	out := []tracker.Issue{}
 	for _, r := range raw {
 		i := r.issue()
@@ -192,7 +183,7 @@ func search(t tracker.Target, text, state, label string, limit int) ([]tracker.I
 		v.Set("labels", label)
 	}
 	var raw []rawIssue
-	if err := call("GET", t.API, issuePath(t, "/issues")+"?"+v.Encode(), nil, &raw); err != nil {
+	if err := send("GET", t.API, issuePath(t, "/issues")+"?"+v.Encode(), nil, &raw); err != nil {
 		return nil, err
 	}
 	out := []tracker.Issue{}

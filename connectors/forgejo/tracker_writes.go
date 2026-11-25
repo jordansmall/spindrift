@@ -33,7 +33,7 @@ func setLabels(t tracker.Target, number string, names []string) error {
 	if err != nil {
 		return err
 	}
-	return call("PUT", t.API, path, marshal(map[string][]string{"labels": append([]string{}, names...)}), nil)
+	return send("PUT", t.API, path, map[string][]string{"labels": append([]string{}, names...)}, nil)
 }
 
 // editLabels reads the current set and writes it back with the edit applied:
@@ -68,7 +68,7 @@ func issueComment(t tracker.Target, number string, r tracker.CommentRequest) err
 	if r.Research {
 		body = researchMarker + "\n" + body
 	}
-	return call("POST", t.API, path, marshal(map[string]string{"body": body}), nil)
+	return send("POST", t.API, path, map[string]string{"body": body}, nil)
 }
 
 // closeIssue closes unconditionally; core has already read the issue.
@@ -77,7 +77,7 @@ func closeIssue(t tracker.Target, number string) error {
 	if err != nil {
 		return err
 	}
-	return call("PATCH", t.API, path, marshal(map[string]string{"state": "closed"}), nil)
+	return send("PATCH", t.API, path, map[string]string{"state": "closed"}, nil)
 }
 
 type rawLabel struct {
@@ -90,15 +90,16 @@ type rawLabel struct {
 // refused for lack of auth, so an org-only label may exist unseen.
 func labelUnion(t tracker.Target) (labels []rawLabel, orgUnreadable bool, err error) {
 	owner, _, _ := strings.Cut(t.Repo, "/")
-	if owner == "" {
-		return nil, false, fmt.Errorf("repo %q has no owner", t.Repo)
+	ownerSeg, err := connector.PathSegment(owner)
+	if err != nil {
+		return nil, false, fmt.Errorf("repo %q: owner: %w", t.Repo, err)
 	}
 	key := func(l rawLabel) string { return l.Name }
 	labels, err = pageUntilEmpty(t.API, issuePath(t, "/labels"), url.Values{}, key)
 	if err != nil {
 		return nil, false, err
 	}
-	org, err := pageUntilEmpty(t.API, "/api/v1/orgs/"+url.PathEscape(owner)+"/labels", url.Values{}, key)
+	org, err := pageUntilEmpty(t.API, "/api/v1/orgs/"+ownerSeg+"/labels", url.Values{}, key)
 	var ce *connector.Error
 	switch {
 	case errors.As(err, &ce) && ce.Class == connector.NotFound:
@@ -137,8 +138,8 @@ func listLabels(t tracker.Target) ([]string, error) {
 
 // createLabel takes the colour as bare hex; Forgejo needs the leading #.
 func createLabel(t tracker.Target, name, description, color string) error {
-	return call("POST", t.API, issuePath(t, "/labels"),
-		marshal(map[string]string{"name": name, "description": description, "color": "#" + color}), nil)
+	return send("POST", t.API, issuePath(t, "/labels"),
+		map[string]string{"name": name, "description": description, "color": "#" + color}, nil)
 }
 
 // fileIssue creates the issue and returns its html_url; r.IssueType is ignored,
@@ -185,8 +186,8 @@ func fileIssue(t tracker.Target, r tracker.IssueRequest) (string, error) {
 		Number  int    `json:"number"`
 		HTMLURL string `json:"html_url"`
 	}
-	if err := call("POST", t.API, issuePath(t, "/issues"),
-		marshal(map[string]any{"title": r.Title, "body": body, "labels": ids}), &created); err != nil {
+	if err := send("POST", t.API, issuePath(t, "/issues"),
+		map[string]any{"title": r.Title, "body": body, "labels": ids}, &created); err != nil {
 		return "", err
 	}
 	if created.HTMLURL == "" {

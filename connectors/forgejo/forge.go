@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"spindrift.dev/sdk/connector"
 	"spindrift.dev/sdk/forge"
 )
 
@@ -56,6 +57,13 @@ func (r rawPR) pr() forge.PR {
 // t.API is the instance's base URL, so a sub-path install keeps its prefix.
 func forgePath(t forge.Target, rest string) string { return "/api/v1/repos/" + t.Repo + rest }
 
+// send is SendJSON to api+path with the answer's status and headers dropped; a
+// caller that judges the status itself calls SendJSON.
+func send(method, api, path string, in, out any) error {
+	_, err := connector.SendJSON(connector.Request{Method: method, URL: api + path}, in, out)
+	return err
+}
+
 func parseNumber(number string) (int, error) {
 	n, err := strconv.Atoi(number)
 	if err != nil || n < 1 || strconv.Itoa(n) != number {
@@ -77,7 +85,7 @@ func pageUntilEmpty[T any, K comparable](api, path string, q url.Values, key fun
 		q.Set("limit", strconv.Itoa(pageSize))
 		q.Set("page", strconv.Itoa(page))
 		var batch []T
-		if err := call("GET", api, path+"?"+q.Encode(), nil, &batch); err != nil {
+		if err := send("GET", api, path+"?"+q.Encode(), nil, &batch); err != nil {
 			return nil, err
 		}
 		if len(batch) == 0 || (page > 1 && key(batch[0]) == prevFirst) {
@@ -113,7 +121,7 @@ func readPR(t forge.Target, number string) (rawPR, error) {
 	if _, err := parseNumber(number); err != nil {
 		return raw, err
 	}
-	err := call("GET", t.API, forgePath(t, "/pulls/"+number), nil, &raw)
+	err := send("GET", t.API, forgePath(t, "/pulls/"+number), nil, &raw)
 	return raw, err
 }
 
@@ -137,7 +145,11 @@ type rawStatus struct {
 // endpoint lists every status ever reported for the sha, so one context
 // repeats; IDs only grow, and first seen wins on equal or missing ones.
 func latestStatuses(t forge.Target, sha string) ([]rawStatus, error) {
-	all, err := pageUntilEmpty(t.API, forgePath(t, "/commits/"+url.PathEscape(sha)+"/statuses"), url.Values{},
+	seg, err := connector.PathSegment(sha)
+	if err != nil {
+		return nil, err
+	}
+	all, err := pageUntilEmpty(t.API, forgePath(t, "/commits/"+seg+"/statuses"), url.Values{},
 		func(s rawStatus) int { return s.ID })
 	if err != nil {
 		return nil, err
@@ -181,7 +193,11 @@ func checks(t forge.Target, number string) (forge.Rollup, error) {
 		State      string `json:"state"`
 		TotalCount int    `json:"total_count"`
 	}
-	if err := call("GET", t.API, forgePath(t, "/commits/"+url.PathEscape(sha)+"/status"), nil, &combined); err != nil {
+	seg, err := connector.PathSegment(sha)
+	if err != nil {
+		return forge.Rollup{}, err
+	}
+	if err := send("GET", t.API, forgePath(t, "/commits/"+seg+"/status"), nil, &combined); err != nil {
 		return forge.Rollup{}, err
 	}
 	out := forge.Rollup{Checks: []forge.Check{}}
@@ -226,11 +242,9 @@ func resolveWarning(statuses []rawStatus) string {
 
 func validRepo(repo string) bool {
 	owner, name, ok := strings.Cut(repo, "/")
-	return ok && validSegment(owner) && validSegment(name)
-}
-
-func validSegment(s string) bool {
-	return s != "" && s != "." && s != ".." && !strings.Contains(s, "/")
+	_, ownerErr := connector.PathSegment(owner)
+	_, nameErr := connector.PathSegment(name)
+	return ok && ownerErr == nil && nameErr == nil
 }
 
 // branchPath escapes branch for the URL path, keeping "/" a separator
@@ -240,10 +254,10 @@ func validSegment(s string) bool {
 func branchPath(branch string) (string, error) {
 	segs := strings.Split(branch, "/")
 	for i, s := range segs {
-		if s == "" || s == "." || s == ".." {
-			return "", fmt.Errorf("branch %q has an empty, \".\" or \"..\" path segment", branch)
+		var err error
+		if segs[i], err = connector.PathSegment(s); err != nil {
+			return "", fmt.Errorf("branch %q: %w", branch, err)
 		}
-		segs[i] = url.PathEscape(s)
 	}
 	return strings.Join(segs, "/"), nil
 }
@@ -254,17 +268,11 @@ func branchExists(t forge.Target, branch string) (bool, error) {
 		return false, err
 	}
 	path := forgePath(t, "/branches/"+p)
-	resp, err := request("GET", t.API, path, nil)
-	if err != nil {
-		return false, err
-	}
-	switch {
-	case is2xx(resp.Status):
-		return true, nil
-	case resp.Status == 404:
+	resp, err := connector.SendJSON(connector.Request{Method: "GET", URL: t.API + path}, nil, nil)
+	if resp.Status == 404 {
 		return false, nil
 	}
-	return false, statusError("GET", path, resp.Status)
+	return err == nil, err
 }
 
 func deleteBranch(t forge.Target, branch string) error {
@@ -273,7 +281,7 @@ func deleteBranch(t forge.Target, branch string) error {
 		return err
 	}
 	// A 404 is classed not-found, which core counts as a delete done.
-	return call("DELETE", t.API, forgePath(t, "/branches/"+p), nil, nil)
+	return send("DELETE", t.API, forgePath(t, "/branches/"+p), nil, nil)
 }
 
 // jobPathSegs counts the segments of a job page path below the base URL:
@@ -352,7 +360,7 @@ func jobLog(t forge.Target, id string) (string, error) {
 		} `json:"workflow_runs"`
 	}
 	q := url.Values{"run_number": {strconv.FormatUint(run, 10)}}
-	if err := call("GET", t.API, forgePath(t, "/actions/runs?"+q.Encode()), nil, &runs); err != nil {
+	if err := send("GET", t.API, forgePath(t, "/actions/runs?"+q.Encode()), nil, &runs); err != nil {
 		return "", err
 	}
 	if len(runs.WorkflowRuns) == 0 {
@@ -362,19 +370,16 @@ func jobLog(t forge.Target, id string) (string, error) {
 		ID uint64 `json:"id"`
 	}
 	runPath := forgePath(t, "/actions/runs/"+strconv.FormatUint(runs.WorkflowRuns[0].ID, 10)+"/jobs")
-	if err := call("GET", t.API, runPath, nil, &jobs); err != nil {
+	if err := send("GET", t.API, runPath, nil, &jobs); err != nil {
 		return "", err
 	}
 	if job >= uint64(len(jobs)) {
 		return "", fmt.Errorf("run %d has no job at index %d", run, job)
 	}
 	logPath := forgePath(t, "/actions/jobs/"+strconv.FormatUint(jobs[job].ID, 10)+"/logs")
-	resp, err := request("GET", t.API, logPath, nil)
+	resp, err := connector.SendJSON(connector.Request{Method: "GET", URL: t.API + logPath}, nil, nil)
 	if err != nil {
 		return "", err
-	}
-	if !is2xx(resp.Status) {
-		return "", statusError("GET", logPath, resp.Status)
 	}
 	return string(resp.Body), nil
 }
