@@ -14,6 +14,7 @@
 let
   inherit (pkgs.lib) assertMsg;
   registry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
+  core = import ../../core;
   mkHarness =
     extra:
     import ../../lib/mkHarness.nix (
@@ -25,8 +26,8 @@ let
     );
   # The fixture Driver Connector's own row: a full lib/drivers row plus
   # `module`, with a credential env already in core's generated scrub set.
-  fixtureConnector = (import ../fixtures/connector).lib.connector { core = import ../../core; };
-  fixtureRow = (import ../fixtures/connector/data.nix { core = import ../../core; }).driver;
+  fixtureConnector = (import ../fixtures/connector).lib.connector { inherit core; };
+  fixtureRow = (import ../fixtures/connector/data.nix { inherit core; }).driver;
   withRows = rows: mkHarness { driverRows = rows; };
   withFixture = mkHarness {
     driver = "fixture";
@@ -36,9 +37,9 @@ let
   # The dogfood's primary Connectors are Drivers, named in mkHarness's
   # `primaryDrivers`; a backend row carries no `primary` (issue #7456).
   driverPrimaries = fixtures.dogfoodDriverPrimaries;
-  claudeConnector = (import ../../connectors/claude).lib.connector { core = import ../../core; };
-  githubConnector = (import ../../connectors/github).lib.connector { core = import ../../core; };
-  jiraConnector = (import ../../connectors/jira).lib.connector { core = import ../../core; };
+  claudeConnector = (import ../../connectors/claude).lib.connector { inherit core; };
+  githubConnector = (import ../../connectors/github).lib.connector { inherit core; };
+  jiraConnector = (import ../../connectors/jira).lib.connector { inherit core; };
   githubProgramWith =
     modules:
     (fixtures.connectorConsumerVia (
@@ -48,7 +49,7 @@ let
       ]
       ++ modules
     )).apps.${system}.default.program;
-  forgejoConnector = (import ../../connectors/forgejo).lib.connector { core = import ../../core; };
+  forgejoConnector = (import ../../connectors/forgejo).lib.connector { inherit core; };
   claudeRow = claudeConnector.data.driver pkgs.lib;
   # opencode rejects the schema's bare claude ids (issue #5355), so each
   # Harness selecting it names its models; the worker's is dropped silently.
@@ -164,6 +165,32 @@ in
         };
       };
       claudeWasmDir = builtins.unsafeDiscardStringContext (builtins.dirOf (claudeRow.module pkgs));
+      # A Connector registered as data reaches mkHarness through core's
+      # connectorModule, so a claim made there meets the same row validation
+      # (issue #7559). Forcing the app program's length reaches it.
+      dataEvaluates =
+        data:
+        let
+          program =
+            (fixtures.connectorConsumerVia [
+              ../../lib/flakeModule.nix
+              (core.lib.connectorModule core data)
+            ]).apps.${system}.default.program;
+        in
+        (builtins.tryEval (builtins.stringLength program)).success;
+      # Handles the fixture's attrset `driver` and claude's lib-taking function
+      # `driver`, as resolveDriver in lib/connector-data.nix does.
+      claiming =
+        data:
+        data
+        // {
+          driver =
+            lib:
+            (if builtins.isFunction data.driver then data.driver lib else data.driver)
+            // {
+              firstParty = true;
+            };
+        };
     in
     assert assertMsg (evaluates (withRows {
       fixture = fixtureRow;
@@ -184,6 +211,16 @@ in
         };
       }))
     ) "the batteries row carrying `firstParty` must fail closed: the mark is derived, never claimed";
+    assert assertMsg (dataEvaluates claudeConnector.data)
+      "control: the batteries Connector registered as data must evaluate";
+    assert assertMsg (
+      !(dataEvaluates (claiming claudeConnector.data))
+    ) "a batteries Connector registered as data claiming `firstParty` must fail closed";
+    assert assertMsg (dataEvaluates fixtureConnector.data)
+      "control: a third-party Connector registered as data must evaluate";
+    assert assertMsg (
+      !(dataEvaluates (claiming fixtureConnector.data))
+    ) "a third-party Connector registered as data claiming `firstParty` must fail closed";
     assert assertMsg (preambleEvaluates (mkHarness {
       driverRows.claude = claudeRow;
     })) "control: the batteries claude row must evaluate";
