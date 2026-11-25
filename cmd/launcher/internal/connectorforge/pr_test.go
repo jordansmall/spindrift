@@ -73,7 +73,7 @@ func newPRHarness(t *testing.T, caps []string, replies map[string]any) *prHarnes
 	conn := auditStub{&h.audit}
 	p := pushOnlyOver(conn, call, clock, testTarget)
 	p.git = h.git
-	h.f = composePR(p, caps, testWebHost)
+	h.f = composePR(p, caps, testWebHost, "")
 	h.caps = forge.ResolveCodeForge(h.f)
 	return h
 }

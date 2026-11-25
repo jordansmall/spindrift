@@ -48,26 +48,26 @@ var ErrGitRemote = errors.New("cannot derive a clone URL")
 // segments, so every site that names the repository (push, relay, mirror seed,
 // the Ledger) must use this one derivation.
 func CloneURL(remote, repo string) (string, error) {
-	cloneURL, _, err := deriveRemote(remote, repo)
+	cloneURL, _, _, err := deriveRemote(remote, repo)
 	return cloneURL, err
 }
 
-// deriveRemote returns the clone URL CloneURL names and the web host
-// (host[:port]) the PR URLs are pinned to.
-func deriveRemote(remote, repo string) (cloneURL, webHost string, err error) {
+// deriveRemote returns the clone URL CloneURL names and the web host and subpath
+// (host[:port], path without a trailing slash) the PR URLs are pinned to.
+func deriveRemote(remote, repo string) (cloneURL, webHost, webPath string, err error) {
 	u, perr := url.Parse(remote)
 	switch {
 	case perr != nil || u.Scheme != "https" || u.Host == "":
-		return "", "", fmt.Errorf("%w: Git remote is not an https URL with a host", ErrGitRemote)
+		return "", "", "", fmt.Errorf("%w: Git remote is not an https URL with a host", ErrGitRemote)
 	case u.User != nil || strings.ContainsAny(remote, "?#"):
-		return "", "", fmt.Errorf("%w: Git remote carries userinfo, a query or a fragment", ErrGitRemote)
+		return "", "", "", fmt.Errorf("%w: Git remote carries userinfo, a query or a fragment", ErrGitRemote)
 	}
 	owner, name, ok := strings.Cut(repo, "/")
 	bad := func(seg string) bool { return seg == "" || seg == "." || seg == ".." || strings.Contains(seg, "/") }
 	if !ok || bad(owner) || bad(name) {
-		return "", "", fmt.Errorf("%w: repository %q is not owner/name", ErrGitRemote, repo)
+		return "", "", "", fmt.Errorf("%w: repository %q is not owner/name", ErrGitRemote, repo)
 	}
-	return strings.TrimSuffix(remote, "/") + "/" + repo + ".git", u.Host, nil
+	return strings.TrimSuffix(remote, "/") + "/" + repo + ".git", u.Host, strings.TrimRight(u.Path, "/"), nil
 }
 
 // Git is the core-side git plumbing the composed forge runs Merge and Rebase
@@ -82,9 +82,9 @@ type Git struct {
 	// Clock paces the retry backoff; the zero value is retry.RealClock().
 	Clock retry.Clock
 	// WebBase is the forge's https web base from its row's Git remote
-	// declaration. Compose derives the clone URL and the web host the PR URLs
-	// are pinned to from it and Target.Repo; the Connector's own answer to
-	// forge.remote is never asked for.
+	// declaration. Compose derives the clone URL and the web host and subpath
+	// the PR URLs are pinned to from it and Target.Repo; the Connector's own
+	// answer to forge.remote is never asked for.
 	WebBase string
 	// Note, when set, sees each guest call of the composed forge that fails
 	// after retries and classification, by method. Compose's own refusals are
@@ -108,7 +108,7 @@ type pushOnly struct {
 	raw  guestCall
 	call guestCall
 	// rd is the PR reads' state, which the result checks of prShape and its
-	// kin read; composePR pins its web host.
+	// kin read; composePR pins its web host and path.
 	rd *reads
 	// clock paces the recheck of a conflicting merge.
 	clock  retry.Clock
@@ -140,7 +140,7 @@ func Compose(c *connectorhost.Connector, target Target, g Git) (forge.CodeForge,
 	if g.Plumbing == nil {
 		return nil, forge.Capabilities{}, errors.New("connectorforge: Git.Plumbing is nil")
 	}
-	cloneURL, webHost, err := deriveRemote(g.WebBase, target.Repo)
+	cloneURL, webHost, webPath, err := deriveRemote(g.WebBase, target.Repo)
 	if err != nil {
 		return nil, forge.Capabilities{}, err
 	}
@@ -159,7 +159,7 @@ func Compose(c *connectorhost.Connector, target Target, g Git) (forge.CodeForge,
 	p.cloneURL, p.cred = cloneURL, g.Credential
 	var cf forge.CodeForge = p
 	if !isPushOnly {
-		cf = composePR(p, c.Capabilities, webHost)
+		cf = composePR(p, c.Capabilities, webHost, webPath)
 		if has(capDraftPRs) {
 			cf = relayLayer{cf, p}
 		}

@@ -30,10 +30,10 @@ type prForge struct {
 }
 
 // composePR wraps the validated push-only pieces p as a PR forge for a Connector
-// advertising caps, pinning PR URLs to webHost. It adds no relay layer: Compose
-// does, since NewReader's forge has no clone to relay into.
-func composePR(p *pushOnly, caps []string, webHost string) forge.CodeForge {
-	p.rd.webHost = webHost
+// advertising caps, pinning PR URLs under webHost and webPath. It adds no relay
+// layer: Compose does, since NewReader's forge has no clone to relay into.
+func composePR(p *pushOnly, caps []string, webHost, webPath string) forge.CodeForge {
+	p.rd.webHost, p.rd.webPath = webHost, webPath
 	f := &prForge{
 		reads:     p.rd,
 		push:      p,

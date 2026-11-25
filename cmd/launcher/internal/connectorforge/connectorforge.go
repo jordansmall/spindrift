@@ -107,6 +107,9 @@ type reads struct {
 	call    guestCall
 	target  Target
 	webHost string
+	// webPath is the web base's subpath without a trailing slash, "" at the
+	// host root; every PR URL and run link sits under it.
+	webPath string
 }
 
 // NewReader composes c's forge for a host that reads through the Connector
@@ -114,7 +117,7 @@ type reads struct {
 // Call only those reads: Rebase fails with ErrNoGit, and the writes would
 // reach the Connector. Every PR URL must name webHost (host[:port]) exactly,
 // case-insensitively, with the port as written ("github.com:443" does not
-// match "github.com").
+// match "github.com"). PR URLs sit at the host root.
 func NewReader(c *connectorhost.Connector, target Target, webHost string) (forge.CodeForge, error) {
 	if !slices.Contains(c.Capabilities, capForge) {
 		return nil, fmt.Errorf("%w: capabilities %v lack \"forge\"", ErrNotForge, c.Capabilities)
@@ -123,7 +126,7 @@ func NewReader(c *connectorhost.Connector, target Target, webHost string) (forge
 		return nil, ErrNoWebHost
 	}
 	p := newPushOnly(c, target, retry.Clock{})
-	return composePR(p, c.Capabilities, webHost), nil
+	return composePR(p, c.Capabilities, webHost, ""), nil
 }
 
 // isPRNumber reports whether s is a positive decimal integer in canonical form
@@ -140,10 +143,17 @@ func (t *reads) onWebHost(u *url.URL) bool {
 		u.RawQuery == "" && !u.ForceQuery && u.Fragment == ""
 }
 
+// underWebPath returns p with the web base's subpath removed, keeping the
+// leading slash. The prefix matches whole segments.
+func (t *reads) underWebPath(p string) (string, bool) {
+	rest, ok := strings.CutPrefix(p, t.webPath+"/")
+	return "/" + rest, ok
+}
+
 // prNumber extracts the PR number from raw, which must be an https URL on the
-// target's web host of the form /<owner>/<repo>/pull/<n> (Forgejo's is
-// /pulls/<n>) naming the target repository (host and repo case-insensitive, as
-// forges are) with nothing else attached.
+// target's web host of the form <web base path>/<owner>/<repo>/pull/<n>
+// (Forgejo's is /pulls/<n>) naming the target repository (host and repo
+// case-insensitive, as forges are) with nothing else attached.
 func (t *reads) prNumber(raw string) (string, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -152,26 +162,28 @@ func (t *reads) prNumber(raw string) (string, error) {
 	if !t.onWebHost(u) {
 		return "", fmt.Errorf("PR URL %q is not a plain https URL on %s", raw, t.webHost)
 	}
-	parts := strings.Split(u.Path, "/")
-	if len(parts) != 5 || parts[0] != "" || (parts[3] != "pull" && parts[3] != "pulls") || !isPRNumber(parts[4]) ||
+	rel, underBase := t.underWebPath(u.Path)
+	parts := strings.Split(rel, "/")
+	if !underBase || len(parts) != 5 || parts[0] != "" || (parts[3] != "pull" && parts[3] != "pulls") || !isPRNumber(parts[4]) ||
 		!strings.EqualFold(parts[1]+"/"+parts[2], t.target.Repo) {
-		return "", fmt.Errorf("PR URL %q is not /%s/pull/<n> or /%s/pulls/<n>", raw, t.target.Repo, t.target.Repo)
+		return "", fmt.Errorf("PR URL %q is not %s/%s/pull/<n> or %[2]s/%[3]s/pulls/<n>", raw, t.webPath, t.target.Repo)
 	}
 	return parts[4], nil
 }
 
 // ownRunLink keeps a CI run link only when it is a plain https URL on the
-// target repository's web host. The guest is untrusted and the link is
-// rendered for operators to click, so a link off the target repo is dropped,
-// not failed on. A backslash is refused: browsers read it as "/", which would
-// escape the repository prefix.
+// target repository's web host, under its web base path. The guest is
+// untrusted and the link is rendered for operators to click, so a link off
+// the target repo is dropped, not failed on. A backslash is refused: browsers
+// read it as "/", which would escape the repository prefix.
 func (t *reads) ownRunLink(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil || !t.onWebHost(u) || strings.Contains(u.Path, `\`) {
 		return ""
 	}
+	rel, underBase := t.underWebPath(u.Path)
 	prefix := "/" + t.target.Repo + "/"
-	if len(u.Path) <= len(prefix) || !strings.EqualFold(u.Path[:len(prefix)], prefix) || path.Clean(u.Path) != u.Path {
+	if !underBase || len(rel) <= len(prefix) || !strings.EqualFold(rel[:len(prefix)], prefix) || path.Clean(u.Path) != u.Path {
 		return ""
 	}
 	return raw

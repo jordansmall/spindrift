@@ -126,3 +126,62 @@ func TestGitGoesToTheDerivedCloneURLWhateverTheConnectorSaysItIs(t *testing.T) {
 		t.Errorf("core asked the Connector for its remote %d times, want 0", n)
 	}
 }
+
+// A forge served under a subpath: git, the bundle relay and the mirror seed all
+// reach <base>/<owner>/<name>.git, the credential goes only there, and that
+// instance's PR URLs and run links are accepted.
+func TestASubpathForgeKeepsGitAndURLsUnderItsBase(t *testing.T) {
+	const sub = "/forgejo"
+	h := connectorforgetest.NewHostMediation(t, connectorforgetest.WithGitOverHTTPS(), connectorforgetest.WithWebBasePath(sub))
+	h.Backend.SetRemote("https://"+h.Backend.Host+"/o/other.git", "https://"+h.Backend.Host+"/o/other")
+	_, caps, err := h.Compose()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := caps.MirrorSeeder.SeedMirror(filepath.Join(t.TempDir(), "mirror")); err != nil {
+		t.Fatalf("SeedMirror: %v", err)
+	}
+	const ref = "agent/issue-9106"
+	if err := caps.BundleRelay.RelayBundle(h.SeedBundle(ref), ref); err != nil {
+		t.Fatalf("RelayBundle: %v", err)
+	}
+	if !h.BundleLanded(ref) {
+		t.Errorf("%s never reached the derived repository", ref)
+	}
+	src := t.TempDir()
+	forgetest.Run(t, "", "clone", h.Repo.Bare, src)
+	forgetest.Run(t, src, "checkout", "-b", "work")
+	forgetest.WriteFile(t, filepath.Join(src, "feature.txt"), "feature\n")
+	forgetest.Run(t, src, "add", "feature.txt")
+	forgetest.Run(t, src, "commit", "-m", "feature")
+	if err := caps.BranchPusher.PushBranch(src, "work", "agent/issue-9107", "main"); err != nil {
+		t.Fatalf("PushBranch: %v", err)
+	}
+	subClonePath := sub + cloneURLPath
+	reqs := h.GitRequests()
+	if len(reqs) == 0 {
+		t.Fatal("no git requests reached the subpath clone URL")
+	}
+	gitexectest.RequireAuthOnlyUnder(t, reqs, subClonePath)
+	for _, r := range reqs {
+		if !strings.HasPrefix(r.Path, subClonePath) {
+			t.Errorf("git request to %s, want only %s", r.Path, subClonePath)
+		}
+	}
+	if n := h.Backend.RemoteRequests(); n != 0 {
+		t.Errorf("core asked the Connector for its remote %d times, want 0", n)
+	}
+
+	// The backend now serves the subpath's own URLs.
+	h.Backend.SetRemote("https://"+h.Backend.Host+sub+"/o/r.git", "https://"+h.Backend.Host+sub+"/o/r")
+	head, wantURL := h.SeedExistingOpenPR()
+	pr, ok, err := caps.PRForge.OpenPRForBranch(head)
+	if err != nil || !ok || pr.URL != wantURL || !strings.Contains(pr.URL, sub+"/o/r/pull/") {
+		t.Errorf("OpenPRForBranch = %+v, %v, %v, want the PR at %s accepted", pr, ok, err, wantURL)
+	}
+	runLink := "https://" + h.Backend.Host + sub + "/o/r/actions/runs/1"
+	h.Backend.AddStatus(101, "ci", "pending", "running", runLink)
+	if _, got, err := caps.CIRunReporter.CheckRun(wantURL); err != nil || got != runLink {
+		t.Errorf("CheckRun link = %q, %v, want %q", got, err, runLink)
+	}
+}
