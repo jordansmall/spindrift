@@ -95,12 +95,15 @@ let
     shadowDrivers = [ "opencode" ];
   };
   # A Consumer module wiring opencode's Connector row, as a Connector's own
-  # flake module would.
+  # data would, with the Consumer's `extra` switches on it.
   opencodeConnectorModule = extra: {
-    spindrift.connectors.opencode = {
-      driver = opencodeRow;
-    }
-    // extra;
+    spindrift.connectorData = [
+      {
+        name = "opencode";
+        driver = opencodeRow;
+      }
+    ];
+    spindrift.connectors.opencode = extra;
     perSystem.spindrift.agents.drivers.opencode = opencodeModels;
   };
   # Forces the validation chain without a build.
@@ -678,27 +681,29 @@ in
       # A backend row whose name has no native backend to replace. `primary` is
       # set only when true: a backend row refuses even `primary = false`.
       nativeless = primary: {
-        spindrift.connectors.nativeless = {
-          knobs.nativelessToken = {
-            env = "NATIVELESS_TOKEN";
-            group = "dispatch";
-            secret = true;
-            doc = "test knob";
-            flakeOption = false;
-            boxEnv = false;
-          };
-          backend = {
-            module = _: "/nativeless.wasm";
-            routes = [
-              {
-                method = "GET";
-                host = "example.invalid";
-                path = "/api";
-              }
-            ];
-          };
-        }
-        // pkgs.lib.optionalAttrs primary { primary = true; };
+        imports = [
+          (fixtures.rowAsData "nativeless" {
+            knobs.nativelessToken = {
+              env = "NATIVELESS_TOKEN";
+              group = "dispatch";
+              secret = true;
+              doc = "test knob";
+              flakeOption = false;
+              boxEnv = false;
+            };
+            backend = {
+              module = _: "/nativeless.wasm";
+              routes = [
+                {
+                  method = "GET";
+                  host = "example.invalid";
+                  path = "/api";
+                }
+              ];
+            };
+          })
+        ];
+        spindrift.connectors.nativeless = pkgs.lib.optionalAttrs primary { primary = true; };
       };
       errorFor =
         row:

@@ -58,19 +58,9 @@ let
   evaluates = c: (builtins.tryEval (builtins.deepSeq (programOf c) true)).success;
   row = (configOf viaData).connectors.datafixture;
 
-  # The same Connector as a hand-written flake-parts module, in the shape every
-  # Connector registered in before it could be data.
-  handWritten = {
-    key = "spindrift-connector-datafixture";
-    imports = [ ../../lib/flakeModule.nix ];
-    spindrift.connectors.datafixture = {
-      inherit (good) knobs fragments driver;
-      inherit routes;
-      backend = {
-        module = _: wasm;
-        inherit routes;
-      };
-    };
+  # The same Connector registered straight into the option the module sets.
+  direct = {
+    spindrift.connectorData = [ good ];
   };
 
   # Each bad data set with the substrings its message must carry: the
@@ -349,13 +339,13 @@ in
         touch $out
       '';
 
-  # The data path is a shorthand for the module, not a second registration
-  # route: both produce the same program from the same row.
-  connector-data-equals-flake-module =
+  # The module is a shorthand for the option, not a second registration
+  # route: both produce the same program from the same data.
+  connector-data-equals-option =
     assert assertMsg (
-      programOf viaData == programOf (consumerWith [ handWritten ])
-    ) "a data Connector must build the program its hand-written flake module builds";
-    pkgs.runCommand "connector-data-equals-flake-module" { } "touch $out";
+      programOf viaData == programOf (consumerWith [ direct ])
+    ) "a data Connector must build the same program through its module and through the option";
+    pkgs.runCommand "connector-data-equals-option" { } "touch $out";
 
   # The module keeps the key a hand-written Connector module carries, so a
   # Consumer importing it twice dedups instead of failing "registered twice".

@@ -142,6 +142,7 @@ let
     // (import ./connectors.nix common)
     // (import ./connector-backend-rows.nix common)
     // (import ./connector-data.nix common)
+    // (import ./connector-registration.nix common)
     // (import ./connector-driver-rows.nix common)
     // (import ./connector-escape-guard.nix common)
     // (import ./connector-scaffold.nix common)
