@@ -15,21 +15,22 @@ var ftgt = forge.Target{API: "https://forge.test", Repo: "o/r"}
 
 const repoAPI = "https://forge.test/api/v1/repos/o/r"
 
-// stub replaces send with canned responses keyed by URL and records requests.
+// stub serves canned responses keyed by URL through the fake host and records
+// the requests it admits; an unlisted URL answers 404.
 func stub(t *testing.T, resp map[string]connector.Response) *[]connector.Request {
 	t.Helper()
-	var got []connector.Request
-	old := send
-	send = func(r connector.Request) (connector.Response, error) {
-		got = append(got, r)
+	return stubOn(t, host, resp)
+}
+
+func stubOn(t *testing.T, h *connector.FakeHost, resp map[string]connector.Response) *[]connector.Request {
+	t.Helper()
+	return h.Serve(t, func(r connector.Request) (connector.Response, error) {
 		v, ok := resp[r.URL]
 		if !ok {
 			return connector.Response{Status: 404, Body: []byte("{}")}, nil
 		}
 		return v, nil
-	}
-	t.Cleanup(func() { send = old })
-	return &got
+	})
 }
 
 func ok(body string) connector.Response {
@@ -315,8 +316,7 @@ func TestDeleteBranchMissingIsNotFound(t *testing.T) {
 
 func TestPRsForBranchWalksPastFiftyPages(t *testing.T) {
 	const pages = 60
-	old := send
-	send = func(r connector.Request) (connector.Response, error) {
+	host.Serve(t, func(r connector.Request) (connector.Response, error) {
 		page, _ := strconv.Atoi(strings.Split(strings.Split(r.URL, "page=")[1], "&")[0])
 		if page > pages {
 			return ok(`[]`), nil
@@ -326,8 +326,7 @@ func TestPRsForBranchWalksPastFiftyPages(t *testing.T) {
 			ref = "b"
 		}
 		return ok(`[{"number":` + strconv.Itoa(page) + `,"html_url":"u","state":"open","head":{"ref":"` + ref + `","sha":"s"}}]`), nil
-	}
-	t.Cleanup(func() { send = old })
+	})
 	prs, err := prsForBranch(ftgt, "b")
 	if err != nil || len(prs) != 2 || prs[0].Number != strconv.Itoa(pages) {
 		t.Fatalf("prs = %#v, err = %v", prs, err)
@@ -414,7 +413,12 @@ func TestJobLog(t *testing.T) {
 func TestJobLogUnderSubPathBase(t *testing.T) {
 	api := "https://forge.test/forge"
 	prefix := api + "/api/v1/repos/o/r"
-	got := stub(t, map[string]connector.Response{
+	// The host prefixes each Route with the base's path, so this base needs its own table.
+	routes, err := resolvedRoutes(api, "o/r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := stubOn(t, connector.NewFakeHost(routes), map[string]connector.Response{
 		prefix + "/actions/runs?run_number=5": ok(`{"workflow_runs":[{"id":903}]}`),
 		prefix + "/actions/runs/903/jobs":     ok(`[{"id":40},{"id":41}]`),
 		prefix + "/actions/jobs/41/logs":      {Status: 200, Body: []byte("boom\n")},
