@@ -112,7 +112,7 @@
 # configures (issue #7415): `connectorKnobs`, the names of its Connector's
 # credential knobs (connectors/<name>/data.nix or module.nix), each a secret
 # stanza beside the row's own tokenEnvVar; `flakeInput`, the flake-input stanza; and
-# `moduleImport`, the module import. A null flakeInput or moduleImport means
+# `connectorData`, the expression for the Connector's data. A null flakeInput or connectorData means
 # the batteries flake (`flakeModules.default`) already carries the backend;
 # otherwise the input text goes, re-indented, inside the Consumer's `inputs = { ... };`
 # with its `core` following the Consumer's `spindrift` input. The

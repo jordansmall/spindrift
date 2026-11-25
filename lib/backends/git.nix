@@ -10,7 +10,7 @@
   consumerStanza = {
     connectorKnobs = [ ];
     flakeInput = null;
-    moduleImport = null;
+    connectorData = null;
   };
   validAsCodeForge = true;
   # Bundle relay only (issue #6898): git has no pull requests, so no draft-PR

@@ -16,7 +16,7 @@
   consumerStanza = {
     connectorKnobs = [ ];
     flakeInput = null;
-    moduleImport = null;
+    connectorData = null;
   };
   doctorSlugHint = "FORGEJO_BASE_URL";
   outboxRelayCapable = true;

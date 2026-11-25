@@ -930,7 +930,7 @@ func renderFlakeNix(a answers) (string, error) {
 		}
 	}
 
-	var extraInputs, moduleImports string
+	var extraInputs, connectorData string
 	for _, choice := range a.chosen() {
 		stanza := consumerStanzas[choice.name]
 		if stanza.FlakeInput != "" {
@@ -938,14 +938,19 @@ func renderFlakeNix(a answers) (string, error) {
 				extraInputs += "    " + line + "\n"
 			}
 		}
-		if stanza.ModuleImport != "" {
-			moduleImports += "        " + stanza.ModuleImport + "\n"
+		if stanza.ConnectorData != "" {
+			connectorData += "        " + stanza.ConnectorData + "\n"
 		}
 	}
+	// A Connector registers as data at flake level, not as a module import.
 	// nixfmt keeps a one-element list on one line.
-	imports := "      imports = [ spindrift.flakeModules.default ];"
-	if moduleImports != "" {
-		imports = "      imports = [\n        spindrift.flakeModules.default\n" + moduleImports + "      ];"
+	flakeBody := "      imports = [ spindrift.flakeModules.default ];"
+	if connectorData != "" {
+		list := "[\n" + connectorData + "      ]"
+		if strings.Count(connectorData, "\n") == 1 {
+			list = "[ " + strings.TrimSpace(connectorData) + " ]"
+		}
+		flakeBody += "\n\n      spindrift.connectorData = " + list + ";"
 	}
 
 	out := fmt.Sprintf(`{
@@ -990,7 +995,7 @@ func renderFlakeNix(a answers) (string, error) {
         };
     };
 }
-`, extraInputs, imports,
+`, extraInputs, flakeBody,
 		pathRuntime, nixEscape(a.runtime),
 		pathRepoSlug, nixEscape(a.repoSlug),
 		pathGitUserName, nixEscape(a.gitUserName),

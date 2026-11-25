@@ -6,12 +6,12 @@ package main
 // consumerStanza is a backend row's Consumer stanza: what a Consumer of the
 // backend configures (lib/backends/<name>.nix, nix/consumer-stanzas.nix).
 type consumerStanza struct {
-	DisplayName  string
-	Settings     []stanzaSetting // the row's settings-block knobs, sorted by Env
-	Secrets      []stanzaSecret  // harness.env lines, in the env example's order
-	Credential   string          // env var the Connector reads its credential from; "" when none
-	FlakeInput   string          // "" when the batteries flake already carries it
-	ModuleImport string          // likewise
+	DisplayName   string
+	Settings      []stanzaSetting // the row's settings-block knobs, sorted by Env
+	Secrets       []stanzaSecret  // harness.env lines, in the env example's order
+	Credential    string          // env var the Connector reads its credential from; "" when none
+	FlakeInput    string          // "" when the batteries flake already carries it
+	ConnectorData string          // likewise
 }
 
 // stanzaSetting is one settings-block knob of a Consumer stanza: its env name,
@@ -82,9 +82,9 @@ var consumerStanzas = map[string]consumerStanza{
 			{Env: "JIRA_TOKEN", Secret: true},
 			{Env: "JIRA_EMAIL"},
 		},
-		Credential:   "JIRA_TOKEN",
-		FlakeInput:   "jira = {\n  url = \"github:jordansmall/spindrift?dir=connectors/jira\";\n  inputs.core.follows = \"spindrift\";\n};\n",
-		ModuleImport: "inputs.jira.flakeModules.default",
+		Credential:    "JIRA_TOKEN",
+		FlakeInput:    "jira = {\n  url = \"github:jordansmall/spindrift?dir=connectors/jira\";\n  inputs.core.follows = \"spindrift\";\n};\n",
+		ConnectorData: "inputs.jira.connectorData",
 	},
 	"forgejo": {
 		DisplayName: "Forgejo",

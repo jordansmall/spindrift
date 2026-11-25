@@ -36,7 +36,7 @@ let
     consumerStanza = {
       inherit connectorKnobs;
       flakeInput = null;
-      moduleImport = null;
+      connectorData = null;
     };
   };
   connectorRows.stub.knobs = {
@@ -143,9 +143,9 @@ in
     ) "consumer-stanzas: the composition must hold one entry per backend row, in registry order";
     assert assertMsg
       (builtins.all (
-        s: s ? displayName && s ? settings && s ? secrets && s ? flakeInput && s ? moduleImport
+        s: s ? displayName && s ? settings && s ? secrets && s ? flakeInput && s ? connectorData
       ) real)
-      "consumer-stanzas: every entry must carry displayName, settings, secrets, flakeInput and moduleImport";
+      "consumer-stanzas: every entry must carry displayName, settings, secrets, flakeInput and connectorData";
     assert assertMsg (
       map (s: s.name) (builtins.filter (s: s.secrets == [ ]) real) == [
         "git"

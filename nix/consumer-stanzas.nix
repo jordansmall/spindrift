@@ -4,7 +4,7 @@
 #
 # Returns `{ stanzas; errors; }`. `stanzas` is one entry per backend row, in
 # registry order: `{ name; displayName; settings; secrets; flakeInput;
-# moduleImport; credential; }`, where `settings` is the row's own `flakeOption`
+# connectorData; credential; }`, where `settings` is the row's own `flakeOption`
 # knobs, `secrets` is the row's `tokenEnvVar` schema entry (when it has one),
 # then its Connector's Basic `identity` when that names a core schema knob (a
 # Connector-owned identity is a listed connector knob instead), then the
@@ -63,7 +63,7 @@ let
           ++ lib.optional (identityEntry != null) identityEntry
           ++ map (k: declared.${k}) listed;
         flakeInput = stanza.flakeInput or null;
-        moduleImport = stanza.moduleImport or null;
+        connectorData = stanza.connectorData or null;
         credential =
           let
             connector = connectorRows.${row.name} or { };

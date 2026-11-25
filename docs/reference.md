@@ -3547,7 +3547,7 @@ row that sets either fails evaluation, because there is no native backend of
 the same name to shadow or replace.
 
 The batteries flake (`spindrift.flakeModules.default`) carries no jira
-Connector, so add an input on its subflake and import its module in the
+Connector, so add an input on its subflake and register its data in the
 Consumer:
 
 ```nix
@@ -3561,15 +3561,13 @@ inputs = {
   };
 };
 # ...
-imports = [
-  spindrift.flakeModules.default
-  inputs.jira.flakeModules.default
-];
+imports = [ spindrift.flakeModules.default ];
+
+spindrift.connectorData = [ inputs.jira.connectorData ];
 ```
 
 `core` follows `spindrift` (not `spindrift/core`: the root flake has no `core`
 input, and its outputs serve as core), so the lock graph holds one core. The
-Connector module carries a dedup `key`, so importing it twice is harmless. The
 [Quickstart wizard](../README.md#quick-start) writes this stanza when you pick
 jira as the tracker.
 
