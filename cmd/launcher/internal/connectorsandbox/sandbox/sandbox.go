@@ -1,5 +1,8 @@
-// Package sandbox is the Connector sandbox a run starts through its runner, on
-// the first Connector load, and shares among every later one.
+// Package sandbox is the Connector sandboxes a run starts through its runner.
+// A Sandbox starts on its first load. A Pool holds the one sandbox every Driver
+// Connector shares and hands each credential-holding Connector a sandbox of its
+// own, so no Connector's credential shares a pipe or an address space with
+// another's.
 package sandbox
 
 import (

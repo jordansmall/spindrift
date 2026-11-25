@@ -426,7 +426,8 @@ type Options struct {
 	Getenv func(string) string
 	// Client is the transport; nil means a default client.
 	Client *http.Client
-	// Sandbox is where the module loads; nil means the installed one.
+	// Sandbox is where the module loads; nil means the installed one, which
+	// takes a network load only through an owned sandbox.
 	Sandbox connectorsandbox.Loader
 }
 
