@@ -3,13 +3,33 @@ package runner
 import (
 	"slices"
 	"testing"
+
+	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
 func goodSandboxArgv() []string {
 	return []string{
 		"run", "-i", "--rm", "--name", ConnectorSandboxPrefix + "x", "--network=none",
-		"--cap-drop=all", "--security-opt=no-new-privileges", "--read-only",
-		"--pids-limit=128", "--memory=512m", "img:tag",
+		"--cap-drop=all", "--security-opt=no-new-privileges", "--read-only", "--pull=never",
+		"--pids-limit=128", "--memory=512m", runnertest.SandboxImageID,
+	}
+}
+
+func TestSandboxViolations_FlagsAnUnpinnedOrPullableImage(t *testing.T) {
+	good := goodSandboxArgv()
+	for name, argv := range map[string][]string{
+		"no never-pull":      slices.DeleteFunc(slices.Clone(good), func(a string) bool { return a == "--pull=never" }),
+		"later pull=always":  slices.Insert(slices.Clone(good), len(good)-1, "--pull=always"),
+		"later pull=missing": slices.Insert(slices.Clone(good), len(good)-1, "--pull=missing"),
+		"bare --pull":        slices.Insert(slices.Clone(good), len(good)-1, "--pull"),
+		"image by tag":       slices.Replace(slices.Clone(good), len(good)-1, len(good), "img:tag"),
+	} {
+		if got := SandboxViolations(argv); len(got) == 0 {
+			t.Errorf("%s: SandboxViolations(%v) = none, want a violation", name, argv)
+		}
+	}
+	if got := SandboxViolations(slices.Replace(slices.Clone(good), len(good)-1, len(good), "reg.io/img@"+runnertest.SandboxImageID)); len(got) != 0 {
+		t.Errorf("SandboxViolations(name@digest) = %v, want none", got)
 	}
 }
 

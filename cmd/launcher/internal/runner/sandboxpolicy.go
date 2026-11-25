@@ -2,6 +2,7 @@ package runner
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -19,9 +20,14 @@ var sandboxForbidden = []string{
 // and `-vX:Y` carry one as surely as a bare `-t`.
 const sandboxForbiddenShort = "tevp"
 
+// sandboxImagePinned matches an image reference pinned by content: a bare
+// image ID (what a loaded archive has, no registry digest) or name@digest.
+var sandboxImagePinned = regexp.MustCompile(`(^|@)sha256:[0-9a-f]{64}$`)
+
 // SandboxViolations lists how an argv for `run` of a Connector sandbox
 // departs from the isolation the sandbox promises: no env, mounts, ports or
-// network, a bounded footprint, and the host's frame stream on raw stdio.
+// network, a bounded footprint, the host's frame stream on raw stdio, and an
+// image pinned by digest and never pulled.
 // It is the single isolation policy the adapter contract and the seamtest
 // fake share.
 func SandboxViolations(argv []string) []string {
@@ -30,10 +36,14 @@ func SandboxViolations(argv []string) []string {
 	hasPrefix := func(prefix string) bool {
 		return slices.ContainsFunc(argv, func(a string) bool { return strings.HasPrefix(a, prefix) })
 	}
-	for _, want := range []string{"-i", "--rm", "--network=none", "--cap-drop=all", "--security-opt=no-new-privileges", "--read-only"} {
+	for _, want := range []string{"-i", "--rm", "--network=none", "--cap-drop=all", "--security-opt=no-new-privileges", "--read-only", "--pull=never"} {
 		if !has(want) {
 			bad = append(bad, "lacks "+want)
 		}
+	}
+	// The sandbox run passes no command, so the image is the last element.
+	if len(argv) > 0 && !sandboxImagePinned.MatchString(argv[len(argv)-1]) {
+		bad = append(bad, fmt.Sprintf("last argument %s is not a sha256-pinned image", argv[len(argv)-1]))
 	}
 	for _, prefix := range []string{"--pids-limit=", "--memory="} {
 		if !hasPrefix(prefix) {
@@ -52,6 +62,9 @@ func SandboxViolations(argv []string) []string {
 		}
 		if strings.HasPrefix(a, "--network") && a != "--network=none" {
 			bad = append(bad, fmt.Sprintf("carries %s, want only --network=none", a))
+		}
+		if strings.HasPrefix(a, "--pull") && a != "--pull=never" {
+			bad = append(bad, fmt.Sprintf("carries %s, want only --pull=never", a))
 		}
 	}
 	return bad
