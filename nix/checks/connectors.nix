@@ -366,8 +366,11 @@ in
       }
     ) "the fixture entry point must take exactly the core it is handed";
     assert assertMsg (
-      fixtureConnector.flakeModule.imports == [ core.flakeModules.default ]
-    ) "the fixture module must import the core it was handed";
+      let
+        imports = fixtureConnector.flakeModule.imports;
+      in
+      builtins.length imports == 2 && builtins.head imports == core.flakeModules.default
+    ) "the fixture module must import the core it was handed, then its own row module";
     pkgs.runCommand "connectors-fixture-takes-in-tree-core" { } "touch $out";
 
   connectors-duplicate-name-fails =

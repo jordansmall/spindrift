@@ -8,14 +8,18 @@
 # `name` is required. `module` (a function of pkgs returning the wasm path)
 # declares a backend row and needs `routes` and `credential`; `scheme`,
 # `identity`, `base` and `gitRemote` belong to that row. `knobs`, `fragments`
-# and `driver` are the row's own fields. Deep checks (Route rules, scheme enum,
-# credential ownership) stay with core's row types and validators; this file
-# only refuses what those would let through silently, because the row type is
-# freeform: an unknown key, a wrongly typed field, backend fields without
-# `module`, or a backend row missing `routes` or `credential`.
+# and `driver` are the row's own fields. `driver` is a row set, or a function of
+# nixpkgs `lib` returning one: a core-derived row
+# (`(core.lib.driverEntries { inherit lib; }).opencode // { module }`) needs a
+# `lib` a data file does not have in scope. Deep checks (Route rules, scheme
+# enum, credential ownership) stay with core's row types and validators; this
+# file only refuses what those would let through silently, because the row
+# type is freeform: an unknown key, a wrongly typed field, backend fields
+# without `module`, or a backend row missing `routes` or `credential`.
 #
-# Builtins only, and it never forces `module` or `driver.module`, so a reader
-# that hands the Connector a stub core `{ }` can still read a row.
+# Builtins only. No reader applies `module` or touches `driver.module`, and
+# `rowsOf` leaves a function `driver` an unforced thunk, so a reader that hands
+# the Connector a stub core `{ }` can still read its knobs and backend row.
 let
   # Field -> the `builtins.typeOf` values it may hold.
   fields = {
@@ -43,6 +47,7 @@ let
     ];
     driver = [
       "set"
+      "lambda"
       "null"
     ];
   };
@@ -112,19 +117,21 @@ let
     in
     if p == null then data else throw p;
 
+  resolveDriver = lib: d: if builtins.isFunction d then d lib else d;
+
   # The attrs of `spindrift.connectors.<name>` the data declares, absent
   # fields omitted so the row keeps its option defaults.
   row =
-    data:
+    lib: data:
     let
       optional = k: if data ? ${k} && data.${k} != null then { ${k} = data.${k}; } else { };
       pick = builtins.foldl' (acc: k: acc // optional k) { };
     in
     pick [
       "knobs"
-      "driver"
       "fragments"
     ]
+    // (if data.driver or null == null then { } else { driver = resolveDriver lib data.driver; })
     // (
       if data ? module then
         {
@@ -148,24 +155,33 @@ let
   # `coreModule` is core's flake-parts module (a path or module value). The key
   # matches what a hand-written Connector module carries, so a Consumer that
   # imports the Connector twice dedups instead of failing "registered twice".
-  module =
+  # The inner module takes `lib` from the module system for a function `driver`.
+  toFlakeModule =
     coreModule: data:
     let
       d = validate data;
     in
     {
       key = "spindrift-connector-${d.name}";
-      imports = [ coreModule ];
-      spindrift.connectors.${d.name} = row d;
+      imports = [
+        coreModule
+        (
+          { lib, ... }:
+          {
+            spindrift.connectors.${d.name} = row lib d;
+          }
+        )
+      ];
     };
 
   # The readers below take a `lib.connector` entry in either form: a data
   # Connector's `data`, or the entry-level declarations (`flakeModule`,
   # `fragments`, `driverRow`) of one not yet moved to data. No caller branches
-  # on the form. None forces a wasm `module`.
+  # on the form. None applies a wasm `module`.
 
   # `{ <name> = <row>; }`, the shape of a flake module's `spindrift.connectors`.
-  # `moduleArgs` is what the flake module is applied to when there is no data.
+  # `moduleArgs` is what an entry-form flake module is applied to; a data entry
+  # reads only its `lib`, and only to apply a function `driver`.
   rowsOf =
     moduleArgs: entry:
     if entry ? data then
@@ -173,7 +189,9 @@ let
         d = validate entry.data;
       in
       {
-        ${d.name} = row d;
+        ${d.name} = row (moduleArgs.lib
+          or (throw "connector ${d.name}: a function `driver` needs rowsOf's module args to carry `lib`")
+        ) d;
       }
     else
       (entry.flakeModule moduleArgs).spindrift.connectors or { };
@@ -184,7 +202,7 @@ let
   driverRowOf =
     lib: entry:
     if entry ? data then
-      (validate entry.data).driver or null
+      resolveDriver lib ((validate entry.data).driver or null)
     else if entry ? driverRow then
       entry.driverRow lib
     else
@@ -194,7 +212,7 @@ in
   inherit
     problem
     validate
-    module
+    toFlakeModule
     rowsOf
     fragmentsOf
     driverRowOf
