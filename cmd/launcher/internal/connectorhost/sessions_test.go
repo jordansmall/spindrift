@@ -433,3 +433,30 @@ func TestSessionsFatalCallReleasesTheSessionAndStillLoadsAReplacement(t *testing
 		})
 	}
 }
+
+func TestSessionsDeadReportsAHostThatEnded(t *testing.T) {
+	toHostR, toHostW := io.Pipe()
+	fromHostR, fromHostW := io.Pipe()
+	done := make(chan error, 1)
+	go func() {
+		err := connectorhost.ServeSessions(context.Background(), toHostR, fromHostW)
+		_ = fromHostW.Close()
+		done <- err
+	}()
+	s, err := connectorhost.NewSessions(context.Background(), fromHostR, toHostW, func() {}, sync.OnceValue(func() error { return <-done }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close(context.Background()) })
+	if err := s.Dead(); err != nil {
+		t.Fatalf("Dead = %v on a serving host", err)
+	}
+	_ = toHostW.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for s.Dead() == nil && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if s.Dead() == nil {
+		t.Fatal("Dead = nil after the host ended")
+	}
+}
