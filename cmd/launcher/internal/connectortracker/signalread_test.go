@@ -1,4 +1,4 @@
-package connectortracker
+package connectortracker_test
 
 import (
 	"context"
@@ -11,20 +11,22 @@ import (
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorprotocol/schematest"
+	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/signalsocket"
 )
 
-func connectorIssueHandler(t *testing.T, replies map[string]string, guestErr error) (http.Handler, *[]recordedCall) {
+func connectorIssueHandler(t *testing.T, replies map[string]string, guestErr error) (http.Handler, *[]schematest.Call) {
 	t.Helper()
-	call, calls := stubGuest(t, replies)
+	call, calls := connectortracker.StubGuest(t, replies)
 	guest := call
 	if guestErr != nil {
 		guest = func(context.Context, string, any, any) error {
 			return guestErr
 		}
 	}
-	tr := mustTracker(t, guest, testLifecycle, testTarget, nil, true)
+	tr := connectortracker.MustTracker(t, guest, connectortracker.TestLifecycle, connectortracker.TestTarget, nil, true)
 	rd := signalsocket.NewTrackerIssueReader(tr, "o/r", io.Discard)
 	return signalsocket.NewHandler(signalsocket.New(signalsocket.Config{}), nil, rd, nil), calls
 }
@@ -65,16 +67,16 @@ func TestSignalIssueReadRefusesWhatTheRouteTableDoesNotAdmit(t *testing.T) {
 	}
 }
 
-func connectorSearchHandler(t *testing.T, replies map[string]string, guestErr error) (http.Handler, *[]recordedCall) {
+func connectorSearchHandler(t *testing.T, replies map[string]string, guestErr error) (http.Handler, *[]schematest.Call) {
 	t.Helper()
-	call, calls := stubGuest(t, replies)
+	call, calls := connectortracker.StubGuest(t, replies)
 	guest := call
 	if guestErr != nil {
 		guest = func(context.Context, string, any, any) error {
 			return guestErr
 		}
 	}
-	tr := mustTracker(t, guest, testLifecycle, testTarget, []string{CapSearchIssues}, true)
+	tr := connectortracker.MustTracker(t, guest, connectortracker.TestLifecycle, connectortracker.TestTarget, []string{connectortracker.CapSearchIssues}, true)
 	c := forge.ResolveCapabilities(nil, tr, backend.Descriptor{}, backend.Descriptor{})
 	if c.IssueSearcher == nil {
 		t.Fatal("a Connector advertising tracker.searchIssues resolved no IssueSearcher")
@@ -93,7 +95,7 @@ func TestSignalIssueSearchThroughAConnectorTracker(t *testing.T) {
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "from the connector") {
 		t.Fatalf("got %d %s, want the connector's hit", w.Code, w.Body)
 	}
-	if len(*calls) != 1 || (*calls)[0].Method != CapSearchIssues || (*calls)[0].Params["text"] != "flaky" || (*calls)[0].Params["state"] != "closed" {
+	if len(*calls) != 1 || (*calls)[0].Method != connectortracker.CapSearchIssues || (*calls)[0].Params["text"] != "flaky" || (*calls)[0].Params["state"] != "closed" {
 		t.Fatalf("guest calls = %+v, want one tracker.searchIssues with the query", *calls)
 	}
 }
