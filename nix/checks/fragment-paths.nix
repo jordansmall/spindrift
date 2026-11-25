@@ -162,8 +162,7 @@ let
   forkData = forgejoConnectorData // {
     fragments = forgejoFork;
   };
-  evalFails = v: !(builtins.tryEval (builtins.deepSeq v true)).success;
-  hasAll = msg: builtins.all (s: hasInfix s msg);
+  inherit (fixtures) fails hasAll;
 in
 {
   fragment-paths =
@@ -361,9 +360,9 @@ in
       ];
     in
     assert assertMsg (
-      !(evalFails (rowsOf [ rootFlakeModule ]))
+      !(fails (rowsOf [ rootFlakeModule ]))
     ) "control: the batteries root alone must evaluate";
-    assert assertMsg (evalFails (rowsOf forced))
+    assert assertMsg (fails (rowsOf forced))
       "fragment-paths: mkForce on spindrift.connectors.forgejo.fragments beside the batteries module must fail evaluation";
     assert assertMsg (hasAll forcedMessage [
       "Connector 'forgejo'"
@@ -371,7 +370,7 @@ in
       "'fragments'"
       "spindrift.connectorData"
     ]) "fragment-paths: the row refusal must name the Connector, file and key; got ${forcedMessage}";
-    assert assertMsg (evalFails (
+    assert assertMsg (fails (
       rowsOf second
     )) "fragment-paths: a second forgejo data entry beside the batteries one must fail evaluation";
     assert assertMsg

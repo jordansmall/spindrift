@@ -758,6 +758,10 @@ let
   connectorConsumerVia = consumerVia { debug = true; };
   # A Connector's data registered the way a Consumer's flake does.
   registerData = data: { spindrift.connectorData = [ data ]; };
+  # Shared by the Connector registration checks: whether forcing `v` throws,
+  # and whether every string occurs in an error message.
+  fails = v: !(builtins.tryEval (builtins.deepSeq v true)).success;
+  hasAll = msg: builtins.all (s: pkgs.lib.hasInfix s msg);
   # A hand-written row as the data core builds it back into the same row, for
   # checks that probe a row's contents: a Connector registers as data only
   # (issue #7562). The backend row's fields sit flat beside the row's own.
@@ -963,6 +967,8 @@ in
     moduleConsumerWith
     connectorConsumerVia
     registerData
+    fails
+    hasAll
     rowAsData
     driverConnectorConsumer
     driverConnectorArtifacts

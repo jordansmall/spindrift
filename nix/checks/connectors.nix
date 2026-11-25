@@ -71,7 +71,7 @@ let
       }
     ];
   };
-  fails = v: !(builtins.tryEval (builtins.deepSeq v true)).success;
+  inherit (fixtures) fails;
   drvPathsOf = pkgs': builtins.mapAttrs (_: p: p.drvPath) (filterAttrs (_: isDerivation) pkgs');
 
   programsOf = builtins.mapAttrs (_: a: a.program);
