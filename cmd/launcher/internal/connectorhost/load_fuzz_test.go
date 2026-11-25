@@ -80,6 +80,7 @@ func FuzzLoad(f *testing.F) {
 		f.Logf("%s is unset; fuzzing without the fixture Connector seeds", fixturesEnv)
 	}
 	f.Fuzz(func(t *testing.T, wasm []byte) {
+		t.Parallel()
 		done := make(chan error, 1)
 		go func() {
 			c, err := connectorhost.Load(context.Background(), wasm)
