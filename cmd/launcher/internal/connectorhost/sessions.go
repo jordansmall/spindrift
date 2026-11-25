@@ -184,6 +184,14 @@ func (s *Sessions) engine(ctx context.Context, wasm []byte, host hostCalls) (eng
 // safe concurrently and after Close.
 func (s *Sessions) Stats() HopStats { return s.meter.stats() }
 
+// Dead is why the host's stream ended or broke, or nil while it serves; once
+// non-nil it never serves a new session.
+func (s *Sessions) Dead() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.dead
+}
+
 func (s *Sessions) newSession() (*session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
