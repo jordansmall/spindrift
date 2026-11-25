@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -32,7 +33,13 @@ func loadersFor(t testing.TB) map[string]loader {
 // written to tap, when non-nil.
 func loadRemoteOver(ctx context.Context, wasm []byte, n *connectorhost.Network, tap io.Writer) (*connectorhost.Connector, error) {
 	toHostR, toHostW := io.Pipe()
-	fromHostR, fromHostW := io.Pipe()
+	// An OS pipe, not io.Pipe: after a failed call the Launcher stops reading,
+	// and a host blocked writing its small reply frame never sees its stdin
+	// close, so Close would wait out closeGrace.
+	fromHostR, fromHostW, err := os.Pipe()
+	if err != nil {
+		return nil, err
+	}
 	done := make(chan error, 1)
 	go func() {
 		err := connectorhost.Serve(context.Background(), toHostR, fromHostW)
@@ -47,9 +54,15 @@ func loadRemoteOver(ctx context.Context, wasm []byte, n *connectorhost.Network, 
 		}{io.MultiWriter(toHostW, tap), toHostW}
 	}
 	killed := errors.New("host killed")
-	return connectorhost.LoadRemoteOver(ctx, wasm, n, fromHostR, w,
-		func() { _ = toHostR.CloseWithError(killed); _ = fromHostR.CloseWithError(killed) },
-		func() error { return <-done })
+	kill := func() { _ = toHostR.CloseWithError(killed); _ = fromHostR.Close() }
+	c, err := connectorhost.LoadRemoteOver(ctx, wasm, n, fromHostR, w, kill,
+		func() error { err := <-done; _ = fromHostR.Close(); return err })
+	if err != nil {
+		// A refused grant returns before the load calls kill or wait; kill is
+		// safe to repeat, and it lets Serve return and close fromHostW.
+		kill()
+	}
+	return c, err
 }
 
 func TestFrameRoundTrips(t *testing.T) {
