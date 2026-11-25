@@ -4292,6 +4292,13 @@ description and a regen.
   The SDK's protocol constants and wire structs live in each package's
   generated `protocol_gen.go`, rendered from the description (see above), not
   hand-kept in step with core.
+  For native `go test`, `connector.NewFakeHost(routes)` stands in for the
+  `http_request` Host call: it applies the Route admit rule to the table
+  `connector.LoadRoutes` reads from `SPINDRIFT_BACKEND_CONNECTOR_ROUTES` (which
+  a Connector's checks export), refusing with core's reason, records each
+  request sent, and reports the declared Routes no test used. It is a test
+  aid, not a control: it re-implements core's rule without the address
+  policy, and the real host stays the authority on every request.
 - **Conformance.** `conformance.RunConnector(t, wasmPath, corpusDir)`
   (`cmd/launcher/internal/driver/driverkit/conformance`) loads a compiled
   Driver Connector and runs the same suite over the same corpus as
