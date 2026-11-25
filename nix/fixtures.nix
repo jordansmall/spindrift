@@ -27,7 +27,7 @@ let
   dogfoodDriverPrimaries = builtins.filter (n: dogfoodDriverRows ? ${n}) dogfoodPrimary;
   # Every Driver Connector's row, as the module registers it, so the
   # nix/dogfood-*.nix lists alone decide which are shadowed or primary. A
-  # backend Connector has no `driverRow`; the directory name is the row's name.
+  # backend Connector has no Driver row; the directory name is the row's name.
   dogfoodDriverRows = builtins.listToAttrs (
     builtins.concatMap (
       dir:

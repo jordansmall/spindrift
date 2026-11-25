@@ -4,12 +4,13 @@
 {
   lib.connector =
     { core }:
+    let
+      data = import ./data.nix { inherit core; };
+    in
     {
-      flakeModule = import ./module.nix { inherit core; };
+      inherit data;
+      flakeModule = core.lib.connectorModule core data;
       # `pkgs` is the caller's, so the build uses its Go toolchain.
       package = pkgs: import ./package.nix { inherit pkgs core; };
-      # The Driver row the module registers, for a caller that wires mkHarness
-      # directly instead of through the flake module.
-      driverRow = lib: import ./row.nix { inherit core lib; };
     };
 }
