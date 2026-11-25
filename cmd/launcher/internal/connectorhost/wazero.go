@@ -410,7 +410,8 @@ const (
 	hostRequest        = "http_request"
 	hostResponseHeader = "http_response_header"
 
-	// maxHeaderName bounds the name a guest looks up; no real header is longer.
+	// maxHeaderName bounds a header name from the guest, both the one it looks
+	// up and the one a refusal echoes; no real header is longer.
 	maxHeaderName = 256
 )
 
