@@ -105,7 +105,7 @@ func prsForBranch(t forge.Target, branch string) ([]forge.PR, error) {
 	var raw []rawPR
 	path := forgePath(t, "/pulls?head="+url.QueryEscape(owner+":"+branch)+
 		"&state=all&sort=created&direction=desc&per_page="+strconv.Itoa(pageSize))
-	if err := call("GET", t.API, path, nil, &raw); err != nil {
+	if _, err := send("GET", t.API, path, nil, &raw); err != nil {
 		return nil, err
 	}
 	prs := make([]forge.PR, 0, len(raw))
@@ -122,7 +122,7 @@ func readPR(t forge.Target, number string) (rawPR, error) {
 	if _, err := parseNumber(number); err != nil {
 		return raw, err
 	}
-	err := call("GET", t.API, forgePath(t, "/pulls/"+number), nil, &raw)
+	_, err := send("GET", t.API, forgePath(t, "/pulls/"+number), nil, &raw)
 	return raw, err
 }
 
@@ -292,6 +292,9 @@ func jobLog(t forge.Target, id string) (string, error) {
 	if _, _, err := splitRepo(t.Repo); err != nil {
 		return "", err
 	}
-	b, err := fetch("GET", t.API, forgePath(t, "/actions/jobs/"+id+"/logs"), nil)
-	return string(b), err
+	resp, err := send("GET", t.API, forgePath(t, "/actions/jobs/"+id+"/logs"), nil, nil)
+	if err != nil {
+		return "", err
+	}
+	return string(resp.Body), nil
 }

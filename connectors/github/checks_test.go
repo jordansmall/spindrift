@@ -33,6 +33,16 @@ func TestTrackerProbeErrorsOnTransportFailure(t *testing.T) {
 	}
 }
 
+// A send that never reaches the forge is worth retrying, unlike a refusal.
+func TestFailedSendIsTransient(t *testing.T) {
+	host.Serve(t, func(connector.Request) (connector.Response, error) { return connector.Response{}, errors.New("dial") })
+	_, err := trackerProbe(tgt)
+	var ce *connector.Error
+	if !errors.As(err, &ce) || ce.Class != connector.Transient {
+		t.Errorf("probe error = %v; want a Transient *connector.Error", err)
+	}
+}
+
 func TestCountSizesTheListIssuesSet(t *testing.T) {
 	// Page 1 is 40 PRs then 60 issues, page 2 a full page of issues, page 3 a
 	// short one: only issues count, and the walk goes on while a page is full.

@@ -19,14 +19,15 @@ const (
 	maxPages = 50
 )
 
-// request sends one request to api+path. The host attaches the credential, so
-// none is set here. The status is the caller's to judge.
-func request(method, api, path string, body []byte) (connector.Response, error) {
-	return requestWith(method, api, path, body, nil)
+// send sends one request to api+path and decodes a 2xx JSON answer into out. The
+// host attaches the credential, so none is set here. A non-2xx answer comes
+// back as an error beside its Response, for a caller that judges the status.
+func send(method, api, path string, in, out any) (connector.Response, error) {
+	return sendWith(method, api, path, in, out, nil)
 }
 
-// requestWith is request plus extra headers, such as If-None-Match.
-func requestWith(method, api, path string, body []byte, extra map[string]string) (connector.Response, error) {
+// sendWith is send plus extra headers, such as If-None-Match.
+func sendWith(method, api, path string, in, out any, extra map[string]string) (connector.Response, error) {
 	headers := map[string]string{
 		"Accept":               "application/vnd.github+json",
 		"X-GitHub-Api-Version": "2022-11-28",
@@ -34,45 +35,7 @@ func requestWith(method, api, path string, body []byte, extra map[string]string)
 	for k, v := range extra {
 		headers[k] = v
 	}
-	if body != nil {
-		headers["Content-Type"] = "application/json"
-	}
-	return connector.HTTPRequest(connector.Request{Method: method, URL: api + path, Headers: headers, Body: string(body)})
-}
-
-// statusError is a non-2xx answer, carrying the class core retries on.
-func statusError(method, path string, status int) error {
-	return connector.Errorf(connector.ClassForStatus(status), "%s %s: status %d", method, path, status)
-}
-
-func is2xx(status int) bool { return status >= 200 && status <= 299 }
-
-// fetch is request returning a 2xx body.
-func fetch(method, api, path string, body []byte) ([]byte, error) {
-	resp, err := request(method, api, path, body)
-	if err != nil {
-		return nil, err
-	}
-	if !is2xx(resp.Status) {
-		return nil, statusError(method, path, resp.Status)
-	}
-	return resp.Body, nil
-}
-
-// call is fetch plus decoding the JSON body into out.
-func call(method, api, path string, body []byte, out any) error {
-	b, err := fetch(method, api, path, body)
-	if err != nil {
-		return err
-	}
-	if err := json.Unmarshal(b, out); err != nil {
-		return fmt.Errorf("%s %s: decode: %w", method, path, err)
-	}
-	return nil
-}
-
-func get(t tracker.Target, path string, out any) error {
-	return call("GET", t.API, path, nil, out)
+	return connector.SendJSON(connector.Request{Method: method, URL: api + path, Headers: headers}, in, out)
 }
 
 type rawIssue struct {
@@ -135,7 +98,7 @@ func pages[T any](api, path string, visit func([]T) bool) error {
 func pagesOf[B any](api, path string, size func(B) int, visit func(B) bool) error {
 	for page := 1; page <= maxPages; page++ {
 		var raw B
-		if err := call("GET", api, path+"&page="+strconv.Itoa(page), nil, &raw); err != nil {
+		if _, err := send("GET", api, path+"&page="+strconv.Itoa(page), nil, &raw); err != nil {
 			return err
 		}
 		if visit(raw) || size(raw) < pageSize {
@@ -207,7 +170,7 @@ func issue(t tracker.Target, number string) (tracker.Issue, error) {
 		return tracker.Issue{}, err
 	}
 	var raw rawIssue
-	if err := get(t, path, &raw); err != nil {
+	if _, err := send("GET", t.API, path, nil, &raw); err != nil {
 		return tracker.Issue{}, err
 	}
 	// REST serves pull requests under /issues/{n}; `gh issue view` does not.
@@ -454,7 +417,7 @@ func labeledPage(t tracker.Target, label string, route []tracker.Selector, state
 	}
 	path := fmt.Sprintf("%s?state=%s%s&sort=created&direction=desc&per_page=%d&page=%d", repoPath(t), state, filter, perPage, page)
 	var raw []rawIssue
-	if err := call("GET", t.API, path, nil, &raw); err != nil {
+	if _, err := send("GET", t.API, path, nil, &raw); err != nil {
 		return nil, "", err
 	}
 	var out []tracker.Issue
