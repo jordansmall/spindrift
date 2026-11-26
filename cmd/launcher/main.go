@@ -19,6 +19,7 @@ import (
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/connectorsandbox"
+	"spindrift.dev/launcher/internal/connectorsetup"
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
@@ -2138,6 +2139,11 @@ func preDispatchVerb(argv []string) string {
 	return verb
 }
 
+// newConnectorRuntime is how the program builds its Connector runtime. A var
+// so a test binary, which has no runner to start a sandbox on, installs the
+// in-process engine instead.
+var newConnectorRuntime = connectorsetup.New
+
 // mainRun parses argv and dispatches to the selected subcommand, returning the
 // process exit code. stdout and stderr are injected so tests can assert on
 // help and error output without touching the real process streams.
@@ -2223,12 +2229,16 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
 	}
-	sourced, err := applyRowCredentials()
+	in, err := connectorInput()
 	if err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
 	}
-	connectors := connectorruntime.FromRegistries(sourced.Rows)
+	connectors, err := newConnectorRuntime(in, connectorsetup.Options{Interactive: isInteractiveTTY()})
+	if err != nil {
+		fmt.Fprintf(stderr, "%s\n", err)
+		return 1
+	}
 	defer func() { _ = connectors.Close() }()
 	_, driverWarning := resolveDriver()
 	fmt.Fprint(stderr, driverWarning)

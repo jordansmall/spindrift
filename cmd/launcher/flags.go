@@ -10,12 +10,11 @@ import (
 
 	"github.com/charmbracelet/x/term"
 
-	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/connectorsetup"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/launcherchecks"
-	"spindrift.dev/launcher/internal/rowcredential"
 	"spindrift.dev/launcher/internal/secretcmd"
 )
 
@@ -116,9 +115,11 @@ var isInteractiveTTY = func() bool {
 	return isStdinTTY() && isStderrTTY()
 }
 
-// secretCmdRunner runs a secret-fetch command through the shell and returns
-// its raw stdout, captured as the secret and never printed. A package var so
-// tests can substitute a fake; it prompts only on an interactive TTY.
+// secretCmdRunner runs a core secret knob's fetch command through the shell and
+// returns its raw stdout, captured as the secret and never printed. A package
+// var so tests can substitute a fake. A Connector row's `_CMD` does not come
+// here: it runs through the runtime connectorsetup.New builds (Options.Run,
+// Options.Interactive).
 var secretCmdRunner = func(cmd string) (string, error) {
 	return secretcmd.Run(cmd, isInteractiveTTY())
 }
@@ -410,26 +411,37 @@ func isCoreSecretKnob(env string) bool {
 	return slices.ContainsFunc(inputdoc.SecretKnobs, func(k inputdoc.SecretKnob) bool { return k.Env == env })
 }
 
-// applyRowCredentials chooses the credential source of each backend row, via
-// the resolver the Daemon shares, for the Connector runtime to read at each
-// use. A schema knob such as GH_TOKEN_REFRESH_FILE is read from the flag or
-// document only; the environment applies to the non-schema keys alone, as
-// backendRowSetting reads them.
+// connectorInput is what the launcher input says about hosting Connectors, for
+// connectorsetup.New to choose the credential source of each backend row and
+// start the sandbox. A schema knob such as GH_TOKEN_REFRESH_FILE is read from
+// the flag or document only; the environment applies to the non-schema keys
+// alone, as backendRowSetting reads them.
 // Applied is isCoreSecretKnob because parseFlags already ran each core secret's
-// `_CMD`, so running it here would resolve the credential twice. An unset
-// credential is tolerated: doctor must run without one, and validate and the
-// launch gates refuse it per verb.
-func applyRowCredentials() (rowcredential.Sourced, error) {
-	res := rowcredential.Resolution{
+// `_CMD`, so running it again would resolve the credential twice. The launcher
+// tolerates an unset credential (Options.RequireCredential stays false):
+// doctor must run without one, and validate and the launch gates refuse it per
+// verb. A vanished working directory fails here, even for a verb that loads no
+// Connector.
+func connectorInput() (connectorsetup.Input, error) {
+	pwd, err := os.Getwd()
+	if err != nil {
+		return connectorsetup.Input{}, err
+	}
+	arts := docArtifacts()
+	shared := arts.Shared
+	rowKnobs := loadSchemaConfig().RowKnobs
+	return connectorsetup.Input{
+		Dir: pwd, RunnerKind: shared.RunnerKind.String(), Runtime: shared.Runtime.String(),
+		Artifacts: arts,
+		Knobs: func(env string) (string, bool) {
+			v, ok := rowKnobs[env]
+			return v, ok
+		},
 		Forge: resolvedKnob("CODE_FORGE"), Tracker: resolvedKnob("ISSUE_TRACKER"),
-		Template: globalSecretCmdTemplate, Run: secretCmdRunner, Applied: isCoreSecretKnob,
-		Lookup: backendRowSetting(launcherInput, processEnv()),
-	}
-	sourced, err := res.Sources(backendrows.All())
-	if errors.Is(err, rowcredential.ErrUnset) {
-		return sourced, nil
-	}
-	return sourced, err
+		SecretCmd: globalSecretCmdTemplate,
+		Setting:   backendRowSetting(launcherInput, processEnv()),
+		Applied:   isCoreSecretKnob,
+	}, nil
 }
 
 // applySecretCmdFallback resolves globalSecretCmdTemplate, substituting

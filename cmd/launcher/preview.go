@@ -132,7 +132,6 @@ func preview(connectors *connectorruntime.Runtime, stdout io.Writer, issueNums [
 	if err != nil {
 		return err
 	}
-	defer gc.closeSandbox()
 	pwd, err := os.Getwd()
 	if err != nil {
 		return err

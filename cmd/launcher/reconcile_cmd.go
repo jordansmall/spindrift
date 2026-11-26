@@ -155,7 +155,6 @@ func withRepoReadContext(connectors *connectorruntime.Runtime, stderr io.Writer,
 		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
 	}
-	defer rc.closeSandbox()
 
 	pwd, err := os.Getwd()
 	if err != nil {

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -11,13 +10,10 @@ import (
 
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorruntime"
-	"spindrift.dev/launcher/internal/connectorsandbox"
-	"spindrift.dev/launcher/internal/connectorsandbox/sandbox"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/forge/github"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/localloop"
@@ -106,18 +102,10 @@ func bootstrap(connectors *connectorruntime.Runtime, stdout io.Writer, ensureRea
 		}()
 	}
 
-	// newGatedContext installs the Connector sandbox ahead of its gate walk and
-	// stops it itself on an error.
 	gc, err := newGatedContext(connectors, stdout, kind, selfContained)
 	if err != nil {
 		return nil, err
 	}
-	closeSandbox := gc.closeSandbox
-	defer func() {
-		if err != nil {
-			closeSandbox()
-		}
-	}()
 	// c diverges from gc.config below (registryProxyRoutes is set on c only),
 	// which is safe only because gc.config is never read again.
 	c := gc.config
@@ -173,7 +161,6 @@ func bootstrap(connectors *connectorruntime.Runtime, stdout io.Writer, ensureRea
 		terminated:   terminated,
 		cleanup: func() {
 			f.Cleanup()
-			closeSandbox()
 			removeScratchMirrors()
 			// Held for the whole run rather than only the seed, so a
 			// concurrent process cannot seed or mount the same Accumulation
@@ -312,41 +299,4 @@ func seedMirrorHook(c config, pwd string, seeder forge.MirrorSeeder) func() (str
 		}
 		return dir, func() { _ = os.RemoveAll(tmp) }, nil
 	}
-}
-
-// recordSandboxTotals is a var so a test can count the closer's calls.
-var recordSandboxTotals = github.RecordRoutedSandboxTotals
-
-// newConnectorSandboxLoader is a var so a test binary, which has no runner to
-// start a sandbox on, can install the in-process engine instead.
-var newConnectorSandboxLoader = realConnectorSandboxLoader
-
-func realConnectorSandboxLoader(c config, pwd string) connectorsandbox.Loader {
-	return sandbox.ForKind(c.runnerKind, runnerConfig(c), c.artifacts, c.knobLookup, pwd)
-}
-
-// installConnectorSandbox makes every Connector this process hosts load into
-// one sandbox and returns the func that stops it. Each path that can load a
-// Connector installs it once, ahead of its first load: the Launcher never loads
-// one in its own address space. The install lasts the process, so
-// sandboxVerdict can still read a start failure once the run has cleaned up.
-func installConnectorSandbox(c config) (closeSandbox func(), err error) {
-	pwd, err := os.Getwd()
-	if err != nil {
-		return nil, err
-	}
-	l := newConnectorSandboxLoader(c, pwd)
-	connectorsandbox.Use(l)
-	// The totals follow Close so they are final, and live here so every exit
-	// path that closes the sandbox records them.
-	return func() {
-		// A Connector closes through the sandbox that hosts it.
-		if c.connectors != nil {
-			_ = c.connectors.Close()
-		}
-		if cl, ok := l.(interface{ Close(context.Context) error }); ok {
-			_ = cl.Close(context.Background())
-		}
-		recordSandboxTotals()
-	}, nil
 }

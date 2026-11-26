@@ -7,12 +7,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
+	"spindrift.dev/launcher/internal/connectorsetup"
 	"spindrift.dev/launcher/internal/exitcode"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/runner"
@@ -48,106 +51,170 @@ func loadViaRow(t *testing.T) error {
 	return err
 }
 
-// useRealConnectorSandbox puts back the production Loader builder that
-// TestMain swaps for the in-process engine.
-func useRealConnectorSandbox(t *testing.T) {
-	t.Helper()
-	prev := newConnectorSandboxLoader
-	newConnectorSandboxLoader = realConnectorSandboxLoader
-	t.Cleanup(func() { newConnectorSandboxLoader = prev })
+// countedKind is a runner family that counts the runners built for it, so a
+// test can tell whether anything started a Connector sandbox on it.
+const countedKind = "counted-test"
+
+var countedBuilt atomic.Int32
+
+func init() {
+	runner.Register(runner.Strategy{
+		Name: countedKind,
+		New: func(runner.Config, inputdoc.Artifacts, runner.KnobLookup, string) (runner.Runner, error) {
+			countedBuilt.Add(1)
+			return runner.NewFake(), nil
+		},
+	})
 }
 
-// countConnectorSandboxInstalls swaps the Loader builder for one that counts
-// its calls and installs the in-process engine.
-func countConnectorSandboxInstalls(t *testing.T) *int {
-	t.Helper()
-	installs := 0
-	prev := newConnectorSandboxLoader
-	newConnectorSandboxLoader = func(config, string) connectorsandbox.Loader {
-		installs++
-		return connectorsandboxtest.InProcess()
-	}
-	t.Cleanup(func() { newConnectorSandboxLoader = prev })
-	return &installs
-}
+// countingLoader is a Loader no path could install by accident, so comparing
+// connectorsandbox.Current against it shows nothing replaced the program's.
+type countingLoader struct{ connectorsandbox.Loader }
 
-// Every command that can load a Connector installs the sandbox itself, once,
-// ahead of its first load. Without it a load would fail with
-// ErrNoConnectorSandbox on that path alone.
-func TestConnectorSandboxInstalledOnEveryLoadingPath(t *testing.T) {
-	paths := map[string]func(t *testing.T){
-		"newReadContext": func(t *testing.T) {
-			rc, err := newReadContext(nil, nil, false)
-			if err != nil {
+// Every command that can load a Connector uses the runtime the program built,
+// whose sandbox is already installed: none installs one of its own, or a load
+// on that path alone would reach a sandbox the runtime's close never stops.
+func TestConnectorLoadingPathsUseTheProgramsRuntime(t *testing.T) {
+	paths := map[string]func(t *testing.T, rt *connectorruntime.Runtime){
+		"newReadContext": func(t *testing.T, rt *connectorruntime.Runtime) {
+			if _, err := newReadContext(rt, nil, false); err != nil {
 				t.Fatal(err)
 			}
-			rc.closeSandbox()
 		},
-		"newGatedContext": func(t *testing.T) {
-			gc, err := newGatedContext(nil, io.Discard, nil, false)
-			if err != nil {
+		"newGatedContext": func(t *testing.T, rt *connectorruntime.Runtime) {
+			if _, err := newGatedContext(rt, io.Discard, nil, false); err != nil {
 				t.Fatal(err)
 			}
-			gc.closeSandbox()
 		},
-		"doctor":      func(t *testing.T) { cmdDoctor(nil, doctorOptions{}, io.Discard, io.Discard) },
-		"reconcile":   func(t *testing.T) { cmdReconcile(nil, io.Discard, io.Discard) },
-		"preview":     func(t *testing.T) { _ = preview(nil, io.Discard, nil) },
-		"completions": func(t *testing.T) { cmdCompleteIssues(nil) },
+		"doctor": func(t *testing.T, rt *connectorruntime.Runtime) {
+			cmdDoctor(rt, doctorOptions{}, io.Discard, io.Discard)
+		},
+		"reconcile":   func(t *testing.T, rt *connectorruntime.Runtime) { cmdReconcile(rt, io.Discard, io.Discard) },
+		"preview":     func(t *testing.T, rt *connectorruntime.Runtime) { _ = preview(rt, io.Discard, nil) },
+		"completions": func(t *testing.T, rt *connectorruntime.Runtime) { cmdCompleteIssues(rt) },
+		"stats": func(t *testing.T, rt *connectorruntime.Runtime) {
+			cmdStats(rt, []string{"--root", t.TempDir()}, io.Discard, io.Discard)
+		},
+		"recover": func(t *testing.T, rt *connectorruntime.Runtime) {
+			verbHandlers["recover"](rt, []string{"999"}, io.Discard, io.Discard)
+		},
+		"research": func(t *testing.T, rt *connectorruntime.Runtime) {
+			verbHandlers["research"](rt, []string{"--no-build"}, io.Discard, io.Discard)
+		},
+		"butler": func(t *testing.T, rt *connectorruntime.Runtime) {
+			verbHandlers["butler"](rt, []string{"--no-build"}, io.Discard, io.Discard)
+		},
+		"lateMergeSweep": func(t *testing.T, rt *connectorruntime.Runtime) {
+			cmdLateMergeSweep(rt, io.Discard, io.Discard)
+		},
+		// The archive holds a Pass of the named driver, so the replay reaches
+		// connectorsandbox.Load; the module is not wasm, so it fails there.
+		"shadowReplay": func(t *testing.T, rt *connectorruntime.Runtime) {
+			logs, wasm := t.TempDir(), filepath.Join(t.TempDir(), "d.wasm")
+			if err := os.WriteFile(wasm, []byte("not wasm"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(logs, "issue-1.log"), []byte(shadowReplayArchive("opencode")), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			cmdShadowReplay(rt, []string{"--driver", "opencode", "--connector", wasm, logs}, io.Discard, io.Discard)
+		},
 	}
 	for name, run := range paths {
 		t.Run(name, func(t *testing.T) {
 			t.Cleanup(connectorsandbox.Use(nil))
-			installs := countConnectorSandboxInstalls(t)
 			stubPastaOnPath(t)
 			setMinimalLocalBootstrapEnv(t, filepath.Join(t.TempDir(), "accum.git"))
 			setArtifact(t, "RUNTIME", "echo")
-			t.Chdir(t.TempDir())
-			run(t)
-			if *installs != 1 {
-				t.Fatalf("Connector sandbox installed %d times, want 1", *installs)
+			t.Chdir(mustSeedableCheckout(t)) // the verbs that bootstrap need a git checkout
+			in, err := connectorInput()
+			if err != nil {
+				t.Fatal(err)
+			}
+			l := &countingLoader{connectorsandboxtest.InProcess()}
+			rt, err := connectorsetup.New(in, connectorsetup.Options{Sandbox: l})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = rt.Close() }()
+			run(t, rt)
+			if connectorsandbox.Current() != connectorsandbox.Loader(l) {
+				t.Fatal("a Connector-loading path replaced the sandbox the runtime installed")
 			}
 		})
 	}
 }
 
-// countSandboxTotals swaps recordSandboxTotals for a call counter.
-func countSandboxTotals(t *testing.T) *int {
-	t.Helper()
+// A sandbox starts on the first load, not when the program builds its runtime,
+// so a command that loads no Connector starts none.
+func TestMainRun_NoConnectorLoadStartsNoSandbox(t *testing.T) {
+	prev := newConnectorRuntime
+	newConnectorRuntime = connectorsetup.New
+	t.Cleanup(connectorsandbox.Use(nil))
+	t.Cleanup(func() { newConnectorRuntime = prev })
+	setRunner(t, "echo", countedKind)
+	t.Chdir(t.TempDir())
+	countedBuilt.Store(0)
+
+	var stdout, stderr bytes.Buffer
+	mainRunT(t, []string{"stats", "--root", t.TempDir()}, &stdout, &stderr)
+	if got := countedBuilt.Load(); got != 0 {
+		t.Fatalf("%d runners built for a command that loads no Connector, want 0; stderr=%q", got, stderr.String())
+	}
+
+	// The same input does start one on a load.
+	in, err := connectorInput()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt, err := connectorsetup.New(in, connectorsetup.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+	_ = loadViaRow(t)
+	if got := countedBuilt.Load(); got != 1 {
+		t.Fatalf("%d runners built after a load, want 1", got)
+	}
+}
+
+// A primary run still writes its totals line: closing the runtime mainRun
+// builds runs each backend's totals hook, after the sandbox stops.
+func TestConnectorRuntimeClose_RecordsSandboxTotals(t *testing.T) {
 	calls := 0
-	prev := recordSandboxTotals
-	recordSandboxTotals = func() { calls++ }
-	t.Cleanup(func() { recordSandboxTotals = prev })
-	return &calls
-}
-
-// The closer is also what bootstrap's error-path defer runs, so the totals
-// must be recorded from it, not only from the success-path cleanup.
-func TestInstallConnectorSandbox_CloserRecordsTotals(t *testing.T) {
-	useRealConnectorSandbox(t)
+	t.Cleanup(backendkit.ReplaceRegistryForTest([]backendkit.Strategy{
+		{RecordSandboxTotals: func() { calls++ }},
+	}))
 	t.Cleanup(connectorsandbox.Use(nil))
-	calls := countSandboxTotals(t)
-	closeSandbox, err := installConnectorSandbox(baseConfig())
+	in, err := connectorInput()
 	if err != nil {
 		t.Fatal(err)
 	}
-	closeSandbox()
-	if *calls != 1 {
-		t.Fatalf("recordSandboxTotals called %d times, want 1", *calls)
-	}
-}
-
-func TestInstallConnectorSandbox_StartFailureFailsTheRun(t *testing.T) {
-	useRealConnectorSandbox(t)
-	t.Cleanup(connectorsandbox.Use(nil))
-	c := baseConfig()
-	c.runtime = "podman"
-	c.runnerKind = refusingKind
-	closeSandbox, err := installConnectorSandbox(c)
+	rt, err := newConnectorRuntime(in, connectorsetup.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer closeSandbox()
+	if calls != 0 {
+		t.Fatalf("totals recorded %d times before the runtime closed", calls)
+	}
+	_ = rt.Close()
+	if calls != 1 {
+		t.Fatalf("totals recorded %d times, want 1", calls)
+	}
+}
+
+func TestConnectorRuntime_StartFailureFailsTheRun(t *testing.T) {
+	t.Cleanup(connectorsandbox.Use(nil))
+	in, err := connectorInput()
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.Runtime, in.RunnerKind = "podman", refusingKind
+	rt, err := connectorsetup.New(in, connectorsetup.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
 
 	// The load site may swallow this error, so the verdict must not depend on
 	// it reaching the run.
@@ -177,5 +244,22 @@ func TestInstallConnectorSandbox_StartFailureFailsTheRun(t *testing.T) {
 		if !strings.Contains(stderr.String(), connectorsandbox.ErrConnectorSandboxStart.Error()) {
 			t.Errorf("stderr for exit %d = %q, want the named error", clean, stderr.String())
 		}
+	}
+}
+
+// mainRun closes the runtime it built on every exit, so a primary run writes
+// its totals line without any verb closing the runtime itself.
+func TestMainRun_ClosesTheRuntimeItBuilt(t *testing.T) {
+	calls := 0
+	t.Cleanup(backendkit.ReplaceRegistryForTest([]backendkit.Strategy{
+		{RecordSandboxTotals: func() { calls++ }},
+	}))
+	t.Cleanup(connectorsandbox.Use(nil))
+	t.Chdir(t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	mainRunT(t, []string{"stats", "--root", t.TempDir()}, &stdout, &stderr)
+	if calls != 1 {
+		t.Fatalf("totals recorded %d times after mainRun returned, want 1; stderr=%q", calls, stderr.String())
 	}
 }

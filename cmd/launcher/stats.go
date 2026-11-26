@@ -196,16 +196,6 @@ func cmdStats(connectors *connectorruntime.Runtime, args []string, stdout, stder
 		fmt.Fprintln(stderr, subcommandUsage("stats"))
 		return 1
 	}
-	// Parsing a log loads its Driver's Connector, whose grammar reads the log.
-	// No checkBackendsRegistered: stats builds no tracker or forge, so a bad
-	// ISSUE_TRACKER or CODE_FORGE is not its concern.
-	c := loadConfig(connectors)
-	closeSandbox, err := installConnectorSandbox(c)
-	if err != nil {
-		fmt.Fprintf(stderr, "%s\n", err)
-		return 1
-	}
-	defer closeSandbox()
 	roots := opts.roots
 	if len(roots) == 0 {
 		roots = []string{"."}

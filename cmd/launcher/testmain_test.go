@@ -5,8 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"spindrift.dev/launcher/internal/connectorsandbox"
-	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
+	"spindrift.dev/launcher/internal/connectorsetup/connectorsetuptest"
 	"spindrift.dev/launcher/internal/driver/drivertest"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/registrymanifest"
@@ -52,9 +51,9 @@ func TestMain(m *testing.M) {
 			os.Exit(1)
 		}
 	}
-	// installConnectorSandbox overwrites the Loader UseClaudeConnector
-	// installs, so the in-process engine comes in through its builder; tests of
-	// the real sandbox wiring put realConnectorSandboxLoader back.
-	newConnectorSandboxLoader = func(config, string) connectorsandbox.Loader { return connectorsandboxtest.InProcess() }
+	// The Connector runtime mainRun builds starts its sandbox on the runner
+	// family, which a test binary has none for, so the in-process engine
+	// comes in through Options.Sandbox; a test of the real wiring passes its own.
+	newConnectorRuntime = connectorsetuptest.WithInProcessSandbox(newConnectorRuntime)
 	seamtest.MainWith(m, drivertest.UseClaudeConnector)
 }
