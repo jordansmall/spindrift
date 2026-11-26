@@ -19,7 +19,6 @@ import (
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorruntime"
-	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
 	"spindrift.dev/launcher/internal/connectorsetup"
 	"spindrift.dev/launcher/internal/driver"
@@ -2714,7 +2713,6 @@ func rowRuntime(t *testing.T) (*connectorruntime.Runtime, error) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(connectorsandbox.Use(nil))
 	rt, err := connectorsetup.New(in, connectorsetup.Options{Run: secretCmdRunner, Sandbox: connectorsandboxtest.InProcess()})
 	if err == nil {
 		t.Cleanup(func() { _ = rt.Close() })

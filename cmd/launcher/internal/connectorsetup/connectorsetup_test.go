@@ -31,7 +31,7 @@ const (
 )
 
 // useRow registers a Connector-routed backend and its row, restoring the
-// registries and the installed sandbox when the test ends.
+// registries when the test ends.
 func useRow(t *testing.T, totals func(connectorsandbox.Stats)) {
 	t.Helper()
 	t.Cleanup(backendrows.Snapshot())

@@ -3,8 +3,8 @@
 // loads them into (one per row, since every row holds a credential), and the
 // live sessions, closed together. The sandbox is the runtime's own, given at
 // construction; a runtime built with none fails every load with
-// connectorsandbox.ErrNoConnectorSandbox, so no load falls back to a
-// process-wide sandbox or to loading in-process.
+// connectorsandbox.ErrNoConnectorSandbox, so no load falls back to loading
+// in-process.
 //
 // A session is the one Connector a (row, Target) pair keeps alive, whichever
 // axis (tracker, Code Forge or read-only forge view) or direct request for the

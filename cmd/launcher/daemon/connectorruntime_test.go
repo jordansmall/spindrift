@@ -39,10 +39,9 @@ func refusingDocT(t *testing.T, settings map[string]string) *inputdoc.Document {
 }
 
 // The Daemon counts demand through a Connector row in its own process, so that
-// load must go to the sandbox it installs, never to an engine it hosts itself.
+// load must go to the runtime's sandbox, never to an engine it hosts itself.
 func TestConnectorRuntime_DemandTrackerLoadGoesToTheSandbox(t *testing.T) {
 	clearKnobEnvT(t)
-	t.Cleanup(connectorsandbox.Use(nil))
 	t.Cleanup(backendrows.Snapshot())
 
 	module := filepath.Join(t.TempDir(), "x.wasm")
@@ -82,7 +81,6 @@ func TestConnectorRuntime_DemandTrackerLoadGoesToTheSandbox(t *testing.T) {
 }
 
 func TestConnectorRuntime_CloseStopsTheSandbox(t *testing.T) {
-	t.Cleanup(connectorsandbox.Use(nil))
 	rt, err := connectorsetup.New(connectorInput(refusingDocT(t, nil), nil, t.TempDir()), connectorsetup.Options{RequireCredential: true})
 	if err != nil {
 		t.Fatal(err)

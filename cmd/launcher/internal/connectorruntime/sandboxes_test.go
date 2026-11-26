@@ -2,7 +2,11 @@ package connectorruntime_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +18,7 @@ import (
 	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/credsource"
+	"spindrift.dev/launcher/internal/driver/driverrows"
 )
 
 var errDriverLoad = errors.New("driver load reached the shared sandbox")
@@ -225,13 +230,13 @@ func TestOnCloseRunsOnceInOrderAfterTheSandboxesStopped(t *testing.T) {
 	}
 }
 
-// A runtime built with no sandbox fails every load with ErrNoConnectorSandbox,
-// though a process-wide one is installed: nothing reads it.
-func TestNilSandboxFailsLoadsEvenWhenOneIsInstalled(t *testing.T) {
+// A runtime built with no sandbox fails every backend and Driver load with
+// ErrNoConnectorSandbox, never loading in-process.
+func TestNilSandboxFailsBackendAndDriverLoads(t *testing.T) {
 	e := newEnv(t, "tracker.wasm")
-	t.Cleanup(connectorsandbox.Use(connectorsandboxtest.InProcess()))
 	rt := connectorruntime.New([]backendrows.Row{e.row}, nil, nil)
 	t.Cleanup(func() { _ = rt.Close() })
+	rt.UseDriverRows(hostedDriverRows(t))
 
 	if rt.HasSandbox() {
 		t.Error("HasSandbox = true for a runtime built with none")
@@ -239,8 +244,60 @@ func TestNilSandboxFailsLoadsEvenWhenOneIsInstalled(t *testing.T) {
 	if _, err := rt.Connector(e.row, e.spec.SessionSpec); !errors.Is(err, connectorsandbox.ErrNoConnectorSandbox) {
 		t.Fatalf("Connector err = %v, want ErrNoConnectorSandbox", err)
 	}
+	if _, err := rt.Drivers().New("outsider"); !errors.Is(err, connectorsandbox.ErrNoConnectorSandbox) {
+		t.Fatalf("Drivers().New err = %v, want ErrNoConnectorSandbox", err)
+	}
 	if err := rt.SandboxFailure(); err != nil {
 		t.Errorf("SandboxFailure = %v, want nil with no sandbox", err)
+	}
+}
+
+// startFailingSandbox is a sandbox whose runner did not start. Loads fall to
+// the embedded in-process engine only if the runtime bypasses it.
+type startFailingSandbox struct{ connectorsandbox.Loader }
+
+var errRunnerRefused = fmt.Errorf("%w: runner refused", connectorsandbox.ErrConnectorSandboxStart)
+
+func (startFailingSandbox) Load(context.Context, []byte) (*connectorhost.Connector, error) {
+	return nil, errRunnerRefused
+}
+
+func (startFailingSandbox) Err() error { return errRunnerRefused }
+
+// hostedDriverRows is one Driver Connector row whose module is not wasm, so a
+// load that reached the in-process engine would fail with a compile error.
+func hostedDriverRows(t *testing.T) driverrows.Rows {
+	t.Helper()
+	module := filepath.Join(t.TempDir(), "outsider.wasm")
+	if err := os.WriteFile(module, []byte("not wasm"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal([]map[string]any{{"name": "outsider", "module": module}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := driverrows.Parse(raw, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rows
+}
+
+// A Launcher runtime whose sandbox cannot start fails a Driver Connector's
+// load closed with the sandbox-start error, not by loading it in-process.
+func TestDriverConnectorLoadFailsClosedWhenTheSandboxCannotStart(t *testing.T) {
+	t.Parallel()
+	sb := startFailingSandbox{connectorsandboxtest.InProcess()}
+	rt := connectorruntime.FromRegistries(nil, sb)
+	t.Cleanup(func() { _ = rt.Close() })
+	rt.UseDriverRows(hostedDriverRows(t))
+
+	_, err := rt.Drivers().New("outsider")
+	if !errors.Is(err, connectorsandbox.ErrConnectorSandboxStart) {
+		t.Fatalf("Drivers().New = %v, want ErrConnectorSandboxStart", err)
+	}
+	if got := rt.SandboxFailure(); !errors.Is(got, connectorsandbox.ErrConnectorSandboxStart) {
+		t.Errorf("SandboxFailure = %v, want the start failure", got)
 	}
 }
 
@@ -253,6 +310,7 @@ type failingSandbox struct {
 func (s failingSandbox) Err() error { return s.err }
 
 func TestSandboxFailureIsTheRuntimesSandboxStartFailure(t *testing.T) {
+	t.Parallel()
 	startErr := errors.New("runner did not start")
 	sb := failingSandbox{Loader: connectorsandboxtest.InProcess(), err: startErr}
 	rt := connectorruntime.FromRegistries(nil, sb)

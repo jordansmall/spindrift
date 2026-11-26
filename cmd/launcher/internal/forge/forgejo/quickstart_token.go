@@ -23,7 +23,7 @@ func acquireToken(s backendkit.Shared, l backendkit.Lookup, p backendkit.TokenPr
 	if token == "" {
 		return "", fmt.Errorf("no Forgejo token provided — rerun `%s` and paste a token when prompted", p.RerunCmd)
 	}
-	// Quickstart installs no Connector sandbox, so the paths below the
+	// Quickstart builds its runtime with no Connector sandbox, so the paths below the
 	// deferral are reachable only from tests injecting a probe error;
 	// `spindrift doctor` owns the live token check.
 	if err := p.Probe(token); err != nil {

@@ -115,7 +115,7 @@ var (
 	// Both sides may reach these.
 	commonAllowed = []allowedCall{
 		{"internal/driver/driverrows/driverrows.go", "loadPolicy.load", "boxLoads",
-			"the Box loads its first-party Drivers in-process; the Launcher's hostLoads path goes to connectorsandbox.Load"},
+			"the Box loads its first-party Drivers in-process; the Launcher's hostLoads path goes through its runtime's sandbox"},
 		{"internal/forge/fake_connector.go", "loadInProcess", "",
 			"forge.Fake's test seam; only tests construct a Fake (checked below), never a production binary"},
 	}
@@ -251,7 +251,7 @@ func TestNoProductionBinaryLoadsAConnectorInProcess(t *testing.T) {
 				}
 			}
 			for _, v := range violations(t, root, dirs, side.allowed) {
-				t.Errorf("%s: %s: a production binary can load a Connector in-process; load it through connectorsandbox.Load", main, v)
+				t.Errorf("%s: %s: a production binary can load a Connector in-process; load it through the Connector runtime's sandbox", main, v)
 			}
 		}
 	}

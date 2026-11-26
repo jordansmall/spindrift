@@ -908,22 +908,17 @@ func TestUseSkipsARowWithAnUnusableGitRemoteEnv(t *testing.T) {
 	}
 }
 
-// A Load with no sandbox fails closed rather than reaching for one installed
-// process-wide.
+// A Load with no sandbox fails closed rather than loading in the Launcher's
+// own address space.
 func TestLoadWithoutASandboxFailsWithErrNoConnectorSandbox(t *testing.T) {
 	t.Chdir(t.TempDir())
 	module := filepath.Join(t.TempDir(), "x.wasm")
 	if err := os.WriteFile(module, []byte("\x00asm"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	l := &recordingLoader{}
-	t.Cleanup(connectorsandbox.Use(l))
 	r := backendrows.Row{Name: "fixture", Module: module, CredentialEnv: "TOKEN"}
 
 	if _, err := backendrows.Load(context.Background(), r, backendrows.Options{}); !errors.Is(err, connectorsandbox.ErrNoConnectorSandbox) {
 		t.Fatalf("Load = %v, want ErrNoConnectorSandbox", err)
-	}
-	if len(l.networks) != 0 {
-		t.Errorf("installed sandbox saw loads %v, want none", l.networks)
 	}
 }

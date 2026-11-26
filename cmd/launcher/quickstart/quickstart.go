@@ -488,7 +488,7 @@ func runQuickstart(connectors *connectorruntime.Runtime, dir string, env Environ
 	gitUserEmail := promptDefault("Git user email", env.GitConfig(hostGitConfigKeyGitUserEmail))
 
 	shared := quickstartShared(connectors, repoSlug, gitUserName, gitUserEmail)
-	// Quickstart installs no Connector sandbox, so a Connector-read tracker or
+	// Quickstart builds its runtime with no Connector sandbox, so a Connector-read tracker or
 	// Code Forge defers its finish-line checks to `spindrift doctor`, as does
 	// the token probe of any chosen row whose tracker side is the Connector.
 	deferChecks := !connectors.HasSandbox() &&

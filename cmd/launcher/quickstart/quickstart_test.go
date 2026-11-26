@@ -4019,7 +4019,7 @@ func TestRenderFlakeNix_KnobWithoutStanzaSetting_Errors(t *testing.T) {
 	}
 }
 
-// Quickstart installs no Connector sandbox, so a Connector-routed backend's
+// Quickstart builds its runtime with no Connector sandbox, so a Connector-routed backend's
 // finish-line doctor cannot load its Connector: the wizard says the check is
 // deferred to `spindrift doctor` and goes on to the build.
 func TestRunQuickstart_FinishLine_NoConnectorSandboxDefersDoctor(t *testing.T) {
