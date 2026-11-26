@@ -146,7 +146,7 @@ func TestRecoverFailed_DeclinedAppendsSettled(t *testing.T) {
 	path := stampPrimaryLog(t, dir, "42")
 	read := testutil.InstallPipeReporter(t)
 
-	if err := recoverFailed(fc, capsFor(fc, fc), "42", errors.New("no change"), io.Discard, io.Discard); err != nil {
+	if err := recoverFailed(recoverConfig(t), fc, capsFor(fc, fc), "42", errors.New("no change"), io.Discard, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 
@@ -187,7 +187,7 @@ func TestRecoverFailed_RefusedRestoreCommentsRefusal(t *testing.T) {
 
 	var got error
 	testutil.CaptureStderr(t, func() {
-		got = recoverFailed(fc, capsFor(fc, fc), "42", orig, io.Discard, io.Discard)
+		got = recoverFailed(recoverConfig(t), fc, capsFor(fc, fc), "42", orig, io.Discard, io.Discard)
 	})
 
 	if got != orig {
@@ -226,4 +226,11 @@ func TestRecoverQueueOne_RefusedRestoreCommentsAndSettlesDistinctReason(t *testi
 	if len(x.fc.CommentCalls) != 1 || !strings.Contains(x.fc.CommentCalls[0].Body, "could not move") {
 		t.Errorf("comments = %+v, want one naming the refusal", x.fc.CommentCalls)
 	}
+}
+
+// recoverConfig is the config recover's terminal settle reads its Driver set from.
+func recoverConfig(t *testing.T) config {
+	c := baseConfig()
+	c.connectors = driverRuntime(t)
+	return c
 }

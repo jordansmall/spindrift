@@ -207,6 +207,9 @@ type Dispatcher interface {
 	// dispatch_settled op is appended to.
 	LogPath() string
 
+	// Drivers returns the Driver set the Dispatch's Record is ingested through.
+	Drivers() *driver.Set
+
 	// RecordWarnings adds a batch of scan warnings to this Dispatch's sidecar
 	// (issue #3744): the first call replaces an earlier run's file, later
 	// calls (fix passes) append; no warnings at all clears it. Best-effort:

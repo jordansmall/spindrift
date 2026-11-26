@@ -139,7 +139,7 @@ func TestParseLog(t *testing.T) {
 			if err := os.Chtimes(p, mtime, mtime); err != nil {
 				t.Fatal(err)
 			}
-			rec, _, err := ParseLog(p)
+			rec, _, err := ParseLog(p, testDrivers)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -176,7 +176,7 @@ func TestParseLogCrashFallsBackToMtime(t *testing.T) {
 	if err := os.Chtimes(p, mtime, mtime); err != nil {
 		t.Fatal(err)
 	}
-	rec, provisional, err := ParseLog(p)
+	rec, provisional, err := ParseLog(p, testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,14 +194,14 @@ func TestParseLogCrashFallsBackToMtime(t *testing.T) {
 func TestParseLogDeterministicID(t *testing.T) {
 	t.Parallel()
 	p := writeLog(t, "issue-3.log", result("2026-10-07T12:00:00.123Z", 1, 1, 1, 1, "m"))
-	a, _, err := ParseLog(p)
+	a, _, err := ParseLog(p, testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chtimes(p, time.Now(), time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	b, _, err := ParseLog(p)
+	b, _, err := ParseLog(p, testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,14 +212,14 @@ func TestParseLogDeterministicID(t *testing.T) {
 
 func TestParseLogMissingFile(t *testing.T) {
 	t.Parallel()
-	if _, _, err := ParseLog(filepath.Join(t.TempDir(), "issue-1.log")); err == nil {
+	if _, _, err := ParseLog(filepath.Join(t.TempDir(), "issue-1.log"), testDrivers); err == nil {
 		t.Fatal("want error for missing file")
 	}
 }
 
 func TestParseLogRejectsNonChainName(t *testing.T) {
 	t.Parallel()
-	if _, _, err := ParseLog(writeLog(t, "issue-1-fix-2.log")); err == nil {
+	if _, _, err := ParseLog(writeLog(t, "issue-1-fix-2.log"), testDrivers); err == nil {
 		t.Fatal("want error for fix log name")
 	}
 }
@@ -263,7 +263,7 @@ func TestParseLogPassOrdinalsStrictlyIncrease(t *testing.T) {
 		opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}),
 		result("2026-10-07T12:01:00Z", 1, 1, 10, 5, "opus"),
 	)
-	rec, _, err := ParseLog(p)
+	rec, _, err := ParseLog(p, testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +279,7 @@ func TestParseLogPassOrdinalsStrictlyIncrease(t *testing.T) {
 func TestParseLogTimestampedClaimIsNotProvisional(t *testing.T) {
 	t.Parallel()
 	p := writeLog(t, "issue-3.log", result("2026-10-07T12:00:00.123Z", 1, 1, 1, 1, "m"))
-	_, provisional, err := ParseLog(p)
+	_, provisional, err := ParseLog(p, testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +295,7 @@ func TestParseLogEventFreeLog(t *testing.T) {
 		"whitespace": {" \n", "\n", "\t\n"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, _, err := ParseLog(writeLog(t, "issue-5.log", lines...)); !errors.Is(err, ErrEmptyLog) {
+			if _, _, err := ParseLog(writeLog(t, "issue-5.log", lines...), testDrivers); !errors.Is(err, ErrEmptyLog) {
 				t.Fatalf("err = %v, want ErrEmptyLog", err)
 			}
 		})
@@ -352,7 +352,7 @@ func TestParseLogReviewEvidence(t *testing.T) {
 		opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 4, Role: "delta-review"}),
 		resultText(ts, "VERDICT: APPROVE"),
 	)
-	rec, _, err := ParseLog(p)
+	rec, _, err := ParseLog(p, testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -394,7 +394,7 @@ func TestParseLogDispositionsNeedASuccessfulWrite(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			lines := append([]string{opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "fix"})}, tt.lines...)
-			rec, _, err := ParseLog(writeLog(t, "issue-9.log", append(lines, resultText("2026-10-07T12:00:00Z", "done"))...))
+			rec, _, err := ParseLog(writeLog(t, "issue-9.log", append(lines, resultText("2026-10-07T12:00:00Z", "done"))...), testDrivers)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -462,7 +462,7 @@ func assertParseLogKinds(t *testing.T, cases []kindCase) {
 	t.Helper()
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rec, _, err := ParseLog(writeLog(t, "issue-42.log", tc.lines...))
+			rec, _, err := ParseLog(writeLog(t, "issue-42.log", tc.lines...), testDrivers)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -488,7 +488,7 @@ func TestParseLogAnnounceBeatsWorkUniqueStatus(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			rec, _, err := ParseLog(writeLog(t, "issue-42.log", tc.lines...))
+			rec, _, err := ParseLog(writeLog(t, "issue-42.log", tc.lines...), testDrivers)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -502,7 +502,7 @@ func TestParseLogAnnounceBeatsWorkUniqueStatus(t *testing.T) {
 func TestParseLogChoreKeyBeatsOutcomeStatus(t *testing.T) {
 	t.Parallel()
 	p := writeLog(t, "issue-"+dispatchkey.ChorePrefix+"x.log", result("2026-10-07T12:35:00Z", 1, 1, 1, 1, "m"), outcomeLine("recommend"))
-	rec, _, err := ParseLog(p)
+	rec, _, err := ParseLog(p, testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -518,7 +518,7 @@ func TestParseLogPlainTextLogYieldsZeroCostRecord(t *testing.T) {
 	if err := os.Chtimes(p, mtime, mtime); err != nil {
 		t.Fatal(err)
 	}
-	rec, provisional, err := ParseLog(p)
+	rec, provisional, err := ParseLog(p, testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}

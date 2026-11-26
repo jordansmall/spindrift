@@ -16,6 +16,7 @@ import (
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/recordsdigest"
@@ -72,6 +73,8 @@ type Policy struct {
 	// records-scoped Chore reads (ADR 0062); empty means no store, so such a
 	// Chore is never due.
 	RecordsRoot string
+	// Drivers is the Driver set the store ingests logs through.
+	Drivers *driver.Set
 	// Knobs resolves a row-owned knob's env name (BUTLER_TUNING_MIN_RECORDS and
 	// the like) to its value (ADR 0068). The butler holds no per-Chore knob
 	// field: the records source reads the min-records knob the Chore's row

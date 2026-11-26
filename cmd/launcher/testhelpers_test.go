@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
@@ -184,18 +185,35 @@ func captureStdout(t *testing.T, fn func()) string {
 // exercise a Fix or Run call.
 func testFactory(t *testing.T, dir string, r runner.Runner) *dispatch.Factory {
 	t.Helper()
-	drv, err := driver.New("")
+	drivers := sharedDriverSet(t)
+	drv, err := drivers.New("")
 	if err != nil {
-		t.Fatalf("driver.New: %v", err)
+		t.Fatalf("drivers.New: %v", err)
 	}
 	f, err := dispatch.NewFactory(dispatch.Config{
-		Policy: retry.Policy{Max: 3, Unit: 0, Jitter: 0},
+		Policy:  retry.Policy{Max: 3, Unit: 0, Jitter: 0},
+		Drivers: drivers,
 	}, dir, r, drv, dispatch.RealClock())
 	if err != nil {
 		t.Fatalf("dispatch.NewFactory: %v", err)
 	}
 	t.Cleanup(f.Cleanup)
 	return f
+}
+
+// sharedDriverSet is one claude-capable Driver set for the whole test binary, so
+// the Connector compiles once rather than per test.
+var sharedDriverSetOnce struct {
+	sync.Once
+	set *driver.Set
+}
+
+func sharedDriverSet(t testing.TB) *driver.Set {
+	t.Helper()
+	sharedDriverSetOnce.Do(func() {
+		sharedDriverSetOnce.set = drivertest.Drivers(t, bundle.Drivers())
+	})
+	return sharedDriverSetOnce.set
 }
 
 // The tracker is filing-capable so doctor --butler's resolveButlerSettings

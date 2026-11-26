@@ -128,7 +128,7 @@ func TestUnstampedNonChainLogIsIgnoredAndNotReopened(t *testing.T) {
 
 func TestParseLogUnstampedNonChainName(t *testing.T) {
 	t.Parallel()
-	_, _, err := ParseLog(writeLog(t, "issue-1.log.1", workLog("2026-03-01T11:00:00Z", 1)...))
+	_, _, err := ParseLog(writeLog(t, "issue-1.log.1", workLog("2026-03-01T11:00:00Z", 1)...), testDrivers)
 	if !errors.Is(err, ErrUnstamped) {
 		t.Fatalf("err = %v, want ErrUnstamped", err)
 	}
@@ -137,11 +137,11 @@ func TestParseLogUnstampedNonChainName(t *testing.T) {
 func TestParseLogStampMustBeFirstEvent(t *testing.T) {
 	t.Parallel()
 	lines := append(workLog("2026-03-01T11:00:00Z", 1), stampLine(stampClaim))
-	_, _, err := ParseLog(writeLog(t, "issue-1.log.1", lines...))
+	_, _, err := ParseLog(writeLog(t, "issue-1.log.1", lines...), testDrivers)
 	if !errors.Is(err, ErrUnstamped) {
 		t.Fatalf("err = %v, want ErrUnstamped", err)
 	}
-	rec, _, err := ParseLog(writeLog(t, "issue-1.log", lines...))
+	rec, _, err := ParseLog(writeLog(t, "issue-1.log", lines...), testDrivers)
 	if err != nil || rec.Attribution != AttributionInferred {
 		t.Fatalf("rec = %+v, err = %v", rec, err)
 	}
@@ -223,11 +223,11 @@ func TestPromptHashesIgnoredWithoutMatchingStamp(t *testing.T) {
 	t.Parallel()
 	id := RecordID("work", "42", stampClaim)
 	h := hashesLine(id, map[string]string{"implement": "aa"})
-	rec, _, err := ParseLog(writeLog(t, "issue-1.log", append([]string{h}, workLog("2026-03-01T11:00:00Z", 1)...)...))
+	rec, _, err := ParseLog(writeLog(t, "issue-1.log", append([]string{h}, workLog("2026-03-01T11:00:00Z", 1)...)...), testDrivers)
 	if err != nil || rec.Attribution != AttributionInferred || rec.PromptHashes != nil {
 		t.Fatalf("rec = %+v, err = %v", rec, err)
 	}
-	rec, _, err = ParseLog(writeLog(t, "issue-42.log", stampLine(stampClaim), hashesLine("work:other@x", map[string]string{"review": "zz"})))
+	rec, _, err = ParseLog(writeLog(t, "issue-42.log", stampLine(stampClaim), hashesLine("work:other@x", map[string]string{"review": "zz"})), testDrivers)
 	if err != nil || rec.PromptHashes != nil {
 		t.Fatalf("rec = %+v, err = %v", rec, err)
 	}
@@ -340,7 +340,7 @@ func TestSettledOpFollowedByBoxEventIsIgnored(t *testing.T) {
 	for name, after := range map[string]string{"result": outcomeResult("ready"), "assistant": assistant("a2")} {
 		t.Run(name, func(t *testing.T) {
 			path := writeLog(t, "issue-42.log", append(stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1), forged, after)...)
-			rec, _, err := ParseLog(path)
+			rec, _, err := ParseLog(path, testDrivers)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -357,7 +357,7 @@ func TestSettledOpFollowedByOnlySettledOpsStillCounts(t *testing.T) {
 	path := writeLog(t, "issue-42.log", append(stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1),
 		settledLine(id, "failed", "ci-red"),
 		settledLine(id, "failed", "ci-red"))...)
-	rec, _, err := ParseLog(path)
+	rec, _, err := ParseLog(path, testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +373,7 @@ func TestLastSettledOpWins(t *testing.T) {
 	id := RecordID("work", "42", stampClaim)
 	path := writeLog(t, "issue-42.log", append(stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1),
 		settledLine(id, "failed", "ci-red"), settledLine(id, "complete", "merged"))...)
-	rec, _, err := ParseLog(path)
+	rec, _, err := ParseLog(path, testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -389,7 +389,7 @@ func TestMismatchedSettledOpAfterValidOneKeepsOutcome(t *testing.T) {
 	id := RecordID("work", "42", stampClaim)
 	path := writeLog(t, "issue-42.log", append(stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1),
 		outcomeResult("ready"), settledLine(id, "failed", "ci-red"), settledLine("work:99@elsewhere", "complete", "merged"))...)
-	rec, _, err := ParseLog(path)
+	rec, _, err := ParseLog(path, testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,7 +406,7 @@ func TestSettledOpFollowedByOrchestratorOpIsIgnored(t *testing.T) {
 	path := writeLog(t, "issue-42.log", append(stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1),
 		settledLine(id, "complete", "merged"),
 		opLine(hostop.SpindriftOp{Op: "pass_usage", Usage: &hostop.PassUsage{APICalls: 1}}))...)
-	rec, _, err := ParseLog(path)
+	rec, _, err := ParseLog(path, testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -435,7 +435,7 @@ func TestParseLogIngestsStampLongerThanAReadBuffer(t *testing.T) {
 	if len(line) <= 4096 {
 		t.Fatalf("stamp is %d bytes, want over 4096", len(line))
 	}
-	rec, _, err := ParseLog(writeLog(t, "issue-42.log", append([]string{line}, workLog("2026-05-01T09:00:00Z", 1)...)...))
+	rec, _, err := ParseLog(writeLog(t, "issue-42.log", append([]string{line}, workLog("2026-05-01T09:00:00Z", 1)...)...), testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -489,7 +489,7 @@ func tokenedLog(lines ...string) []string {
 
 func parseOutcome(t *testing.T, lines []string) Record {
 	t.Helper()
-	rec, _, err := ParseLog(writeLog(t, "issue-42.log", lines...))
+	rec, _, err := ParseLog(writeLog(t, "issue-42.log", lines...), testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}

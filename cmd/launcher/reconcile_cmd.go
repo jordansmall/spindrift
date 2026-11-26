@@ -10,6 +10,7 @@ import (
 
 	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/daemon"
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/reconcile"
@@ -20,11 +21,11 @@ import (
 // merged since, printing a line only when it upgraded any. A nil pr (a
 // PR-less code forge: git, local) has no PR state to read, so it does
 // nothing. Per-Record warnings go to stderr, like the settle gate's.
-func recordLateMerges(caps forge.Capabilities, pwd string, w io.Writer) error {
+func recordLateMerges(caps forge.Capabilities, drivers *driver.Set, pwd string, w io.Writer) error {
 	if caps.PRForge == nil {
 		return nil
 	}
-	merged, err := settle.LateMerges(pwd, caps.PRForge, caps.MergeCommitReader, time.Now(), os.Stderr)
+	merged, err := settle.LateMerges(pwd, drivers, caps.PRForge, caps.MergeCommitReader, time.Now(), os.Stderr)
 	if len(merged) > 0 {
 		fmt.Fprintf(w, "reconcile: recorded %d late merge(s): %s\n", len(merged), strings.Join(merged, ", "))
 	}
@@ -37,7 +38,7 @@ func recordLateMerges(caps forge.Capabilities, pwd string, w io.Writer) error {
 // then always runs reconcileIssues: a stats-store failure is joined into the
 // result but never skips the issue bookkeeping.
 func runReconcile(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconcile.LivenessProbe, caps forge.Capabilities, pwd string, w io.Writer) error {
-	lateErr := recordLateMerges(caps, pwd, w)
+	lateErr := recordLateMerges(caps, c.connectors.Drivers(), pwd, w)
 	return errors.Join(reconcileIssues(c, it, cf, lp, caps, pwd, w), lateErr)
 }
 
@@ -88,13 +89,13 @@ func reconcileIssues(c config, it forge.IssueTracker, cf forge.CodeForge, lp rec
 // __late-merge-sweep verb: it claims the sweep for this
 // settle.LateMergeSweepInterval across processes sharing pwd and records
 // late merges only when the claim is won.
-func sweepLateMergesThrottled(caps forge.Capabilities, pwd string, w io.Writer) error {
+func sweepLateMergesThrottled(caps forge.Capabilities, drivers *driver.Set, pwd string, w io.Writer) error {
 	if caps.PRForge == nil {
 		return nil
 	}
 	ok, err := settle.ClaimLateMergeSweep(pwd, time.Now())
 	if ok {
-		err = recordLateMerges(caps, pwd, w)
+		err = recordLateMerges(caps, drivers, pwd, w)
 	}
 	return err
 }
@@ -109,7 +110,7 @@ func sweepLateMergesThrottled(caps forge.Capabilities, pwd string, w io.Writer) 
 // still runs the local-tracker issue bookkeeping.
 func reconcileAfterDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconcile.LivenessProbe, caps forge.Capabilities, pwd string, w io.Writer) error {
 	if !daemon.InPoolChild() {
-		if err := sweepLateMergesThrottled(caps, pwd, w); err != nil {
+		if err := sweepLateMergesThrottled(caps, c.connectors.Drivers(), pwd, w); err != nil {
 			fmt.Fprintf(w, "    ?? late merges: %v\n", err)
 		}
 	}
@@ -174,6 +175,6 @@ func withRepoReadContext(connectors *connectorruntime.Runtime, stderr io.Writer,
 // reconcileAfterDispatch, so a stray extra invocation is cheap.
 func cmdLateMergeSweep(connectors *connectorruntime.Runtime, stdout, stderr io.Writer) int {
 	return withRepoReadContext(connectors, stderr, func(rc readContext, pwd string) error {
-		return sweepLateMergesThrottled(rc.capabilities, pwd, stdout)
+		return sweepLateMergesThrottled(rc.capabilities, connectors.Drivers(), pwd, stdout)
 	})
 }

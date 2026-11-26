@@ -87,7 +87,7 @@ func TestStoreConcurrentOpenAndIngestFromSeparateHandles(t *testing.T) {
 		concurrentLog(t, root, i)
 	}
 	errs := runConcurrently(n, func(int) error {
-		s, err := Open(root)
+		s, err := Open(root, testDrivers)
 		if err != nil {
 			return err
 		}
@@ -108,7 +108,7 @@ func TestStoreConcurrentSettlesEachIngestOwnLog(t *testing.T) {
 	const n = 8
 	root := t.TempDir()
 	errs := runConcurrently(n, func(i int) error {
-		s, err := Open(root)
+		s, err := Open(root, testDrivers)
 		if err != nil {
 			return err
 		}

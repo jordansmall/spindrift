@@ -3,6 +3,7 @@ package dispatch
 import (
 	"sync"
 
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/fakehook"
 	"spindrift.dev/launcher/internal/usage"
 )
@@ -37,6 +38,9 @@ type Fake struct {
 
 	// RecordIDResult answers RecordID.
 	RecordIDResult string
+
+	// DriversResult answers Drivers.
+	DriversResult *driver.Set
 
 	// LogPathResult answers LogPath.
 	LogPathResult string
@@ -148,4 +152,11 @@ func (f *Fake) RecordID() string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.RecordIDResult
+}
+
+// Drivers returns DriversResult.
+func (f *Fake) Drivers() *driver.Set {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.DriversResult
 }

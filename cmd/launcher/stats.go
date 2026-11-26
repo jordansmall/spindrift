@@ -17,6 +17,7 @@ import (
 	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/dispatchrecord"
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/recordstats"
 )
@@ -134,8 +135,8 @@ func (o statsOptions) keep(r dispatchrecord.Record) bool {
 var statsNow = time.Now
 
 // statsRootRecords ingests one root's logs and returns its Records.
-func statsRootRecords(root string, reingest, fillRevisions bool, stderr io.Writer) ([]dispatchrecord.Record, error) {
-	store, err := dispatchrecord.Open(root)
+func statsRootRecords(root string, drivers *driver.Set, reingest, fillRevisions bool, stderr io.Writer) ([]dispatchrecord.Record, error) {
+	store, err := dispatchrecord.Open(root, drivers)
 	if err != nil {
 		return nil, err
 	}
@@ -231,7 +232,7 @@ func cmdStats(connectors *connectorruntime.Runtime, args []string, stdout, stder
 			continue
 		}
 		seen[resolved] = true
-		recs, err := statsRootRecords(abs, opts.reingest, opts.by.has(statsByRevision), stderr)
+		recs, err := statsRootRecords(abs, connectors.Drivers(), opts.reingest, opts.by.has(statsByRevision), stderr)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
 			return 1

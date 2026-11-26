@@ -56,7 +56,7 @@ func writeLogAt(t *testing.T, root, key string, ts time.Time, state, reason, prU
 
 func storedRecordsByID(t *testing.T, root string) map[string]dispatchrecord.Record {
 	t.Helper()
-	store, err := dispatchrecord.Open(root)
+	store, err := dispatchrecord.Open(root, testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestLateMerges(t *testing.T) {
 	}
 
 	var w bytes.Buffer
-	merged, err := LateMerges(root, fc, fc, lateMergeNow, &w)
+	merged, err := LateMerges(root, testDrivers, fc, fc, lateMergeNow, &w)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestLateMerges(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.Reset()
-	merged, err = LateMerges(root, fc, fc, lateMergeNow, &w)
+	merged, err = LateMerges(root, testDrivers, fc, fc, lateMergeNow, &w)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestLateMerges(t *testing.T) {
 
 func TestLateMerges_NoLogDirLeavesNothingBehind(t *testing.T) {
 	root := t.TempDir()
-	merged, err := LateMerges(root, forge.NewFake(), forge.NewFake(), lateMergeNow, &bytes.Buffer{})
+	merged, err := LateMerges(root, testDrivers, forge.NewFake(), forge.NewFake(), lateMergeNow, &bytes.Buffer{})
 	if err != nil || len(merged) != 0 {
 		t.Fatalf("LateMerges = %v, %v; want no-op", merged, err)
 	}
@@ -188,7 +188,7 @@ func TestLateMerges_SkipsRecordsOutsideTheCandidateSet(t *testing.T) {
 			before, _ := os.Stat(path)
 
 			var w bytes.Buffer
-			merged, err := LateMerges(root, fc, nil, lateMergeNow, &w)
+			merged, err := LateMerges(root, testDrivers, fc, nil, lateMergeNow, &w)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -212,7 +212,7 @@ func TestLateMerges_UpgradesClaimJustInsideTheWindow(t *testing.T) {
 	const pr = "https://x/pull/9"
 	fc.SetPRState(pr, forge.PRMerged)
 	id, _ := writeLogAt(t, root, "9", lateMergeNow.Add(-LateMergeWindow+time.Hour), "complete", dispatchrecord.ReasonManual, pr)
-	merged, err := LateMerges(root, fc, fc, lateMergeNow, &bytes.Buffer{})
+	merged, err := LateMerges(root, testDrivers, fc, fc, lateMergeNow, &bytes.Buffer{})
 	if err != nil || len(merged) != 1 || merged[0] != id {
 		t.Fatalf("merged = %v, %v; want [%s]", merged, err, id)
 	}
@@ -232,7 +232,7 @@ func TestLateMerges_StopsAtFirstRateLimit(t *testing.T) {
 	fc := &askedPR{PRForge: fake}
 
 	var w bytes.Buffer
-	merged, err := LateMerges(root, fc, nil, lateMergeNow, &w)
+	merged, err := LateMerges(root, testDrivers, fc, nil, lateMergeNow, &w)
 	if !errors.Is(err, forge.ErrRateLimit) {
 		t.Fatalf("err = %v, want one wrapping forge.ErrRateLimit", err)
 	}
@@ -255,7 +255,7 @@ func TestLateMerges_RateLimitKeepsEarlierMerges(t *testing.T) {
 	fake.PRStateErrs = []error{nil, &forge.RateLimitError{Err: errors.New("HTTP 403")}}
 	fc := &askedPR{PRForge: fake}
 
-	merged, err := LateMerges(root, fc, nil, lateMergeNow, &bytes.Buffer{})
+	merged, err := LateMerges(root, testDrivers, fc, nil, lateMergeNow, &bytes.Buffer{})
 	if !errors.Is(err, forge.ErrRateLimit) {
 		t.Fatalf("err = %v, want one wrapping forge.ErrRateLimit", err)
 	}
@@ -348,7 +348,7 @@ func TestLateMerges_FillsMergeCommit(t *testing.T) {
 	fc.SetPRState(prA, forge.PRMerged)
 	fc.SetMergeCommit(prA, "abc123")
 
-	merged, err := LateMerges(root, fc, fc, lateMergeNow, &bytes.Buffer{})
+	merged, err := LateMerges(root, testDrivers, fc, fc, lateMergeNow, &bytes.Buffer{})
 	if err != nil || len(merged) != 1 {
 		t.Fatalf("LateMerges = %v, %v; want one merged", merged, err)
 	}
@@ -361,7 +361,7 @@ func TestLateMerges_FillsMergeCommit(t *testing.T) {
 	fc.SetPRState(prB, forge.PRMerged)
 	fc.MergeCommitErr = errors.New("boom")
 	var w bytes.Buffer
-	merged, err = LateMerges(root, fc, fc, lateMergeNow, &w)
+	merged, err = LateMerges(root, testDrivers, fc, fc, lateMergeNow, &w)
 	if err != nil || len(merged) != 1 || merged[0] != idB {
 		t.Fatalf("LateMerges = %v, %v; want %s merged despite the failed read", merged, err, idB)
 	}

@@ -659,6 +659,7 @@ func lateMergeFixture(t *testing.T) (root, idA string, f *forge.Fake, c config) 
 	f.SetPRState(prA, forge.PRMerged)
 	f.SetPRState(prB, forge.PRClosed)
 	c = baseConfig()
+	c.connectors = driverRuntime(t)
 	c.IssueTracker = "github"
 	return root, idA, f, c
 }
@@ -787,14 +788,14 @@ func TestSweepLateMergesThrottled_ClaimsOncePerInterval(t *testing.T) {
 	caps.PRForge = counter
 
 	var buf bytes.Buffer
-	if err := sweepLateMergesThrottled(caps, root, &buf); err != nil {
+	if err := sweepLateMergesThrottled(caps, c.connectors.Drivers(), root, &buf); err != nil {
 		t.Fatalf("sweepLateMergesThrottled: %v", err)
 	}
 	swept := counter.calls
 	if swept == 0 {
 		t.Fatal("first sweep asked the forge nothing")
 	}
-	if err := sweepLateMergesThrottled(caps, root, &buf); err != nil {
+	if err := sweepLateMergesThrottled(caps, c.connectors.Drivers(), root, &buf); err != nil {
 		t.Fatalf("second sweepLateMergesThrottled: %v", err)
 	}
 	if counter.calls != swept {
@@ -893,10 +894,10 @@ func TestRunReconcile_LocalTracker_LateMergeFailureErrorsAfterClosing(t *testing
 // A PR-less code forge has no PR state to read, so recording late merges is a
 // silent no-op even when the pwd holds logs.
 func TestRecordLateMerges_PRLessForgeIsNoOp(t *testing.T) {
-	root, _, _, _ := lateMergeFixture(t)
+	root, _, _, c := lateMergeFixture(t)
 
 	var buf bytes.Buffer
-	if err := recordLateMerges(forge.Capabilities{}, root, &buf); err != nil {
+	if err := recordLateMerges(forge.Capabilities{}, c.connectors.Drivers(), root, &buf); err != nil {
 		t.Fatalf("recordLateMerges: %v", err)
 	}
 	if buf.Len() != 0 {

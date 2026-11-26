@@ -13,7 +13,6 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchrecord"
-	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/hostop"
@@ -158,11 +157,11 @@ func seamDispatch(t *testing.T, root, num string, fr *runner.Fake) *dispatch.Dis
 	if err := os.MkdirAll(dispatch.HostLogDirFor(root), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	drv, err := driver.New("claude")
+	drv, err := testDrivers.New("claude")
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := dispatch.NewFactory(dispatch.Config{Kind: "work", OpenPRForIssue: func(string) (bool, error) { return false, nil }}, root, fr, drv, dispatch.RealClock())
+	f, err := dispatch.NewFactory(dispatch.Config{Kind: "work", Drivers: testDrivers, OpenPRForIssue: func(string) (bool, error) { return false, nil }}, root, fr, drv, dispatch.RealClock())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +182,7 @@ func seamForge(num string) *forge.Fake {
 // ingestRecords ingests the logs under root and returns the Records.
 func ingestRecords(t *testing.T, root string) []dispatchrecord.Record {
 	t.Helper()
-	store, err := dispatchrecord.Open(root)
+	store, err := dispatchrecord.Open(root, testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +253,7 @@ func TestRecoverOpenPR_FixPassContinuesPriorRecord(t *testing.T) {
 // settle itself must have put them there.
 func storedRecords(t *testing.T, root string) []dispatchrecord.Record {
 	t.Helper()
-	store, err := dispatchrecord.Open(root)
+	store, err := dispatchrecord.Open(root, testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -430,7 +429,7 @@ func TestSettle_UnreadableUnrelatedLogDoesNotBlockIngest(t *testing.T) {
 	if strings.Contains(stderr, "could not ingest") {
 		t.Errorf("stderr = %q, want no ingest warning", stderr)
 	}
-	store, err := dispatchrecord.Open(root)
+	store, err := dispatchrecord.Open(root, testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -486,7 +485,7 @@ func TestSettle_UnreadableOwnLogWarnsButRecordLands(t *testing.T) {
 	if !strings.Contains(stderr, "could not ingest") {
 		t.Errorf("stderr = %q, want the ingest warning", stderr)
 	}
-	store, err := dispatchrecord.Open(root)
+	store, err := dispatchrecord.Open(root, testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}

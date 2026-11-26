@@ -114,6 +114,6 @@ func parkQueueFailure(c config, it forge.IssueTracker, num string, rec recoverre
 	// Emitted here, not through the settler's latch: a landing that returns
 	// false never reaches a terminal transition there, so nothing else reports
 	// this attempt's end.
-	recoverSettled(num, v, note)
+	recoverSettled(c, num, v, note)
 	return errors.Join(saveErr, parkErr)
 }

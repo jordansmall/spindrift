@@ -299,7 +299,7 @@ func countSnapshots(t *testing.T, root string) int {
 func TestRecordsSnapshotLoadsRowStoredBeforeTheChoreKeyedTable(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	s, err := dispatchrecord.Open(root)
+	s, err := dispatchrecord.Open(root, testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}

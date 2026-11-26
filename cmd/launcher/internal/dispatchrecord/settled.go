@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/hostpaths"
 )
@@ -40,7 +41,7 @@ func AppendSettled(warn io.Writer, label, logPath string, ds hostop.DispatchSett
 // the log's chain so the Dispatch's Record is in the store with no `stats` run.
 // The store's root is derived from logPath: a log outside a root's
 // .spindrift/logs has no store, so nothing is ingested.
-func RecordSettled(warn io.Writer, label, logPath string, ds hostop.DispatchSettled) {
+func RecordSettled(warn io.Writer, label, logPath string, ds hostop.DispatchSettled, drivers *driver.Set) {
 	if !AppendSettled(warn, label, logPath, ds) {
 		return
 	}
@@ -48,13 +49,13 @@ func RecordSettled(warn io.Writer, label, logPath string, ds hostop.DispatchSett
 	if !ok {
 		return
 	}
-	if err := ingestChainAt(root, filepath.Base(logPath)); err != nil {
+	if err := ingestChainAt(root, filepath.Base(logPath), drivers); err != nil {
 		fmt.Fprintf(warn, "    ?? %s: could not ingest into %s: %v\n", label, hostpaths.DispatchRecordsDB(root), err)
 	}
 }
 
-func ingestChainAt(root, base string) (err error) {
-	store, err := Open(root)
+func ingestChainAt(root, base string, drivers *driver.Set) (err error) {
+	store, err := Open(root, drivers)
 	if err != nil {
 		return err
 	}

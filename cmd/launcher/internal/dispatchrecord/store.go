@@ -17,6 +17,7 @@ import (
 	"modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
 
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/hostpaths"
 )
 
@@ -270,8 +271,9 @@ var migrations = []string{
 // between reads as the same Dispatch growing, so that earlier Record, which has
 // no real claim time, is replaced.
 type Store struct {
-	db   *sql.DB
-	root string
+	db      *sql.DB
+	root    string
+	drivers *driver.Set
 }
 
 // forceReparseSize never matches a real file's size, so the row's stat check
@@ -293,8 +295,9 @@ const walRetryInterval = 5 * time.Millisecond
 // (SQLITE_BUSY_RECOVERY and friends all carry SQLITE_BUSY in the low byte).
 const primaryCodeMask = 0xff
 
-// Open opens (creating and migrating if needed) the store under root.
-func Open(root string) (*Store, error) {
+// Open opens (creating and migrating if needed) the store under root. Ingest
+// resolves each log stamp's Driver through drivers.
+func Open(root string, drivers *driver.Set) (*Store, error) {
 	path := hostpaths.DispatchRecordsDB(root)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
@@ -309,7 +312,7 @@ func Open(root string) (*Store, error) {
 	// One connection: WAL still lets other processes read, and it keeps the
 	// per-connection pragmas and transactions trivially consistent.
 	db.SetMaxOpenConns(1)
-	s := &Store{db: db, root: root}
+	s := &Store{db: db, root: root, drivers: drivers}
 	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, err
@@ -540,7 +543,7 @@ func (s *Store) ingestFile(path string, role logRole, reparse bool) (bool, strin
 		}
 	}
 	var recp *Record
-	rec, provisional, segment, err := parseLogFile(path)
+	rec, provisional, segment, err := parseLogFile(path, s.drivers)
 	switch {
 	case err == nil:
 		recp = &rec

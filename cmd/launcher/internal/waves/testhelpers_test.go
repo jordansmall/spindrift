@@ -112,13 +112,14 @@ func fakePending(fc *forge.Fake, c Config, edges map[string][]string, failed map
 // tests where nothing dispatches pass nil for f and s (issue #2940).
 func testFactory(t *testing.T, dir string, r runner.Runner) *dispatch.Factory {
 	t.Helper()
-	seamtest.RegisterDriver(t)
-	drv, err := driver.New("")
+	drivers := driver.NewSet(seamtest.Strategy())
+	drv, err := drivers.New("")
 	if err != nil {
-		t.Fatalf("driver.New: %v", err)
+		t.Fatalf("drivers.New: %v", err)
 	}
 	f, err := dispatch.NewFactory(dispatch.Config{
-		Policy: retry.Policy{Max: 3, Unit: 0, Jitter: 0},
+		Policy:  retry.Policy{Max: 3, Unit: 0, Jitter: 0},
+		Drivers: drivers,
 	}, dir, r, drv, dispatch.RealClock())
 	if err != nil {
 		t.Fatalf("dispatch.NewFactory: %v", err)

@@ -69,7 +69,7 @@ func TestParseLog_ResumedSessionAcrossLogsBooksOnlyTheIncrement(t *testing.T) {
 	putLog(t, root, "issue-42.log", implementLog(id, stampClaim)...)
 	fix := putLog(t, root, "issue-42-fix-1.log", fixLog(id, stampClaim.Add(time.Hour))...)
 
-	rec, _, err := ParseLog(fix)
+	rec, _, err := ParseLog(fix, testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestParseLog_ResumedSessionChainsThroughEarlierFixLogs(t *testing.T) {
 		opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 3, Role: "fix"}),
 		sessionResult("2026-05-01T10:10:00Z", 1.75, 140000, 7034, 13405))
 
-	rec, _, err := ParseLog(fix2)
+	rec, _, err := ParseLog(fix2, testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestParseLog_SatelliteOfAnotherRecordGetsNoSeed(t *testing.T) {
 	root := t.TempDir()
 	putLog(t, root, "issue-42.log", implementLog("work:42@other", stampClaim)...)
 	fix := putLog(t, root, "issue-42-fix-1.log", fixLog(RecordID("work", "42", stampClaim), stampClaim.Add(time.Hour))...)
-	rec, _, err := ParseLog(fix)
+	rec, _, err := ParseLog(fix, testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestParseLog_RotatedPrimaryRetryBooksOnlyTheIncrement(t *testing.T) {
 	root := t.TempDir()
 	putLog(t, root, "issue-42.log.1", implementLog(id, stampClaim)...)
 	primary := putLog(t, root, "issue-42.log", primaryRetryLog(id, stampClaim.Add(time.Hour))...)
-	rec, _, err := ParseLog(primary)
+	rec, _, err := ParseLog(primary, testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestParseLog_PrimaryOfAnotherRecordGetsNoSeed(t *testing.T) {
 	root := t.TempDir()
 	putLog(t, root, "issue-42.log.1", implementLog("work:42@other", stampClaim)...)
 	primary := putLog(t, root, "issue-42.log", fixLog(RecordID("work", "42", stampClaim), stampClaim.Add(time.Hour))...)
-	rec, _, err := ParseLog(primary)
+	rec, _, err := ParseLog(primary, testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}

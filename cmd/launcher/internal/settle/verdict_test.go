@@ -30,7 +30,7 @@ func TestSettledPanicsOnZeroVerdict(t *testing.T) {
 			t.Error("Settled with a zero Verdict did not panic")
 		}
 	}()
-	Settled(dispatchkey.Issue("7"), "", Verdict{}, hostop.DispatchSettled{})
+	Settled(dispatchkey.Issue("7"), "", Verdict{}, hostop.DispatchSettled{}, testDrivers)
 }
 
 func TestForReasonPanicsWithoutFixedState(t *testing.T) {
@@ -61,7 +61,7 @@ func TestSettledPanicsOnInProgressVerdict(t *testing.T) {
 					t.Errorf("Settled with the in-progress %q Verdict did not panic", reason)
 				}
 			}()
-			Settled(dispatchkey.Issue("7"), "", ForReason(reason), hostop.DispatchSettled{})
+			Settled(dispatchkey.Issue("7"), "", ForReason(reason), hostop.DispatchSettled{}, testDrivers)
 		}()
 	}
 }

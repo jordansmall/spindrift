@@ -16,6 +16,7 @@ import (
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/gitexec"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/registryproxy"
@@ -97,6 +98,10 @@ func choreSubject(c Chore) subject {
 // Config carries the subset of launcher config a Dispatch needs to build a
 // Box's env and drive its retry policy.
 type Config struct {
+	// Drivers is the Driver set the host reads Pass logs through; the Record
+	// the Dispatch settles into is ingested with it.
+	Drivers *driver.Set
+
 	// BoxEnvVars is a space-separated list of env var names forwarded into
 	// every Box (schema boxEnv=true entries).
 	BoxEnvVars string
