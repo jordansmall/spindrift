@@ -129,12 +129,6 @@ func graphql(api, query string, vars map[string]any, data any) error {
 	return json.Unmarshal(resp.Data, data)
 }
 
-// mutatePR runs a GraphQL mutation selection on the pull request whose node id
-// the selection reads as $id.
-func mutatePR(api, nodeID, selection string) error {
-	return graphql(api, "mutation($id:ID!){"+selection+"{clientMutationId}}", map[string]any{"id": nodeID}, nil)
-}
-
 func open(t forge.Target, p forge.NewPR) (forge.PR, error) {
 	body, err := json.Marshal(p)
 	if err != nil {
@@ -196,11 +190,11 @@ func setDraft(t forge.Target, number string, draft bool) error {
 	if err != nil || raw.Draft == draft {
 		return err
 	}
-	field := "markPullRequestReadyForReview"
+	doc := markReadyForReviewMutation
 	if draft {
-		field = "convertPullRequestToDraft"
+		doc = convertToDraftMutation
 	}
-	return mutatePR(t.API, raw.NodeID, field+"(input:{pullRequestId:$id})")
+	return graphql(t.API, doc, map[string]any{"id": raw.NodeID}, nil)
 }
 
 func comment(t forge.Target, number, body string) error {
@@ -263,7 +257,7 @@ func enqueueAutoMerge(t forge.Target, number string) error {
 	if err != nil {
 		return err
 	}
-	return mutatePR(t.API, raw.NodeID, "enablePullRequestAutoMerge(input:{pullRequestId:$id,mergeMethod:REBASE})")
+	return graphql(t.API, enableAutoMergeMutation, map[string]any{"id": raw.NodeID}, nil)
 }
 
 // branchProtected reports classic protection or a repository ruleset. A 404

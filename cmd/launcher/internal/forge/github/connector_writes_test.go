@@ -747,19 +747,18 @@ func (b *restBackend) labelID(name string) (string, bool) {
 	return "LA_" + name, known
 }
 
-// labelIDs serves the query removeLabels sends: the issue's node id and one
-// aliased label(name:$nK) per name, null for a label the repository lacks. A
+// labelIDs serves the query removeLabels sends once per name: the issue's node
+// id and the one label(name:$name), null for a label the repository lacks. The
 // name must arrive as a variable, as it may carry any character.
 func (b *restBackend) labelIDs(w http.ResponseWriter, raw []byte, slug string, number int, reject func(string)) {
 	var req struct {
-		Query     string         `json:"query"`
 		Variables map[string]any `json:"variables"`
 	}
 	if err := json.Unmarshal(raw, &req); err != nil || slug != connectorRepo {
 		reject("label query undecodable or for another repository")
 		return
 	}
-	repo := map[string]any{"issue": nil}
+	repo := map[string]any{"issue": nil, "label": nil}
 	var errs []map[string]string
 	if i := b.issues[number]; i != nil && !i.pull {
 		repo["issue"] = map[string]any{"id": "I_" + strconv.Itoa(number)}
@@ -767,17 +766,9 @@ func (b *restBackend) labelIDs(w http.ResponseWriter, raw []byte, slug string, n
 		// GitHub answers a missing number with a null issue and a NOT_FOUND error.
 		errs = append(errs, map[string]string{"type": "NOT_FOUND", "message": "Could not resolve to an issue or pull request with the number of " + strconv.Itoa(number) + "."})
 	}
-	for k := 0; ; k++ {
-		alias := "l" + strconv.Itoa(k)
-		if !strings.Contains(req.Query, " "+alias+":label(name:$n"+strconv.Itoa(k)+")") {
-			break
-		}
-		name, _ := req.Variables["n"+strconv.Itoa(k)].(string)
-		if id, known := b.labelID(name); known {
-			repo[alias] = map[string]any{"id": id}
-		} else {
-			repo[alias] = nil
-		}
+	name, _ := req.Variables["name"].(string)
+	if id, known := b.labelID(name); known {
+		repo["label"] = map[string]any{"id": id}
 	}
 	resp := map[string]any{"data": map[string]any{"repository": repo}}
 	if errs != nil {

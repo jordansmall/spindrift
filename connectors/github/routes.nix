@@ -13,11 +13,15 @@
 # exact one: `GET /issues` also admits `/issues/comments/*` and
 # `/issues/events`, `POST /pulls` admits review creation, `PUT /pulls` admits
 # update-branch, and `/actions/jobs` admits every GET beside `/{id}/logs`.
-# `POST /graphql` admits any document, mutations included, and cannot be
-# pinned to the repository; the Connector sends its rollup, comment, identity,
-# token-grant, draft-flip, auto-merge, label-removal and close documents there
-# (issues #6808, #6881, #6882, #6887). Label removal cannot be a REST
-# `DELETE`: the host refuses the escaped `/` in a name such as `agent/ready`.
+# `POST /graphql` admits only the `documents` it declares: the host refuses a
+# body whose `query` is not byte-identical to one of them. Variables stay free,
+# so e.g. the close mutation still reaches any issue the token can, and the
+# Route cannot be pinned to the repository. The Connector sends its rollup,
+# comment, identity, token-grant, draft-flip, auto-merge, label-removal and
+# close documents there (issues #6808, #6881, #6882, #6887, #7566);
+# routes_test.go pins the texts to the Go `documents` map. Label removal cannot
+# be a REST `DELETE`: the host refuses the escaped `/` in a name such as
+# `agent/ready`.
 #
 # The job-log Route follows one redirect hop (issue #6893): GitHub answers
 # with a 302 to a pre-signed blob URL on a varying host, so no host can be
@@ -51,6 +55,19 @@ in
     path = "/graphql";
     requestHeaders = apiVersion;
     responseHeaders = [ "X-OAuth-Scopes" ];
+    documents = {
+      rollup = "query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){url commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:50){nodes{__typename ... on CheckRun{name conclusion status summary detailsUrl} ... on StatusContext{context state description}}}}}}}}}}";
+      comments = "query($owner:String!,$repo:String!,$number:Int!,$after:String){repository(owner:$owner,name:$repo){issue(number:$number){comments(first:100,after:$after){pageInfo{hasNextPage endCursor} nodes{author{login} createdAt body isMinimized minimizedReason authorAssociation}}}}}";
+      repository = "query($owner:String!,$repo:String!){repository(owner:$owner,name:$repo){nameWithOwner autoMergeAllowed}}";
+      viewer = "{viewer{login}}";
+      markReadyForReview = "mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){clientMutationId}}";
+      convertToDraft = "mutation($id:ID!){convertPullRequestToDraft(input:{pullRequestId:$id}){clientMutationId}}";
+      enableAutoMerge = "mutation($id:ID!){enablePullRequestAutoMerge(input:{pullRequestId:$id,mergeMethod:REBASE}){clientMutationId}}";
+      issueID = "query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){issue(number:$number){id}}}";
+      labelID = "query($owner:String!,$repo:String!,$number:Int!,$name:String!){repository(owner:$owner,name:$repo){issue(number:$number){id} label(name:$name){id}}}";
+      removeLabels = "mutation($id:ID!,$ids:[ID!]!){removeLabelsFromLabelable(input:{labelableId:$id,labelIds:$ids}){clientMutationId}}";
+      closeIssue = "mutation($id:ID!){closeIssue(input:{issueId:$id,stateReason:COMPLETED}){clientMutationId}}";
+    };
   }
   {
     method = "GET";

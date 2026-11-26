@@ -3,7 +3,9 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -31,23 +33,32 @@ func TestTrackerTransitionIsAlwaysUnmapped(t *testing.T) {
 	}
 }
 
-// labelFake answers the label add over REST and the two GraphQL documents
-// editLabels sends, telling them apart by content; lookup is the reply to the
-// id query.
-func labelFake(t *testing.T, lookup string) *[]connector.Request {
+// labelFake answers the label add over REST and the GraphQL documents
+// editLabels sends, telling them apart by content. Each label lookup consumes
+// the next of lookups (the last repeats). Every GraphQL query must be one of
+// the declared documents.
+func labelFake(t *testing.T, lookups ...string) *[]connector.Request {
 	t.Helper()
 	var got []connector.Request
+	n := 0
 	old := send
 	t.Cleanup(func() { send = old })
 	send = func(r connector.Request) (connector.Response, error) {
 		got = append(got, r)
+		if r.URL == graphqlURL {
+			if q := gqlOf(t, r).Query; !slices.Contains(slices.Collect(maps.Values(documents)), q) {
+				t.Errorf("query is not a declared document: %q", q)
+			}
+		}
 		switch {
 		case r.URL == issuesURL+"/7/labels":
 			return ok(`[]`), nil
 		case r.URL == graphqlURL && strings.Contains(r.Body, "removeLabelsFromLabelable"):
 			return ok(`{"data":{"removeLabelsFromLabelable":{"clientMutationId":null}}}`), nil
 		case r.URL == graphqlURL:
-			return ok(lookup), nil
+			reply := lookups[min(n, len(lookups)-1)]
+			n++
+			return ok(reply), nil
 		}
 		return connector.Response{Status: 404, Body: []byte("{}")}, nil
 	}
@@ -69,50 +80,66 @@ func gqlOf(t *testing.T, r connector.Request) gqlBody {
 }
 
 func TestEditLabelsAddsThenRemoves(t *testing.T) {
-	got := labelFake(t, `{"data":{"repository":{"issue":{"id":"I_7"},"l0":{"id":"L_fix"},"l1":{"id":"L_ab"}}}}`)
+	got := labelFake(t,
+		`{"data":{"repository":{"issue":{"id":"I_7"},"label":{"id":"L_fix"}}}}`,
+		`{"data":{"repository":{"issue":{"id":"I_7"},"label":{"id":"L_ab"}}}}`)
 	if err := editLabels(tgt, "7", []string{"x", "y"}, []string{"needs fix", "a/b"}); err != nil {
 		t.Fatal(err)
 	}
-	if len(*got) != 3 {
-		t.Fatalf("calls = %d, want 3: %+v", len(*got), *got)
+	if len(*got) != 4 {
+		t.Fatalf("calls = %d, want 4: %+v", len(*got), *got)
 	}
 	add := (*got)[0]
 	var body struct{ Labels []string }
 	if add.Method != "POST" || json.Unmarshal([]byte(add.Body), &body) != nil || strings.Join(body.Labels, ",") != "x,y" {
 		t.Errorf("add call = %+v", add)
 	}
-	q := (*got)[1]
-	if q.Method != "POST" || q.URL != graphqlURL {
-		t.Errorf("lookup call = %s %s", q.Method, q.URL)
+	for i, name := range []string{"needs fix", "a/b"} {
+		q := (*got)[1+i]
+		if q.Method != "POST" || q.URL != graphqlURL {
+			t.Errorf("lookup call = %s %s", q.Method, q.URL)
+		}
+		wantVars := map[string]any{"owner": "o", "repo": "r", "number": float64(7), "name": name}
+		if g := gqlOf(t, q); g.Query != labelIDQuery || !reflect.DeepEqual(g.Variables, wantVars) {
+			t.Errorf("lookup %d = %+v, want the fixed document with vars %#v", i, g, wantVars)
+		}
 	}
-	wantVars := map[string]any{"owner": "o", "repo": "r", "number": float64(7), "n0": "needs fix", "n1": "a/b"}
-	g := gqlOf(t, q)
-	if !reflect.DeepEqual(g.Variables, wantVars) {
-		t.Errorf("lookup variables = %#v, want %#v", g.Variables, wantVars)
-	}
-	if strings.Contains(g.Query, "needs fix") || strings.Contains(g.Query, "a/b") {
-		t.Error("label name interpolated into the query text")
-	}
-	m := (*got)[2]
+	m := (*got)[3]
 	if m.Method != "POST" || m.URL != graphqlURL {
 		t.Errorf("mutation call = %s %s", m.Method, m.URL)
 	}
-	wantVars = map[string]any{"id": "I_7", "ids": []any{"L_fix", "L_ab"}}
-	if g := gqlOf(t, m); !strings.Contains(g.Query, "removeLabelsFromLabelable") || !reflect.DeepEqual(g.Variables, wantVars) {
+	wantVars := map[string]any{"id": "I_7", "ids": []any{"L_fix", "L_ab"}}
+	if g := gqlOf(t, m); g.Query != removeLabelsMutation || !reflect.DeepEqual(g.Variables, wantVars) {
+		t.Errorf("mutation = %+v", g)
+	}
+}
+
+func TestEditLabelsRemovesOneLabel(t *testing.T) {
+	got := labelFake(t, `{"data":{"repository":{"issue":{"id":"I_7"},"label":{"id":"L_x"}}}}`)
+	if err := editLabels(tgt, "7", nil, []string{"x"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(*got) != 2 {
+		t.Fatalf("calls = %d, want lookup and mutation: %+v", len(*got), *got)
+	}
+	if g := gqlOf(t, (*got)[0]); g.Query != labelIDQuery || g.Variables["name"] != "x" {
+		t.Errorf("lookup = %+v", g)
+	}
+	if g := gqlOf(t, (*got)[1]); g.Query != removeLabelsMutation || !reflect.DeepEqual(g.Variables["ids"], []any{"L_x"}) {
 		t.Errorf("mutation = %+v", g)
 	}
 }
 
 func TestEditLabelsRemoveOnlySkipsAdd(t *testing.T) {
-	got := labelFake(t, `{"data":{"repository":{"issue":{"id":"I_7"},"l0":{"id":"L_x"}}}}`)
+	got := labelFake(t, `{"data":{"repository":{"issue":{"id":"I_7"},"label":{"id":"L_x"}}}}`)
 	if err := editLabels(tgt, "7", []string{""}, []string{"", "x"}); err != nil {
 		t.Fatal(err)
 	}
 	if len(*got) != 2 || (*got)[0].URL != graphqlURL || (*got)[1].URL != graphqlURL {
 		t.Fatalf("calls = %+v, want the two GraphQL calls only", *got)
 	}
-	if v := gqlOf(t, (*got)[0]).Variables; v["n0"] != "x" || v["n1"] != nil {
-		t.Errorf("variables = %#v, want only n0=x", v)
+	if v := gqlOf(t, (*got)[0]).Variables; v["name"] != "x" {
+		t.Errorf("variables = %#v, want name=x", v)
 	}
 }
 
@@ -124,7 +151,8 @@ func TestEditLabelsEmptyEditMakesNoCalls(t *testing.T) {
 }
 
 func TestEditLabelsAbsentLabelIsSkipped(t *testing.T) {
-	got := labelFake(t, `{"data":{"repository":{"issue":{"id":"I_7"},"l0":null,"l1":{"id":"L_y"}}}}`)
+	got := labelFake(t, `{"data":{"repository":{"issue":{"id":"I_7"},"label":null}}}`,
+		`{"data":{"repository":{"issue":{"id":"I_7"},"label":{"id":"L_y"}}}}`)
 	if err := editLabels(tgt, "7", nil, []string{"gone", "y"}); err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +163,7 @@ func TestEditLabelsAbsentLabelIsSkipped(t *testing.T) {
 }
 
 func TestEditLabelsAllAbsentSendsNoMutation(t *testing.T) {
-	got := labelFake(t, `{"data":{"repository":{"issue":{"id":"I_7"},"l0":null}}}`)
+	got := labelFake(t, `{"data":{"repository":{"issue":{"id":"I_7"},"label":null}}}`)
 	if err := editLabels(tgt, "7", nil, []string{"gone"}); err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +174,7 @@ func TestEditLabelsAllAbsentSendsNoMutation(t *testing.T) {
 
 func TestEditLabelsMissingIssueOrRepoFails(t *testing.T) {
 	for name, lookup := range map[string]string{
-		"null issue": `{"data":{"repository":{"issue":null,"l0":{"id":"L"}}}}`,
+		"null issue": `{"data":{"repository":{"issue":null,"label":{"id":"L"}}}}`,
 		"null repo":  `{"data":{"repository":null}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -183,7 +211,7 @@ func TestEditLabelsFailsOnErrors(t *testing.T) {
 		if strings.Contains(r.Body, "removeLabelsFromLabelable") {
 			return ok(`{"errors":[{"message":"denied"}]}`), nil
 		}
-		return ok(`{"data":{"repository":{"issue":{"id":"I"},"l0":{"id":"L"}}}}`), nil
+		return ok(`{"data":{"repository":{"issue":{"id":"I"},"label":{"id":"L"}}}}`), nil
 	}
 	if err := editLabels(tgt, "7", nil, []string{"x"}); err == nil {
 		t.Error("graphql errors on mutation: want error")

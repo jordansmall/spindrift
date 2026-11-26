@@ -1,6 +1,7 @@
 package main
 
 import (
+	"maps"
 	"net/http"
 	"slices"
 	"testing"
@@ -73,4 +74,28 @@ func canonical(names []string) []string {
 	}
 	slices.Sort(out)
 	return out
+}
+
+// TestGraphQLRouteDeclaresExactlyTheDocumentsSent pins the table to the Go
+// documents map: only POST /graphql carries documents, and they are the texts
+// the Connector sends, byte for byte.
+func TestGraphQLRouteDeclaresExactlyTheDocumentsSent(t *testing.T) {
+	routes, err := connector.LoadRoutes()
+	if err != nil {
+		t.Fatalf("%v\nthe Connector's checks export the Route table: run `nix run .#connector-dev -- github flake check`", err)
+	}
+	found := false
+	for _, r := range routes {
+		if r.Method == "POST" && r.Path == "/graphql" {
+			found = true
+			if !maps.Equal(r.Documents, documents) {
+				t.Errorf("POST /graphql declares documents %v, the Connector sends %v", r.Documents, documents)
+			}
+		} else if len(r.Documents) != 0 {
+			t.Errorf("%s %s declares documents %v, want none", r.Method, r.Path, r.Documents)
+		}
+	}
+	if !found {
+		t.Error("the Route table has no POST /graphql route")
+	}
 }
