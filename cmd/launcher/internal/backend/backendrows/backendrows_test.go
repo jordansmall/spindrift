@@ -559,10 +559,10 @@ func TestUseSubstitutesTheConfiguredBaseURLIntoRoutes(t *testing.T) {
 		base string
 		want connectorhost.Route
 	}{
-		"bare host":        {"https://acme.example.net", connectorhost.Route{Method: "GET", Host: "acme.example.net", Path: "/rest/api/3/search"}},
-		"trailing slash":   {"https://acme.example.net/", connectorhost.Route{Method: "GET", Host: "acme.example.net", Path: "/rest/api/3/search"}},
-		"path prefix":      {"https://acme.example.net/jira", connectorhost.Route{Method: "GET", Host: "acme.example.net", Path: "/jira/rest/api/3/search"}},
-		"prefix and slash": {"https://acme.example.net:8443/jira/", connectorhost.Route{Method: "GET", Host: "acme.example.net:8443", Path: "/jira/rest/api/3/search"}},
+		"bare host":        {"https://acme.example.net", connectorhost.Route{Method: "GET", Host: "acme.example.net", Path: "/rest/api/3/search", NamedByKnob: true}},
+		"trailing slash":   {"https://acme.example.net/", connectorhost.Route{Method: "GET", Host: "acme.example.net", Path: "/rest/api/3/search", NamedByKnob: true}},
+		"path prefix":      {"https://acme.example.net/jira", connectorhost.Route{Method: "GET", Host: "acme.example.net", Path: "/jira/rest/api/3/search", NamedByKnob: true}},
+		"prefix and slash": {"https://acme.example.net:8443/jira/", connectorhost.Route{Method: "GET", Host: "acme.example.net:8443", Path: "/jira/rest/api/3/search", NamedByKnob: true}},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -689,7 +689,7 @@ func TestUseMapsARootBaseRouteToTheBarePrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := backendrows.Lookup("site")
-	if want := (connectorhost.Route{Method: "GET", Host: "acme.example.net", Path: "/jira"}); !reflect.DeepEqual(got.Routes[0], want) {
+	if want := (connectorhost.Route{Method: "GET", Host: "acme.example.net", Path: "/jira", NamedByKnob: true}); !reflect.DeepEqual(got.Routes[0], want) {
 		t.Errorf("Routes[0] = %v, want %v", got.Routes[0], want)
 	}
 }
