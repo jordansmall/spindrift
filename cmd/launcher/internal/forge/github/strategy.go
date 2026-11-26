@@ -27,7 +27,8 @@ var Strategy = backendkit.Strategy{
 	AutoMergeRemedy: func(backendkit.Shared) string {
 		return `enable "Allow auto-merge" in repo Settings → General`
 	},
-	AcquireToken: acquireTokenWith(introspectToken),
+	AcquireToken:        acquireTokenWith(introspectToken),
+	RecordSandboxTotals: RecordRoutedSandboxTotals,
 	// The tracker and Code Forge build without a row and fail each call with
 	// ErrNoRoute (routeRow, #6811): a build that failed here would take down
 	// every launch path that merely constructs one. A missing runtime is a

@@ -65,6 +65,8 @@ type Runtime struct {
 	sessions map[sessionKey]*session
 	// owned are the sandboxes started for rows, by row name.
 	owned map[string]connectorsandbox.Sandbox
+	// onClose run once, in order, at the end of Close.
+	onClose []func() error
 }
 
 type sessionKey struct {
@@ -143,9 +145,18 @@ func (r *Runtime) GitCredential(row backendrows.Row) gitexec.CredentialSource {
 // Row is the named backend row.
 func (r *Runtime) Row(name string) (backendrows.Row, bool) { return r.lookup(name) }
 
+// OnClose registers f to run at the end of Close, after the sessions and the
+// row sandboxes closed, in registration order; its error joins Close's. A
+// runtime already closed never runs it.
+func (r *Runtime) OnClose(f func() error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.onClose = append(r.onClose, f)
+}
+
 // Close closes every session's live Connector, then every sandbox it started
-// for a row, and refuses further Trackers and Code Forges; a second Close does
-// nothing.
+// for a row, then runs the OnClose funcs, and refuses further Trackers and
+// Code Forges; a second Close does nothing.
 func (r *Runtime) Close() error {
 	r.mu.Lock()
 	if r.closed {
@@ -157,6 +168,8 @@ func (r *Runtime) Close() error {
 	r.sessions = nil
 	owned := r.owned
 	r.owned = nil
+	onClose := r.onClose
+	r.onClose = nil
 	r.mu.Unlock()
 	var errs []error
 	for _, s := range sessions {
@@ -165,6 +178,9 @@ func (r *Runtime) Close() error {
 	// After the sessions: a Connector closes through the sandbox that hosts it.
 	for _, sb := range owned {
 		errs = append(errs, sb.Close(context.Background()))
+	}
+	for _, f := range onClose {
+		errs = append(errs, f())
 	}
 	return errors.Join(errs...)
 }

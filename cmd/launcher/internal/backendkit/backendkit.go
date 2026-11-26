@@ -89,6 +89,10 @@ type Strategy struct {
 	// means this Dispatch has no host issue reader; it is never guessed from
 	// the repo slug, which a tracker with its own scope would misname.
 	IssueReadScope func(Shared, Lookup) string
+	// RecordSandboxTotals writes the run's Connector sandbox cost to wherever
+	// the backend keeps it. The Connector runtime's setup calls it once when
+	// the runtime closes, after its sandboxes stopped, so the totals are final.
+	RecordSandboxTotals func()
 	// AutoMergeRemedy is the fix to name when the repo does not allow
 	// auto-merge. Nil means the backend has no native auto-merge, so the
 	// preflight leaves it out of its "CODE_FORGE=..." list.
