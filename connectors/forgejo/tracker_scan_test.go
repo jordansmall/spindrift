@@ -268,19 +268,50 @@ func TestUnreadableLabelRegistryQueriesAnyway(t *testing.T) {
 }
 
 func TestCountRouteIsAndedAndRechecked(t *testing.T) {
-	const routed = repoAPI + "/issues?labels=ready%2Corders-api&limit=1&page=1&state=open&type=issues"
+	const routed = repoAPI + "/issues?labels=ready%2Corders-api&limit=100&page=1&state=open&type=issues"
+	both := `{"number":3,"labels":[{"name":"ready"},{"name":"orders-api"}]}`
 	for _, tc := range []struct {
 		name string
 		page string
 		want int
 	}{
-		{"carries both", `[{"number":3,"labels":[{"name":"ready"},{"name":"orders-api"}]}]`, 12},
+		{"carries both", `[` + both + `]`, 12},
+		{"every issue on the page carries both", `[` + both + `,` + both + `]`, 12},
+		{"a later issue lacks a label", `[` + both + `,{"number":4,"labels":[{"name":"ready"}]}]`, 0},
 		{"filter dropped by Forgejo", `[{"number":3,"labels":[{"name":"ready"}]}]`, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			labelStub(t, `[{"id":1,"name":"ready"},{"id":2,"name":"orders-api"}]`, status(404), map[string]connector.Response{routed: ok(tc.page)})
 			withHeaders(t, map[string]string{"X-Total-Count": "12"})
 			got, err := count(ttgt, tracker.Query{Label: "ready", Route: orders}, 0, false)
+			if err != nil || got != tc.want {
+				t.Fatalf("count = %d, %v, want %d", got, err, tc.want)
+			}
+		})
+	}
+}
+
+// With the org registry unreadable, a route label absent from the repo's is
+// still queried, and Forgejo may drop it from the filter (#7409): every route
+// label must be re-checked on every issue, not just the first or the first label.
+func TestCountMultiLabelRouteUnreadableOrgRechecksEveryLabel(t *testing.T) {
+	const routed = repoAPI + "/issues?labels=ready%2Corders-api%2Cbilling&limit=100&page=1&state=open&type=issues"
+	route := []tracker.Selector{{Kind: "label", Value: "orders-api"}, {Kind: "label", Value: "billing"}}
+	all := `{"number":3,"labels":[{"name":"ready"},{"name":"orders-api"},{"name":"billing"}]}`
+	for _, tc := range []struct {
+		name string
+		page string
+		want int
+	}{
+		{"every issue carries every label", `[` + all + `,` + strings.Replace(all, `"number":3`, `"number":4`, 1) + `]`, 12},
+		{"a later issue lacks the second route label", `[` + all + `,{"number":4,"labels":[{"name":"ready"},{"name":"orders-api"}]}]`, 0},
+		{"a later issue lacks the first route label", `[` + all + `,{"number":4,"labels":[{"name":"ready"},{"name":"billing"}]}]`, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// billing is org-only, and the org lookup is refused for lack of auth.
+			labelStub(t, `[{"id":1,"name":"ready"},{"id":2,"name":"orders-api"}]`, status(403), map[string]connector.Response{routed: ok(tc.page)})
+			withHeaders(t, map[string]string{"X-Total-Count": "12"})
+			got, err := count(ttgt, tracker.Query{Label: "ready", Route: route}, 0, false)
 			if err != nil || got != tc.want {
 				t.Fatalf("count = %d, %v, want %d", got, err, tc.want)
 			}

@@ -58,14 +58,20 @@ func hasAll(i tracker.Issue, labels []string) bool {
 }
 
 // count reads the open issues carrying q.Label and every route label from the
-// X-Total-Count of a one-item page rather than walking them, clamped to limit
-// when limit > 0.
+// X-Total-Count of one page rather than walking them, clamped to limit when
+// limit > 0. The page is one item, or a full page when a route is set: Forgejo
+// can drop a single route label from a multi-label filter, so every issue on
+// the page is re-checked before the total is trusted.
 func count(t tracker.Target, q tracker.Query, limit int, _ bool) (int, error) {
-	v := url.Values{"state": {"open"}, "type": {"issues"}, "limit": {"1"}, "page": {"1"}}
 	required, err := tracker.RouteLabels(q.Label, q.Route)
 	if err != nil {
 		return 0, err
 	}
+	perPage := 1
+	if len(q.Route) > 0 {
+		perPage = pageSize
+	}
+	v := url.Values{"state": {"open"}, "type": {"issues"}, "limit": {strconv.Itoa(perPage)}, "page": {"1"}}
 	if len(required) > 0 {
 		if !allDefined(t, required) {
 			return 0, nil
@@ -93,8 +99,10 @@ func count(t tracker.Target, q tracker.Query, limit int, _ bool) (int, error) {
 		// Forgejo dropped a label from the filter, so total counts unrelated
 		// issues; usually allDefined answered true for a label it could not
 		// rule out.
-		if len(page) > 0 && !hasAll(page[0].issue(), required) {
-			return 0, nil
+		for _, r := range page {
+			if !hasAll(r.issue(), required) {
+				return 0, nil
+			}
 		}
 	}
 	if limit > 0 {
