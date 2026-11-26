@@ -6795,8 +6795,8 @@ lists (github.com, codeberg.org) pre-selects both and you can override either;
 otherwise each defaults to `github`. It offers a row on an axis when it can
 collect that row's credential: `github`, `forgejo` and `local` on both axes,
 `git` as a forge only, and `jira` as a tracker only. A jira pick also adds the
-jira Connector's flake input and module import to the generated `flake.nix`
-(see [Running jira through its Connector](#running-jira-through-its-connector)).
+jira Connector's flake input and `spindrift.connectorData` entry to the generated
+`flake.nix` (see [Running jira through its Connector](#running-jira-through-its-connector)).
 
 - **`github`** (default) — the label lifecycle described above.
 - **`local`** — a private, file-based tracker; see [Local issue

@@ -127,9 +127,9 @@ in
     in
     assert assertMsg (
       row != null
-    ) "the fixture Connector's module must register spindrift.connectors.fixture";
+    ) "the fixture Connector's data must register spindrift.connectors.fixture";
     assert assertMsg (row.name == "fixture") "the row's name must default to its attr name";
-    assert assertMsg (row.knobs == fixtureKnob) "the registered row must carry the module's knobs";
+    assert assertMsg (row.knobs == fixtureKnob) "the registered row must carry the data's knobs";
     assert assertMsg (
       ((configOf withTemplate).connectors.fixture or { }).knobs or null == fixtureKnob
     ) "the copyable flake.nix template's connectorData must register the same fixture row";
@@ -166,7 +166,7 @@ in
     assert assertMsg (row ? module) "the pi Connector's row must carry a `module`";
     pkgs.runCommand "connectors-pi-contributes-driver-row" { } "touch $out";
 
-  # The github Connector's module registers its Route table on the row, so
+  # The github Connector's data registers its Route table on the row, so
   # the table a Consumer's row carries is the one routes.nix declares.
   connectors-github-contributes-routes =
     let
