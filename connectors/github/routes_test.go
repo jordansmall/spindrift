@@ -25,9 +25,7 @@ func TestRoutesDeclareExactlyTheExtraHeadersSent(t *testing.T) {
 		t.Fatalf("%v\nthe Connector's checks export the Route table: run `nix run .#connector-dev -- github flake check`", err)
 	}
 	var sent []string
-	old := send
-	t.Cleanup(func() { send = old })
-	send = func(r connector.Request) (connector.Response, error) {
+	host.Serve(t, func(r connector.Request) (connector.Response, error) {
 		for k := range r.Headers {
 			k = http.CanonicalHeaderKey(k)
 			if !slices.Contains(hostFixedRequestHeaders, k) && !slices.Contains(sent, k) {
@@ -35,8 +33,8 @@ func TestRoutesDeclareExactlyTheExtraHeadersSent(t *testing.T) {
 			}
 		}
 		return connector.Response{Status: 200}, nil
-	}
-	if _, err := requestWith("POST", "https://api.github.com", "/x", []byte("{}"), map[string]string{"If-None-Match": `"e"`}); err != nil {
+	})
+	if _, err := requestWith("POST", "https://api.github.com", "/repos/o/r/issues", []byte("{}"), map[string]string{"If-None-Match": `"e"`}); err != nil {
 		t.Fatal(err)
 	}
 	slices.Sort(sent)

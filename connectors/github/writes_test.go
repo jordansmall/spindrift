@@ -29,8 +29,8 @@ func TestFetchClassesNon2xx(t *testing.T) {
 		502: connector.Transient, 429: connector.RateLimited, 404: connector.NotFound,
 		403: connector.Auth, 405: connector.Permanent,
 	} {
-		stub(t, map[string]connector.Response{"https://api.github.com/x": {Status: status}})
-		_, err := fetch("GET", "https://api.github.com", "/x", nil)
+		stub(t, map[string]connector.Response{"https://api.github.com/repos/o/r/issues": {Status: status}})
+		_, err := fetch("GET", "https://api.github.com", "/repos/o/r/issues", nil)
 		if got := classOf(t, err); got != want {
 			t.Errorf("status %d: class %q, want %q", status, got, want)
 		}
@@ -231,11 +231,9 @@ func TestFilesEmptyIsNotNil(t *testing.T) {
 }
 
 func TestFilesOverPageCeilingIsError(t *testing.T) {
-	old := send
-	send = func(connector.Request) (connector.Response, error) {
+	host.Serve(t, func(connector.Request) (connector.Response, error) {
 		return ok("[" + strings.Repeat(`{"filename":"f"},`, pageSize-1) + `{"filename":"f"}]`), nil
-	}
-	t.Cleanup(func() { send = old })
+	})
 	if _, err := prFiles(ftgt, "5"); err == nil {
 		t.Fatal("want error, not a truncated list")
 	}

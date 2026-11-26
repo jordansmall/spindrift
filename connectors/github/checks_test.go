@@ -27,9 +27,7 @@ func TestTrackerProbeReturnsStatusWithoutFailingOnNon2xx(t *testing.T) {
 }
 
 func TestTrackerProbeErrorsOnTransportFailure(t *testing.T) {
-	old := send
-	send = func(connector.Request) (connector.Response, error) { return connector.Response{}, errors.New("dial") }
-	t.Cleanup(func() { send = old })
+	host.Serve(t, func(connector.Request) (connector.Response, error) { return connector.Response{}, errors.New("dial") })
 	if _, err := trackerProbe(tgt); err == nil {
 		t.Fatal("want transport error")
 	}

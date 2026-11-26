@@ -162,9 +162,7 @@ func TestForgeErrors(t *testing.T) {
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			old := send
-			send = func(connector.Request) (connector.Response, error) { return c.resp, nil }
-			t.Cleanup(func() { send = old })
+			host.Serve(t, func(connector.Request) (connector.Response, error) { return c.resp, nil })
 			if c.call() == nil {
 				t.Fatal("want error")
 			}

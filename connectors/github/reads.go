@@ -19,10 +19,6 @@ const (
 	maxPages = 50
 )
 
-// send is the HTTP transport; tests swap it because connector.HTTPRequest
-// fails outside wasip1.
-var send = connector.HTTPRequest
-
 // request sends one request to api+path. The host attaches the credential, so
 // none is set here. The status is the caller's to judge.
 func request(method, api, path string, body []byte) (connector.Response, error) {
@@ -41,7 +37,7 @@ func requestWith(method, api, path string, body []byte, extra map[string]string)
 	if body != nil {
 		headers["Content-Type"] = "application/json"
 	}
-	return send(connector.Request{Method: method, URL: api + path, Headers: headers, Body: string(body)})
+	return connector.HTTPRequest(connector.Request{Method: method, URL: api + path, Headers: headers, Body: string(body)})
 }
 
 // statusError is a non-2xx answer, carrying the class core retries on.
