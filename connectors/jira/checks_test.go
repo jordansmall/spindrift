@@ -195,3 +195,22 @@ func TestCountCarriesRouteClauses(t *testing.T) {
 		t.Errorf("server jql = %q, want %s", g, want)
 	}
 }
+
+// A project key that cannot stay one path segment is refused by the Connector
+// before any request is sent, as an issue key is.
+func TestProjectKeyRefusedBeforeAnyRequest(t *testing.T) {
+	got := serve(t, "/jira/rest/api/2/project/ENG/statuses", `[]`)
+	for _, key := range []string{".", ".."} {
+		bad := cloud
+		bad.Repo = key
+		if _, err := statuses(bad); err == nil {
+			t.Errorf("statuses(%q) succeeded, want a refusal", key)
+		}
+		if _, err := createMeta(bad, "Bug"); err == nil {
+			t.Errorf("createMeta(%q) succeeded, want a refusal", key)
+		}
+	}
+	if len(*got) != 0 {
+		t.Fatalf("requests sent for refused project keys: %v", *got)
+	}
+}

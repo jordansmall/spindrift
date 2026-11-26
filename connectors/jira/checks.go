@@ -40,7 +40,11 @@ func statuses(t tracker.Target) ([]tracker.Status, error) {
 			} `json:"statusCategory"`
 		} `json:"statuses"`
 	}
-	if err := get(t, "/rest/api/2/project/"+url.PathEscape(t.Repo)+"/statuses", &perType); err != nil {
+	repo, err := segment("project key", t.Repo)
+	if err != nil {
+		return nil, err
+	}
+	if err := get(t, "/rest/api/2/project/"+repo+"/statuses", &perType); err != nil {
 		return nil, err
 	}
 	out := []tracker.Status{}
@@ -97,7 +101,11 @@ func createMetaRows(t tracker.Target, path string) ([]createMetaRow, error) {
 // createMeta reports the issue types the project offers and the create fields
 // of issueType (exact name match), none when it is not offered.
 func createMeta(t tracker.Target, issueType string) (tracker.CreateMeta, error) {
-	base := "/rest/api/2/issue/createmeta/" + url.PathEscape(t.Repo) + "/issuetypes"
+	repo, err := segment("project key", t.Repo)
+	if err != nil {
+		return tracker.CreateMeta{}, err
+	}
+	base := "/rest/api/2/issue/createmeta/" + repo + "/issuetypes"
 	types, err := createMetaRows(t, base)
 	if err != nil {
 		return tracker.CreateMeta{}, err
@@ -113,7 +121,11 @@ func createMeta(t tracker.Target, issueType string) (tracker.CreateMeta, error) 
 	if typeID == "" {
 		return cm, nil
 	}
-	rows, err := createMetaRows(t, base+"/"+url.PathEscape(typeID))
+	typeSeg, err := segment("issue type id", typeID)
+	if err != nil {
+		return tracker.CreateMeta{}, err
+	}
+	rows, err := createMetaRows(t, base+"/"+typeSeg)
 	if err != nil {
 		return tracker.CreateMeta{}, err
 	}

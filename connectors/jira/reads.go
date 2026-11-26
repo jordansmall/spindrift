@@ -471,11 +471,32 @@ func searchServer(t tracker.Target, jql string, limit int) ([]rawIssue, error) {
 	return nil, fmt.Errorf("GET /rest/api/2/search: more than %d pages", maxPages)
 }
 
-func issuePath(key string) string { return "/rest/api/2/issue/" + url.PathEscape(key) }
+// segment refuses s when it cannot stay one path segment, such as "." or "..",
+// before sending; the host would refuse it and close the Connector. what names
+// the value in the error.
+func segment(what, s string) (string, error) {
+	seg, err := connector.PathSegment(s)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", what, err)
+	}
+	return seg, nil
+}
+
+func issuePath(key string) (string, error) {
+	seg, err := segment("issue key", key)
+	if err != nil {
+		return "", err
+	}
+	return "/rest/api/2/issue/" + seg, nil
+}
 
 func issue(t tracker.Target, key string) (tracker.Issue, error) {
 	var raw rawIssue
-	if err := get(t, issuePath(key)+"?properties="+dedupPropertyKey, &raw); err != nil {
+	path, err := issuePath(key)
+	if err != nil {
+		return tracker.Issue{}, err
+	}
+	if err := get(t, path+"?properties="+dedupPropertyKey, &raw); err != nil {
 		return tracker.Issue{}, err
 	}
 	return raw.issue(), nil
@@ -496,7 +517,11 @@ func comments(t tracker.Target, key string) ([]tracker.Comment, error) {
 			Properties []property `json:"properties"`
 		} `json:"comments"`
 	}
-	if err := get(t, issuePath(key)+"/comment?expand=properties", &payload); err != nil {
+	path, err := issuePath(key)
+	if err != nil {
+		return nil, err
+	}
+	if err := get(t, path+"/comment?expand=properties", &payload); err != nil {
 		return nil, err
 	}
 	out := make([]tracker.Comment, len(payload.Comments))
@@ -535,7 +560,11 @@ var (
 // relationship text matches, deduped in payload order.
 func linkKeys(t tracker.Target, key string, dir linkDirection) ([]string, error) {
 	var raw rawIssue
-	if err := get(t, issuePath(key), &raw); err != nil {
+	path, err := issuePath(key)
+	if err != nil {
+		return nil, err
+	}
+	if err := get(t, path, &raw); err != nil {
 		return nil, err
 	}
 	ids := []string{}
