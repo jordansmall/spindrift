@@ -43,6 +43,11 @@ import (
 // on), interleaved in a shuffled order, and compare each row against the
 // process row from the same round.
 //
+// The Start and HostCall benchmarks also have a -x2 and -x3 row per sandbox row
+// (sandbox-bwrap-x2): that many sandboxes over one runner, all live together,
+// as a dispatch has the Drivers' shared sandbox and its backend rows' own. Read
+// them against the plain row from the same round.
+//
 // A sandbox row's ns/line less in-process is the per-call overhead; the
 // HostCall row's ns/op less in-process is the per-call and per-Host-call
 // overhead together. hop-ns/call is the sandbox's own measure of a call, and
@@ -69,6 +74,8 @@ const (
 // benchRow is one way to run a Connector.
 type benchRow struct {
 	name string
+	// sandboxes is how many sandboxes the row holds live together.
+	sandboxes int
 	// newSandbox builds the row's runner once, skipping tb when the row is not
 	// opted into, and returns a factory for fresh, unstarted Sandboxes over it;
 	// nil for the in-process row.
@@ -77,10 +84,10 @@ type benchRow struct {
 
 func benchRows() []benchRow {
 	return []benchRow{
-		{name: "in-process"},
-		{name: "sandbox-process", newSandbox: newProcessSandbox},
-		{name: "sandbox-podman", newSandbox: newPodmanSandbox},
-		{name: "sandbox-bwrap", newSandbox: newBwrapSandbox},
+		{name: "in-process", sandboxes: 1},
+		{name: "sandbox-process", sandboxes: 1, newSandbox: newProcessSandbox},
+		{name: "sandbox-podman", sandboxes: 1, newSandbox: newPodmanSandbox},
+		{name: "sandbox-bwrap", sandboxes: 1, newSandbox: newBwrapSandbox},
 	}
 }
 
@@ -88,6 +95,20 @@ func sandboxRows() []benchRow {
 	var rows []benchRow
 	for _, r := range benchRows() {
 		if r.newSandbox != nil {
+			rows = append(rows, r)
+		}
+	}
+	return rows
+}
+
+// multiSandboxRows is a -x2 and a -x3 row per sandbox row, each opted into by
+// the same input as its single row.
+func multiSandboxRows() []benchRow {
+	var rows []benchRow
+	for _, n := range []int{2, 3} {
+		for _, r := range sandboxRows() {
+			r.name = fmt.Sprintf("%s-x%d", r.name, n)
+			r.sandboxes = n
 			rows = append(rows, r)
 		}
 	}
@@ -102,30 +123,63 @@ type benchLoader struct {
 	stats       func() (connectorsandbox.Stats, bool)
 }
 
-// open returns the row's loader. A sandbox is started by its first load, and
-// closed at tb's cleanup.
+// open returns the loader of a row that holds one sandbox. A sandbox is started
+// by its first load, and closed at tb's cleanup.
 func (r benchRow) open(tb testing.TB) benchLoader {
 	tb.Helper()
-	if r.newSandbox == nil {
-		return benchLoader{load: connectorhost.Load, loadNetwork: connectorhost.LoadNetwork}
+	if r.sandboxes != 1 {
+		tb.Fatalf("row %s holds %d sandboxes, open wants one", r.name, r.sandboxes)
 	}
-	sb := r.newSandbox(tb)()
-	tb.Cleanup(func() { _ = sb.Close(context.Background()) })
-	return benchLoader{load: sb.Load, loadNetwork: sb.LoadNetwork, stats: sb.Stats}
+	return r.openAll(tb)[0]
+}
+
+// openAll returns one loader per sandbox the row holds, each closed at tb's
+// cleanup.
+func (r benchRow) openAll(tb testing.TB) []benchLoader {
+	tb.Helper()
+	if r.newSandbox == nil {
+		return []benchLoader{{load: connectorhost.Load, loadNetwork: connectorhost.LoadNetwork}}
+	}
+	newSandbox := r.newSandbox(tb)
+	var ls []benchLoader
+	for range r.sandboxes {
+		sb := newSandbox()
+		tb.Cleanup(func() { _ = sb.Close(context.Background()) })
+		ls = append(ls, benchLoader{load: sb.Load, loadNetwork: sb.LoadNetwork, stats: sb.Stats})
+	}
+	return ls
+}
+
+// sumStats is the loaders' Stats added together, so hop measures a row's
+// sandboxes as one; nil in the Launcher. Every loader in a row is the same
+// kind, all sandboxed or all in the Launcher, so the first one's stats decide.
+func sumStats(ls []benchLoader) func() (connectorsandbox.Stats, bool) {
+	if ls[0].stats == nil {
+		return nil
+	}
+	return func() (connectorsandbox.Stats, bool) {
+		var sum connectorsandbox.Stats
+		for _, l := range ls {
+			st, _ := l.stats()
+			sum.Start += st.Start
+			sum.HopStats = sum.HopStats.Add(st.HopStats)
+		}
+		return sum, true
+	}
 }
 
 // hop runs f and reports the hop-ns and Host calls each call paid, from the
-// Stats it moved; a no-op around f for the in-process row. The load's own
-// exchanges are before f, so they are not a call's.
-func (l benchLoader) hop(b *testing.B, f func()) {
+// Stats it moved; a no-op around f when stats is nil, the in-process row. The
+// load's own exchanges are before f, so they are not a call's.
+func hop(b *testing.B, stats func() (connectorsandbox.Stats, bool), f func()) {
 	b.Helper()
-	if l.stats == nil {
+	if stats == nil {
 		f()
 		return
 	}
-	before, _ := l.stats()
+	before, _ := stats()
 	f()
-	after, _ := l.stats()
+	after, _ := stats()
 	if calls := after.Calls - before.Calls; calls > 0 {
 		b.ReportMetric(float64((after.Hop-before.Hop).Nanoseconds())/float64(calls), "hop-ns/call")
 		b.ReportMetric(float64(after.HostCalls-before.HostCalls)/float64(calls), "host-calls/call")
@@ -193,7 +247,7 @@ func BenchmarkConnectorSandboxDecode(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
-			l.hop(b, func() {
+			hop(b, l.stats, func() {
 				for b.Loop() {
 					decode := s.NewDecoder()
 					for _, line := range lines {
@@ -233,25 +287,39 @@ func BenchmarkConnectorSandboxLoad(b *testing.B) {
 // BenchmarkConnectorSandboxStart is a sandbox's start: a fresh sandbox per
 // iteration over one runner, started by its first load, then closed. start-ns is the start
 // alone (runner start to the host's hello); ns/op adds the first load and the
-// teardown.
+// teardown. An -xN row starts N such sandboxes one after another and holds them
+// all live before closing them, and its start-ns is the sum of their starts.
 func BenchmarkConnectorSandboxStart(b *testing.B) {
 	wasm := benchWasm(b)
-	for _, r := range sandboxRows() {
+	for _, r := range append(sandboxRows(), multiSandboxRows()...) {
 		b.Run(r.name, func(b *testing.B) {
 			newSandbox := r.newSandbox(b)
 			var start time.Duration
 			for b.Loop() {
-				sb := newSandbox()
-				c, err := sb.Load(context.Background(), wasm)
-				if err != nil {
-					_ = sb.Close(context.Background())
-					b.Fatal(err)
+				var sbs []*sandbox.Sandbox
+				var cs []*connectorhost.Connector
+				closeAll := func() {
+					for _, c := range cs {
+						_ = c.Close(context.Background())
+					}
+					for _, sb := range sbs {
+						_ = sb.Close(context.Background())
+					}
 				}
-				if st, ok := sb.Stats(); ok {
-					start += st.Start
+				for range r.sandboxes {
+					sb := newSandbox()
+					sbs = append(sbs, sb)
+					c, err := sb.Load(context.Background(), wasm)
+					if err != nil {
+						closeAll()
+						b.Fatal(err)
+					}
+					cs = append(cs, c)
+					if st, ok := sb.Stats(); ok {
+						start += st.Start
+					}
 				}
-				_ = c.Close(context.Background())
-				_ = sb.Close(context.Background())
+				closeAll()
 			}
 			b.ReportMetric(float64(start.Nanoseconds())/float64(b.N), "start-ns")
 		})
@@ -259,7 +327,9 @@ func BenchmarkConnectorSandboxStart(b *testing.B) {
 }
 
 // BenchmarkConnectorSandboxHostCall is one Connector call that makes one
-// http_request Host call against a local backend.
+// http_request Host call against a local backend. An -xN row loads the Connector
+// into N sandboxes and rotates the calls across them, so ns/op stays one call
+// and hop-ns/call and host-calls/call are over every sandbox's calls.
 func BenchmarkConnectorSandboxHostCall(b *testing.B) {
 	dir, err := fixturebuild.ConnectorDir()
 	if err != nil {
@@ -284,20 +354,24 @@ func BenchmarkConnectorSandboxHostCall(b *testing.B) {
 		Audit:  connectorhost.NewAuditLog(io.Discard),
 	}
 	params := map[string]string{"url": srv.URL + "/repos/x", "method": "GET"}
-	for _, r := range benchRows() {
+	for _, r := range append(benchRows(), multiSandboxRows()...) {
 		b.Run(r.name, func(b *testing.B) {
-			l := r.open(b)
-			c, err := l.loadNetwork(context.Background(), wasm, network)
-			if err != nil {
-				b.Fatal(err)
+			ls := r.openAll(b)
+			var cs []*connectorhost.Connector
+			for _, l := range ls {
+				c, err := l.loadNetwork(context.Background(), wasm, network)
+				if err != nil {
+					b.Fatal(err)
+				}
+				b.Cleanup(func() { _ = c.Close(context.Background()) })
+				cs = append(cs, c)
 			}
-			b.Cleanup(func() { _ = c.Close(context.Background()) })
 			var out struct {
 				Status int `json:"status"`
 			}
-			l.hop(b, func() {
-				for b.Loop() {
-					if err := c.Call(context.Background(), "fetch", params, &out); err != nil {
+			hop(b, sumStats(ls), func() {
+				for i := 0; b.Loop(); i++ {
+					if err := cs[i%len(cs)].Call(context.Background(), "fetch", params, &out); err != nil {
 						b.Fatal(err)
 					}
 				}
