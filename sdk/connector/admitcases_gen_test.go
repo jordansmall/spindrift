@@ -6,6 +6,8 @@ package connector
 
 import (
 	"errors"
+	"net/textproto"
+	"slices"
 	"testing"
 )
 
@@ -13,12 +15,17 @@ var admitCaseRoutes = []Route{
 	{Method: "GET", Host: "jira.example.com", Path: "/rest/api/2"},
 	{Method: "POST", Host: "jira.example.com", Path: "/rest/api/2/issue"},
 	{Method: "GET", Host: "other.example.com:8443", Path: "/"},
+	{Method: "POST", Host: "api.example.com", Path: "/graphql", RequestHeaders: []string{"X-Api-Version"}, ResponseHeaders: []string{"X-OAuth-Scopes"}, Documents: map[string]string{"viewer": "query { viewer { login } }"}},
 }
 
-// An admit case is admitted, or refused for the exact reason in refuse.
+// An admit case is admitted, or refused for the exact reason in refuse. An
+// admitted case with served also has the host answer those headers, and
+// expects exactly the names in readable to reach the guest.
 type admitCase struct {
-	rule, name, method, url, refuse string
-	admit                           bool
+	rule, name, method, url, body, refuse string
+	headers, served                       map[string]string
+	readable                              []string
+	admit                                 bool
 }
 
 var admitCases = []admitCase{
@@ -46,13 +53,48 @@ var admitCases = []admitCase{
 	{rule: "pathPattern", name: "sibling prefix", method: "POST", url: "https://jira.example.com/rest/api/2/issuefoo", refuse: "no route admits POST jira.example.com/rest/api/2/issuefoo"},
 	{rule: "semicolon", name: "dot-dot semicolon", method: "GET", url: "https://jira.example.com/rest/api/2/..;/x", refuse: "no route admits GET jira.example.com/rest/api/2/..;/x"},
 	{rule: "semicolon", name: "path parameter", method: "GET", url: "https://jira.example.com/rest/api/2/issue;x=1", refuse: "no route admits GET jira.example.com/rest/api/2/issue;x=1"},
+	{rule: "requestHeaders", name: "fixed header needs no declaration", method: "GET", url: "https://jira.example.com/rest/api/2", headers: map[string]string{"Accept": "application/json"}, admit: true},
+	{rule: "requestHeaders", name: "declared header", method: "POST", url: "https://api.example.com/graphql", headers: map[string]string{"X-Api-Version": "1"}, body: "{\"query\":\"query { viewer { login } }\"}", admit: true},
+	{rule: "requestHeaders", name: "declared header in any case", method: "POST", url: "https://api.example.com/graphql", headers: map[string]string{"x-api-version": "1"}, body: "{\"query\":\"query { viewer { login } }\"}", admit: true},
+	{rule: "requestHeaders", name: "undeclared header", method: "GET", url: "https://jira.example.com/rest/api/2", headers: map[string]string{"X-Api-Version": "1"}, refuse: "GET jira.example.com/rest/api/2: request header \"X-Api-Version\" is not declared by the route"},
+	{rule: "requestHeaders", name: "credential header", method: "GET", url: "https://jira.example.com/rest/api/2", headers: map[string]string{"Authorization": "Bearer x"}, refuse: "GET jira.example.com/rest/api/2: request header \"Authorization\" is not declared by the route"},
+	{rule: "responseHeaders", name: "declared and fixed headers", method: "POST", url: "https://api.example.com/graphql", body: "{\"query\":\"query { viewer { login } }\"}", served: map[string]string{"ETag": "\"v1\"", "Set-Cookie": "a=b", "X-OAuth-Scopes": "repo", "X-Secret": "s"}, readable: []string{"ETag", "X-OAuth-Scopes"}, admit: true},
+	{rule: "responseHeaders", name: "fixed header only", method: "GET", url: "https://jira.example.com/rest/api/2", served: map[string]string{"Content-Length": "0", "Content-Range": "bytes 0-0/1", "Content-Type": "application/json", "Date": "Thu, 01 Jan 1970 00:00:00 GMT", "ETag": "\"v1\"", "Last-Modified": "Thu, 01 Jan 1970 00:00:00 GMT", "Link": "<https://jira.example.com/next>; rel=\"next\"", "Location": "https://jira.example.com/rest/api/2", "Retry-After": "1", "Set-Cookie": "a=b", "X-OAuth-Scopes": "repo", "X-Secret": "s"}, readable: []string{"Content-Type", "Content-Length", "Content-Range", "Date", "ETag", "Last-Modified", "Link", "Location", "Retry-After"}, admit: true},
+	{rule: "documents", name: "declared document", method: "POST", url: "https://api.example.com/graphql", body: "{\"query\":\"query { viewer { login } }\"}", admit: true},
+	{rule: "documents", name: "variables and operationName", method: "POST", url: "https://api.example.com/graphql", body: "{\"operationName\":\"Viewer\",\"query\":\"query { viewer { login } }\",\"variables\":{}}", admit: true},
+	{rule: "documents", name: "undeclared document", method: "POST", url: "https://api.example.com/graphql", body: "{\"query\":\"query { viewer { id } }\"}", refuse: "POST api.example.com/graphql: query is not a document the route declares"},
+	{rule: "documents", name: "query string", method: "POST", url: "https://api.example.com/graphql?query=x", body: "{\"query\":\"query { viewer { login } }\"}", refuse: "POST api.example.com/graphql: a route that declares documents admits no query string"},
+	{rule: "documents", name: "body is not JSON", method: "POST", url: "https://api.example.com/graphql", body: "not json", refuse: "POST api.example.com/graphql: body is not a JSON object with a string \"query\""},
+	{rule: "documents", name: "body has no query", method: "POST", url: "https://api.example.com/graphql", body: "{\"variables\":{}}", refuse: "POST api.example.com/graphql: body is not a JSON object with a string \"query\""},
+	{rule: "documents", name: "unknown body key", method: "POST", url: "https://api.example.com/graphql", body: "{\"extra\":1,\"query\":\"query { viewer { login } }\"}", refuse: "POST api.example.com/graphql: body key \"extra\" is not allowed"},
 }
 
 func TestAdmitCases(t *testing.T) {
 	h := NewFakeHost(admitCaseRoutes)
 	for _, c := range admitCases {
 		t.Run(c.rule+"/"+c.name, func(t *testing.T) {
-			err := h.Admit(Request{Method: c.method, URL: c.url})
+			req := Request{Method: c.method, URL: c.url, Headers: c.headers, Body: c.body}
+			if c.served != nil {
+				h.Serve(t, func(Request) (Response, error) { return Response{Status: 200, Header: c.served}, nil })
+				if _, err := HTTPRequest(req); err != nil {
+					t.Fatalf("HTTPRequest = %v, want admitted", err)
+				}
+				var got []string
+				for name := range c.served {
+					if _, ok := ResponseHeader(name); ok {
+						got = append(got, textproto.CanonicalMIMEHeaderKey(name))
+					}
+				}
+				want := slices.Clone(c.readable)
+				for i, name := range want {
+					want[i] = textproto.CanonicalMIMEHeaderKey(name)
+				}
+				if slices.Sort(got); !slices.Equal(got, slices.Sorted(slices.Values(want))) {
+					t.Fatalf("guest reads %v, want %v", got, want)
+				}
+				return
+			}
+			err := h.Admit(req)
 			if c.admit {
 				if err != nil {
 					t.Fatalf("Admit = %v, want admitted", err)

@@ -305,6 +305,8 @@ let
   admitCaseChecks =
     ac:
     let
+      isStrList = v: isList v && builtins.all isString v;
+      isStrMap = v: isAttrs v && builtins.all isString (builtins.attrValues v);
       caseChecks =
         rule: c:
         let
@@ -320,10 +322,33 @@ let
               "name"
               "method"
               "url"
+              "headers"
+              "body"
+              "served"
+              "readable"
               "admit"
               "refuse"
             ]
             [ "name" "method" "url" ]
+          )
+          (
+            if
+              (c ? headers -> isStrMap c.headers)
+              && (c ? served -> isStrMap c.served)
+              && (c ? body -> isString c.body)
+              && (c ? readable -> isStrList c.readable)
+            then
+              true
+            else
+              fail "${what}: headers and served must map strings to strings, body be a string, readable a list of strings"
+          )
+          (
+            if (c ? served) != (c ? readable) then
+              fail "${what}: served and readable come together"
+            else if c ? served && !(c ? admit) then
+              fail "${what}: a served case must be admitted"
+            else
+              true
           )
           (
             if isString c.name && c.name != "" && isString c.method && isString c.url then
@@ -373,11 +398,27 @@ let
         what = "admitCases route ${toJSON (r.path or "?")}";
       in
       [
-        (checkFields what r [
-          "method"
-          "host"
-          "path"
-        ])
+        (checkKeys what r
+          [
+            "method"
+            "host"
+            "path"
+            "requestHeaders"
+            "responseHeaders"
+            "documents"
+          ]
+          [ "method" "host" "path" ]
+        )
+        (
+          if
+            (r ? requestHeaders -> isStrList r.requestHeaders)
+            && (r ? responseHeaders -> isStrList r.responseHeaders)
+            && (r ? documents -> isStrMap r.documents)
+          then
+            true
+          else
+            fail "${what}: requestHeaders and responseHeaders must be lists of strings, documents a map of strings"
+        )
         (
           if isString r.method && match "[A-Z]+" r.method != null then
             true
@@ -1412,18 +1453,39 @@ let
     let
       desc = validate description;
       ac = desc.admitCases;
+      goStrList = l: "[]string{${concatStringsSep ", " (map goString l)}}";
+      goStrMap =
+        m:
+        "map[string]string{${
+          concatStringsSep ", " (map (k: "${goString k}: ${goString m.${k}}") (attrNames m))
+        }}";
+      opt =
+        row: field: key: lit:
+        if row ? ${key} then ", ${field}: ${lit row.${key}}" else "";
       routeLit =
-        r: "{Method: ${goString r.method}, Host: ${goString r.host}, Path: ${goString r.path}},\n";
+        r:
+        "{Method: ${goString r.method}, Host: ${goString r.host}, Path: ${goString r.path}"
+        + opt r "RequestHeaders" "requestHeaders" goStrList
+        + opt r "ResponseHeaders" "responseHeaders" goStrList
+        + opt r "Documents" "documents" goStrMap
+        + "},\n";
       caseLit =
         rule: c:
-        "{rule: ${goString rule}, name: ${goString c.name}, method: ${goString c.method}, url: ${goString c.url}, "
+        "{rule: ${goString rule}, name: ${goString c.name}, method: ${goString c.method}, url: ${goString c.url}"
+        + opt c "headers" "headers" goStrMap
+        + opt c "body" "body" goString
+        + opt c "served" "served" goStrMap
+        + opt c "readable" "readable" goStrList
+        + ", "
         + (if c ? refuse then "refuse: ${goString c.refuse}" else "admit: true")
         + "},\n";
       data =
         routesType:
         "var admitCaseRoutes = []${routesType}{\n${concat (map routeLit ac.routes)}}\n\n"
-        + "// An admit case is admitted, or refused for the exact reason in refuse.\n"
-        + "type admitCase struct {\n\trule, name, method, url, refuse string\n\tadmit bool\n}\n\n"
+        + "// An admit case is admitted, or refused for the exact reason in refuse. An\n"
+        + "// admitted case with served also has the host answer those headers, and\n"
+        + "// expects exactly the names in readable to reach the guest.\n"
+        + "type admitCase struct {\n\trule, name, method, url, body, refuse string\n\theaders, served map[string]string\n\treadable []string\n\tadmit bool\n}\n\n"
         + "var admitCases = []admitCase{\n${
           concat (concatMap' (r: map (caseLit r.name) r.cases) ac.rules)
         }}\n\n";
@@ -1441,7 +1503,9 @@ let
           	"encoding/json"
           	"errors"
           	"io"
+          	"maps"
           	"net/http"
+          	"slices"
           	"strings"
           	"testing"
 
@@ -1451,33 +1515,51 @@ let
         ''
         + data "connectorhost.Route"
         + ''
-          // admitCaseTransport answers every request 200 and counts them, so a
-          // case shows whether the host sent it without dialing anything.
-          type admitCaseTransport struct{ sent int }
+          // admitCaseTransport answers every request 200 with the served headers
+          // and counts them, so a case shows whether the host sent it without
+          // dialing anything.
+          type admitCaseTransport struct {
+          	sent   int
+          	served map[string]string
+          }
 
           func (t *admitCaseTransport) RoundTrip(*http.Request) (*http.Response, error) {
           	t.sent++
-          	return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("ok"))}, nil
+          	h := http.Header{}
+          	for k, v := range t.served {
+          		h.Add(k, v)
+          	}
+          	return &http.Response{StatusCode: 200, Header: h, Body: io.NopCloser(strings.NewReader("ok"))}, nil
           }
 
           func TestAdmitCases(t *testing.T) {
           	for _, c := range admitCases {
           		t.Run(c.rule+"/"+c.name, func(t *testing.T) {
-          			stub := &admitCaseTransport{}
+          			stub := &admitCaseTransport{served: c.served}
           			n := &connectorhost.Network{
           				Name:   "admit-cases",
           				Routes: admitCaseRoutes,
           				Client: &http.Client{Transport: stub},
           				Audit:  connectorhost.NewAuditLog(&bytes.Buffer{}),
           			}
-          			raw, err := json.Marshal(map[string]string{"method": c.method, "url": c.url})
+          			raw, err := json.Marshal(map[string]any{"method": c.method, "url": c.url, "headers": c.headers, "body": c.body})
           			if err != nil {
           				t.Fatal(err)
           			}
-          			_, _, err = n.Do(context.Background(), raw, 1<<10)
+          			_, _, got, err := n.DoHeader(context.Background(), raw, 1<<10)
           			if c.admit {
           				if err != nil || stub.sent != 1 {
           					t.Fatalf("err = %v, sent = %d, want admitted and sent once", err, stub.sent)
+          				}
+          				if c.served != nil {
+          					// The host holds canonical names: "Etag", not "ETag".
+          					want := slices.Clone(c.readable)
+          					for i, name := range want {
+          						want[i] = http.CanonicalHeaderKey(name)
+          					}
+          					if names := slices.Sorted(maps.Keys(got)); !slices.Equal(names, slices.Sorted(slices.Values(want))) {
+          						t.Fatalf("guest reads %v, want %v", names, want)
+          					}
           				}
           				return
           			}
@@ -1497,6 +1579,8 @@ let
 
           import (
           	"errors"
+          	"net/textproto"
+          	"slices"
           	"testing"
           )
 
@@ -1507,7 +1591,28 @@ let
           	h := NewFakeHost(admitCaseRoutes)
           	for _, c := range admitCases {
           		t.Run(c.rule+"/"+c.name, func(t *testing.T) {
-          			err := h.Admit(Request{Method: c.method, URL: c.url})
+          			req := Request{Method: c.method, URL: c.url, Headers: c.headers, Body: c.body}
+          			if c.served != nil {
+          				h.Serve(t, func(Request) (Response, error) { return Response{Status: 200, Header: c.served}, nil })
+          				if _, err := HTTPRequest(req); err != nil {
+          					t.Fatalf("HTTPRequest = %v, want admitted", err)
+          				}
+          				var got []string
+          				for name := range c.served {
+          					if _, ok := ResponseHeader(name); ok {
+          						got = append(got, textproto.CanonicalMIMEHeaderKey(name))
+          					}
+          				}
+          				want := slices.Clone(c.readable)
+          				for i, name := range want {
+          					want[i] = textproto.CanonicalMIMEHeaderKey(name)
+          				}
+          				if slices.Sort(got); !slices.Equal(got, slices.Sorted(slices.Values(want))) {
+          					t.Fatalf("guest reads %v, want %v", got, want)
+          				}
+          				return
+          			}
+          			err := h.Admit(req)
           			if c.admit {
           				if err != nil {
           					t.Fatalf("Admit = %v, want admitted", err)
@@ -1532,11 +1637,32 @@ let
     let
       ac = (validate description).admitCases;
       cell = builtins.replaceStrings [ "|" ] [ "\\|" ];
-      routeLine = r: "- `${r.method} ${r.host}${r.path}`\n";
-      verdict = c: if c ? refuse then "refused: `${cell c.refuse}`" else "admitted";
+      names = concatStringsSep ", ";
+      routeLine =
+        r:
+        "- `${r.method} ${r.host}${r.path}`"
+        + (if r ? requestHeaders then "; sends ${names (map (n: "`${n}`") r.requestHeaders)}" else "")
+        + (if r ? responseHeaders then "; reads ${names (map (n: "`${n}`") r.responseHeaders)}" else "")
+        + (if r ? documents then "; documents ${names (map (n: "`${n}`") (attrNames r.documents))}" else "")
+        + "\n";
+      verdict =
+        c:
+        if c ? refuse then
+          "refused: `${cell c.refuse}`"
+        else if c ? readable then
+          "admitted; guest reads ${if c.readable == [ ] then "nothing" else names c.readable}"
+        else
+          "admitted";
+      extras =
+        c:
+        (if c ? headers then " + header ${names (attrNames c.headers)}" else "")
+        + (if c ? served then " + served ${names (attrNames c.served)}" else "")
+        + (if c ? body then " + body `${c.body}`" else "");
       row =
         rule: i: c:
-        "| ${if i == 0 then ruleCell rule else ""} | `${cell c.method} ${cell c.url}` | ${verdict c} |\n";
+        "| ${
+          if i == 0 then ruleCell rule else ""
+        } | `${cell c.method} ${cell c.url}`${cell (extras c)} | ${verdict c} |\n";
       ruleCell = rule: "**`${rule.name}`**: ${cell rule.doc}";
       ruleRows =
         rule:
