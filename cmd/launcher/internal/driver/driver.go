@@ -100,45 +100,68 @@ type Driver interface {
 	SessionFlags(mode, repoSlug, issue, home string) (driverkit.SessionFlag, error)
 }
 
-// registry is populated by the bundle package's init(); this package imports
-// no Driver, so a binary links the Drivers by importing the bundle (ADR 0066
-// decision 8).
-var registry = map[string]Driver{}
-
-// Register adds the Driver that runs s to the registry, keyed on s.Name. It
-// panics on a duplicate name, which is a programming error rather than a
-// runtime condition.
-func Register(s driverkit.Strategy) {
-	if Has(s.Name) {
-		panic("driver: duplicate registration for " + s.Name)
-	}
-	registry[s.Name] = driverkit.New(s)
+// Set is the Drivers one runtime offers: the native Strategies linked into the
+// binary, the Connector Drivers its rows load (lazily, once), the Descriptors
+// in force (the generated ones overlaid by rows), and each native Driver's
+// shadow row. The zero value is not usable; build one with NewSet. A Set is
+// built by one goroutine, then read concurrently.
+type Set struct {
+	natives     map[string]Driver
+	lazy        map[string]func() (Driver, error)
+	descriptors []Descriptor
+	shadows     map[string]shadowRow
 }
 
-// lazyDrivers holds the Drivers loaded on first use rather than linked in,
-// keyed by name; New resolves them and Names lists them (ADR 0073).
-var lazyDrivers = map[string]func() (Driver, error){}
+// NewSet returns a Set holding natives, keyed on each Strategy's Name, over the
+// generated Descriptors. This package imports no Driver, so the binary supplies
+// the natives (ADR 0066 decision 8). It panics on a duplicate name, which is a
+// programming error rather than a runtime condition.
+func NewSet(natives ...driverkit.Strategy) *Set {
+	s := &Set{
+		natives:     map[string]Driver{},
+		lazy:        map[string]func() (Driver, error){},
+		descriptors: slices.Clone(descriptors),
+		shadows:     map[string]shadowRow{},
+	}
+	for _, n := range natives {
+		if s.Has(n.Name) {
+			panic("driver: duplicate registration for " + n.Name)
+		}
+		s.natives[n.Name] = driverkit.New(n)
+	}
+	return s
+}
 
-// RegisterConnector adds a Driver that load builds on first use, keyed on name.
+// clone returns an independent copy of s.
+func (s *Set) clone() *Set {
+	return &Set{
+		natives:     maps.Clone(s.natives),
+		lazy:        maps.Clone(s.lazy),
+		descriptors: slices.Clone(s.descriptors),
+		shadows:     maps.Clone(s.shadows),
+	}
+}
+
+// AddConnector adds a Driver that load builds on first use, keyed on name.
 // load runs at most once, so a Connector is compiled only when a run selects
-// it. It panics on a duplicate name, as Register does.
-func RegisterConnector(name string, load func() (driverkit.Strategy, error)) {
-	if Has(name) {
+// it. It panics on a duplicate name, as NewSet does.
+func (s *Set) AddConnector(name string, load func() (driverkit.Strategy, error)) {
+	if s.Has(name) {
 		panic("driver: duplicate registration for " + name)
 	}
-	lazyDrivers[name] = lazyDriver(name, load)
+	s.lazy[name] = lazyDriver(name, load)
 }
 
-// RegisterPrimary makes the Connector load builds the Driver name, in place of
-// the native Strategy linked in under it. The native Strategy stays registered,
-// for NativeStrategy and a shadow, but New never falls back to it: a load
-// failure is the Driver's error. It panics unless a native Strategy holds name
-// and no Connector does yet.
-func RegisterPrimary(name string, load func() (driverkit.Strategy, error)) {
-	if _, lazy := lazyDrivers[name]; lazy || !HasNative(name) {
+// UsePrimary makes the Connector load builds the Driver name, in place of the
+// native Strategy linked in under it. The native Strategy stays in the Set, for
+// NativeStrategy and a shadow, but New never falls back to it: a load failure
+// is the Driver's error. It panics unless a native Strategy holds name and no
+// Connector does yet.
+func (s *Set) UsePrimary(name string, load func() (driverkit.Strategy, error)) {
+	if _, lazy := s.lazy[name]; lazy || !s.HasNative(name) {
 		panic("driver: primary Connector needs a native Strategy and no other Connector for " + name)
 	}
-	lazyDrivers[name] = lazyDriver(name, load)
+	s.lazy[name] = lazyDriver(name, load)
 }
 
 // lazyDriver wraps load so it runs once and its failure names the Driver.
@@ -153,23 +176,23 @@ func lazyDriver(name string, load func() (driverkit.Strategy, error)) func() (Dr
 }
 
 // HasNative reports whether a Strategy linked into the binary holds name.
-func HasNative(name string) bool {
-	_, native := registry[name]
+func (s *Set) HasNative(name string) bool {
+	_, native := s.natives[name]
 	return native
 }
 
-// Has reports whether a Driver is registered under name, linked in or lazily
+// Has reports whether a Driver is in the Set under name, linked in or lazily
 // loaded, without loading it.
-func Has(name string) bool {
-	_, native := registry[name]
-	_, lazy := lazyDrivers[name]
+func (s *Set) Has(name string) bool {
+	_, native := s.natives[name]
+	_, lazy := s.lazy[name]
 	return native || lazy
 }
 
 // NativeStrategy returns the Strategy linked in under name, which an empty name
 // defaults to "claude" for; ok is false for a lazily loaded or unknown Driver.
-func NativeStrategy(name string) (driverkit.Strategy, bool) {
-	d, ok := registry[orDefault(name)].(driverkit.Driver)
+func (s *Set) NativeStrategy(name string) (driverkit.Strategy, bool) {
+	d, ok := s.natives[orDefault(name)].(driverkit.Driver)
 	return d.Strategy(), ok
 }
 
@@ -179,25 +202,23 @@ func NativeStrategy(name string) (driverkit.Strategy, bool) {
 // reports instead of failing the run. Exactly one of the two is set.
 type shadowRow struct{ module, skip string }
 
-var shadows = map[string]shadowRow{}
-
 // UseShadow records module as the Connector shadowing the native Driver name.
-func UseShadow(name, module string) { shadows[name] = shadowRow{module: module} }
+func (s *Set) UseShadow(name, module string) { s.shadows[name] = shadowRow{module: module} }
 
 // SkipShadow records why the shadow row for name was not applied.
-func SkipShadow(name, reason string) { shadows[name] = shadowRow{skip: reason} }
+func (s *Set) SkipShadow(name, reason string) { s.shadows[name] = shadowRow{skip: reason} }
 
 // ShadowSkipped returns why the shadow row for name was skipped, which an empty
 // name defaults to "claude" for.
-func ShadowSkipped(name string) (reason string, ok bool) {
-	row := shadows[orDefault(name)]
+func (s *Set) ShadowSkipped(name string) (reason string, ok bool) {
+	row := s.shadows[orDefault(name)]
 	return row.skip, row.skip != ""
 }
 
 // ShadowModule returns the module shadowing name, which an empty name defaults
 // to "claude" for.
-func ShadowModule(name string) (module string, ok bool) {
-	row := shadows[orDefault(name)]
+func (s *Set) ShadowModule(name string) (module string, ok bool) {
+	row := s.shadows[orDefault(name)]
 	return row.module, row.module != ""
 }
 
@@ -218,22 +239,22 @@ func orDefault(name string) string {
 // ResolveName returns name, or the default Driver's name when name is empty.
 func ResolveName(name string) string { return orDefault(name) }
 
-// New returns the registered Driver strategy for name. An empty name defaults
-// to "claude". A name with a Descriptor but no Driver is a Connector-only
-// Driver (claude) that no Driver row supplied a module for; that is an error,
-// never a fallback.
-func New(name string) (Driver, error) {
+// New returns the Driver strategy for name. An empty name defaults to
+// "claude". A name with a Descriptor but no Driver is a Connector-only Driver
+// (claude) that no Driver row supplied a module for; that is an error, never a
+// fallback.
+func (s *Set) New(name string) (Driver, error) {
 	name = orDefault(name)
-	if load, ok := lazyDrivers[name]; ok {
+	if load, ok := s.lazy[name]; ok {
 		return load()
 	}
-	if d, ok := registry[name]; ok {
+	if d, ok := s.natives[name]; ok {
 		return d, nil
 	}
-	if _, ok := descriptor(name); ok {
+	if _, ok := s.DescriptorFor(name); ok {
 		return nil, fmt.Errorf("DRIVER %q: no Driver row supplies its Connector module", name)
 	}
-	return nil, UnknownError(name, Names())
+	return nil, UnknownError(name, s.Names())
 }
 
 // UnknownError is the error for a DRIVER name that no known Driver answers to.
@@ -243,35 +264,21 @@ func UnknownError(name string, known []string) error {
 
 // UseDescriptor makes d the Descriptor of the Driver it names, replacing the
 // generated one or adding a row the generated set lacks (the launcher input
-// document opens the registry at runtime, ADR 0020).
-func UseDescriptor(d Descriptor) {
-	for i := range descriptors {
-		if descriptors[i].Name == d.Name {
-			descriptors[i] = d
+// document opens the Set at runtime, ADR 0020).
+func (s *Set) UseDescriptor(d Descriptor) {
+	for i := range s.descriptors {
+		if s.descriptors[i].Name == d.Name {
+			s.descriptors[i] = d
 			return
 		}
 	}
-	descriptors = append(descriptors, d)
-}
-
-// Snapshot captures the registry and the Descriptors and returns the function
-// that restores them, for a test that registers Drivers or applies rows in the
-// process-global registry.
-func Snapshot() (restore func()) {
-	reg, lazy, descs, shad := maps.Clone(registry), maps.Clone(lazyDrivers), slices.Clone(descriptors), maps.Clone(shadows)
-	return func() {
-		registry, lazyDrivers, descriptors, shadows = reg, lazy, descs, shad
-	}
+	s.descriptors = append(s.descriptors, d)
 }
 
 // DescriptorFor returns the Descriptor in force for an exact Driver name: the
 // generated one, or the row UseDescriptor replaced it with.
-func DescriptorFor(name string) (Descriptor, bool) {
-	return descriptor(name)
-}
-
-func descriptor(name string) (Descriptor, bool) {
-	for _, d := range descriptors {
+func (s *Set) DescriptorFor(name string) (Descriptor, bool) {
+	for _, d := range s.descriptors {
 		if d.Name == name {
 			return d, true
 		}
@@ -280,40 +287,40 @@ func descriptor(name string) (Descriptor, bool) {
 }
 
 // ProviderNamespacedModels reports whether the named Driver takes
-// provider-namespaced model ids, read from its generated Descriptor. It is the
-// Go mirror of the Nix fact lib/mkHarness.nix's rosterWithoutBareWorker reads
-// (issue #5338); unknown and empty names are false rather than an error.
-func ProviderNamespacedModels(name string) bool {
-	d, _ := descriptor(name)
+// provider-namespaced model ids, read from its Descriptor. It is the Go mirror
+// of the Nix fact lib/mkHarness.nix's rosterWithoutBareWorker reads (issue
+// #5338); unknown and empty names are false rather than an error.
+func (s *Set) ProviderNamespacedModels(name string) bool {
+	d, _ := s.DescriptorFor(name)
 	return d.ProviderNamespacedModels
 }
 
 // EffortOnModelLevels returns the levels the named Driver reads from a model
-// id's `:<level>` suffix, from its generated Descriptor; nil for a Driver whose
-// effort does not ride on the model, and for unknown and empty names. It is the
-// Go mirror of the Nix effortOnModelLevels fact (issue #5625).
-func EffortOnModelLevels(name string) []string {
-	d, _ := descriptor(name)
+// id's `:<level>` suffix, from its Descriptor; nil for a Driver whose effort
+// does not ride on the model, and for unknown and empty names. It is the Go
+// mirror of the Nix effortOnModelLevels fact (issue #5625).
+func (s *Set) EffortOnModelLevels(name string) []string {
+	d, _ := s.DescriptorFor(name)
 	return d.EffortOnModelLevels
 }
 
 // CredentialRules returns the named Driver's credential rules from its
-// generated Descriptor. An empty name defaults to "claude", as New does; ok is
-// false for an unknown Driver.
-func CredentialRules(name string) (rules []CredentialRule, ok bool) {
-	d, ok := descriptor(orDefault(name))
+// Descriptor. An empty name defaults to "claude", as New does; ok is false for
+// an unknown Driver.
+func (s *Set) CredentialRules(name string) (rules []CredentialRule, ok bool) {
+	d, ok := s.DescriptorFor(orDefault(name))
 	return d.Credentials, ok
 }
 
-// Names returns the sorted registered Driver names. The nix/Go parity test
+// Names returns the sorted Driver names in the Set. The nix/Go parity test
 // compares them against the nix registry to catch drift.
-func Names() []string {
-	names := make([]string, 0, len(registry))
-	for name := range registry {
+func (s *Set) Names() []string {
+	names := make([]string, 0, len(s.natives))
+	for name := range s.natives {
 		names = append(names, name)
 	}
-	for name := range lazyDrivers {
-		if !HasNative(name) { // a primary Connector shares its native Driver's name
+	for name := range s.lazy {
+		if !s.HasNative(name) { // a primary Connector shares its native Driver's name
 			names = append(names, name)
 		}
 	}
@@ -328,14 +335,14 @@ func Names() []string {
 // renders nothing. The Box calls it before starting a session, so a Connector
 // cannot smuggle an arbitrary CLI flag into the agent's argv through the
 // session slot.
-func SessionArgs(name string, f driverkit.SessionFlag) ([]string, error) {
+func (s *Set) SessionArgs(name string, f driverkit.SessionFlag) ([]string, error) {
 	if f == (driverkit.SessionFlag{}) {
 		return nil, nil
 	}
 	if f.Flag == "" {
 		return nil, fmt.Errorf("driver %q answered session value %q with no flag", name, f.Value)
 	}
-	d, ok := descriptor(name)
+	d, ok := s.DescriptorFor(name)
 	if !ok {
 		return nil, fmt.Errorf("driver %q has no row declaring session flags; refusing session flag %q", name, f.Flag)
 	}
@@ -346,4 +353,62 @@ func SessionArgs(name string, f driverkit.SessionFlag) ([]string, error) {
 		return nil, fmt.Errorf("driver %q answered session flag %q with value %q, which the CLI would read as a flag", name, f.Flag, f.Value)
 	}
 	return f.Args(), nil
+}
+
+// Temporary process-wide shims; deleted by #7556's last slice.
+
+// process is the Set the package-level shims read and write.
+var process = NewSet()
+
+// Register adds the native Strategy s to the process Set.
+func Register(s driverkit.Strategy) {
+	if process.Has(s.Name) {
+		panic("driver: duplicate registration for " + s.Name)
+	}
+	process.natives[s.Name] = driverkit.New(s)
+}
+
+// ProcessNatives returns the Strategies Register has added to the process Set.
+func ProcessNatives() []driverkit.Strategy {
+	var out []driverkit.Strategy
+	for _, name := range process.Names() {
+		if s, ok := process.NativeStrategy(name); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// Process returns the process Set, for the driverrows shims that apply rows to it.
+func Process() *Set { return process }
+
+// Snapshot captures the process Set and returns the function that restores it.
+func Snapshot() (restore func()) {
+	saved := process.clone()
+	return func() { process = saved }
+}
+
+func RegisterConnector(name string, load func() (driverkit.Strategy, error)) {
+	process.AddConnector(name, load)
+}
+func RegisterPrimary(name string, load func() (driverkit.Strategy, error)) {
+	process.UsePrimary(name, load)
+}
+func UseShadow(name, module string)                         { process.UseShadow(name, module) }
+func SkipShadow(name, reason string)                        { process.SkipShadow(name, reason) }
+func UseDescriptor(d Descriptor)                            { process.UseDescriptor(d) }
+func HasNative(name string) bool                            { return process.HasNative(name) }
+func Has(name string) bool                                  { return process.Has(name) }
+func NativeStrategy(name string) (driverkit.Strategy, bool) { return process.NativeStrategy(name) }
+func ShadowSkipped(name string) (string, bool)              { return process.ShadowSkipped(name) }
+func ShadowModule(name string) (string, bool)               { return process.ShadowModule(name) }
+func New(name string) (Driver, error)                       { return process.New(name) }
+func DescriptorFor(name string) (Descriptor, bool)          { return process.DescriptorFor(name) }
+func ProviderNamespacedModels(name string) bool             { return process.ProviderNamespacedModels(name) }
+func EffortOnModelLevels(name string) []string              { return process.EffortOnModelLevels(name) }
+func CredentialRules(name string) ([]CredentialRule, bool)  { return process.CredentialRules(name) }
+func AuthContentFor(name string) (AuthContent, bool)        { return process.AuthContentFor(name) }
+func Names() []string                                       { return process.Names() }
+func SessionArgs(name string, f driverkit.SessionFlag) ([]string, error) {
+	return process.SessionArgs(name, f)
 }

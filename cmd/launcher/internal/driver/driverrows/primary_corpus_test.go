@@ -11,7 +11,6 @@ import (
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/driver/driverkit/conformance"
 	"spindrift.dev/launcher/internal/driver/driverrows"
-	"spindrift.dev/launcher/internal/driver/drivertest"
 	"spindrift.dev/launcher/internal/golden"
 )
 
@@ -22,8 +21,8 @@ const (
 	connectorNameEnv = "SPINDRIFT_DRIVER_CONNECTOR_NAME"
 )
 
-// A primary row makes the Connector the Driver on both paths that apply rows,
-// the Launcher's (Use) and the Box's (UseFile), and the Driver New hands out
+// A primary row makes the Connector the Driver on both paths that build a Set,
+// the Launcher's (Hosted) and the Box's (InProcess), and the Driver New hands out
 // passes the same corpus against the same goldens as the native Strategy on
 // the Box's path, where driver-exec runs its stream filter live.
 func TestPrimaryRowConnectorPassesCorpus(t *testing.T) {
@@ -41,30 +40,17 @@ func TestPrimaryRowConnectorPassesCorpus(t *testing.T) {
 	if name == "claude" {
 		t.Skip("claude has no native Strategy to replace; TestCorpus runs its Connector")
 	}
-	desc, ok := driver.DescriptorFor(name)
-	if !ok {
-		t.Fatalf("%s has no Descriptor", name)
-	}
+	desc := generated(t, name)
 	raw := rows(t, []driverrows.Row{{Descriptor: desc, Module: wasm, Primary: true, FirstParty: true}})
-	rowsFile := filepath.Join(t.TempDir(), "rows.json")
-	if err := os.WriteFile(rowsFile, raw, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	for path, apply := range map[string]func() error{
-		"host": func() error { return driverrows.Use(raw) },
-		"box":  func() error { return driverrows.UseFile(rowsFile) },
+	// A primary row replaces a native Strategy, which this binary may not link.
+	ns := natives(name)
+	for path, build := range map[string]func() *driver.Set{
+		"host": func() *driver.Set { return hosted(t, raw, ns...) },
+		"box":  func() *driver.Set { return box(t, raw, ns...) },
 	} {
 		t.Run(path, func(t *testing.T) {
-			drivertest.Isolate(t)
-			drivertest.InProcessSandbox(t)
-			// A primary row replaces a native Strategy, which this binary may not link.
-			if !driver.HasNative(name) {
-				driver.Register(driverkit.Strategy{Name: name})
-			}
-			if err := apply(); err != nil {
-				t.Fatal(err)
-			}
-			d, err := driver.New(name)
+			t.Parallel()
+			d, err := build().New(name)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -73,7 +59,7 @@ func TestPrimaryRowConnectorPassesCorpus(t *testing.T) {
 				t.Fatalf("New(%s) = %T, want a driverkit.Driver", name, d)
 			}
 			// The registered stand-in is an empty Strategy; a Connector-built one
-			// has a decoder, so this fails if Use left the stand-in in place.
+			// has a decoder, so this fails if the row left the stand-in in place.
 			if kd.Strategy().NewDecoder == nil {
 				t.Fatalf("New(%s) kept the empty stand-in Strategy; the Connector's was not applied", name)
 			}

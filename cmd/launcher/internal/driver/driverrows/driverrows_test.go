@@ -11,10 +11,10 @@ import (
 
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectorsandbox"
+	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/driver/driverrows"
-	"spindrift.dev/launcher/internal/driver/drivertest"
 )
 
 const fixturesEnv = "SPINDRIFT_CONNECTOR_FIXTURES_DIR"
@@ -39,40 +39,98 @@ func rows(t *testing.T, v any) json.RawMessage {
 	return b
 }
 
-func TestUseNilChangesNothing(t *testing.T) {
-	names := driver.Names()
-	rules, _ := driver.CredentialRules("opencode")
-	for _, raw := range []json.RawMessage{nil, {}} {
-		if err := driverrows.Use(raw); err != nil {
-			t.Fatal(err)
-		}
+// natives are the stand-in native Strategies a test links in.
+func natives(names ...string) []driverkit.Strategy {
+	var out []driverkit.Strategy
+	for _, n := range names {
+		out = append(out, driverkit.Strategy{Name: n})
 	}
-	if err := driverrows.UseFile(""); err != nil {
+	return out
+}
+
+// generated is the Descriptor the generated table holds for name.
+func generated(t *testing.T, name string) driver.Descriptor {
+	t.Helper()
+	d, ok := driver.NewSet().DescriptorFor(name)
+	if !ok {
+		t.Fatalf("%s has no generated Descriptor", name)
+	}
+	return d
+}
+
+// inProcess is the Launcher's sandbox seam backed by the in-process engine.
+var inProcess driverrows.Loader = connectorsandboxtest.InProcess().Load
+
+// hosted is the Launcher's Set for raw: parsed against ns, Connectors loaded
+// through the in-process engine.
+func hosted(t *testing.T, raw json.RawMessage, ns ...driverkit.Strategy) *driver.Set {
+	t.Helper()
+	r, err := driverrows.Parse(raw, ns)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if got := driver.Names(); !reflect.DeepEqual(got, names) {
-		t.Errorf("Names() = %v, want %v", got, names)
+	return r.Hosted(inProcess)
+}
+
+// parseFile reads raw back through the Box's row file.
+func parseFile(t *testing.T, raw json.RawMessage, ns ...driverkit.Strategy) (driverrows.Rows, error) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "rows.json")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if got, _ := driver.CredentialRules("opencode"); !reflect.DeepEqual(got, rules) {
-		t.Errorf("claude CredentialRules = %v, want %v", got, rules)
+	return driverrows.ReadFile(path, ns)
+}
+
+// box is the Box's Set for raw: read from a row file, which gates on the
+// first-party mark.
+func box(t *testing.T, raw json.RawMessage, ns ...driverkit.Strategy) *driver.Set {
+	t.Helper()
+	r, err := parseFile(t, raw, ns...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r.InProcess()
+}
+
+func TestNoRowsChangeNothing(t *testing.T) {
+	t.Parallel()
+	ns := natives("opencode")
+	base := driver.NewSet(ns...)
+	r, err := driverrows.ReadFile("", ns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sets := map[string]*driver.Set{"file": r.InProcess()}
+	for name, raw := range map[string]json.RawMessage{"nil": nil, "empty": {}} {
+		r, err := driverrows.Parse(raw, ns)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sets[name] = r.Hosted(nil)
+	}
+	for name, s := range sets {
+		if got, want := s.Names(), base.Names(); !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: Names() = %v, want %v", name, got, want)
+		}
+		got, _ := s.CredentialRules("opencode")
+		if want, _ := base.CredentialRules("opencode"); !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: opencode CredentialRules = %v, want %v", name, got, want)
+		}
 	}
 }
 
-func TestUseLoadsConnectorDriverLazily(t *testing.T) {
-	drivertest.Isolate(t)
-	drivertest.InProcessSandbox(t)
+func TestHostedLoadsConnectorDriverLazily(t *testing.T) {
+	t.Parallel()
 	wasm := fixtureWasm(t, "driver.wasm")
-	err := driverrows.Use(rows(t, []map[string]any{{
+	s := hosted(t, rows(t, []map[string]any{{
 		"name":   "fixture",
 		"module": wasm,
 		"credentials": []map[string]any{
 			{"env": []string{"FIXTURE_KEY"}, "modelPrefix": "fx/", "remedy": "set FIXTURE_KEY"},
 		},
 	}}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	d, err := driver.New("fixture")
+	d, err := s.New("fixture")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,198 +141,162 @@ func TestUseLoadsConnectorDriverLazily(t *testing.T) {
 	if want := "result hi\n"; string(ev) != want {
 		t.Errorf("ResultEvent = %q, want %q", ev, want)
 	}
-	rules, ok := driver.CredentialRules("fixture")
+	rules, ok := s.CredentialRules("fixture")
 	want := []driver.CredentialRule{{Env: []string{"FIXTURE_KEY"}, ModelPrefix: "fx/", Remedy: "set FIXTURE_KEY"}}
 	if !ok || !reflect.DeepEqual(rules, want) {
 		t.Errorf("CredentialRules(fixture) = %v, %v; want %v", rules, ok, want)
 	}
 }
 
-func TestUseFileReadsDocument(t *testing.T) {
-	drivertest.Isolate(t)
+func TestReadFileReadsDocument(t *testing.T) {
+	t.Parallel()
 	wasm := fixtureWasm(t, "driver.wasm")
-	path := filepath.Join(t.TempDir(), "rows.json")
 	doc := rows(t, []map[string]any{{"name": "filefixture", "module": wasm, "firstParty": true}})
-	if err := os.WriteFile(path, doc, 0o600); err != nil {
-		t.Fatal(err)
+	if !box(t, doc).Has("filefixture") {
+		t.Fatal("the Box's Set registered no Driver")
 	}
-	if err := driverrows.UseFile(path); err != nil {
-		t.Fatal(err)
-	}
-	if !driver.Has("filefixture") {
-		t.Fatal("UseFile registered no Driver")
-	}
-	if err := driverrows.UseFile(filepath.Join(t.TempDir(), "absent.json")); err == nil {
-		t.Error("UseFile of a missing file succeeded")
+	if _, err := driverrows.ReadFile(filepath.Join(t.TempDir(), "absent.json"), nil); err == nil {
+		t.Error("ReadFile of a missing file succeeded")
 	}
 }
 
 func TestNativeStrategyWinsOverModule(t *testing.T) {
-	drivertest.Isolate(t)
-	driver.Register(driverkit.Strategy{Name: "nativerow"})
-	err := driverrows.Use(rows(t, []map[string]any{{
+	t.Parallel()
+	s := hosted(t, rows(t, []map[string]any{{
 		"name":   "nativerow",
 		"module": filepath.Join(t.TempDir(), "never-read.wasm"),
-	}}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := driver.New("nativerow"); err != nil {
+	}}), natives("nativerow")...)
+	if _, err := s.New("nativerow"); err != nil {
 		t.Errorf("New(nativerow) = %v, want the native Driver", err)
 	}
 }
 
 func TestNameMismatchFailsOnNew(t *testing.T) {
-	drivertest.Isolate(t)
-	drivertest.InProcessSandbox(t)
+	t.Parallel()
 	wasm := fixtureWasm(t, "driver.wasm")
-	if err := driverrows.Use(rows(t, []map[string]any{{"name": "other", "module": wasm}})); err != nil {
-		t.Fatal(err)
-	}
-	_, err := driver.New("other")
+	s := hosted(t, rows(t, []map[string]any{{"name": "other", "module": wasm}}))
+	_, err := s.New("other")
 	if err == nil || !strings.Contains(err.Error(), "other") {
 		t.Errorf("New(other) = %v, want an error naming the Driver", err)
 	}
 }
 
-func TestUseRejectsUnknownKey(t *testing.T) {
-	if err := driverrows.Use(json.RawMessage(`[{"name":"x","bogus":1}]`)); err == nil {
+func TestParseRejectsUnknownKey(t *testing.T) {
+	t.Parallel()
+	if _, err := driverrows.Parse(json.RawMessage(`[{"name":"x","bogus":1}]`), nil); err == nil {
 		t.Error("an unknown key was accepted")
 	}
 }
 
-func TestUseRejectsModulelessUnknownDriver(t *testing.T) {
-	err := driverrows.Use(json.RawMessage(`[{"name":"nomodule"}]`))
+func TestParseRejectsModulelessUnknownDriver(t *testing.T) {
+	t.Parallel()
+	_, err := driverrows.Parse(json.RawMessage(`[{"name":"nomodule"}]`), nil)
 	if err == nil || !strings.Contains(err.Error(), "nomodule") {
-		t.Errorf("Use = %v, want an error naming nomodule", err)
+		t.Errorf("Parse = %v, want an error naming nomodule", err)
 	}
 }
 
-func TestUseAcceptsModulelessNativeDriver(t *testing.T) {
-	drivertest.Isolate(t)
-	driver.Register(driverkit.Strategy{Name: "nativeonly"})
-	rowsJSON := json.RawMessage(`[{"name":"nativeonly","credentials":[{"env":["NATIVE_KEY"],"remedy":"set it"}]}]`)
-	if err := driverrows.Use(rowsJSON); err != nil {
-		t.Fatal(err)
-	}
-	rules, _ := driver.CredentialRules("nativeonly")
+func TestParseAcceptsModulelessNativeDriver(t *testing.T) {
+	t.Parallel()
+	s := hosted(t, json.RawMessage(`[{"name":"nativeonly","credentials":[{"env":["NATIVE_KEY"],"remedy":"set it"}]}]`), natives("nativeonly")...)
+	rules, _ := s.CredentialRules("nativeonly")
 	if len(rules) != 1 || rules[0].Env[0] != "NATIVE_KEY" {
 		t.Errorf("rules = %v", rules)
 	}
 }
 
-func TestUseRefusesRowChangingNativeDescriptor(t *testing.T) {
-	drivertest.Isolate(t)
-	driver.Register(driverkit.Strategy{Name: "opencode"})
-	before, ok := driver.DescriptorFor("opencode")
-	if !ok {
-		t.Fatal("opencode has no Descriptor")
-	}
-	changed := before
+func TestParseRefusesRowChangingNativeDescriptor(t *testing.T) {
+	t.Parallel()
+	changed := generated(t, "opencode")
 	changed.Credentials = []driver.CredentialRule{{Env: []string{"STOLEN"}, Remedy: "x"}}
-	err := driverrows.Use(rows(t, []driver.Descriptor{changed}))
+	_, err := driverrows.Parse(rows(t, []driver.Descriptor{changed}), natives("opencode"))
 	if err == nil || !strings.Contains(err.Error(), "opencode") {
-		t.Fatalf("Use = %v, want an error naming opencode", err)
-	}
-	if got, _ := driver.DescriptorFor("opencode"); !reflect.DeepEqual(got, before) {
-		t.Errorf("opencode Descriptor = %v, want it unchanged: %v", got, before)
+		t.Fatalf("Parse = %v, want an error naming opencode", err)
 	}
 }
 
-func TestUseAcceptsRowEqualToNativeDescriptor(t *testing.T) {
-	drivertest.Isolate(t)
-	driver.Register(driverkit.Strategy{Name: "opencode"})
-	before, _ := driver.DescriptorFor("opencode")
-	if err := driverrows.Use(rows(t, []driver.Descriptor{before})); err != nil {
-		t.Fatalf("Use = %v, want the generated Descriptor accepted", err)
-	}
-	if got, _ := driver.DescriptorFor("opencode"); !reflect.DeepEqual(got, before) {
+func TestParseAcceptsRowEqualToNativeDescriptor(t *testing.T) {
+	t.Parallel()
+	before := generated(t, "opencode")
+	s := hosted(t, rows(t, []driver.Descriptor{before}), natives("opencode")...)
+	if got, _ := s.DescriptorFor("opencode"); !reflect.DeepEqual(got, before) {
 		t.Errorf("opencode Descriptor = %v, want %v", got, before)
 	}
 }
 
-func TestUseRefusesPartialApplyOnLaterBadRow(t *testing.T) {
-	drivertest.Isolate(t)
-	err := driverrows.Use(json.RawMessage(`[{"name":"early","module":"/x.wasm"},{"name":"nomodule"}]`))
+func TestParseValidatesWholeBeforeAnyRowApplies(t *testing.T) {
+	t.Parallel()
+	r, err := driverrows.Parse(json.RawMessage(`[{"name":"early","module":"/x.wasm"},{"name":"nomodule"}]`), nil)
 	if err == nil {
-		t.Fatal("Use succeeded")
+		t.Fatal("Parse succeeded")
 	}
-	if driver.Has("early") {
+	if r.Hosted(nil).Has("early") {
 		t.Error("a row registered before the bad row was reached")
 	}
 }
 
-func TestUseRejectsDuplicateRowNames(t *testing.T) {
-	drivertest.Isolate(t)
-	err := driverrows.Use(json.RawMessage(`[{"name":"dup","module":"/a.wasm"},{"name":"dup","module":"/b.wasm"}]`))
+func TestParseRejectsDuplicateRowNames(t *testing.T) {
+	t.Parallel()
+	_, err := driverrows.Parse(json.RawMessage(`[{"name":"dup","module":"/a.wasm"},{"name":"dup","module":"/b.wasm"}]`), nil)
 	if err == nil || !strings.Contains(err.Error(), "dup") {
-		t.Errorf("Use = %v, want a duplicate-row error naming dup", err)
-	}
-	if driver.Has("dup") {
-		t.Error("a duplicate document registered a Driver")
+		t.Errorf("Parse = %v, want a duplicate-row error naming dup", err)
 	}
 }
 
 func TestShadowRowRecordsModuleAndKeepsNativeDriver(t *testing.T) {
-	drivertest.Isolate(t)
-	driver.Register(driverkit.Strategy{Name: "nat"})
-	if _, ok := driver.ShadowModule("nat"); ok {
+	t.Parallel()
+	if _, ok := driver.NewSet(natives("nat")...).ShadowModule("nat"); ok {
 		t.Fatal("nat has a shadow before any row")
 	}
-	if err := driverrows.Use(json.RawMessage(`[{"name":"nat","module":"/m/nat.wasm","shadow":true}]`)); err != nil {
-		t.Fatal(err)
-	}
-	if got, ok := driver.ShadowModule("nat"); !ok || got != "/m/nat.wasm" {
+	s := hosted(t, json.RawMessage(`[{"name":"nat","module":"/m/nat.wasm","shadow":true}]`), natives("nat")...)
+	if got, ok := s.ShadowModule("nat"); !ok || got != "/m/nat.wasm" {
 		t.Errorf("ShadowModule(nat) = %q, %v, want /m/nat.wasm", got, ok)
 	}
-	after, err := driver.New("nat")
-	if _, native := driver.NativeStrategy("nat"); err != nil || !native || after.Name() != "nat" {
-		t.Errorf("driver.New(nat) = %v, %v, want the native Driver", after, err)
+	after, err := s.New("nat")
+	if _, native := s.NativeStrategy("nat"); err != nil || !native || after.Name() != "nat" {
+		t.Errorf("New(nat) = %v, %v, want the native Driver", after, err)
 	}
 }
 
 func TestShadowRowWithoutNativeDriverOrModuleIsSkippedNotFatal(t *testing.T) {
-	drivertest.Isolate(t)
-	driver.Register(driverkit.Strategy{Name: "nat"})
-	driver.RegisterConnector("lazy", func() (driverkit.Strategy, error) { return driverkit.Strategy{Name: "lazy"}, nil })
+	t.Parallel()
 	for name, tc := range map[string]struct{ raw, driver string }{
 		"unknown":    {`[{"name":"nope","module":"/x.wasm","shadow":true}]`, "nope"},
-		"connector":  {`[{"name":"lazy","module":"/x.wasm","shadow":true}]`, "lazy"},
+		"connector":  {`[{"name":"lazy","module":"/x.wasm"},{"name":"lazy","module":"/x.wasm","shadow":true}]`, "lazy"},
 		"moduleless": {`[{"name":"nat","shadow":true}]`, "nat"},
 	} {
-		if err := driverrows.Use(json.RawMessage(tc.raw)); err != nil {
-			t.Errorf("%s: Use = %v, want the shadow skipped", name, err)
-		}
-		if reason, ok := driver.ShadowSkipped(tc.driver); !ok || reason == "" {
-			t.Errorf("%s: ShadowSkipped = %q, %v, want a reason", name, reason, ok)
-		}
-		if _, ok := driver.ShadowModule(tc.driver); ok {
-			t.Errorf("%s: a skipped row left a shadow behind", name)
-		}
-	}
-	if driver.Has("nope") {
-		t.Error("a skipped shadow row registered a Driver")
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			s := hosted(t, json.RawMessage(tc.raw), natives("nat")...)
+			if reason, ok := s.ShadowSkipped(tc.driver); !ok || reason == "" {
+				t.Errorf("ShadowSkipped = %q, %v, want a reason", reason, ok)
+			}
+			if _, ok := s.ShadowModule(tc.driver); ok {
+				t.Error("a skipped row left a shadow behind")
+			}
+			if name == "unknown" && s.Has("nope") {
+				t.Error("a skipped shadow row registered a Driver")
+			}
+		})
 	}
 }
 
 // A shadow row is never worth failing the run over: one that disagrees with the
 // native Descriptor or repeats a shadow row is skipped with a reason.
 func TestMalformedShadowRowsAreSkippedNotFatal(t *testing.T) {
-	for name, raw := range map[string]string{
-		"descriptor": `[{"name":"nat","module":"/x.wasm","shadow":true,"providerNamespacedModels":true}]`,
-		"duplicate":  `[{"name":"nat","module":"/x.wasm","shadow":true},{"name":"nat","module":"/y.wasm","shadow":true}]`,
+	t.Parallel()
+	for name, tc := range map[string]struct{ raw, driver string }{
+		// An empty Descriptor is not opencode's generated one.
+		"descriptor": {`[{"name":"opencode","module":"/x.wasm","shadow":true}]`, "opencode"},
+		"duplicate":  {`[{"name":"nat","module":"/x.wasm","shadow":true},{"name":"nat","module":"/y.wasm","shadow":true}]`, "nat"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			drivertest.Isolate(t)
-			driver.Register(driverkit.Strategy{Name: "nat"})
-			driver.UseDescriptor(driver.Descriptor{Name: "nat"})
-			if err := driverrows.Use(json.RawMessage(raw)); err != nil {
-				t.Errorf("Use = %v, want the shadow skipped", err)
-			}
-			if reason, ok := driver.ShadowSkipped("nat"); !ok || reason == "" {
+			t.Parallel()
+			s := hosted(t, json.RawMessage(tc.raw), natives("nat", "opencode")...)
+			if reason, ok := s.ShadowSkipped(tc.driver); !ok || reason == "" {
 				t.Errorf("ShadowSkipped = %q, %v, want a reason", reason, ok)
 			}
-			if _, ok := driver.ShadowModule("nat"); ok {
+			if _, ok := s.ShadowModule(tc.driver); ok {
 				t.Error("a skipped row left a shadow behind")
 			}
 		})
@@ -282,69 +304,41 @@ func TestMalformedShadowRowsAreSkippedNotFatal(t *testing.T) {
 }
 
 func TestShadowRowBesideNativeRowOfSameNameIsFine(t *testing.T) {
-	drivertest.Isolate(t)
-	driver.Register(driverkit.Strategy{Name: "nat"})
-	driver.UseDescriptor(driver.Descriptor{Name: "nat"})
-	if err := driverrows.Use(json.RawMessage(`[{"name":"nat"},{"name":"nat","module":"/m.wasm","shadow":true}]`)); err != nil {
-		t.Fatal(err)
-	}
-	if got, ok := driver.ShadowModule("nat"); !ok || got != "/m.wasm" {
+	t.Parallel()
+	s := hosted(t, json.RawMessage(`[{"name":"nat"},{"name":"nat","module":"/m.wasm","shadow":true}]`), natives("nat")...)
+	if got, ok := s.ShadowModule("nat"); !ok || got != "/m.wasm" {
 		t.Errorf("ShadowModule(nat) = %q, %v, want /m.wasm", got, ok)
 	}
 }
 
-// useFile applies raw through the Box's entry point, the one that gates on the
-// first-party mark.
-func useFile(t *testing.T, raw json.RawMessage) error {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "rows.json")
-	if err := os.WriteFile(path, raw, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return driverrows.UseFile(path)
-}
-
 func TestBoxRefusesToLoadConnectorDriverNotFirstParty(t *testing.T) {
-	drivertest.Isolate(t)
-	if err := useFile(t, rows(t, []map[string]any{{"name": "outsider", "module": "/m/outsider.wasm"}})); err != nil {
-		t.Fatalf("UseFile = %v, want the unmarked row registered, not refused at startup", err)
+	t.Parallel()
+	s := box(t, rows(t, []map[string]any{{"name": "outsider", "module": "/m/outsider.wasm"}}))
+	if !s.Has("outsider") {
+		t.Fatal("the Box's Set registered no Driver for the unmarked row")
 	}
-	if !driver.Has("outsider") {
-		t.Fatal("UseFile registered no Driver for the unmarked row")
-	}
-	_, err := driver.New("outsider")
+	_, err := s.New("outsider")
 	if !errors.Is(err, driverrows.ErrNotFirstParty) || !strings.Contains(err.Error(), "outsider") {
 		t.Fatalf("New(outsider) = %v, want ErrNotFirstParty naming outsider", err)
 	}
 }
 
 func TestBoxUnmarkedRowDoesNotBlockOtherDrivers(t *testing.T) {
-	drivertest.Isolate(t)
-	driver.Register(driverkit.Strategy{Name: "nat"})
-	driver.RegisterConnector("trusted", func() (driverkit.Strategy, error) { return driverkit.Strategy{Name: "trusted"}, nil })
-	err := useFile(t, rows(t, []map[string]any{
+	t.Parallel()
+	s := box(t, rows(t, []map[string]any{
 		{"name": "outsider", "module": "/m/x.wasm"},
 		{"name": "nat"},
-	}))
-	if err != nil {
-		t.Fatalf("UseFile = %v", err)
-	}
-	for _, name := range []string{"nat", "trusted"} {
-		if _, err := driver.New(name); err != nil {
-			t.Errorf("New(%s) = %v, want it unaffected by the unmarked row", name, err)
-		}
+	}), natives("nat")...)
+	if _, err := s.New("nat"); err != nil {
+		t.Errorf("New(nat) = %v, want it unaffected by the unmarked row", err)
 	}
 }
 
 func TestBoxLoadsFirstPartyConnectorDriver(t *testing.T) {
-	drivertest.Isolate(t)
-	// The Box loads its first-party Connectors itself, with no sandbox installed.
-	t.Cleanup(connectorsandbox.Use(nil))
+	t.Parallel()
 	wasm := fixtureWasm(t, "driver.wasm")
-	if err := useFile(t, rows(t, []map[string]any{{"name": "fixture", "module": wasm, "firstParty": true}})); err != nil {
-		t.Fatal(err)
-	}
-	d, err := driver.New("fixture")
+	s := box(t, rows(t, []map[string]any{{"name": "fixture", "module": wasm, "firstParty": true}}))
+	d, err := s.New("fixture")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,38 +348,30 @@ func TestBoxLoadsFirstPartyConnectorDriver(t *testing.T) {
 }
 
 func TestBoxAppliesFirstPartyShadowRow(t *testing.T) {
-	drivertest.Isolate(t)
-	driver.Register(driverkit.Strategy{Name: "opencode"})
-	if err := useFile(t, nativeShadowRow(t, true)); err != nil {
-		t.Fatal(err)
-	}
-	if got, ok := driver.ShadowModule("opencode"); !ok || got != "/m/opencode.wasm" {
+	t.Parallel()
+	s := box(t, nativeShadowRow(t, true), natives("opencode")...)
+	if got, ok := s.ShadowModule("opencode"); !ok || got != "/m/opencode.wasm" {
 		t.Errorf("ShadowModule(opencode) = %q, %v, want /m/opencode.wasm", got, ok)
 	}
 }
 
 func TestBoxSkipsShadowRowNotFirstParty(t *testing.T) {
-	drivertest.Isolate(t)
-	driver.Register(driverkit.Strategy{Name: "opencode"})
-	if err := useFile(t, nativeShadowRow(t, false)); err != nil {
-		t.Fatalf("UseFile = %v, want the shadow skipped, not fatal", err)
-	}
-	reason, ok := driver.ShadowSkipped("opencode")
+	t.Parallel()
+	s := box(t, nativeShadowRow(t, false), natives("opencode")...)
+	reason, ok := s.ShadowSkipped("opencode")
 	if !ok || !strings.Contains(reason, driverrows.ErrNotFirstParty.Error()) {
 		t.Errorf("ShadowSkipped = %q, %v, want the not-first-party reason", reason, ok)
 	}
-	if _, ok := driver.ShadowModule("opencode"); ok {
+	if _, ok := s.ShadowModule("opencode"); ok {
 		t.Error("a skipped row left a shadow behind")
 	}
 }
 
-func TestHostUseAcceptsConnectorDriverNotFirstParty(t *testing.T) {
-	drivertest.Isolate(t)
-	if err := driverrows.Use(rows(t, []map[string]any{{"name": "outsider", "module": "/m/outsider.wasm"}})); err != nil {
-		t.Fatalf("Use = %v, want the Launcher to carry no first-party gate", err)
-	}
-	if !driver.Has("outsider") {
-		t.Error("Use registered no Driver")
+func TestHostedAcceptsConnectorDriverNotFirstParty(t *testing.T) {
+	t.Parallel()
+	s := hosted(t, rows(t, []map[string]any{{"name": "outsider", "module": "/m/outsider.wasm"}}))
+	if !s.Has("outsider") {
+		t.Error("Hosted registered no Driver, want the Launcher to carry no first-party gate")
 	}
 }
 
@@ -393,31 +379,21 @@ func TestHostUseAcceptsConnectorDriverNotFirstParty(t *testing.T) {
 // only the first-party mark decides whether it applies.
 func nativeShadowRow(t *testing.T, firstParty bool) json.RawMessage {
 	t.Helper()
-	desc, ok := driver.DescriptorFor("opencode")
-	if !ok {
-		t.Fatal("opencode has no Descriptor")
-	}
-	return rows(t, []driverrows.Row{{Descriptor: desc, Module: "/m/opencode.wasm", Shadow: true, FirstParty: firstParty}})
+	return rows(t, []driverrows.Row{{Descriptor: generated(t, "opencode"), Module: "/m/opencode.wasm", Shadow: true, FirstParty: firstParty}})
 }
 
 // nativePrimaryRow is opencode's primary row, carrying its generated Descriptor.
 func nativePrimaryRow(t *testing.T, module string, firstParty bool) json.RawMessage {
 	t.Helper()
-	desc, ok := driver.DescriptorFor("opencode")
-	if !ok {
-		t.Fatal("opencode has no Descriptor")
-	}
-	return rows(t, []driverrows.Row{{Descriptor: desc, Module: module, Primary: true, FirstParty: firstParty}})
+	return rows(t, []driverrows.Row{{Descriptor: generated(t, "opencode"), Module: module, Primary: true, FirstParty: firstParty}})
 }
 
 // claude is a plain Connector row with no native Strategy behind it, so a
 // Connector that cannot load fails the run with a named error and nothing
 // falls back to a native Driver.
 func TestClaudeConnectorLoadFailureFailsNewWithoutFallback(t *testing.T) {
-	desc, ok := driver.DescriptorFor("claude")
-	if !ok {
-		t.Fatal("claude has no Descriptor")
-	}
+	t.Parallel()
+	desc := generated(t, "claude")
 	notWasm := filepath.Join(t.TempDir(), "claude.wasm")
 	if err := os.WriteFile(notWasm, []byte("not wasm"), 0o600); err != nil {
 		t.Fatal(err)
@@ -427,14 +403,12 @@ func TestClaudeConnectorLoadFailureFailsNewWithoutFallback(t *testing.T) {
 		"module not valid": notWasm,
 	} {
 		t.Run(name, func(t *testing.T) {
-			drivertest.Isolate(t)
-			if err := driverrows.Use(rows(t, []driverrows.Row{{Descriptor: desc, Module: module}})); err != nil {
-				t.Fatal(err)
-			}
-			if driver.HasNative("claude") {
+			t.Parallel()
+			s := hosted(t, rows(t, []driverrows.Row{{Descriptor: desc, Module: module}}))
+			if s.HasNative("claude") {
 				t.Fatal("claude has a native Strategy to fall back to")
 			}
-			d, err := driver.New("claude")
+			d, err := s.New("claude")
 			if err == nil || !strings.Contains(err.Error(), `DRIVER "claude"`) {
 				t.Fatalf("New(claude) = %v, %v, want the load failure naming DRIVER \"claude\"", d, err)
 			}
@@ -445,45 +419,40 @@ func TestClaudeConnectorLoadFailureFailsNewWithoutFallback(t *testing.T) {
 // A claude row cannot be primary or shadow: there is no native Strategy to
 // replace or to compare against.
 func TestClaudePrimaryRowRefusedAndShadowRowSkipped(t *testing.T) {
-	desc, _ := driver.DescriptorFor("claude")
+	t.Parallel()
+	desc := generated(t, "claude")
 	primary := rows(t, []driverrows.Row{{Descriptor: desc, Module: "/m/claude.wasm", Primary: true, FirstParty: true}})
 	shadow := rows(t, []driverrows.Row{{Descriptor: desc, Module: "/m/claude.wasm", Shadow: true, FirstParty: true}})
 	t.Run("primary", func(t *testing.T) {
-		drivertest.Isolate(t)
-		if err := driverrows.Use(primary); err == nil || !strings.Contains(err.Error(), `Driver "claude" is primary but has no native Strategy`) {
-			t.Errorf("Use = %v, want the no-native-Strategy refusal", err)
+		t.Parallel()
+		if _, err := driverrows.Parse(primary, nil); err == nil || !strings.Contains(err.Error(), `Driver "claude" is primary but has no native Strategy`) {
+			t.Errorf("Parse = %v, want the no-native-Strategy refusal", err)
 		}
 	})
 	t.Run("shadow", func(t *testing.T) {
-		drivertest.Isolate(t)
-		if err := driverrows.Use(shadow); err != nil {
-			t.Fatalf("Use = %v, want the shadow skipped, not fatal", err)
-		}
-		if reason, ok := driver.ShadowSkipped("claude"); !ok || reason == "" {
+		t.Parallel()
+		s := hosted(t, shadow)
+		if reason, ok := s.ShadowSkipped("claude"); !ok || reason == "" {
 			t.Errorf("ShadowSkipped = %q, %v, want a reason", reason, ok)
 		}
-		if _, ok := driver.ShadowModule("claude"); ok {
+		if _, ok := s.ShadowModule("claude"); ok {
 			t.Error("a claude shadow row left a shadow behind")
 		}
 	})
 }
 
 func TestBoxRefusesPrimaryRowNotFirstParty(t *testing.T) {
-	drivertest.Isolate(t)
-	driver.Register(driverkit.Strategy{Name: "opencode"})
-	if err := useFile(t, nativePrimaryRow(t, "/m/opencode.wasm", false)); err != nil {
-		t.Fatalf("UseFile = %v, want the row registered, refused at load", err)
-	}
-	_, err := driver.New("opencode")
+	t.Parallel()
+	s := box(t, nativePrimaryRow(t, "/m/opencode.wasm", false), natives("opencode")...)
+	_, err := s.New("opencode")
 	if !errors.Is(err, driverrows.ErrNotFirstParty) || !strings.Contains(err.Error(), `DRIVER "opencode"`) {
 		t.Fatalf("New(opencode) = %v, want ErrNotFirstParty naming DRIVER \"opencode\"", err)
 	}
 }
 
 func TestPrimaryRowValidation(t *testing.T) {
-	drivertest.Isolate(t)
-	driver.Register(driverkit.Strategy{Name: "opencode"})
-	desc, _ := driver.DescriptorFor("opencode")
+	t.Parallel()
+	desc := generated(t, "opencode")
 	for name, tc := range map[string]struct {
 		row  driverrows.Row
 		want string
@@ -493,12 +462,13 @@ func TestPrimaryRowValidation(t *testing.T) {
 		"shadow and primary": {driverrows.Row{Descriptor: desc, Module: "/m/c.wasm", Primary: true, Shadow: true}, `Driver "opencode" cannot be both shadow and primary`},
 	} {
 		t.Run(name, func(t *testing.T) {
-			for _, apply := range map[string]func() error{
-				"host": func() error { return driverrows.Use(rows(t, []driverrows.Row{tc.row})) },
-				"box":  func() error { return useFile(t, rows(t, []driverrows.Row{tc.row})) },
-			} {
-				if err := apply(); err == nil || !strings.Contains(err.Error(), tc.want) {
-					t.Errorf("err = %v, want it to contain %q", err, tc.want)
+			t.Parallel()
+			raw := rows(t, []driverrows.Row{tc.row})
+			_, errHost := driverrows.Parse(raw, natives("opencode"))
+			_, errBox := parseFile(t, raw, natives("opencode")...)
+			for who, err := range map[string]error{"host": errHost, "box": errBox} {
+				if err == nil || !strings.Contains(err.Error(), tc.want) {
+					t.Errorf("%s: err = %v, want it to contain %q", who, err, tc.want)
 				}
 			}
 		})
@@ -506,9 +476,8 @@ func TestPrimaryRowValidation(t *testing.T) {
 }
 
 func TestPrimaryAndShadowRowsForSameDriverRefused(t *testing.T) {
-	drivertest.Isolate(t)
-	driver.Register(driverkit.Strategy{Name: "opencode"})
-	desc, _ := driver.DescriptorFor("opencode")
+	t.Parallel()
+	desc := generated(t, "opencode")
 	primary := driverrows.Row{Descriptor: desc, Module: "/m/opencode.wasm", Primary: true, FirstParty: true}
 	shadow := driverrows.Row{Descriptor: desc, Module: "/m/opencode.wasm", Shadow: true, FirstParty: true}
 	unmarked := shadow
@@ -522,38 +491,30 @@ func TestPrimaryAndShadowRowsForSameDriverRefused(t *testing.T) {
 		"repeated shadow then primary": {shadow, shadow, primary},
 	} {
 		t.Run(name, func(t *testing.T) {
-			for who, apply := range map[string]func() error{
-				"host": func() error { return driverrows.Use(rows(t, doc)) },
-				"box":  func() error { return useFile(t, rows(t, doc)) },
-			} {
-				t.Run(who, func(t *testing.T) {
-					defer driver.Snapshot()()
-					err := apply()
-					if err == nil || !strings.Contains(err.Error(), `Driver "opencode" has both a primary row and a shadow row`) {
-						t.Errorf("err = %v, want the primary-and-shadow refusal", err)
-					}
-				})
+			t.Parallel()
+			raw := rows(t, doc)
+			_, errHost := driverrows.Parse(raw, natives("opencode"))
+			_, errBox := parseFile(t, raw, natives("opencode")...)
+			for who, err := range map[string]error{"host": errHost, "box": errBox} {
+				if err == nil || !strings.Contains(err.Error(), `Driver "opencode" has both a primary row and a shadow row`) {
+					t.Errorf("%s: err = %v, want the primary-and-shadow refusal", who, err)
+				}
 			}
 		})
 	}
 }
 
 func TestPrimaryRowReplacesNativeDriver(t *testing.T) {
-	drivertest.Isolate(t)
-	drivertest.InProcessSandbox(t)
+	t.Parallel()
 	wasm := fixtureWasm(t, "driver.wasm")
-	driver.Register(driverkit.Strategy{Name: "fixture"})
-	row := rows(t, []driverrows.Row{{Descriptor: driver.Descriptor{Name: "fixture"}, Module: wasm, Primary: true, FirstParty: true}})
-	for name, apply := range map[string]func() error{
-		"host": func() error { return driverrows.Use(row) },
-		"box":  func() error { return useFile(t, row) },
+	raw := rows(t, []driverrows.Row{{Descriptor: driver.Descriptor{Name: "fixture"}, Module: wasm, Primary: true, FirstParty: true}})
+	for name, build := range map[string]func() *driver.Set{
+		"host": func() *driver.Set { return hosted(t, raw, natives("fixture")...) },
+		"box":  func() *driver.Set { return box(t, raw, natives("fixture")...) },
 	} {
 		t.Run(name, func(t *testing.T) {
-			defer driver.Snapshot()()
-			if err := apply(); err != nil {
-				t.Fatal(err)
-			}
-			d, err := driver.New("fixture")
+			t.Parallel()
+			d, err := build().New("fixture")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -565,6 +526,7 @@ func TestPrimaryRowReplacesNativeDriver(t *testing.T) {
 }
 
 func TestRowWithoutPrimaryOmitsKey(t *testing.T) {
+	t.Parallel()
 	b := rows(t, driverrows.Row{Descriptor: driver.Descriptor{Name: "x"}})
 	if strings.Contains(string(b), "primary") {
 		t.Errorf("row JSON = %s, want no primary key", b)
@@ -574,34 +536,31 @@ func TestRowWithoutPrimaryOmitsKey(t *testing.T) {
 // The module is read but never compiled: the Launcher refuses before any
 // in-process load, so a row it cannot sandbox fails closed rather than loading
 // in its own address space.
-func TestHostLoadFailsClosedWithNoSandbox(t *testing.T) {
-	drivertest.Isolate(t)
-	t.Cleanup(connectorsandbox.Use(nil))
+func TestHostedLoadFailsClosedWithNoSandbox(t *testing.T) {
+	t.Parallel()
 	module := filepath.Join(t.TempDir(), "outsider.wasm")
 	if err := os.WriteFile(module, []byte("not wasm"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := driverrows.Use(rows(t, []map[string]any{{"name": "outsider", "module": module, "firstParty": true}})); err != nil {
+	r, err := driverrows.Parse(rows(t, []map[string]any{{"name": "outsider", "module": module, "firstParty": true}}), nil)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := driver.New("outsider"); !errors.Is(err, connectorsandbox.ErrNoConnectorSandbox) {
+	if _, err := r.Hosted(nil).New("outsider"); !errors.Is(err, connectorsandbox.ErrNoConnectorSandbox) {
 		t.Fatalf("New(outsider) = %v, want ErrNoConnectorSandbox", err)
 	}
 }
 
 // A first-party row's load reaches the in-process engine, which rejects the
-// module, not the sandbox seam, which has none installed.
+// module, not the sandbox seam, which the Box has none of.
 func TestBoxFirstPartyLoadBypassesTheSandbox(t *testing.T) {
-	drivertest.Isolate(t)
-	t.Cleanup(connectorsandbox.Use(nil))
+	t.Parallel()
 	module := filepath.Join(t.TempDir(), "first.wasm")
 	if err := os.WriteFile(module, []byte("not wasm"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := useFile(t, rows(t, []map[string]any{{"name": "first", "module": module, "firstParty": true}})); err != nil {
-		t.Fatal(err)
-	}
-	_, err := driver.New("first")
+	s := box(t, rows(t, []map[string]any{{"name": "first", "module": module, "firstParty": true}}))
+	_, err := s.New("first")
 	if err == nil || errors.Is(err, connectorsandbox.ErrNoConnectorSandbox) || !strings.Contains(err.Error(), "load module") {
 		t.Fatalf("New(first) = %v, want the in-process engine's rejection of the module", err)
 	}
@@ -610,13 +569,10 @@ func TestBoxFirstPartyLoadBypassesTheSandbox(t *testing.T) {
 // A previous-minor Driver is refused at the handshake, and the error names the
 // Driver row so an operator knows which one to rebuild.
 func TestFirstPartyPreviousMinorDriverIsRefusedByName(t *testing.T) {
-	drivertest.Isolate(t)
-	t.Cleanup(connectorsandbox.Use(nil))
+	t.Parallel()
 	module := fixtureWasm(t, "previous-driver.wasm")
-	if err := useFile(t, rows(t, []map[string]any{{"name": "stale", "module": module, "firstParty": true}})); err != nil {
-		t.Fatal(err)
-	}
-	_, err := driver.New("stale")
+	s := box(t, rows(t, []map[string]any{{"name": "stale", "module": module, "firstParty": true}}))
+	_, err := s.New("stale")
 	if !errors.Is(err, connectorhost.ErrProtocolUnsupported) || !strings.Contains(err.Error(), `driver "stale"`) {
 		t.Fatalf("New(stale) = %v, want ErrProtocolUnsupported naming the driver", err)
 	}
