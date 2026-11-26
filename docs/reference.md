@@ -4199,8 +4199,20 @@ description and a regen.
   sooner), failing non-fatally past it; the target host in the audit
   `redirect_host`), and caps the body at 4 MiB (or `respCap`, if smaller;
   a `followRedirect` route keeps the last bytes of a larger body instead
-  of failing). An unmatched or malformed request is refused unsent with
-  `ErrRouteRefused`, naming the Connector, method, host and path. A request
+  of failing). The host resolves each destination itself and dials only a
+  **public** address (global unicast; not loopback, RFC 1918, `fc00::/7`,
+  link-local such as `169.254.169.254`, `0.0.0.0/8` or `100.64.0.0/10`; an
+  IPv4-mapped or NAT64 `64:ff9b::/96` address is judged by the IPv4 inside it).
+  This covers a host the Connector declared as a literal and every redirect
+  hop, whatever named the first host. A host a Route takes from an
+  operator-set knob (`{base}`) is exempt, so a self-hosted forge or Jira on a
+  private address works. A refusal is `ErrRouteRefused`, fatal like any other,
+  and its audit `reason` names the address; a refused redirect names the
+  redirect host, never the signed URL. Behind an environment proxy
+  (`HTTP_PROXY`/`HTTPS_PROXY`) or a non-default HTTP client the host never
+  sees the address dialled, so the check cannot apply: the request proceeds
+  and `address_check` says `not applied`. An unmatched or malformed request
+  is refused unsent with `ErrRouteRefused`, naming the Connector, method, host and path. A request
   header outside the allowed set is refused the same way, and audited. A refusal,
   an oversized body (`ErrResponseTooLarge`) and a pointer outside module
   memory fail closed: the call fails and the Connector is closed. A transport
@@ -4229,7 +4241,13 @@ description and a regen.
   `body_sha256` (the hex SHA-256 of the request body the guest supplied, absent
   whenever no body was decoded: a request too malformed to carry one, and a
   line the host writes without a request), `document` (on a route that
-  declares documents, the matched name), and, when set, `headers` (the sorted canonical names of every header the host set
+  declares documents, the matched name), `address_check` (`public`, `refused:
+  not public`, `not applied: proxy` or `not applied: custom transport`; absent
+  for a knob-named host whose request took no redirect hop), `redirect_host`
+  and `redirect_status` (the redirect hop's host and the 3xx that led to it,
+  also set when the hop is refused; once the hop is sent, `status` is its
+  answer), and,
+  when set, `headers` (the sorted canonical names of every header the host set
   on the request, the guest's plus the credential's `Authorization`, never a
   value; headers the transport adds, such as `User-Agent`, are not listed),
   `rate_limit` (`primary` or `secondary`, on a 403 that carries a

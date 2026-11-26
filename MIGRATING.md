@@ -1,5 +1,22 @@
 # Migration Guide
 
+## The Network host dials only a public address for a Connector-declared host (issue #7567)
+
+**The host now resolves each destination itself and dials only a public
+address, for a host the Connector declared as a literal and for every redirect
+hop.** A host a Route takes from an operator-set knob (`{base}`, such as the
+Forgejo or Jira base URL) may still resolve anywhere, so a self-hosted
+forge or Jira on a private address needs no change.
+
+- **A third-party Connector that declares a literal host on a private,
+  loopback or link-local address now fails** with `ErrRouteRefused` and an
+  audit `reason` naming the address. Take that host from a knob (a `{base}`
+  Route) instead.
+- **Behind `HTTP_PROXY`/`HTTPS_PROXY` the check cannot apply**, because the
+  host never sees the address the proxy dials. Requests proceed, and the audit
+  line's `address_check` says `not applied: proxy`.
+- The audit line gains `address_check` and `redirect_status`.
+
 ## The Network host refuses a GraphQL body no declared document matches (issue #7566)
 
 **A `POST` Route may declare `documents`, an attrset of name to exact GraphQL
