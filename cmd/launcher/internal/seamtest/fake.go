@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -180,6 +181,21 @@ func appendLocked(path string, b []byte, seen func(prior []byte) error) error {
 	return err
 }
 
+// readLocked reads path under a shared flock, the reader's half of
+// appendLocked's exclusive one, so it never sees an append in progress.
+func readLocked(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_SH); err != nil {
+		return nil, err
+	}
+	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN) //nolint:errcheck
+	return io.ReadAll(f)
+}
+
 func parseRecords(b []byte) ([][]string, error) {
 	var out [][]string
 	sc := bufio.NewScanner(bytes.NewReader(b))
@@ -195,10 +211,11 @@ func parseRecords(b []byte) ([][]string, error) {
 }
 
 // ReadRecord returns every argv a fake appended to path, in order. A missing
-// file means no invocations.
+// file means no invocations. It reads under a shared flock so a poll landing
+// mid-append waits instead of parsing a torn last line.
 func ReadRecord(tb testing.TB, path string) [][]string {
 	tb.Helper()
-	b, err := os.ReadFile(path)
+	b, err := readLocked(path)
 	if os.IsNotExist(err) {
 		return nil
 	}
