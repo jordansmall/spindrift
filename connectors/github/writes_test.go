@@ -118,15 +118,15 @@ func TestBranchExists(t *testing.T) {
 }
 
 func TestBranchExistsEscapesSegments(t *testing.T) {
-	got := stub(t, map[string]connector.Response{matchURL + "a%20b/c%3Fd": ok(`[]`)})
-	if _, err := branchExists(ftgt, "a b/c?d"); err != nil || len(*got) != 1 {
+	got := stub(t, map[string]connector.Response{matchURL + "a%20b/c%3Fd,e": ok(`[]`)})
+	if _, err := branchExists(ftgt, "a b/c?d,e"); err != nil || len(*got) != 1 {
 		t.Fatalf("err = %v, requests = %d", err, len(*got))
 	}
 }
 
 func TestBranchNamesRefused(t *testing.T) {
 	got := stub(t, nil)
-	for _, b := range []string{"", ".", "..", "a/../b", "a//b", "/a", "a/", "a/."} {
+	for _, b := range []string{"", ".", "..", "a/../b", "a//b", "/a", "a/", "a/.", "a;b"} {
 		if _, err := branchExists(ftgt, b); err == nil {
 			t.Errorf("branchExists(%q): want error", b)
 		}
