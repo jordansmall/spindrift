@@ -56,11 +56,36 @@ func claudeRows(firstParty bool) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("claude Connector: %w", err)
 	}
-	desc, ok := driver.DescriptorFor("claude")
+	desc, ok := driver.NewSet().DescriptorFor("claude")
 	if !ok {
 		return nil, errors.New("claude Connector: no generated Descriptor for claude")
 	}
 	return json.Marshal([]driverrows.Row{{Descriptor: desc, Module: wasm, FirstParty: firstParty}})
+}
+
+// WithClaudeRow is raw, a Driver rows document, with the claude Connector's row
+// added unless raw already has a row for claude: the one Nix renders into the
+// document of any real Launcher, which a test document leaves out. Parse the
+// result for the runtime under test (connectorsetup.Input.Drivers).
+func WithClaudeRow(raw json.RawMessage) (json.RawMessage, error) {
+	var rows []driverrows.Row
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &rows); err != nil {
+			return nil, fmt.Errorf("driver rows: %w", err)
+		}
+	}
+	if slices.ContainsFunc(rows, func(r driverrows.Row) bool { return r.Name == "claude" }) {
+		return raw, nil
+	}
+	claude, err := claudeRows(false)
+	if err != nil {
+		return nil, err
+	}
+	var row []driverrows.Row
+	if err := json.Unmarshal(claude, &row); err != nil {
+		return nil, err
+	}
+	return json.Marshal(append(rows, row...))
 }
 
 // UseClaudeConnector registers the claude Driver from the compiled claude

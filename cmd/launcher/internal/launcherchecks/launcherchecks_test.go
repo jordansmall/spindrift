@@ -9,6 +9,7 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/doctor"
+	"spindrift.dev/launcher/internal/driver"
 )
 
 // checkByName looks a row up by name, mirroring cmd/launcher/checks_test.go's
@@ -34,6 +35,7 @@ func minimalValidConfig() Config {
 		GitUserName:  "Test User",
 		GitUserEmail: "test@example.com",
 
+		Drivers:     driver.NewSet(),
 		Driver:      "claude",
 		Credentials: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-token", "GH_TOKEN": "gh-token"},
 

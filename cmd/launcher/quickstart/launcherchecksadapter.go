@@ -24,7 +24,8 @@ func quickstartCheckConfig(a answers) launcherchecks.Config {
 		GitUserName:  a.gitUserName,
 		GitUserEmail: a.gitUserEmail,
 
-		Driver: a.driver,
+		Drivers: a.drivers,
+		Driver:  a.driver,
 		// Each chosen backend's token sits under the env var harness.env writes
 		// it as, so a scaffold missing one fails here as under `spindrift doctor`.
 		Credentials: creds,

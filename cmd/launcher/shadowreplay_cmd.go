@@ -10,8 +10,6 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/connectorruntime"
-	"spindrift.dev/launcher/internal/connectorsandbox"
-	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/shadowreplay"
 )
 
@@ -25,9 +23,9 @@ const defaultShadowReplayDir = ".spindrift/logs"
 func cmdShadowReplay(connectors *connectorruntime.Runtime, args []string, stdout, stderr io.Writer) int {
 	name, connector, dir, err := parseShadowReplayArgs(args)
 	if err == nil && connector == "" {
-		connector, _ = driver.ShadowModule(name)
+		connector, _ = connectors.Drivers().ShadowModule(name)
 	}
-	native, hasNative := driver.NativeStrategy(name)
+	native, hasNative := connectors.Drivers().NativeStrategy(name)
 	switch {
 	case err != nil:
 	case !hasNative:
@@ -56,7 +54,7 @@ func cmdShadowReplay(connectors *connectorruntime.Runtime, args []string, stdout
 	}
 	code := 0
 	for _, log := range logs {
-		res, err := shadowreplay.Replay(context.Background(), name, native, connectorsandbox.Load, wasm, log)
+		res, err := shadowreplay.Replay(context.Background(), name, native, connectors.Load, wasm, log)
 		switch {
 		case err != nil:
 			fmt.Fprintf(stderr, "%s: %s\n", log, err)

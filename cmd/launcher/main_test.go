@@ -35,7 +35,6 @@ import (
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/driver"
-	"spindrift.dev/launcher/internal/driver/drivertest"
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/exitcode"
 	"spindrift.dev/launcher/internal/fixturebuild"
@@ -1863,7 +1862,7 @@ func TestResolveAgentPresenceSignals_NoDocumentFallsBackToSchemaDefaults(t *test
 	setKnob(t, "FILER_MODEL", "")
 	setKnob(t, "WORKER_MODEL", "")
 
-	presence := resolveAgentPresenceSignals("")
+	presence := resolveAgentPresenceSignals(driver.NewSet(), "")
 	if presence.filerEnabled {
 		t.Errorf("filerEnabled = true, want false (FILER_MODEL schema default is empty)")
 	}
@@ -1892,7 +1891,7 @@ func TestResolveAgentPresenceSignals_MatchingDocumentTrustsForwardedArtifact(t *
 	setKnob(t, "FILER_MODEL", "")
 	setKnob(t, "WORKER_MODEL", "claude-sonnet-5")
 
-	presence := resolveAgentPresenceSignals("")
+	presence := resolveAgentPresenceSignals(driver.NewSet(), "")
 	if !presence.filerEnabled {
 		t.Errorf("filerEnabled = false, want true (forwarded artifact)")
 	}
@@ -1923,7 +1922,7 @@ func TestResolveAgentPresenceSignals_FilerModelOverride_DocumentArtifactStillTru
 	setKnob(t, "FILER_MODEL", "haiku")
 	setKnob(t, "WORKER_MODEL", "claude-sonnet-5")
 
-	presence := resolveAgentPresenceSignals("")
+	presence := resolveAgentPresenceSignals(driver.NewSet(), "")
 	if presence.filerEnabled {
 		t.Errorf("filerEnabled = true, want false (document's baked FILER_ENABLED artifact must be trusted regardless of a live FILER_MODEL override -- AGENTS_JSON_TEMPLATE is a fixed, non-overridable bake)")
 	}
@@ -1952,7 +1951,7 @@ func TestResolveAgentPresenceSignals_WorkerModelOverride_DocumentArtifactStillTr
 	setKnob(t, "FILER_MODEL", "")
 	setKnob(t, "WORKER_MODEL", "")
 
-	presence := resolveAgentPresenceSignals("")
+	presence := resolveAgentPresenceSignals(driver.NewSet(), "")
 	if presence.filerEnabled {
 		t.Errorf("filerEnabled = true, want false (forwarded artifact)")
 	}
@@ -1980,7 +1979,7 @@ func TestResolveAgentPresenceSignals_NoDocumentOpencodeDriverFallback(t *testing
 			setKnob(t, "FILER_MODEL", "haiku")
 			setKnob(t, "WORKER_MODEL", tc.workerModel)
 
-			presence := resolveAgentPresenceSignals("opencode")
+			presence := resolveAgentPresenceSignals(driver.NewSet(), "opencode")
 			if !presence.filerEnabled {
 				t.Errorf("filerEnabled = false, want true (opencode provisions the Filer from FILER_MODEL like every other Driver)")
 			}
@@ -1999,7 +1998,7 @@ func TestResolveAgentPresenceSignals_NoDocumentNonNamespacedDriverKeepsBareWorke
 			useDoc(t, nil)
 			setKnob(t, "WORKER_MODEL", "claude-sonnet-5")
 
-			if !resolveAgentPresenceSignals(name).workerProvisioned {
+			if !resolveAgentPresenceSignals(driver.NewSet(), name).workerProvisioned {
 				t.Errorf("workerProvisioned = false, want true (bare WORKER_MODEL is provisioned without provider-namespaced ids)")
 			}
 		})
@@ -2016,7 +2015,7 @@ func TestResolveAgentPresenceSignals_ScoutNoDocumentFallsBackToSchemaDefault(t *
 	setKnob(t, "WORKER_MODEL", "")
 	setKnob(t, "SCOUT_MODEL", "")
 
-	presence := resolveAgentPresenceSignals("")
+	presence := resolveAgentPresenceSignals(driver.NewSet(), "")
 	if !presence.scoutProvisioned {
 		t.Errorf("scoutProvisioned = false, want true (SCOUT_MODEL schema default is non-empty)")
 	}
@@ -2044,7 +2043,7 @@ func TestResolveAgentPresenceSignals_ScoutDocumentArtifactTrustedRegardlessOfLiv
 	setKnob(t, "WORKER_MODEL", "claude-sonnet-5")
 	setKnob(t, "SCOUT_MODEL", "claude-haiku-4-5-20251001")
 
-	presence := resolveAgentPresenceSignals("")
+	presence := resolveAgentPresenceSignals(driver.NewSet(), "")
 	if presence.scoutProvisioned {
 		t.Errorf("scoutProvisioned = true, want false (document's baked SCOUT_PROVISIONED artifact must be trusted regardless of a live SCOUT_MODEL override)")
 	}
@@ -2070,7 +2069,7 @@ func TestResolveAgentPresenceSignals_ScoutMissingArtifactKeyFallsBackIndependent
 	setKnob(t, "WORKER_MODEL", "claude-sonnet-5")
 	setKnob(t, "SCOUT_MODEL", "claude-haiku-4-5-20251001")
 
-	presence := resolveAgentPresenceSignals("")
+	presence := resolveAgentPresenceSignals(driver.NewSet(), "")
 	if !presence.filerEnabled {
 		t.Errorf("filerEnabled = false, want true (trusted from document despite SCOUT_PROVISIONED's absence)")
 	}
@@ -2092,7 +2091,7 @@ func TestResolveAgentPresenceSignals_ScoutNoDocumentOpencodeDriverFallsBackToSco
 	setKnob(t, "WORKER_MODEL", "claude-sonnet-5")
 	setKnob(t, "SCOUT_MODEL", "claude-haiku-4-5-20251001")
 
-	presence := resolveAgentPresenceSignals("opencode")
+	presence := resolveAgentPresenceSignals(driver.NewSet(), "opencode")
 	if !presence.scoutProvisioned {
 		t.Errorf("scoutProvisioned = false, want true (SCOUT_MODEL is set, no document)")
 	}
@@ -6513,13 +6512,20 @@ func TestConfigArtifact_EmptyBoxArtifactFollowsRunnerFamily(t *testing.T) {
 	}
 }
 
-// A document's Driver rows are applied to the registry before any verb runs,
-// so a Connector-backed Driver is resolvable by name for the whole process.
+// A document's Driver rows reach the runtime before any verb runs,
+// so a Connector-backed Driver is resolvable by name through it.
 // The rows are the `drivers` section of the document Nix renders for a
 // Consumer importing the fixture Driver Connector; only that section is taken,
 // since the real document's settings would drive a research run.
 func TestMainRun_InputDocument_AppliesDriverRows(t *testing.T) {
-	drivertest.Isolate(t)
+	var built *connectorruntime.Runtime
+	prev := newConnectorRuntime
+	newConnectorRuntime = func(in connectorsetup.Input, opts connectorsetup.Options) (*connectorruntime.Runtime, error) {
+		rt, err := prev(in, opts)
+		built = rt
+		return rt, err
+	}
+	t.Cleanup(func() { newConnectorRuntime = prev })
 	realDoc := os.Getenv("SPINDRIFT_FIXTURE_CONNECTOR_DOC")
 	if realDoc == "" {
 		t.Skip("SPINDRIFT_FIXTURE_CONNECTOR_DOC is unset")
@@ -6540,11 +6546,11 @@ func TestMainRun_InputDocument_AppliesDriverRows(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	mainRunT(t, []string{"--input", docPath, "research"}, &stdout, &stderr)
-	if _, ok := driver.CredentialRules("fixture"); !ok {
-		t.Errorf("driver.CredentialRules(fixture) not registered after the document's rows applied; stderr=%s", stderr.String())
+	if _, ok := built.Drivers().CredentialRules("fixture"); !ok {
+		t.Errorf("Drivers().CredentialRules(fixture) not offered by the runtime after the document's rows applied; stderr=%s", stderr.String())
 	}
-	if _, err := driver.New("fixture"); err != nil {
-		t.Errorf("driver.New(fixture): %v", err)
+	if _, err := built.Drivers().New("fixture"); err != nil {
+		t.Errorf("Drivers().New(fixture): %v", err)
 	}
 }
 

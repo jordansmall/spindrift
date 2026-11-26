@@ -222,7 +222,7 @@ type butlerSettings struct {
 // and, when the patch rung is on, BUTLER_PATCH_CLASSES, via chore.Load), then
 // BUTLER_CLAIM_TIMEOUT and DAEMON_AWAKE_WINDOW -- before any Ledger claim.
 func resolveButlerSettings(cfg config, caps forge.Capabilities, choreName string) (butlerSettings, error) {
-	filerEnabled := resolveAgentPresenceSignals(cfg.driver).filerEnabled
+	filerEnabled := resolveAgentPresenceSignals(cfg.connectors.Drivers(), cfg.driver).filerEnabled
 	chores, err := butlerPreflight(cfg, choreName, filerEnabled, caps.HostPostedIssueFiler, resolveChoreCatalog())
 	if err != nil {
 		return butlerSettings{}, err

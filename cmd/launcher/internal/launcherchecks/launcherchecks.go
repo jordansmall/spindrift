@@ -22,7 +22,10 @@ type Config struct {
 	GitUserName  string
 	GitUserEmail string
 
-	Driver string
+	// Drivers answers for Driver: its credential rules, auth content and, for an
+	// unrecognised name, the error naming the known ones.
+	Drivers *driver.Set
+	Driver  string
 	// Models are every model tier the run uses (MODEL and the per-tier
 	// *_MODEL), so a credential rule gated on a model prefix sees them all.
 	Models []string
@@ -175,14 +178,14 @@ func RequiredKnobChecks(c Config, d Deps) []doctor.Check {
 			Tier:   doctor.Required,
 			Remedy: "set the credential DRIVER's rules require (see the error for which), or fix a typo'd DRIVER value",
 			Probe: func() (any, error) {
-				rules, ok := driver.CredentialRules(c.Driver)
+				rules, ok := c.Drivers.CredentialRules(c.Driver)
 				if !ok {
 					// Not dead code (#2534 removed this arm; it was reverted):
 					// DRIVER is an operator-set env var nix eval never sees,
 					// and driver.New falls back to the
 					// claude Driver on its own error, so an unrecognised DRIVER
 					// would otherwise produce a silent wrong-Driver run.
-					_, err := driver.New(c.Driver)
+					_, err := c.Drivers.New(c.Driver)
 					return nil, err
 				}
 				var errs []error
@@ -191,7 +194,7 @@ func RequiredKnobChecks(c Config, d Deps) []doctor.Check {
 						errs = append(errs, errors.New(r.Remedy))
 					}
 				}
-				if a, ok := driver.AuthContentFor(c.Driver); ok {
+				if a, ok := c.Drivers.AuthContentFor(c.Driver); ok {
 					if content := c.Credentials[a.Env]; content != "" {
 						if err := a.Check(content, rules); err != nil {
 							errs = append(errs, err)

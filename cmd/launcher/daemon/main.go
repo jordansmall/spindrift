@@ -31,7 +31,7 @@ import (
 	"spindrift.dev/launcher/internal/connectorsetup"
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatchkind"
-	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers
+	"spindrift.dev/launcher/internal/driver/bundle" // the bundled Drivers; its init registers the rest
 	"spindrift.dev/launcher/internal/driver/driverrows"
 	"spindrift.dev/launcher/internal/exitcode"
 	"spindrift.dev/launcher/internal/inputdoc"
@@ -710,7 +710,8 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return refuse(err)
 	}
-	if err := driverrows.Use(doc.Drivers); err != nil {
+	driverRows, err := driverrows.Parse(doc.Drivers, bundle.Drivers())
+	if err != nil {
 		return refuse(err)
 	}
 	if err := backendrows.Use(doc.Backends, func(k string) string { return backendRowSetting(doc, stderr, k) }); err != nil {
@@ -830,7 +831,9 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return refuse(err)
 	}
-	connectors, err := newConnectorRuntime(connectorInput(doc, args.Kinds, pwd), connectorsetup.Options{
+	connIn := connectorInput(doc, args.Kinds, pwd)
+	connIn.Drivers = driverRows
+	connectors, err := newConnectorRuntime(connIn, connectorsetup.Options{
 		RequireCredential: true, RefreshEvery: connectorCredentialRefresh,
 		OnRefreshError: func(env string, err error) {
 			fmt.Fprintf(stderr, "daemon: connector credential %s refresh failed, keeping the previous value: %v\n", env, err)

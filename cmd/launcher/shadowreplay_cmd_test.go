@@ -41,7 +41,7 @@ func TestShadowReplayVerb_ReplaysOnlyTheNamedDriversLogs(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := cmdShadowReplay(nil, []string{"--driver", "opencode", "--connector", wasm, dir}, &stdout, &stderr)
+	code := cmdShadowReplay(driverRuntime(t), []string{"--driver", "opencode", "--connector", wasm, dir}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr = %q", code, stderr.String())
@@ -105,7 +105,7 @@ func TestShadowReplayVerb_NoLogsIsAnError(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := cmdShadowReplay(nil, []string{"--driver", "opencode", "--connector", wasm, dir}, &stdout, &stderr)
+	code := cmdShadowReplay(driverRuntime(t), []string{"--driver", "opencode", "--connector", wasm, dir}, &stdout, &stderr)
 
 	if code == 0 {
 		t.Errorf("exit = 0 with no logs, want non-zero")

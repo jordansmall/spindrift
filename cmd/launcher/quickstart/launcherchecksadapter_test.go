@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/doctor"
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/launcherchecks"
 	"spindrift.dev/launcher/internal/runner"
 )
@@ -22,6 +23,7 @@ func validAnswers() answers {
 		tracker:      backendChoice{name: "github"},
 		forge:        backendChoice{name: "github"},
 		tokens:       map[string]string{"github": "ghp_faketoken"},
+		drivers:      driver.NewSet(),
 		credentials:  []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}},
 	}
 }
@@ -37,6 +39,7 @@ func TestQuickstartCheckConfig_MapsFields(t *testing.T) {
 		Credentials:  map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken", "GH_TOKEN": a.tokens["github"]},
 		IssueTracker: a.tracker.name,
 		CodeForge:    "github",
+		Drivers:      a.drivers,
 	}
 	if !reflect.DeepEqual(c, want) {
 		t.Errorf("quickstartCheckConfig(a) = %+v, want %+v", c, want)

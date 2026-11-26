@@ -3,7 +3,11 @@ package connectorsetup_test
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -11,9 +15,11 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
 	"spindrift.dev/launcher/internal/connectorsetup"
+	"spindrift.dev/launcher/internal/driver/driverrows"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/rowcredential"
 	"spindrift.dev/launcher/internal/runner"
@@ -29,7 +35,6 @@ const (
 func useRow(t *testing.T, totals func(connectorsandbox.Stats)) {
 	t.Helper()
 	t.Cleanup(backendrows.Snapshot())
-	t.Cleanup(connectorsandbox.Use(connectorsandbox.Current()))
 	t.Cleanup(backendkit.ReplaceRegistryForTest([]backendkit.Strategy{{
 		Descriptor:          backend.Descriptor{Name: rowName},
 		ConnectorRouted:     true,
@@ -89,11 +94,9 @@ func TestUnsetCredentialIsOneRuleWithAPerProgramOption(t *testing.T) {
 	}
 }
 
-func TestCommandErrorInstallsNoSandbox(t *testing.T) {
+func TestCommandErrorReturnsNoRuntime(t *testing.T) {
 	useRow(t, nil)
 	var events []string
-	installed := newRecordingLoader(&events)
-	connectorsandbox.Use(installed)
 	_, err := connectorsetup.New(input(map[string]string{credEnv + "_CMD": "mint"}), connectorsetup.Options{
 		Sandbox: newRecordingLoader(&events),
 		Run:     func(string) (string, error) { return "", errors.New("vault is down") },
@@ -101,12 +104,9 @@ func TestCommandErrorInstallsNoSandbox(t *testing.T) {
 	if err == nil || errors.Is(err, rowcredential.ErrUnset) {
 		t.Fatalf("err = %v, want the command failure", err)
 	}
-	if connectorsandbox.Current() != connectorsandbox.Loader(installed) {
-		t.Error("a failed setup replaced the installed sandbox")
-	}
 }
 
-func TestInstallsTheSandboxAndCloseStopsItBeforeRecordingTotals(t *testing.T) {
+func TestCloseStopsTheSandboxBeforeRecordingTotals(t *testing.T) {
 	var events []string
 	useRow(t, func(connectorsandbox.Stats) { events = append(events, "totals") })
 	l := newRecordingLoader(&events)
@@ -114,8 +114,8 @@ func TestInstallsTheSandboxAndCloseStopsItBeforeRecordingTotals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if connectorsandbox.Current() != connectorsandbox.Loader(l) {
-		t.Fatal("the sandbox is not the installed one")
+	if rt.Sandbox() != connectorsandbox.Loader(l) {
+		t.Fatal("the runtime's sandbox is not the one given")
 	}
 	row, _ := rt.Row(rowName)
 	if !rt.CredentialSet(row) {
@@ -238,8 +238,6 @@ func TestStartsNoSandboxWhenNothingLoads(t *testing.T) {
 func TestRefreshWithoutAnErrorHandlerIsRefused(t *testing.T) {
 	var events []string
 	useRow(t, nil)
-	installed := newRecordingLoader(&events)
-	connectorsandbox.Use(installed)
 	_, err := connectorsetup.New(input(map[string]string{credEnv + "_CMD": "mint"}), connectorsetup.Options{
 		Sandbox:      newRecordingLoader(&events),
 		RefreshEvery: time.Second,
@@ -247,9 +245,6 @@ func TestRefreshWithoutAnErrorHandlerIsRefused(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("a refresh with nowhere to report a failure was accepted")
-	}
-	if connectorsandbox.Current() != connectorsandbox.Loader(installed) {
-		t.Error("a refused setup replaced the installed sandbox")
 	}
 }
 
@@ -306,3 +301,53 @@ func TestCloseRecordsNoTotalsWhenTheSandboxNeverServed(t *testing.T) {
 type unservedLoader struct{ connectorsandbox.Loader }
 
 func (unservedLoader) Stats() (connectorsandbox.Stats, bool) { return connectorsandbox.Stats{}, false }
+
+// loadRecorder is a sandbox that notes each wasm it is asked to load and
+// refuses it.
+type loadRecorder struct {
+	connectorsandbox.Loader
+	loaded [][]byte
+}
+
+func (l *loadRecorder) Load(_ context.Context, wasm []byte) (*connectorhost.Connector, error) {
+	l.loaded = append(l.loaded, wasm)
+	return nil, errors.New("recorded, not loaded")
+}
+
+func TestDriverConnectorLoadsIntoTheRuntimesSandbox(t *testing.T) {
+	useRow(t, nil)
+	module := filepath.Join(t.TempDir(), "drv.wasm")
+	if err := os.WriteFile(module, []byte("wasm-bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := driverrows.Parse([]byte(`[{"name":"setupdrv","module":`+strconv.Quote(module)+`}]`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := &loadRecorder{Loader: connectorsandboxtest.InProcess()}
+	in := input(map[string]string{credEnv: "tok"})
+	in.Drivers = rows
+	rt, err := connectorsetup.New(in, connectorsetup.Options{Sandbox: l})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+	if _, err := rt.Drivers().New("setupdrv"); err == nil || !strings.Contains(err.Error(), "recorded, not loaded") {
+		t.Fatalf("New = %v, want the sandbox's refusal", err)
+	}
+	if len(l.loaded) != 1 || string(l.loaded[0]) != "wasm-bytes" {
+		t.Errorf("sandbox loads = %q, want the Driver's module once", l.loaded)
+	}
+}
+
+func TestRuntimeWithoutDriverRowsOffersNoDrivers(t *testing.T) {
+	useRow(t, nil)
+	rt, err := connectorsetup.New(input(map[string]string{credEnv: "tok"}), connectorsetup.Options{Sandbox: connectorsandboxtest.InProcess()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+	if rt.Drivers().HasNative("claude") {
+		t.Error("a runtime given no rows offers a native Driver")
+	}
+}
