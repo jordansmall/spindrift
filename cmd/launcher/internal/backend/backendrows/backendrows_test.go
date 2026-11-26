@@ -377,10 +377,16 @@ func withHeaders(r connectorhost.Route, req, resp []string) connectorhost.Route 
 	return r
 }
 
+func withDocs(r connectorhost.Route, docs map[string]string) connectorhost.Route {
+	r.Documents = docs
+	return r
+}
+
 func TestWidening(t *testing.T) {
 	r := func(method, host, path string) connectorhost.Route {
 		return connectorhost.Route{Method: method, Host: host, Path: path}
 	}
+	gql := r("POST", "api.fixture.test", "/graphql")
 	cases := []struct {
 		name     string
 		live     []connectorhost.Route
@@ -415,6 +421,15 @@ func TestWidening(t *testing.T) {
 		{"a second request header widens", []connectorhost.Route{withHeaders(getRepos, []string{"X-A", "X-B"}, nil)}, []connectorhost.Route{withHeaders(getRepos, []string{"X-A"}, nil)},
 			[]connectorhost.Route{withHeaders(getRepos, []string{"X-A", "X-B"}, nil)}},
 		{"the same headers in another case are covered", []connectorhost.Route{withHeaders(getRepos, []string{"x-extra"}, []string{"X-RESP"})}, []connectorhost.Route{withHeaders(getRepos, []string{"X-Extra"}, []string{"x-resp"})}, nil},
+		{"a new document widens", []connectorhost.Route{withDocs(gql, map[string]string{"A": "q a", "B": "q b"})}, []connectorhost.Route{withDocs(gql, map[string]string{"A": "q a"})},
+			[]connectorhost.Route{withDocs(gql, map[string]string{"A": "q a", "B": "q b"})}},
+		{"a changed document text widens", []connectorhost.Route{withDocs(gql, map[string]string{"A": "q a2"})}, []connectorhost.Route{withDocs(gql, map[string]string{"A": "q a"})},
+			[]connectorhost.Route{withDocs(gql, map[string]string{"A": "q a2"})}},
+		{"dropping the document constraint widens", []connectorhost.Route{gql}, []connectorhost.Route{withDocs(gql, map[string]string{"A": "q a"})},
+			[]connectorhost.Route{gql}},
+		{"fewer documents are covered", []connectorhost.Route{withDocs(gql, map[string]string{"A": "q a"})}, []connectorhost.Route{withDocs(gql, map[string]string{"A": "q a", "B": "q b"})}, nil},
+		{"the same documents are covered", []connectorhost.Route{withDocs(gql, map[string]string{"A": "q a"})}, []connectorhost.Route{withDocs(gql, map[string]string{"A": "q a"})}, nil},
+		{"an unconstrained accepted route covers documents", []connectorhost.Route{withDocs(gql, map[string]string{"A": "q a"})}, []connectorhost.Route{gql}, nil},
 		{"fewer headers are covered", []connectorhost.Route{getRepos}, []connectorhost.Route{withHeaders(getRepos, []string{"X-Extra"}, []string{"X-Resp"})}, nil},
 	}
 	for _, tc := range cases {

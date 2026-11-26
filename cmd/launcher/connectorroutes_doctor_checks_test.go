@@ -163,6 +163,41 @@ func TestConnectorRoutesChecks_HeaderWideningNamesTheHeader(t *testing.T) {
 	}
 }
 
+func TestConnectorRoutesChecks_DocumentWideningNamesTheDocuments(t *testing.T) {
+	post := fixtureGetRepos
+	post.Method = "POST"
+	accepted := post
+	accepted.Documents = map[string]string{"A": "query { a }"}
+	live := post
+	live.Documents = map[string]string{"A": "query { a }", "B": "query { b }"}
+	useConnectorRows(t, connectorRow([]connectorhost.Route{accepted}, []connectorhost.Route{live}))
+	out := runConnectorRows(t, connectorRoutesChecks(fixtureConfig()))
+	for _, want := range []string{"connector-routes-widened[fixture]", "\n+ POST api.fixture.test /repos (documents A@ddd02bba, B@115b9db7)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestConnectorRoutesChecks_ChangedDocumentTextIsAWideningWithDistinctLines(t *testing.T) {
+	post := fixtureGetRepos
+	post.Method = "POST"
+	accepted := post
+	accepted.Documents = map[string]string{"closeIssue": "mutation { close }"}
+	live := post
+	live.Documents = map[string]string{"closeIssue": "mutation { close(all: true) }"}
+	if accepted.String() == live.String() {
+		t.Fatalf("a changed document text renders the same line: %s", live)
+	}
+	useConnectorRows(t, connectorRow([]connectorhost.Route{accepted}, []connectorhost.Route{live}))
+	out := runConnectorRows(t, connectorRoutesChecks(fixtureConfig()))
+	for _, want := range []string{"connector-routes-widened[fixture]", "\n+ " + live.String()} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestConnectorRoutesChecks_JiraWriteRoutesRenderAsAdded(t *testing.T) {
 	get := func(p string) connectorhost.Route {
 		return connectorhost.Route{Method: "GET", Host: backendrows.BaseHost, Path: p}
