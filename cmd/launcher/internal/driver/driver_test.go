@@ -13,7 +13,7 @@ import (
 // TestNewUnknownDriverErrors verifies that an unrecognized DRIVER value is
 // rejected rather than silently falling back.
 func TestNewUnknownDriverErrors(t *testing.T) {
-	if _, err := New("bogus"); err == nil {
+	if _, err := NewSet().New("bogus"); err == nil {
 		t.Fatal("New(\"bogus\"): expected error, got nil")
 	}
 }
@@ -28,7 +28,7 @@ func TestProviderNamespacedModels(t *testing.T) {
 		"":         false,
 		"nope":     false,
 	} {
-		if got := ProviderNamespacedModels(name); got != want {
+		if got := NewSet().ProviderNamespacedModels(name); got != want {
 			t.Errorf("ProviderNamespacedModels(%q) = %v, want %v", name, got, want)
 		}
 	}
@@ -39,18 +39,18 @@ func TestProviderNamespacedModels(t *testing.T) {
 // carries levels (issue #5625).
 func TestEffortOnModelLevels(t *testing.T) {
 	want := []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"}
-	if got := EffortOnModelLevels("pi"); !slices.Equal(got, want) {
+	if got := NewSet().EffortOnModelLevels("pi"); !slices.Equal(got, want) {
 		t.Errorf("EffortOnModelLevels(pi) = %v, want %v", got, want)
 	}
 	for _, name := range []string{"claude", "opencode", "", "nope"} {
-		if got := EffortOnModelLevels(name); got != nil {
+		if got := NewSet().EffortOnModelLevels(name); got != nil {
 			t.Errorf("EffortOnModelLevels(%q) = %v, want nil", name, got)
 		}
 	}
 }
 
 func TestCredentialRulesClaudeAlwaysApplies(t *testing.T) {
-	rules, ok := CredentialRules("claude")
+	rules, ok := NewSet().CredentialRules("claude")
 	if !ok || len(rules) != 1 {
 		t.Fatalf("CredentialRules(claude) = %v, %v; want one rule", rules, ok)
 	}
@@ -67,7 +67,7 @@ func TestCredentialRulesClaudeAlwaysApplies(t *testing.T) {
 }
 
 func TestCredentialRulesOpencodeAppliesOnlyToCopilot(t *testing.T) {
-	rules, ok := CredentialRules("opencode")
+	rules, ok := NewSet().CredentialRules("opencode")
 	if !ok || len(rules) != 1 {
 		t.Fatalf("CredentialRules(opencode) = %v, %v; want one rule", rules, ok)
 	}
@@ -84,7 +84,7 @@ func TestCredentialRulesOpencodeAppliesOnlyToCopilot(t *testing.T) {
 }
 
 func TestCredentialRulesPiOnePerProvider(t *testing.T) {
-	rules, ok := CredentialRules("pi")
+	rules, ok := NewSet().CredentialRules("pi")
 	if !ok {
 		t.Fatal("CredentialRules(pi) not found")
 	}
@@ -151,86 +151,113 @@ func TestCredentialRuleSatisfied(t *testing.T) {
 }
 
 func TestCredentialRulesEmptyNameIsClaude(t *testing.T) {
-	got, ok := CredentialRules("")
-	want, _ := CredentialRules("claude")
+	got, ok := NewSet().CredentialRules("")
+	want, _ := NewSet().CredentialRules("claude")
 	if !ok || !reflect.DeepEqual(got, want) {
 		t.Errorf("CredentialRules(\"\") = %v, %v; want claude's %v", got, ok, want)
 	}
 }
 
 func TestCredentialRulesUnknownDriver(t *testing.T) {
-	if rules, ok := CredentialRules("nope"); ok || rules != nil {
+	if rules, ok := NewSet().CredentialRules("nope"); ok || rules != nil {
 		t.Errorf("CredentialRules(nope) = %v, %v; want nil, false", rules, ok)
 	}
 }
 
-func TestRegisterPanicsOnLazyDuplicate(t *testing.T) {
-	t.Cleanup(Snapshot())
-	RegisterConnector("lazydup", nil)
+func TestAddConnectorPanicsOnLazyDuplicate(t *testing.T) {
+	s := NewSet()
+	s.AddConnector("lazydup", nil)
 	defer func() {
 		if recover() == nil {
-			t.Error("Register of a lazily registered name did not panic")
+			t.Error("AddConnector of a lazily added name did not panic")
 		}
 	}()
-	Register(driverkit.Strategy{Name: "lazydup"})
+	s.AddConnector("lazydup", nil)
 }
 
-func TestSnapshotRestoresRegistryAndDescriptors(t *testing.T) {
+func TestNewSetPanicsOnDuplicateNative(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("NewSet of a repeated native name did not panic")
+		}
+	}()
+	NewSet(driverkit.Strategy{Name: "twice"}, driverkit.Strategy{Name: "twice"})
+}
+
+// Each Set owns its Drivers, Descriptors and shadows.
+func TestSetsAreIndependent(t *testing.T) {
+	a, b := NewSet(driverkit.Strategy{Name: "only-a"}), NewSet()
+	a.AddConnector("lazy-a", nil)
+	a.UseDescriptor(Descriptor{Name: "claude", ProviderNamespacedModels: true})
+	a.UseDescriptor(Descriptor{Name: "added"})
+	a.UseShadow("only-a", "m.wasm")
+	if b.Has("only-a") || b.Has("lazy-a") {
+		t.Error("a Driver added to one Set is in another")
+	}
+	if b.ProviderNamespacedModels("claude") {
+		t.Error("a Descriptor replaced in one Set is replaced in another")
+	}
+	if _, ok := b.DescriptorFor("added"); ok {
+		t.Error("a Descriptor added to one Set is in another")
+	}
+	if _, ok := b.ShadowModule("only-a"); ok {
+		t.Error("a shadow recorded in one Set is in another")
+	}
+	if ProviderNamespacedModels("claude") || Has("only-a") {
+		t.Error("a Set changed the process-wide shims' Set")
+	}
+}
+
+// Covers the temporary Snapshot shim.
+func TestSnapshotRestoresProcessSet(t *testing.T) {
 	restore := Snapshot()
 	Register(driverkit.Strategy{Name: "snapshotted"})
-	RegisterConnector("snapshotlazy", nil)
-	UseDescriptor(Descriptor{Name: "claude", ProviderNamespacedModels: true})
 	UseDescriptor(Descriptor{Name: "snapshotadded"})
 	restore()
-	if Has("snapshotted") || Has("snapshotlazy") {
+	if Has("snapshotted") {
 		t.Error("restore left a registered Driver")
 	}
-	if ProviderNamespacedModels("claude") {
-		t.Error("restore left the replaced claude Descriptor")
-	}
-	if _, ok := descriptor("snapshotadded"); ok {
+	if _, ok := DescriptorFor("snapshotadded"); ok {
 		t.Error("restore left an added Descriptor")
 	}
 }
 
-func TestRegisterPrimaryReplacesNativeInNew(t *testing.T) {
-	t.Cleanup(Snapshot())
-	Register(driverkit.Strategy{Name: "prim"})
-	RegisterPrimary("prim", func() (driverkit.Strategy, error) {
+func TestUsePrimaryReplacesNativeInNew(t *testing.T) {
+	s := NewSet(driverkit.Strategy{Name: "prim"})
+	s.UsePrimary("prim", func() (driverkit.Strategy, error) {
 		return driverkit.Strategy{Name: "prim", SessionFlags: func(mode, _, _, _ string) (driverkit.SessionFlag, error) {
 			return driverkit.SessionFlag{Flag: "--from-connector", Value: mode}, nil
 		}}, nil
 	})
-	d, err := New("prim")
+	d, err := s.New("prim")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got, err := d.SessionFlags("initial", "", "", ""); err != nil || got != (driverkit.SessionFlag{Flag: "--from-connector", Value: "initial"}) {
 		t.Errorf("SessionFlags = %+v, %v; want the Connector's", got, err)
 	}
-	if !HasNative("prim") {
+	if !s.HasNative("prim") {
 		t.Error("HasNative(prim) = false, want the linked-in Strategy kept")
 	}
-	if _, ok := NativeStrategy("prim"); !ok {
+	if _, ok := s.NativeStrategy("prim"); !ok {
 		t.Error("NativeStrategy(prim) not ok, want the linked-in Strategy kept")
 	}
-	if n := slices.Index(Names(), "prim"); n < 0 || slices.Index(Names()[n+1:], "prim") >= 0 {
-		t.Errorf("Names() = %v, want prim listed once", Names())
+	if n := slices.Index(s.Names(), "prim"); n < 0 || slices.Index(s.Names()[n+1:], "prim") >= 0 {
+		t.Errorf("Names() = %v, want prim listed once", s.Names())
 	}
 }
 
-func TestRegisterPrimaryLoadFailureNamesDriverAndDoesNotFallBack(t *testing.T) {
-	t.Cleanup(Snapshot())
-	Register(driverkit.Strategy{Name: "prim"})
-	RegisterPrimary("prim", func() (driverkit.Strategy, error) { return driverkit.Strategy{}, errors.New("boom") })
-	d, err := New("prim")
+func TestUsePrimaryLoadFailureNamesDriverAndDoesNotFallBack(t *testing.T) {
+	s := NewSet(driverkit.Strategy{Name: "prim"})
+	s.UsePrimary("prim", func() (driverkit.Strategy, error) { return driverkit.Strategy{}, errors.New("boom") })
+	d, err := s.New("prim")
 	if err == nil || !strings.Contains(err.Error(), `DRIVER "prim"`) || !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("New(prim) = %v, %v, want an error naming DRIVER \"prim\"", d, err)
 	}
 }
 
-func TestRegisterPrimaryPanicsWithoutNativeOrOnRepeat(t *testing.T) {
-	t.Cleanup(Snapshot())
+func TestUsePrimaryPanicsWithoutNativeOrOnRepeat(t *testing.T) {
+	s := NewSet(driverkit.Strategy{Name: "twice"})
 	load := func() (driverkit.Strategy, error) { return driverkit.Strategy{}, nil }
 	mustPanic := func(what string, f func()) {
 		t.Helper()
@@ -241,26 +268,25 @@ func TestRegisterPrimaryPanicsWithoutNativeOrOnRepeat(t *testing.T) {
 		}()
 		f()
 	}
-	mustPanic("RegisterPrimary without a native Strategy", func() { RegisterPrimary("nonative", load) })
-	RegisterConnector("lazyonly", load)
-	mustPanic("RegisterPrimary of a lazy-only name", func() { RegisterPrimary("lazyonly", load) })
-	Register(driverkit.Strategy{Name: "twice"})
-	RegisterPrimary("twice", load)
-	mustPanic("a repeated RegisterPrimary", func() { RegisterPrimary("twice", load) })
+	mustPanic("UsePrimary without a native Strategy", func() { s.UsePrimary("nonative", load) })
+	s.AddConnector("lazyonly", load)
+	mustPanic("UsePrimary of a lazy-only name", func() { s.UsePrimary("lazyonly", load) })
+	s.UsePrimary("twice", load)
+	mustPanic("a repeated UsePrimary", func() { s.UsePrimary("twice", load) })
 }
 
 // A Descriptor without a registered Driver is a Connector-only Driver whose
 // row never arrived; the error says so, not "unknown".
 func TestNewDescriptorWithoutDriverNamesTheMissingRow(t *testing.T) {
-	t.Cleanup(Snapshot())
-	UseDescriptor(Descriptor{Name: "rowless"})
+	s := NewSet()
+	s.UseDescriptor(Descriptor{Name: "rowless"})
 	for _, name := range []string{"rowless", "claude"} {
 		want := `DRIVER "` + name + `": no Driver row supplies its Connector module`
-		if _, err := New(name); err == nil || err.Error() != want {
+		if _, err := s.New(name); err == nil || err.Error() != want {
 			t.Errorf("New(%q) = %v, want %q", name, err, want)
 		}
 	}
-	if _, err := New("bogus"); err == nil || !strings.Contains(err.Error(), "unknown DRIVER") {
+	if _, err := s.New("bogus"); err == nil || !strings.Contains(err.Error(), "unknown DRIVER") {
 		t.Errorf("New(bogus) = %v, want the unknown-DRIVER error", err)
 	}
 }
@@ -285,7 +311,7 @@ func TestSessionArgs(t *testing.T) {
 		{"value with no flag", "claude", driverkit.SessionFlag{Value: "--settings"}, nil, `driver "claude" answered session value "--settings" with no flag`},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := SessionArgs(c.driver, c.answer)
+			got, err := NewSet().SessionArgs(c.driver, c.answer)
 			if c.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), c.wantErr) {
 					t.Fatalf("SessionArgs error = %v, want it to contain %q", err, c.wantErr)

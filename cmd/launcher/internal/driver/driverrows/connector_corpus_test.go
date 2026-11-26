@@ -1,21 +1,23 @@
 package driverrows_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/driver/driverkit/conformance"
-	"spindrift.dev/launcher/internal/driver/drivertest"
+	"spindrift.dev/launcher/internal/driver/driverrows"
+	"spindrift.dev/launcher/internal/fixturebuild"
 	"spindrift.dev/launcher/internal/golden"
 )
 
-// The claude Connector, registered through the production path, passes the
+// The claude Connector, built through the production path, passes the
 // corpus and goldens that live beside it. The conformance runner is core's and
 // internal, so this tree replays a corpus the Connector's module owns.
 func TestCorpus(t *testing.T) {
+	t.Parallel()
 	// The Connector's conformance check owns this replay and requires its PASS
 	// line; in core's go test it only adds CPU (issue #6799).
 	if os.Getenv(connectorNameEnv) != "claude" {
@@ -25,11 +27,16 @@ func TestCorpus(t *testing.T) {
 	if golden.Update() {
 		t.Fatal("refusing to update goldens from the Connector; unset UPDATE_GOLDENS")
 	}
-	drivertest.Isolate(t)
-	if err := drivertest.UseClaudeConnector(); err != nil {
+	// An unresolvable wasm is an error, never a skip (ADR 0067).
+	wasm, err := fixturebuild.ClaudeConnectorWasm()
+	if err != nil {
+		t.Fatalf("claude Connector: %v", err)
+	}
+	raw, err := json.Marshal([]driverrows.Row{{Descriptor: generated(t, "claude"), Module: wasm}})
+	if err != nil {
 		t.Fatal(err)
 	}
-	d, err := driver.New("claude")
+	d, err := hosted(t, raw).New("claude")
 	if err != nil {
 		t.Fatal(err)
 	}

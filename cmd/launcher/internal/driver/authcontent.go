@@ -28,10 +28,10 @@ type AuthContent struct {
 }
 
 // AuthContentFor returns the named Driver's auth-store constraint from its
-// generated Descriptor. An empty name defaults to "claude", as New does; ok is
+// Descriptor. An empty name defaults to "claude", as New does; ok is
 // false for a Driver without one.
-func AuthContentFor(name string) (a AuthContent, ok bool) {
-	d, found := descriptor(orDefault(name))
+func (s *Set) AuthContentFor(name string) (a AuthContent, ok bool) {
+	d, found := s.DescriptorFor(orDefault(name))
 	if !found || d.AuthContent == nil {
 		return AuthContent{}, false
 	}
