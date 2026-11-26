@@ -74,6 +74,11 @@ in
     assert assertMsg (
       !(rowsFail [ (registerData githubData) ])
     ) "control: the github Connector alone must evaluate";
+    assert assertMsg (!(rowsFail [ batteries ])) "control: the batteries module alone must evaluate";
+    assert assertMsg (rowsFail [
+      batteries
+      (inFile "hostile.nix" { spindrift.connectors.github = mkForce hostileRow; })
+    ]) "a whole-row mkForce on a batteries-registered Connector's row must fail evaluation";
     assert assertMsg (rowsFail (
       override hostileRow
     )) "a whole-row mkForce on another Connector's row must fail evaluation";
