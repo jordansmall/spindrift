@@ -14,20 +14,18 @@ import (
 
 var tgt = tracker.Target{API: "https://api.github.com", Repo: "o/r"}
 
-// stub replaces send with canned responses keyed by URL and records requests.
+// stub serves canned responses keyed by URL and records requests.
 func stub(t *testing.T, resp map[string]connector.Response) *[]connector.Request {
 	t.Helper()
 	var got []connector.Request
-	old := send
-	send = func(r connector.Request) (connector.Response, error) {
+	host.Serve(t, func(r connector.Request) (connector.Response, error) {
 		got = append(got, r)
 		v, ok := resp[r.URL]
 		if !ok {
 			return connector.Response{Status: 404, Body: []byte("{}")}, nil
 		}
 		return v, nil
-	}
-	t.Cleanup(func() { send = old })
+	})
 	return &got
 }
 
@@ -131,13 +129,11 @@ func TestListIssuesLimit(t *testing.T) {
 }
 
 func TestPageCeiling(t *testing.T) {
-	old := send
 	n := 0
-	send = func(connector.Request) (connector.Response, error) {
+	host.Serve(t, func(connector.Request) (connector.Response, error) {
 		n++
 		return ok(items(1, pageSize, false)), nil
-	}
-	t.Cleanup(func() { send = old })
+	})
 	if _, err := nativeDeps(tgt, "5"); err == nil || !strings.Contains(err.Error(), "pages") {
 		t.Fatalf("nativeDeps err = %v", err)
 	}
@@ -201,9 +197,11 @@ func TestErrors(t *testing.T) {
 	if _, err := issue(tgt, "6"); err == nil || !strings.Contains(err.Error(), "404") {
 		t.Fatalf("err = %v", err)
 	}
+	// The fake host hands a transport error back as text, so errors.Is
+	// cannot see boom; match its message.
 	boom := errors.New("boom")
-	send = func(connector.Request) (connector.Response, error) { return connector.Response{}, boom }
-	if _, err := listIssues(tgt, tracker.Query{}, 1); !errors.Is(err, boom) {
+	host.Serve(t, func(connector.Request) (connector.Response, error) { return connector.Response{}, boom })
+	if _, err := listIssues(tgt, tracker.Query{}, 1); err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -295,15 +293,13 @@ func searchQuery(t *testing.T, rawURL string) string {
 
 func TestSearch(t *testing.T) {
 	var reqs []string
-	old := send
-	send = func(r connector.Request) (connector.Response, error) {
+	host.Serve(t, func(r connector.Request) (connector.Response, error) {
 		reqs = append(reqs, r.URL)
 		return ok(`{"items":[
 			{"number":3,"title":"a","body":"b","state":"open","labels":[{"name":"l"}]},
 			{"number":4,"title":"pr","state":"open","labels":[],"pull_request":{}},
 			{"number":5,"title":"c","state":"open","labels":[]}]}`), nil
-	}
-	t.Cleanup(func() { send = old })
+	})
 	issues, err := search(tgt, "  foo   bar ", "open", "a b", 5)
 	if err != nil {
 		t.Fatal(err)
@@ -333,12 +329,10 @@ func TestSearch(t *testing.T) {
 
 func TestSearchPages(t *testing.T) {
 	n := 0
-	old := send
-	send = func(connector.Request) (connector.Response, error) {
+	host.Serve(t, func(connector.Request) (connector.Response, error) {
 		n++
 		return ok(`{"items":` + items(n*100, 100, false) + `}`), nil
-	}
-	t.Cleanup(func() { send = old })
+	})
 	issues, err := search(tgt, "x", "open", "", 150)
 	if err != nil || len(issues) != 150 || n != 2 {
 		t.Fatalf("len = %d, requests = %d, err = %v", len(issues), n, err)
@@ -377,15 +371,13 @@ func gqlComments(hasNext bool, cursor string, nodes ...string) connector.Respons
 func stubPages(t *testing.T, resp ...connector.Response) *[]connector.Request {
 	t.Helper()
 	var got []connector.Request
-	old := send
-	send = func(r connector.Request) (connector.Response, error) {
+	host.Serve(t, func(r connector.Request) (connector.Response, error) {
 		got = append(got, r)
 		if len(got) > len(resp) {
 			return connector.Response{Status: 500, Body: []byte("{}")}, nil
 		}
 		return resp[len(got)-1], nil
-	}
-	t.Cleanup(func() { send = old })
+	})
 	return &got
 }
 

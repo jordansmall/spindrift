@@ -41,9 +41,7 @@ func labelFake(t *testing.T, lookups ...string) *[]connector.Request {
 	t.Helper()
 	var got []connector.Request
 	n := 0
-	old := send
-	t.Cleanup(func() { send = old })
-	send = func(r connector.Request) (connector.Response, error) {
+	host.Serve(t, func(r connector.Request) (connector.Response, error) {
 		got = append(got, r)
 		if r.URL == graphqlURL {
 			if q := gqlOf(t, r).Query; !slices.Contains(slices.Collect(maps.Values(documents)), q) {
@@ -61,7 +59,7 @@ func labelFake(t *testing.T, lookups ...string) *[]connector.Request {
 			return ok(reply), nil
 		}
 		return connector.Response{Status: 404, Body: []byte("{}")}, nil
-	}
+	})
 	return &got
 }
 
@@ -196,23 +194,21 @@ func TestEditLabelsFailsOnErrors(t *testing.T) {
 	if err := editLabels(tgt, "7", nil, []string{"x"}); err == nil {
 		t.Error("graphql errors on lookup: want error")
 	}
-	old := send
-	t.Cleanup(func() { send = old })
-	send = func(r connector.Request) (connector.Response, error) {
+	host.Serve(t, func(r connector.Request) (connector.Response, error) {
 		if r.URL == issuesURL+"/7/labels" {
 			return connector.Response{Status: 500}, nil
 		}
 		return ok(`{}`), nil
-	}
+	})
 	if err := editLabels(tgt, "7", []string{"a"}, nil); err == nil {
 		t.Error("add 500: want error")
 	}
-	send = func(r connector.Request) (connector.Response, error) {
+	host.Serve(t, func(r connector.Request) (connector.Response, error) {
 		if strings.Contains(r.Body, "removeLabelsFromLabelable") {
 			return ok(`{"errors":[{"message":"denied"}]}`), nil
 		}
 		return ok(`{"data":{"repository":{"issue":{"id":"I"},"label":{"id":"L"}}}}`), nil
-	}
+	})
 	if err := editLabels(tgt, "7", nil, []string{"x"}); err == nil {
 		t.Error("graphql errors on mutation: want error")
 	}
@@ -329,11 +325,9 @@ func TestListLabelsFailsPastMaxPages(t *testing.T) {
 	for i := range full {
 		full[i] = `{"name":"l"}`
 	}
-	old := send
-	t.Cleanup(func() { send = old })
-	send = func(connector.Request) (connector.Response, error) {
+	host.Serve(t, func(connector.Request) (connector.Response, error) {
 		return ok("[" + strings.Join(full, ",") + "]"), nil
-	}
+	})
 	if _, err := listLabels(tgt); err == nil {
 		t.Error("want error past maxPages")
 	}
@@ -362,9 +356,7 @@ func TestCreateLabelFailsOnExisting(t *testing.T) {
 func closeFake(t *testing.T, lookup string) *[]connector.Request {
 	t.Helper()
 	var got []connector.Request
-	old := send
-	t.Cleanup(func() { send = old })
-	send = func(r connector.Request) (connector.Response, error) {
+	host.Serve(t, func(r connector.Request) (connector.Response, error) {
 		got = append(got, r)
 		if r.URL != graphqlURL {
 			return connector.Response{Status: 404, Body: []byte("{}")}, nil
@@ -373,7 +365,7 @@ func closeFake(t *testing.T, lookup string) *[]connector.Request {
 			return ok(`{"data":{"closeIssue":{"clientMutationId":null}}}`), nil
 		}
 		return ok(lookup), nil
-	}
+	})
 	return &got
 }
 
