@@ -17,16 +17,13 @@ var tgt = tracker.Target{API: "https://api.github.com", Repo: "o/r"}
 // stub serves canned responses keyed by URL and records requests.
 func stub(t *testing.T, resp map[string]connector.Response) *[]connector.Request {
 	t.Helper()
-	var got []connector.Request
-	host.Serve(t, func(r connector.Request) (connector.Response, error) {
-		got = append(got, r)
+	return host.Serve(t, func(r connector.Request) (connector.Response, error) {
 		v, ok := resp[r.URL]
 		if !ok {
 			return connector.Response{Status: 404, Body: []byte("{}")}, nil
 		}
 		return v, nil
 	})
-	return &got
 }
 
 func ok(body string) connector.Response {
@@ -634,10 +631,9 @@ func TestRouteLabelsAreAndedIntoEveryListRequest(t *testing.T) {
 // share a cached validator.
 func TestRoutedCountKeepsItsOwnCacheEntry(t *testing.T) {
 	resetCountCache(t)
-	stubETag(t, `"e"`)
 	stub(t, map[string]connector.Response{
-		countBase + "&labels=ready&page=1":            ok(items(1, 3, false)),
-		countBase + "&labels=ready,orders-api&page=1": ok(items(1, 1, false)),
+		countBase + "&labels=ready&page=1":            etagged(`"e"`, ok(items(1, 3, false))),
+		countBase + "&labels=ready,orders-api&page=1": etagged(`"e"`, ok(items(1, 1, false))),
 	})
 	plain, routed := tracker.Query{Label: "ready"}, tracker.Query{Label: "ready", Route: routeOrders}
 	for _, c := range []struct {

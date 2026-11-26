@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"time"
 
+	"spindrift.dev/sdk/connector"
 	"spindrift.dev/sdk/tracker"
 )
 
@@ -89,7 +90,7 @@ func count(t tracker.Target, q tracker.Query, limit int, fresh bool) (int, error
 		}
 		if page == 1 {
 			// Read before the next request replaces the latest response.
-			etag, _ = responseHeader("ETag")
+			etag, _ = connector.ResponseHeader("ETag")
 		}
 		for _, r := range raw {
 			if r.PullRequest == nil {
