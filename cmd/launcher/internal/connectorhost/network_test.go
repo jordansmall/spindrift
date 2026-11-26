@@ -472,7 +472,7 @@ func TestNetworkFollowRedirectRouteFollowsOneUncredentialedHop(t *testing.T) {
 	}
 	lines := auditLines(t, &audit)
 	if len(lines) != 1 || lines[0].RedirectHost != target.host() || lines[0].Decision != connectorhost.DecisionSent ||
-		lines[0].Status != 200 || lines[0].Size != int64(len("log body")) {
+		lines[0].Status != 200 || lines[0].RedirectStatus != http.StatusFound || lines[0].Size != int64(len("log body")) {
 		t.Fatalf("audit = %+v, want one sent entry with redirect_host %s", lines, target.host())
 	}
 }

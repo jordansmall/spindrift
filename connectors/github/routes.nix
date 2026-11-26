@@ -26,7 +26,12 @@
 # The job-log Route follows one redirect hop (issue #6893): GitHub answers
 # with a 302 to a pre-signed blob URL on a varying host, so no host can be
 # pinned. The second request carries no credential and none of the guest's
-# headers. A log over the response cap arrives as its tail.
+# headers. A log over the response cap arrives as its tail. The hop must dial a
+# public address. The Route is the whole `/actions/jobs` subtree because a
+# subtree root cannot express `/{id}/logs`; that is deliberate. The only other
+# GET under it is the job JSON, which never answers a 3xx, but tail mode applies
+# to the subtree: an over-cap job JSON arrives tail-truncated rather than as
+# ErrResponseTooLarge.
 #
 # Every Route declares `requestHeaders = apiVersion` (`[ "X-GitHub-Api-Version" ]`): the request
 # helper pins the API version on each request, and the host refuses a header
