@@ -16,6 +16,8 @@ import (
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
 	"spindrift.dev/launcher/internal/connectorsetup"
+	"spindrift.dev/launcher/internal/driver/bundle"
+	"spindrift.dev/launcher/internal/driver/driverrows"
 	"spindrift.dev/launcher/internal/exitcode"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/runner"
@@ -67,12 +69,12 @@ func init() {
 	})
 }
 
-// countingLoader is a Loader no path could install by accident, so comparing
-// connectorsandbox.Current against it shows nothing replaced the program's.
+// countingLoader is a Loader the test hands the runtime and no path could
+// install by accident.
 type countingLoader struct{ connectorsandbox.Loader }
 
 // Every command that can load a Connector uses the runtime the program built,
-// whose sandbox is already installed: none installs one of its own, or a load
+// whose sandbox is the only one: none installs one of its own, or a load
 // on that path alone would reach a sandbox the runtime's close never stops.
 func TestConnectorLoadingPathsUseTheProgramsRuntime(t *testing.T) {
 	paths := map[string]func(t *testing.T, rt *connectorruntime.Runtime){
@@ -108,7 +110,7 @@ func TestConnectorLoadingPathsUseTheProgramsRuntime(t *testing.T) {
 			cmdLateMergeSweep(rt, io.Discard, io.Discard)
 		},
 		// The archive holds a Pass of the named driver, so the replay reaches
-		// connectorsandbox.Load; the module is not wasm, so it fails there.
+		// the runtime's sandbox; the module is not wasm, so it fails there.
 		"shadowReplay": func(t *testing.T, rt *connectorruntime.Runtime) {
 			logs, wasm := t.TempDir(), filepath.Join(t.TempDir(), "d.wasm")
 			if err := os.WriteFile(wasm, []byte("not wasm"), 0o600); err != nil {
@@ -131,6 +133,9 @@ func TestConnectorLoadingPathsUseTheProgramsRuntime(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if in.Drivers, err = driverrows.Parse(nil, bundle.Drivers()); err != nil {
+				t.Fatal(err)
+			}
 			l := &countingLoader{connectorsandboxtest.InProcess()}
 			rt, err := connectorsetup.New(in, connectorsetup.Options{Sandbox: l})
 			if err != nil {
@@ -138,8 +143,8 @@ func TestConnectorLoadingPathsUseTheProgramsRuntime(t *testing.T) {
 			}
 			defer func() { _ = rt.Close() }()
 			run(t, rt)
-			if connectorsandbox.Current() != connectorsandbox.Loader(l) {
-				t.Fatal("a Connector-loading path replaced the sandbox the runtime installed")
+			if connectorsandbox.Current() != nil {
+				t.Fatal("a Connector-loading path installed a process-wide sandbox")
 			}
 		})
 	}

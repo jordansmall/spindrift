@@ -111,7 +111,7 @@ func requiredLabels(opts doctorOptions, rc readContext) []string {
 	}
 	// A work Box relays review findings for the host to file, so the
 	// label is part of what the work kind needs whichever flags are set.
-	if resolveAgentPresenceSignals(c.driver).filerEnabled {
+	if resolveAgentPresenceSignals(c.connectors.Drivers(), c.driver).filerEnabled {
 		labels = append(labels, dispatchkind.Default.FindingLabel)
 	}
 	return labels

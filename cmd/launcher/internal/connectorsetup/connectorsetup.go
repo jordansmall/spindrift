@@ -14,6 +14,7 @@ import (
 	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/connectorsandbox/sandbox"
+	"spindrift.dev/launcher/internal/driver/driverrows"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/rowcredential"
 	"spindrift.dev/launcher/internal/runner"
@@ -41,6 +42,9 @@ type Input struct {
 	// the Daemon childEnvValue (document, then environment).
 	Setting func(env string) string
 	Applied func(env string) bool
+	// Drivers are the parsed Driver rows (driverrows.Parse) the runtime offers
+	// through Drivers; the zero value offers none.
+	Drivers driverrows.Rows
 }
 
 // Options is how the Launcher and the Daemon differ: only the Daemon sets
@@ -65,10 +69,11 @@ type Options struct {
 	Run func(cmd string) (string, error)
 }
 
-// New resolves every row's credential, installs the Connector sandbox and
-// returns the runtime over the registered rows. Closing the runtime, once its
-// sessions close, signals the refresh to stop, then closes the sandbox, then
-// records each backend's sandbox totals. It installs nothing on an error.
+// New resolves every row's credential, builds the Connector sandbox and
+// returns the runtime over the registered rows and in.Drivers. Closing the
+// runtime, once its sessions close, signals the refresh to stop, then closes the
+// sandbox, then records each backend's sandbox totals. It builds nothing on an
+// error.
 func New(in Input, opts Options) (*connectorruntime.Runtime, error) {
 	if opts.RefreshEvery > 0 && opts.OnRefreshError == nil {
 		return nil, errors.New("connectorsetup: RefreshEvery needs OnRefreshError")
@@ -89,9 +94,8 @@ func New(in Input, opts Options) (*connectorruntime.Runtime, error) {
 	if l == nil {
 		l = sandbox.ForKind(in.RunnerKind, runner.Config{Runtime: in.Runtime}, in.Artifacts, in.Knobs, in.Dir)
 	}
-	// driverrows still loads Driver Connectors through the installed sandbox.
-	connectorsandbox.Use(l)
 	rt := connectorruntime.FromRegistries(sourced.Rows, l)
+	rt.UseDriverRows(in.Drivers)
 
 	if opts.RefreshEvery > 0 && len(sourced.Commands) > 0 {
 		stop := make(chan struct{})

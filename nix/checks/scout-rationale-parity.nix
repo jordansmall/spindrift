@@ -71,7 +71,7 @@ let
       file = "cmd/launcher/main.go";
       path = ../../cmd/launcher/main.go;
       prefix = "//";
-      anchor = "if driver.ProviderNamespacedModels(driverName) {";
+      anchor = "if drivers.ProviderNamespacedModels(driverName) {";
     }
     {
       name = "main-test-go";

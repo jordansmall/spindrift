@@ -31,6 +31,8 @@ import (
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/credsource"
+	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/driver/driverrows"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/gitexec"
 	"spindrift.dev/launcher/internal/retry"
@@ -70,6 +72,8 @@ type Runtime struct {
 	owned map[string]connectorsandbox.Sandbox
 	// onClose run once, in order, at the end of Close.
 	onClose []func() error
+	// drivers is the Drivers this runtime offers; UseDriverRows sets it.
+	drivers *driver.Set
 }
 
 type sessionKey struct {
@@ -112,6 +116,40 @@ func (r *Runtime) SandboxFailure() error {
 		return nil
 	}
 	return r.sandbox.Err()
+}
+
+// Load loads wasm into the runtime's sandbox, or fails with
+// connectorsandbox.ErrNoConnectorSandbox when it has none.
+func (r *Runtime) Load(ctx context.Context, wasm []byte) (*connectorhost.Connector, error) {
+	if r.sandbox == nil {
+		return nil, connectorsandbox.ErrNoConnectorSandbox
+	}
+	return r.sandbox.Load(ctx, wasm)
+}
+
+// UseDriverRows makes the runtime's Drivers the natives rows carries plus each
+// row's Driver, a Connector Driver loading into the runtime's own shared
+// sandbox (for an OwningLoader its own Load, which every Driver Connector
+// shares). With no sandbox such a load fails with
+// connectorsandbox.ErrNoConnectorSandbox. Call it before the first Drivers.
+func (r *Runtime) UseDriverRows(rows driverrows.Rows) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.drivers = rows.Hosted(r.Load)
+}
+
+// Drivers is the Drivers this runtime offers; a nil runtime, or one before
+// UseDriverRows, offers an empty Set.
+func (r *Runtime) Drivers() *driver.Set {
+	if r == nil {
+		return driver.NewSet()
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.drivers == nil {
+		r.drivers = driver.NewSet()
+	}
+	return r.drivers
 }
 
 func newRuntime(lookup func(string) (backendrows.Row, bool), creds map[string]credsource.Row, sandbox connectorsandbox.Loader) *Runtime {

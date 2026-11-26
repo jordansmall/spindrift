@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"spindrift.dev/launcher/internal/driver/driverrows"
 	"spindrift.dev/launcher/internal/inputdoc"
 )
 
@@ -48,6 +49,12 @@ var gitConfigLookup = func(key string) string {
 // document loads. Its zero value resolves every knob to its schema default,
 // which is what a test or direct caller sees before any Resolve.
 var launcherInput inputdoc.Resolved
+
+// launcherDriverRows is the document's Driver rows, parsed by mainRun beside
+// launcherInput. connectorInput hands them to the Connector runtime, which owns
+// the Drivers; the zero value is no rows. Code that runs before the runtime
+// exists reads Descriptors from it through Hosted(nil), which loads nothing.
+var launcherDriverRows driverrows.Rows
 
 // resolvedKnob reads a schema knob through the flag > document > schema
 // default tiers of launcherInput; a knob env var is rejected at startup

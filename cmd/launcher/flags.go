@@ -441,6 +441,7 @@ func connectorInput() (connectorsetup.Input, error) {
 		SecretCmd: globalSecretCmdTemplate,
 		Setting:   backendRowSetting(launcherInput, processEnv()),
 		Applied:   isCoreSecretKnob,
+		Drivers:   launcherDriverRows,
 	}, nil
 }
 
@@ -500,7 +501,7 @@ func applySecretCmdFallback() error {
 // unrecognised Driver has no rules; main emits the warning.
 func activeCredentialRules() ([]driver.CredentialRule, []string) {
 	name, _ := resolveDriver()
-	rules, _ := driver.CredentialRules(name)
+	rules, _ := launcherDriverRows.Hosted(nil).CredentialRules(name)
 	return rules, modelTiers(resolvedKnob)
 }
 

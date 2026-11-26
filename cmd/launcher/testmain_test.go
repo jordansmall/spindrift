@@ -5,7 +5,11 @@ import (
 	"os"
 	"testing"
 
+	"spindrift.dev/launcher/internal/connectorruntime"
+	"spindrift.dev/launcher/internal/connectorsetup"
 	"spindrift.dev/launcher/internal/connectorsetup/connectorsetuptest"
+	"spindrift.dev/launcher/internal/driver/bundle"
+	"spindrift.dev/launcher/internal/driver/driverrows"
 	"spindrift.dev/launcher/internal/driver/drivertest"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/registrymanifest"
@@ -54,6 +58,24 @@ func TestMain(m *testing.M) {
 	// The Connector runtime mainRun builds starts its sandbox on the runner
 	// family, which a test binary has none for, so the in-process engine
 	// comes in through Options.Sandbox; a test of the real wiring passes its own.
-	newConnectorRuntime = connectorsetuptest.WithInProcessSandbox(newConnectorRuntime)
+	newConnectorRuntime = withClaudeConnector(connectorsetuptest.WithInProcessSandbox(newConnectorRuntime))
+	// dispatchrecord still reads the process Set (it parses logs outside any
+	// runtime), so claude stays registered there until it takes a Set.
 	seamtest.MainWith(m, drivertest.UseClaudeConnector)
+}
+
+// withClaudeConnector adds claude's Connector row to the Driver rows the
+// runtime under test is built with, as the flake renders it into a real
+// document and a test document leaves it out.
+func withClaudeConnector(build func(connectorsetup.Input, connectorsetup.Options) (*connectorruntime.Runtime, error)) func(connectorsetup.Input, connectorsetup.Options) (*connectorruntime.Runtime, error) {
+	return func(in connectorsetup.Input, opts connectorsetup.Options) (*connectorruntime.Runtime, error) {
+		raw, err := drivertest.WithClaudeRow(launcherInput.Drivers)
+		if err != nil {
+			return nil, err
+		}
+		if in.Drivers, err = driverrows.Parse(raw, bundle.Drivers()); err != nil {
+			return nil, err
+		}
+		return build(in, opts)
+	}
 }

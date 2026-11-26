@@ -355,7 +355,7 @@ func runQuickstart(connectors *connectorruntime.Runtime, dir string, env Environ
 	driverName, _ := env.LookupEnv("DRIVER")
 	// Quickstart has no input document, so a Connector-only Driver has no
 	// registered Strategy; its Descriptor is what names it.
-	if _, ok := driver.DescriptorFor(driver.ResolveName(driverName)); !ok {
+	if _, ok := connectors.Drivers().DescriptorFor(driver.ResolveName(driverName)); !ok {
 		return driver.UnknownError(driverName, driver.DescriptorNames())
 	}
 
@@ -538,7 +538,7 @@ func runQuickstart(connectors *connectorruntime.Runtime, dir string, env Environ
 		tokens[row.Name] = token
 	}
 
-	rules, _ := driver.CredentialRules(driverName)
+	rules, _ := connectors.Drivers().CredentialRules(driverName)
 	credentials, err := gatherCredentials(env, rules, w, prompt, promptMasked, cmdRunner)
 	if err != nil {
 		return err
@@ -546,7 +546,7 @@ func runQuickstart(connectors *connectorruntime.Runtime, dir string, env Environ
 
 	a.repoSlug, a.runtime = repoSlug, runtime
 	a.gitUserName, a.gitUserEmail = gitUserName, gitUserEmail
-	a.tokens, a.driver, a.credentials = tokens, driverName, credentials
+	a.tokens, a.drivers, a.driver, a.credentials = tokens, connectors.Drivers(), driverName, credentials
 
 	files, err := render(a)
 	if err != nil {
@@ -837,6 +837,7 @@ type answers struct {
 	tracker      backendChoice
 	forge        backendChoice
 	tokens       map[string]string // acquired token per backend name
+	drivers      *driver.Set
 	driver       string
 	credentials  []credential
 }

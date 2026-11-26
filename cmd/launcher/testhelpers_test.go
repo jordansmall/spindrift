@@ -12,8 +12,13 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/connectorruntime"
+	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/driver/bundle"
+	"spindrift.dev/launcher/internal/driver/driverrows"
+	"spindrift.dev/launcher/internal/driver/drivertest"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/localloop"
@@ -346,4 +351,22 @@ func mustGitOutput(t *testing.T, dir string, args ...string) string {
 func runGit(pwd string, args ...string) error {
 	_, err := gitOutput(pwd, args...)
 	return err
+}
+
+// driverRuntime is a Connector runtime on the in-process engine whose Drivers
+// include claude's Connector, as a built Launcher's runtime does.
+func driverRuntime(t testing.TB) *connectorruntime.Runtime {
+	t.Helper()
+	raw, err := drivertest.WithClaudeRow(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := driverrows.Parse(raw, bundle.Drivers())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := connectorruntime.FromRegistries(nil, connectorsandboxtest.InProcess())
+	rt.UseDriverRows(rows)
+	t.Cleanup(func() { _ = rt.Close() })
+	return rt
 }

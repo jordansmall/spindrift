@@ -12,7 +12,8 @@ import (
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/credsource"
-	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers
+	"spindrift.dev/launcher/internal/driver/bundle" // the bundled Drivers; its init registers the backends and runner families
+	"spindrift.dev/launcher/internal/driver/driverrows"
 )
 
 // forceFlagUsage deliberately names no fixed "*.bak" backup file: the scheme
@@ -105,6 +106,14 @@ func main() {
 	}
 
 	connectors := connectorruntime.FromRegistries(hostExportedCredentials(), nil)
+	// Quickstart reads no input document, so it offers the bundled Drivers and
+	// their generated Descriptors alone.
+	rows, err := driverrows.Parse(nil, bundle.Drivers())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "quickstart: %s\n", err)
+		os.Exit(1)
+	}
+	connectors.UseDriverRows(rows)
 	interactive := term.IsTerminal(os.Stdin.Fd())
 
 	err = runQuickstart(connectors, dir, hostEnvironment{}, hostCommandRunner{}, buildForge, os.Stdout, os.Stdin, interactive, *force)

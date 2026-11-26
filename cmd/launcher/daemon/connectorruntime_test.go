@@ -88,7 +88,7 @@ func TestConnectorRuntime_CloseStopsTheSandbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = rt.Close()
-	if _, err := connectorsandbox.Load(t.Context(), []byte("x")); err == nil || errors.Is(err, connectorsandbox.ErrNoConnectorSandbox) {
+	if _, err := rt.Load(t.Context(), []byte("x")); err == nil || errors.Is(err, connectorsandbox.ErrNoConnectorSandbox) {
 		t.Fatalf("load after close = %v, want the closed sandbox's error", err)
 	}
 }

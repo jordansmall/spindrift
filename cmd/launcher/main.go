@@ -26,7 +26,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/driver"
-	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers, backends, and runner families
+	"spindrift.dev/launcher/internal/driver/bundle" // the bundled Drivers; its init registers the backends and runner families
 	"spindrift.dev/launcher/internal/driver/driverrows"
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/exitcode"
@@ -363,7 +363,7 @@ type agentPresence struct {
 // resolveAgentPresenceSignals returns the roster and orchestration gate
 // signals for this run, with independent trust gates rather than one spanning
 // all three (issue #2527, #2533): the gates differ in override semantics.
-func resolveAgentPresenceSignals(driverName string) agentPresence {
+func resolveAgentPresenceSignals(drivers *driver.Set, driverName string) agentPresence {
 	var filerEnabled, workerProvisioned, scoutProvisioned bool
 	filerModel := resolvedKnob("FILER_MODEL")
 	workerModel := resolvedKnob("WORKER_MODEL")
@@ -371,7 +371,7 @@ func resolveAgentPresenceSignals(driverName string) agentPresence {
 
 	filerEnabled = filerModel != ""
 
-	// A Driver with provider-namespaced model ids (driver.ProviderNamespacedModels,
+	// A Driver with provider-namespaced model ids (driver.Set.ProviderNamespacedModels,
 	// generated from the Nix Driver fact) drops a WORKER_MODEL without a "/" the
 	// way lib/mkHarness.nix's rosterWithoutBareWorker drops a bare worker (issues
 	// #5331, #5338). This no-document fallback sees WORKER_MODEL alone because no
@@ -379,7 +379,7 @@ func resolveAgentPresenceSignals(driverName string) agentPresence {
 	// because such a Driver provisions them like any other, so a non-empty
 	// FILER_MODEL or SCOUT_MODEL decides their fallback (issue #5330) — see
 	// lib/mkHarness.nix's scoutProvisioned comment.
-	if driver.ProviderNamespacedModels(driverName) {
+	if drivers.ProviderNamespacedModels(driverName) {
 		workerProvisioned = strings.Contains(workerModel, "/")
 	} else {
 		workerProvisioned = workerModel != ""
@@ -752,7 +752,7 @@ func retryPolicy(c config) retry.Policy {
 // (#3062, #2947).
 func dispatchConfig(c config, pwd string, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge, caps forge.Capabilities) dispatch.Config {
 	trackerAxisRead, trackerAxisWrite, trackerAxisFiler, forgeBackend := resolveTrackerAndForgeSignals(c.CodeForge, c.IssueTracker)
-	presence := resolveAgentPresenceSignals(c.driver)
+	presence := resolveAgentPresenceSignals(c.connectors.Drivers(), c.driver)
 	reviewModel, _ := launcherInput.Flag("REVIEW_MODEL")
 	reviewEffort, _ := launcherInput.Flag("REVIEW_EFFORT")
 	reader := issueReader(c, it, os.Stderr)
@@ -804,7 +804,7 @@ func dispatchConfig(c config, pwd string, it forge.IssueTracker, lw *localloop.W
 // validate already rejected an unknown DRIVER, so it is a Connector that failed
 // to load, with no native fallback.
 func newDispatchFactory(c config, pwd string, r runner.Runner, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge, caps forge.Capabilities) (*dispatch.Factory, error) {
-	drv, err := driver.New(c.driver)
+	drv, err := c.connectors.Drivers().New(c.driver)
 	if err != nil {
 		return nil, err
 	}
@@ -2212,7 +2212,8 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		}
 		return 1
 	}
-	if err := driverrows.Use(resolved.Drivers); err != nil {
+	rows, err := driverrows.Parse(resolved.Drivers, bundle.Drivers())
+	if err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return configErrorCode(verb, int(exitcode.ConfigInvalid))
 	}
@@ -2220,7 +2221,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return configErrorCode(verb, int(exitcode.ConfigInvalid))
 	}
-	launcherInput = resolved
+	launcherInput, launcherDriverRows = resolved, rows
 	// Both run after launcherInput is in place: CODE_FORGE and ISSUE_TRACKER may
 	// be set through the document alone. The fallback runs first: it exports a
 	// core secret the row sources then read, so the template runs once.
