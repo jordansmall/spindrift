@@ -6,6 +6,7 @@ import (
 	"maps"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -325,11 +326,17 @@ func TestListLabelsFailsPastMaxPages(t *testing.T) {
 	for i := range full {
 		full[i] = `{"name":"l"}`
 	}
+	var sent int
 	host.Serve(t, func(connector.Request) (connector.Response, error) {
+		sent++
 		return ok("[" + strings.Join(full, ",") + "]"), nil
 	})
-	if _, err := listLabels(tgt); err == nil {
-		t.Error("want error past maxPages")
+	_, err := listLabels(tgt)
+	if err == nil || !strings.Contains(err.Error(), "/labels") || !strings.Contains(err.Error(), strconv.Itoa(maxPages)) {
+		t.Errorf("err = %v, want one naming the endpoint and the %d-page bound", err, maxPages)
+	}
+	if sent != maxPages {
+		t.Errorf("sent %d requests, want exactly %d", sent, maxPages)
 	}
 }
 
