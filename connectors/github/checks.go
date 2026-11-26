@@ -58,7 +58,9 @@ func countQuery(q tracker.Query) (string, error) {
 // count. Deeper pages are read unconditionally while full (PRs share the
 // endpoint), up to limit issues (when limit > 0) and countMaxPages pages; the
 // result is clamped to limit. Page 1's ETag does not cover the deeper pages,
-// so a cached count can lag them.
+// so a cached count can lag them. It keeps its own loop rather than
+// connector.Pages: Pages fails past its bound, where count settles for an
+// under-count, and only page 1 is conditional.
 func count(t tracker.Target, q tracker.Query, limit int, fresh bool) (int, error) {
 	query, err := countQuery(q)
 	if err != nil {

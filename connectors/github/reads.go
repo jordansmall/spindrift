@@ -96,16 +96,22 @@ func pages[T any](api, path string, visit func([]T) bool) error {
 // pagesOf is pages for a response that wraps its list: size counts the items
 // of one decoded page, and a page shorter than pageSize ends the walk.
 func pagesOf[B any](api, path string, size func(B) int, visit func(B) bool) error {
-	for page := 1; page <= maxPages; page++ {
+	// more is whether the last fetch asked for another page: an error with it
+	// set can only be Pages' limit error, since a fetch error returns before.
+	var more bool
+	err := connector.Pages(maxPages, 1, func(page int) (int, bool, error) {
+		more = false
 		var raw B
 		if _, err := send("GET", api, path+"&page="+strconv.Itoa(page), nil, &raw); err != nil {
-			return err
+			return 0, false, err
 		}
-		if visit(raw) || size(raw) < pageSize {
-			return nil
-		}
+		more = !visit(raw) && size(raw) >= pageSize
+		return page + 1, more, nil
+	})
+	if err != nil && more {
+		return connector.Errorf(connector.Permanent, "GET %s: more than %d pages", path, maxPages)
 	}
-	return fmt.Errorf("GET %s: more than %d pages", path, maxPages)
+	return err
 }
 
 // labelsFilter is the labels= query value (with its leading "&") for label
