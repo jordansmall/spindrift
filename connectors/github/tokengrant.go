@@ -9,10 +9,6 @@ import (
 	"spindrift.dev/sdk/forge"
 )
 
-// responseHeader reads a header of the latest response; tests swap it because
-// connector.ResponseHeader has no host outside wasip1.
-var responseHeader = connector.ResponseHeader
-
 // notIntrospectableReason is the read-only gate's explanation for a token whose
 // grants GitHub does not expose. Core renders it verbatim.
 const notIntrospectableReason = "e.g. a fine-grained PAT, whose granted permissions GitHub exposes no endpoint to introspect"
@@ -46,7 +42,7 @@ func tokenGrant(t forge.Target, prefix string) (forge.Grant, error) {
 			return forge.Grant{}, err
 		}
 		// Absent or empty scopes grant nothing, so neither is an error.
-		value, _ := responseHeader("X-OAuth-Scopes")
+		value, _ := connector.ResponseHeader("X-OAuth-Scopes")
 		var scopes []string
 		write := false
 		for _, s := range strings.Split(value, ",") {

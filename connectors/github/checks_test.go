@@ -107,12 +107,10 @@ func resetCountCache(t *testing.T) {
 	t.Cleanup(func() { countCache = map[string]countEntry{} })
 }
 
-// stubETag replaces responseHeader with a host whose latest response carried etag.
-func stubETag(t *testing.T, etag string) {
-	t.Helper()
-	old := responseHeader
-	responseHeader = func(name string) (string, bool) { return etag, etag != "" && name == "ETag" }
-	t.Cleanup(func() { responseHeader = old })
+// etagged is r with a response ETag header, as GitHub sends on a 200.
+func etagged(etag string, r connector.Response) connector.Response {
+	r.Header = map[string]string{"ETag": etag}
+	return r
 }
 
 func TestCountUsesUpdatedDescendingSort(t *testing.T) {
@@ -129,9 +127,8 @@ func TestCountUsesUpdatedDescendingSort(t *testing.T) {
 
 func TestCountSendsCachedETagAndAnswers304FromCache(t *testing.T) {
 	resetCountCache(t)
-	stubETag(t, `"abc"`)
 	url1 := countBase + "&labels=ready&page=1"
-	got := stub(t, map[string]connector.Response{url1: ok(items(1, 3, false))})
+	got := stub(t, map[string]connector.Response{url1: etagged(`"abc"`, ok(items(1, 3, false)))})
 	q := tracker.Query{Label: "ready"}
 	if n, err := count(tgt, q, 100, false); err != nil || n != 3 {
 		t.Fatalf("first count = %d, %v; want 3, nil", n, err)
@@ -150,13 +147,12 @@ func TestCountSendsCachedETagAndAnswers304FromCache(t *testing.T) {
 
 func TestCountFreshOmitsIfNoneMatch(t *testing.T) {
 	resetCountCache(t)
-	stubETag(t, `"abc"`)
 	url1 := countBase + "&page=1"
-	stub(t, map[string]connector.Response{url1: ok(items(1, 3, false))})
+	stub(t, map[string]connector.Response{url1: etagged(`"abc"`, ok(items(1, 3, false)))})
 	if _, err := count(tgt, tracker.Query{}, 100, false); err != nil {
 		t.Fatal(err)
 	}
-	got := stub(t, map[string]connector.Response{url1: ok(items(1, 4, false))})
+	got := stub(t, map[string]connector.Response{url1: etagged(`"abc"`, ok(items(1, 4, false)))})
 	n, err := count(tgt, tracker.Query{}, 100, true)
 	if err != nil || n != 4 {
 		t.Fatalf("fresh count = %d, %v; want 4, nil", n, err)
@@ -168,7 +164,6 @@ func TestCountFreshOmitsIfNoneMatch(t *testing.T) {
 
 func TestCountWithoutETagCachesNothing(t *testing.T) {
 	resetCountCache(t)
-	stubETag(t, "")
 	url1 := countBase + "&page=1"
 	got := stub(t, map[string]connector.Response{url1: ok(items(1, 3, false))})
 	for range 2 {
@@ -187,13 +182,11 @@ func TestCountDropsCachedETagWhenA200CarriesNone(t *testing.T) {
 	// A stale ETag kept past an ETag-less 200 would answer a later 304 with
 	// the older count.
 	resetCountCache(t)
-	stubETag(t, `"abc"`)
 	url1 := countBase + "&page=1"
-	stub(t, map[string]connector.Response{url1: ok(items(1, 3, false))})
+	stub(t, map[string]connector.Response{url1: etagged(`"abc"`, ok(items(1, 3, false)))})
 	if _, err := count(tgt, tracker.Query{}, 100, false); err != nil {
 		t.Fatal(err)
 	}
-	stubETag(t, "")
 	stub(t, map[string]connector.Response{url1: ok(items(1, 4, false))})
 	if _, err := count(tgt, tracker.Query{}, 100, true); err != nil {
 		t.Fatal(err)
@@ -209,9 +202,8 @@ func TestCountDropsCachedETagWhenA200CarriesNone(t *testing.T) {
 
 func TestCountDeeperPage304IsAnError(t *testing.T) {
 	resetCountCache(t)
-	stubETag(t, `"abc"`)
 	stub(t, map[string]connector.Response{
-		countBase + "&page=1": ok(items(1, 100, false)),
+		countBase + "&page=1": etagged(`"abc"`, ok(items(1, 100, false))),
 		countBase + "&page=2": {Status: 304},
 	})
 	if _, err := count(tgt, tracker.Query{}, 0, false); err == nil {

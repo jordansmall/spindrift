@@ -3,9 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"maps"
 	"reflect"
-	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -36,19 +34,12 @@ func TestTrackerTransitionIsAlwaysUnmapped(t *testing.T) {
 
 // labelFake answers the label add over REST and the GraphQL documents
 // editLabels sends, telling them apart by content. Each label lookup consumes
-// the next of lookups (the last repeats). Every GraphQL query must be one of
-// the declared documents.
+// the next of lookups (the last repeats). The fake host refuses a GraphQL query
+// that is not a declared document.
 func labelFake(t *testing.T, lookups ...string) *[]connector.Request {
 	t.Helper()
-	var got []connector.Request
 	n := 0
-	host.Serve(t, func(r connector.Request) (connector.Response, error) {
-		got = append(got, r)
-		if r.URL == graphqlURL {
-			if q := gqlOf(t, r).Query; !slices.Contains(slices.Collect(maps.Values(documents)), q) {
-				t.Errorf("query is not a declared document: %q", q)
-			}
-		}
+	return host.Serve(t, func(r connector.Request) (connector.Response, error) {
 		switch {
 		case r.URL == issuesURL+"/7/labels":
 			return ok(`[]`), nil
@@ -61,7 +52,6 @@ func labelFake(t *testing.T, lookups ...string) *[]connector.Request {
 		}
 		return connector.Response{Status: 404, Body: []byte("{}")}, nil
 	})
-	return &got
 }
 
 type gqlBody struct {
@@ -362,9 +352,7 @@ func TestCreateLabelFailsOnExisting(t *testing.T) {
 // with an empty success.
 func closeFake(t *testing.T, lookup string) *[]connector.Request {
 	t.Helper()
-	var got []connector.Request
-	host.Serve(t, func(r connector.Request) (connector.Response, error) {
-		got = append(got, r)
+	return host.Serve(t, func(r connector.Request) (connector.Response, error) {
 		if r.URL != graphqlURL {
 			return connector.Response{Status: 404, Body: []byte("{}")}, nil
 		}
@@ -373,7 +361,6 @@ func closeFake(t *testing.T, lookup string) *[]connector.Request {
 		}
 		return ok(lookup), nil
 	})
-	return &got
 }
 
 func TestCloseIssueClosesAsCompleted(t *testing.T) {

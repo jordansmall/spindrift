@@ -9,17 +9,11 @@ import (
 	"spindrift.dev/sdk/connector"
 )
 
-// hostFixedRequestHeaders mirrors the request headers the host admits with no
-// declaration (connectorhost's fixed set); a header outside it must be declared
-// on every Route the request reaches.
-var hostFixedRequestHeaders = []string{
-	"Accept", "Accept-Language", "Cache-Control", "Content-Type",
-	"If-Match", "If-Modified-Since", "If-None-Match", "If-Unmodified-Since",
-}
-
-// TestRoutesDeclareExactlyTheExtraHeadersSent pins the table to the request
-// helper: every Route carries the non-fixed headers it sends and no others.
-func TestRoutesDeclareExactlyTheExtraHeadersSent(t *testing.T) {
+// TestRoutesDeclareOnlyHeadersSent pins the table to the request helper: no
+// Route declares a request header the Connector never sends. The other
+// direction, a sent header left undeclared, is the fake host's refusal of the
+// request itself.
+func TestRoutesDeclareOnlyHeadersSent(t *testing.T) {
 	routes, err := connector.LoadRoutes()
 	if err != nil {
 		t.Fatalf("%v\nthe Connector's checks export the Route table: run `nix run .#connector-dev -- github flake check`", err)
@@ -27,21 +21,18 @@ func TestRoutesDeclareExactlyTheExtraHeadersSent(t *testing.T) {
 	var sent []string
 	host.Serve(t, func(r connector.Request) (connector.Response, error) {
 		for k := range r.Headers {
-			k = http.CanonicalHeaderKey(k)
-			if !slices.Contains(hostFixedRequestHeaders, k) && !slices.Contains(sent, k) {
-				sent = append(sent, k)
-			}
+			sent = append(sent, http.CanonicalHeaderKey(k))
 		}
 		return connector.Response{Status: 200}, nil
 	})
 	if _, err := sendWith("POST", "https://api.github.com", "/repos/o/r/issues", map[string]string{}, nil, map[string]string{"If-None-Match": `"e"`}); err != nil {
 		t.Fatal(err)
 	}
-	slices.Sort(sent)
 	for _, r := range routes {
-		got := canonical(r.RequestHeaders)
-		if !slices.Equal(got, sent) {
-			t.Errorf("%s %s declares requestHeaders %v, the Connector sends %v", r.Method, r.Path, got, sent)
+		for _, h := range canonical(r.RequestHeaders) {
+			if !slices.Contains(sent, h) {
+				t.Errorf("%s %s declares requestHeader %q, the Connector sends %v", r.Method, r.Path, h, sent)
+			}
 		}
 	}
 }

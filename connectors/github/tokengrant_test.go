@@ -11,20 +11,6 @@ import (
 	"spindrift.dev/sdk/forge"
 )
 
-// stubScopes replaces responseHeader with a host that served the named
-// header's value, recording the names asked for.
-func stubScopes(t *testing.T, value string, present bool) *[]string {
-	t.Helper()
-	var asked []string
-	old := responseHeader
-	responseHeader = func(name string) (string, bool) {
-		asked = append(asked, name)
-		return value, present
-	}
-	t.Cleanup(func() { responseHeader = old })
-	return &asked
-}
-
 func TestTokenGrantOAuthScopes(t *testing.T) {
 	for name, tc := range map[string]struct {
 		prefix, header string
@@ -41,14 +27,17 @@ func TestTokenGrantOAuthScopes(t *testing.T) {
 		"scope list is trimmed": {"gho_", "  notifications ,repo  ", true, true, []string{"notifications", "repo"}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			got := stub(t, map[string]connector.Response{graphqlURL: ok(`{"data":{"viewer":{"login":"bot"}}}`)})
-			asked := stubScopes(t, tc.header, tc.present)
+			resp := ok(`{"data":{"viewer":{"login":"bot"}}}`)
+			if tc.present {
+				resp.Header = map[string]string{"X-OAuth-Scopes": tc.header}
+			}
+			got := stub(t, map[string]connector.Response{graphqlURL: resp})
 			g, err := tokenGrant(ftgt, tc.prefix)
 			if want := (forge.Grant{Introspectable: true, WriteCapable: tc.write, Scopes: tc.scopes}); err != nil || !reflect.DeepEqual(g, want) {
 				t.Fatalf("tokenGrant = %+v, %v; want %+v", g, err, want)
 			}
-			if len(*got) != 1 || (*got)[0].Method != "POST" || !strings.Contains((*got)[0].Body, "viewer") || len(*asked) != 1 || (*asked)[0] != "X-OAuth-Scopes" {
-				t.Errorf("requests %+v, headers asked %v; want one POST /graphql viewer query and X-OAuth-Scopes", *got, *asked)
+			if len(*got) != 1 || (*got)[0].Method != "POST" || !strings.Contains((*got)[0].Body, "viewer") {
+				t.Errorf("requests %+v; want one POST /graphql viewer query", *got)
 			}
 		})
 	}
@@ -168,7 +157,6 @@ func TestTokenGrantNon2xxIsAnError(t *testing.T) {
 			graphqlURL:            {Status: 401, Body: []byte("{}")},
 			installationURL + "1": {Status: 401, Body: []byte("{}")},
 		})
-		stubScopes(t, "repo", true)
 		_, err := tokenGrant(ftgt, prefix)
 		var ce *connector.Error
 		if err == nil || !errors.As(err, &ce) || ce.Class != connector.Auth {
