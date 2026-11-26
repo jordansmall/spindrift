@@ -104,7 +104,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	connectors := connectorruntime.FromRegistries(hostExportedCredentials())
+	connectors := connectorruntime.FromRegistries(hostExportedCredentials(), nil)
 	interactive := term.IsTerminal(os.Stdin.Fd())
 
 	err = runQuickstart(connectors, dir, hostEnvironment{}, hostCommandRunner{}, buildForge, os.Stdout, os.Stdin, interactive, *force)

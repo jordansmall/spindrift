@@ -342,8 +342,12 @@ func TestConnectorTracker_FailedIssueReadReportsTransient(t *testing.T) {
 	}
 }
 
+// harnessSandbox is where the harness runtimes load: the in-process engine, as
+// a test binary has no runner to start a sandbox on; a test swaps it.
+var harnessSandbox connectorsandbox.Loader = connectorsandboxtest.InProcess()
+
 // newRuntime is the Connector runtime over the rows the test applied and the
-// sandbox TestMain installed, closed with the test. Credentials read the
+// harnessSandbox, closed with the test. Credentials read the
 // process environment but for the identity, which comes from the knobs, as the
 // launcher's lookup does.
 func newRuntime(t *testing.T, knobs map[string]string) *connectorruntime.Runtime {
@@ -356,12 +360,12 @@ func newRuntime(t *testing.T, knobs map[string]string) *connectorruntime.Runtime
 			creds[row.Name] = cr
 		}
 	}
-	rt := connectorruntime.FromRegistries(creds)
+	rt := connectorruntime.FromRegistries(creds, harnessSandbox)
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt
 }
 
-// withoutCapability is the installed sandbox's Loader, with one capability
+// withoutCapability is the harness sandbox's Loader, with one capability
 // struck from every Connector's handshake.
 type withoutCapability struct {
 	connectorsandbox.Loader
@@ -385,7 +389,9 @@ func TestConnectorMissingARequiredCapabilityIsRefused(t *testing.T) {
 		connectortracker.CapLabeled,
 	} {
 		t.Run(capability, func(t *testing.T) {
-			t.Cleanup(connectorsandbox.Use(withoutCapability{connectorsandboxtest.InProcess(), capability}))
+			old := harnessSandbox
+			harnessSandbox = withoutCapability{connectorsandboxtest.InProcess(), capability}
+			t.Cleanup(func() { harnessSandbox = old })
 			_, err := tryProductionHarness(t, true, dispatchkind.TrackerWork, "", jira.LifecycleHybrid, "Task")
 			if !errors.Is(err, connectorruntime.ErrMissingCapabilities) || !strings.Contains(err.Error(), capability) {
 				t.Fatalf("err = %v without %q, want ErrMissingCapabilities naming it", err, capability)

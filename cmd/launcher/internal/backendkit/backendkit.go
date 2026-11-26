@@ -15,6 +15,7 @@ import (
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/connectorruntime"
+	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/gitexec"
@@ -92,7 +93,8 @@ type Strategy struct {
 	// RecordSandboxTotals writes the run's Connector sandbox cost to wherever
 	// the backend keeps it. The Connector runtime's setup calls it once when
 	// the runtime closes, after its sandboxes stopped, so the totals are final.
-	RecordSandboxTotals func()
+	// It receives the sandbox's Stats and is called only when one served.
+	RecordSandboxTotals func(connectorsandbox.Stats)
 	// AutoMergeRemedy is the fix to name when the repo does not allow
 	// auto-merge. Nil means the backend has no native auto-merge, so the
 	// preflight leaves it out of its "CODE_FORGE=..." list.
@@ -156,7 +158,8 @@ type TokenPrompt struct {
 
 // TokenIntrospector probes token for write capability, scoped to repoSlug where
 // the probe itself is repo-scoped.
-type TokenIntrospector func(token, repoSlug string) (forge.TokenIntrospection, error)
+// rt is the runtime whose sandbox the probe's short-lived Connector loads into.
+type TokenIntrospector func(rt *connectorruntime.Runtime, token, repoSlug string) (forge.TokenIntrospection, error)
 
 // AutoMergeForges names, in slice order, every Strategy that offers an
 // auto-merge remedy, joined with " or ".

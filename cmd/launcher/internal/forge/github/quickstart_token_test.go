@@ -9,6 +9,7 @@ import (
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/github"
@@ -16,7 +17,7 @@ import (
 
 // noIntrospection fails the test when the wizard audits a token it should not.
 func noIntrospection(t *testing.T) backendkit.TokenIntrospector {
-	return func(string, string) (forge.TokenIntrospection, error) {
+	return func(*connectorruntime.Runtime, string, string) (forge.TokenIntrospection, error) {
 		t.Helper()
 		t.Fatal("must not introspect the token")
 		return forge.TokenIntrospection{}, nil
@@ -34,7 +35,7 @@ func acquireWith(t *testing.T, introspect backendkit.TokenIntrospector, p backen
 }
 
 func scopesOf(scopes []string, err error) backendkit.TokenIntrospector {
-	return func(string, string) (forge.TokenIntrospection, error) {
+	return func(*connectorruntime.Runtime, string, string) (forge.TokenIntrospection, error) {
 		return forge.TokenIntrospection{Introspectable: true, Scopes: scopes}, err
 	}
 }
@@ -185,7 +186,7 @@ func TestAcquireToken_AmbientLookupFollowsDescriptorTokenEnvVar(t *testing.T) {
 // to refuse the token: the operator is told and the wizard carries on.
 func TestAcquireToken_UnsupportedIntrospectionWarnsAndContinues(t *testing.T) {
 	var out bytes.Buffer
-	unsupported := func(string, string) (forge.TokenIntrospection, error) {
+	unsupported := func(*connectorruntime.Runtime, string, string) (forge.TokenIntrospection, error) {
 		return forge.TokenIntrospection{}, fmt.Errorf("no github connector is configured: %w", backendkit.ErrUnsupported)
 	}
 	token, err := acquireWith(t, unsupported, backendkit.TokenPrompt{
@@ -203,7 +204,7 @@ func TestAcquireToken_UnsupportedIntrospectionWarnsAndContinues(t *testing.T) {
 // The wizard audits the pasted token itself, scoped to the target repo.
 func TestAcquireToken_AuditsThePastedTokenForTheTargetRepo(t *testing.T) {
 	var gotToken, gotRepo string
-	introspect := func(token, repo string) (forge.TokenIntrospection, error) {
+	introspect := func(_ *connectorruntime.Runtime, token, repo string) (forge.TokenIntrospection, error) {
 		gotToken, gotRepo = token, repo
 		return forge.TokenIntrospection{Introspectable: true, Scopes: []string{"public_repo"}}, nil
 	}
@@ -224,7 +225,7 @@ func TestAcquireToken_AuditsThePastedTokenForTheTargetRepo(t *testing.T) {
 // wizard or printing the raw error.
 func TestAcquireToken_NoConnectorSandboxDefersTheAuditAndContinues(t *testing.T) {
 	var out bytes.Buffer
-	noSandbox := func(string, string) (forge.TokenIntrospection, error) {
+	noSandbox := func(*connectorruntime.Runtime, string, string) (forge.TokenIntrospection, error) {
 		return forge.TokenIntrospection{}, fmt.Errorf("introspect the token: %w", connectorsandbox.ErrNoConnectorSandbox)
 	}
 	token, err := acquireWith(t, noSandbox, backendkit.TokenPrompt{

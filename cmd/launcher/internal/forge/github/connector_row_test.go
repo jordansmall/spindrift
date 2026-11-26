@@ -340,7 +340,10 @@ func TestConnectorRow_EveryReadRecordsItsFailure(t *testing.T) {
 		"Probe":           func(c *execClient) error { _, err := c.Probe(); return err },
 		"ListLabels":      func(c *execClient) error { _, err := c.ListLabels(); return err },
 		"BranchProtected": func(c *execClient) error { _, err := c.BranchProtected("main"); return err },
-		"IntrospectToken": func(*execClient) error { _, err := introspectToken("ghp_abc", connectorRepo); return err },
+		"IntrospectToken": func(c *execClient) error {
+			_, err := introspectToken(c.connectors, "ghp_abc", connectorRepo)
+			return err
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, c, _, logDir := routedLogHarness(t, useGithubRowAt)
@@ -399,7 +402,7 @@ func TestConnectorRow_TokenIntrospectionAuditsToTheConnectorRecord(t *testing.T)
 	t.Cleanup(func() { connectorClient = old })
 	t.Setenv(tokenCredentialEnv, connectorToken)
 
-	if _, err := introspectToken("ghp_abc", connectorRepo); err != nil {
+	if _, err := introspectToken(testRuntime(t), "ghp_abc", connectorRepo); err != nil {
 		t.Fatal(err)
 	}
 
@@ -458,25 +461,15 @@ func TestConnectorRow_CheckRunWithoutTheCapabilityFailsWithoutGh(t *testing.T) {
 	}
 }
 
-// statsSandbox is a Connector sandbox that only reports its cost.
-type statsSandbox struct {
-	connectorsandbox.Loader
-	stats connectorsandbox.Stats
-	ok    bool
-}
-
-func (s statsSandbox) Stats() (connectorsandbox.Stats, bool) { return s.stats, s.ok }
-
 // routedSandboxHarness chdirs into a scratch directory, applies the row via
-// useRow, installs s as the Connector sandbox, and returns the audit file path
+// useRow, and returns the audit file path
 // this process would write. A non-nil seed is written there first; nil leaves
 // the file absent.
-func routedSandboxHarness(t *testing.T, useRow func(*testing.T, string), s statsSandbox, seed []byte) (audit string) {
+func routedSandboxHarness(t *testing.T, useRow func(*testing.T, string), seed []byte) (audit string) {
 	t.Helper()
 	dir := t.TempDir()
 	t.Chdir(dir)
 	useRow(t, "example.test")
-	t.Cleanup(connectorsandbox.Use(s))
 	audit = filepath.Join(hostpaths.LogDir(dir), connectorrecord.Name(backend.GitHub.Name, ".audit.jsonl"))
 	if seed != nil {
 		if err := os.MkdirAll(filepath.Dir(audit), 0o755); err != nil {
@@ -491,15 +484,15 @@ func routedSandboxHarness(t *testing.T, useRow func(*testing.T, string), s stats
 
 const seededAudit = "{\"decision\":\"allowed\"}\n"
 
-var knownSandbox = statsSandbox{ok: true, stats: connectorsandbox.Stats{
+var knownStats = connectorsandbox.Stats{
 	Start:    7 * time.Millisecond,
 	HopStats: connectorhost.HopStats{Calls: 5, HostCalls: 3, Hop: 11 * time.Millisecond},
-}}
+}
 
 func TestRecordRoutedSandboxTotals_AppendsOneLineToTheAuditFile(t *testing.T) {
-	audit := routedSandboxHarness(t, useGithubRowAt, knownSandbox, []byte(seededAudit))
+	audit := routedSandboxHarness(t, useGithubRowAt, []byte(seededAudit))
 
-	RecordRoutedSandboxTotals()
+	RecordRoutedSandboxTotals(knownStats)
 
 	b, err := os.ReadFile(audit)
 	if err != nil {
@@ -536,22 +529,12 @@ func TestRecordRoutedSandboxTotals_AppendsOneLineToTheAuditFile(t *testing.T) {
 	}
 }
 
-func TestRecordRoutedSandboxTotals_WritesNothingWhenTheSandboxNeverStarted(t *testing.T) {
-	audit := routedSandboxHarness(t, useGithubRowAt, statsSandbox{}, []byte(seededAudit))
-
-	RecordRoutedSandboxTotals()
-
-	if b, _ := os.ReadFile(audit); string(b) != seededAudit {
-		t.Errorf("audit file = %q, want it untouched", b)
-	}
-}
-
 // A process that never read through its Connector has no record pair,
 // and recording must not make one: a pair reads as a dirty run.
 func TestRecordRoutedSandboxTotals_CreatesNoRecordPair(t *testing.T) {
-	audit := routedSandboxHarness(t, useGithubRowAt, knownSandbox, nil)
+	audit := routedSandboxHarness(t, useGithubRowAt, nil)
 
-	RecordRoutedSandboxTotals()
+	RecordRoutedSandboxTotals(knownStats)
 
 	if got := connectorFiles(t, filepath.Dir(audit), ""); len(got) != 0 {
 		t.Errorf("recording totals created %v, want no files", got)
@@ -559,9 +542,9 @@ func TestRecordRoutedSandboxTotals_CreatesNoRecordPair(t *testing.T) {
 }
 
 func TestRecordRoutedSandboxTotals_AppendsUnderAPlainRow(t *testing.T) {
-	audit := routedSandboxHarness(t, useGithubRowAt, knownSandbox, []byte(seededAudit))
+	audit := routedSandboxHarness(t, useGithubRowAt, []byte(seededAudit))
 
-	RecordRoutedSandboxTotals()
+	RecordRoutedSandboxTotals(knownStats)
 
 	if b, _ := os.ReadFile(audit); len(strings.Split(strings.TrimSuffix(string(b), "\n"), "\n")) != 2 {
 		t.Errorf("audit file = %q, want the existing line and one totals line", b)

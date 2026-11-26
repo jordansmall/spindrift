@@ -89,8 +89,9 @@ func New(in Input, opts Options) (*connectorruntime.Runtime, error) {
 	if l == nil {
 		l = sandbox.ForKind(in.RunnerKind, runner.Config{Runtime: in.Runtime}, in.Artifacts, in.Knobs, in.Dir)
 	}
+	// driverrows still loads Driver Connectors through the installed sandbox.
 	connectorsandbox.Use(l)
-	rt := connectorruntime.FromRegistries(sourced.Rows)
+	rt := connectorruntime.FromRegistries(sourced.Rows, l)
 
 	if opts.RefreshEvery > 0 && len(sourced.Commands) > 0 {
 		stop := make(chan struct{})
@@ -122,9 +123,11 @@ func New(in Input, opts Options) (*connectorruntime.Runtime, error) {
 		if cl, ok := l.(interface{ Close(context.Context) error }); ok {
 			err = cl.Close(context.Background())
 		}
-		for _, s := range backendkit.Strategies() {
-			if s.RecordSandboxTotals != nil {
-				s.RecordSandboxTotals()
+		if st, ok := l.Stats(); ok {
+			for _, s := range backendkit.Strategies() {
+				if s.RecordSandboxTotals != nil {
+					s.RecordSandboxTotals(st)
+				}
 			}
 		}
 		return err

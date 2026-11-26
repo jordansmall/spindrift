@@ -23,7 +23,6 @@ import (
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectorrecord"
-	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/connectorsandbox/sandbox"
 	"spindrift.dev/launcher/internal/fixturebuild"
 	"spindrift.dev/launcher/internal/hostpaths"
@@ -352,7 +351,6 @@ func RouteRefusal(t *testing.T, r runner.Runner) {
 
 	sb := sandbox.New(r, "escape")
 	t.Cleanup(func() { _ = sb.Close(context.Background()) })
-	t.Cleanup(connectorsandbox.Use(sb))
 
 	dir, err := fixturebuild.ConnectorDir()
 	if err != nil {
@@ -370,7 +368,7 @@ func RouteRefusal(t *testing.T, r runner.Runner) {
 	// Load opens its audit file under the working directory's log directory.
 	cwd := t.TempDir()
 	t.Chdir(cwd)
-	c, err := backendrows.Load(ctx, row, backendrows.Options{})
+	c, err := backendrows.Load(ctx, row, backendrows.Options{Sandbox: sb})
 	if err != nil {
 		t.Fatalf("Load through the sandbox: %v", err)
 	}

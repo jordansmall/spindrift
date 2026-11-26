@@ -97,15 +97,14 @@ func (s *sandboxes) ownedBy(name string) []*ownedSandbox {
 	return out
 }
 
-// twoRows is a runtime over two rows of one fixture Connector, built with a
-// nil sandbox so it resolves the one installed.
+// twoRows is a runtime over two rows of one fixture Connector, built over the
+// sandboxes sbs.
 func twoRows(t *testing.T, sbs *sandboxes) (rt *connectorruntime.Runtime, a, b backendrows.Row, spec connectorruntime.SessionSpec) {
 	t.Helper()
 	e := newEnv(t, "tracker.wasm")
 	a, b = e.row, e.row
 	a.Name, b.Name = "row-a", "row-b"
-	t.Cleanup(connectorsandbox.Use(sbs))
-	rt = connectorruntime.New([]backendrows.Row{a, b}, map[string]credsource.Row{a.Name: {Secret: credsource.Static("tok")}, b.Name: {Secret: credsource.Static("tok")}}, nil)
+	rt = connectorruntime.New([]backendrows.Row{a, b}, map[string]credsource.Row{a.Name: {Secret: credsource.Static("tok")}, b.Name: {Secret: credsource.Static("tok")}}, sbs)
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt, a, b, e.spec.SessionSpec
 }
@@ -126,7 +125,7 @@ func TestEachRowLoadsIntoItsOwnSandboxAndDriversIntoTheSharedOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The Runtime never loads a Driver, so the shared sandbox is reached directly.
-	if _, err := connectorsandbox.Load(context.Background(), []byte("driver")); !errors.Is(err, errDriverLoad) {
+	if _, err := sbs.Load(context.Background(), []byte("driver")); !errors.Is(err, errDriverLoad) {
 		t.Fatalf("Driver load = %v, want the shared sandbox's", err)
 	}
 
@@ -223,5 +222,49 @@ func TestOnCloseRunsOnceInOrderAfterTheSandboxesStopped(t *testing.T) {
 	}
 	if got := strings.Join(order, ","); got != "first,second" {
 		t.Errorf("OnClose ran %q, want each once in registration order", got)
+	}
+}
+
+// A runtime built with no sandbox fails every load with ErrNoConnectorSandbox,
+// though a process-wide one is installed: nothing reads it.
+func TestNilSandboxFailsLoadsEvenWhenOneIsInstalled(t *testing.T) {
+	e := newEnv(t, "tracker.wasm")
+	t.Cleanup(connectorsandbox.Use(connectorsandboxtest.InProcess()))
+	rt := connectorruntime.New([]backendrows.Row{e.row}, nil, nil)
+	t.Cleanup(func() { _ = rt.Close() })
+
+	if rt.HasSandbox() {
+		t.Error("HasSandbox = true for a runtime built with none")
+	}
+	if _, err := rt.Connector(e.row, e.spec.SessionSpec); !errors.Is(err, connectorsandbox.ErrNoConnectorSandbox) {
+		t.Fatalf("Connector err = %v, want ErrNoConnectorSandbox", err)
+	}
+	if err := rt.SandboxFailure(); err != nil {
+		t.Errorf("SandboxFailure = %v, want nil with no sandbox", err)
+	}
+}
+
+// failingSandbox reports a start failure, as a runner that did not start does.
+type failingSandbox struct {
+	connectorsandbox.Loader
+	err error
+}
+
+func (s failingSandbox) Err() error { return s.err }
+
+func TestSandboxFailureIsTheRuntimesSandboxStartFailure(t *testing.T) {
+	startErr := errors.New("runner did not start")
+	sb := failingSandbox{Loader: connectorsandboxtest.InProcess(), err: startErr}
+	rt := connectorruntime.FromRegistries(nil, sb)
+	t.Cleanup(func() { _ = rt.Close() })
+
+	if !rt.HasSandbox() {
+		t.Error("HasSandbox = false for a runtime built with one")
+	}
+	if got := rt.SandboxFailure(); !errors.Is(got, startErr) {
+		t.Errorf("SandboxFailure = %v, want %v", got, startErr)
+	}
+	if rt.Sandbox() != connectorsandbox.Loader(sb) {
+		t.Error("Sandbox is not the one the runtime was built with")
 	}
 }

@@ -331,10 +331,10 @@ func TestConnectorForge_SelfHostedUnderASubpath(t *testing.T) {
 }
 
 // newRuntime is the Connector runtime over the rows the test applied and the
-// sandbox TestMain installed, closed with the test.
+// in-process engine, closed with the test.
 func newRuntime(t *testing.T) *connectorruntime.Runtime {
 	t.Helper()
-	rt := connectorruntime.FromRegistries(credsourcetest.Applied())
+	rt := connectorruntime.FromRegistries(credsourcetest.Applied(), connectorsandboxtest.InProcess())
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt
 }

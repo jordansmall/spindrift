@@ -68,7 +68,10 @@ var callsNeedingARow = []struct {
 	{"CreateDraftPR", func(c *execClient) error { _, _, err := c.CreateDraftPR("t", "b", "main", "b"); return err }},
 	{"RelayBundle", func(c *execClient) error { return c.RelayBundle("/nonexistent", "ref") }},
 	{"CommitSubjects", func(c *execClient) error { _, err := c.CommitSubjects("/nonexistent", "main", "ref"); return err }},
-	{"IntrospectToken", func(*execClient) error { _, err := introspectToken("ghp_abc", connectorRepo); return err }},
+	{"IntrospectToken", func(c *execClient) error {
+		_, err := introspectToken(c.connectors, "ghp_abc", connectorRepo)
+		return err
+	}},
 }
 
 // With no github row, or under a GitHub Enterprise GH_HOST

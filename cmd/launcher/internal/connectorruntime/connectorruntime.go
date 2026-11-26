@@ -1,7 +1,10 @@
 // Package connectorruntime owns what a Launcher process needs to host
 // Connectors: the backend rows, each row's credential source, the sandboxes it
 // loads them into (one per row, since every row holds a credential), and the
-// live sessions, closed together.
+// live sessions, closed together. The sandbox is the runtime's own, given at
+// construction; a runtime built with none fails every load with
+// connectorsandbox.ErrNoConnectorSandbox, so no load falls back to a
+// process-wide sandbox or to loading in-process.
 //
 // A session is the one Connector a (row, Target) pair keeps alive, whichever
 // axis (tracker, Code Forge or read-only forge view) or direct request for the
@@ -75,10 +78,10 @@ type sessionKey struct {
 }
 
 // New is a runtime over rows and their credential sources that loads
-// Connectors into sandbox; a nil sandbox is the installed one, resolved at each
-// load. A sandbox that starts sandboxes of its own
-// (connectorsandbox.OwningLoader) hosts each row in one of its own, started by
-// the row's first load; any other Loader is shared by every row.
+// Connectors into sandbox; a nil sandbox is none, and every load fails with
+// connectorsandbox.ErrNoConnectorSandbox. A sandbox that starts sandboxes of
+// its own (connectorsandbox.OwningLoader) hosts each row in one of its own,
+// started by the row's first load; any other Loader is shared by every row.
 func New(rows []backendrows.Row, creds map[string]credsource.Row, sandbox connectorsandbox.Loader) *Runtime {
 	byName := make(map[string]backendrows.Row, len(rows))
 	for _, row := range rows {
@@ -88,9 +91,27 @@ func New(rows []backendrows.Row, creds map[string]credsource.Row, sandbox connec
 }
 
 // FromRegistries is a runtime over the applied backend rows, their credential
-// sources and the installed sandbox.
-func FromRegistries(creds map[string]credsource.Row) *Runtime {
-	return newRuntime(backendrows.Lookup, creds, nil)
+// sources and sandbox, which New describes; nil is none.
+func FromRegistries(creds map[string]credsource.Row, sandbox connectorsandbox.Loader) *Runtime {
+	return newRuntime(backendrows.Lookup, creds, sandbox)
+}
+
+// HasSandbox is whether the runtime was built with a sandbox to load into; a
+// nil runtime has none.
+func (r *Runtime) HasSandbox() bool { return r != nil && r.sandbox != nil }
+
+// Sandbox is the sandbox the runtime loads into, nil when none. A short-lived
+// runtime built for one load shares it.
+func (r *Runtime) Sandbox() connectorsandbox.Loader { return r.sandbox }
+
+// SandboxFailure is the sandbox's start failure, which the run reports as its
+// own whatever the load site did with the error; nil when none failed or the
+// runtime has no sandbox.
+func (r *Runtime) SandboxFailure() error {
+	if r.sandbox == nil {
+		return nil
+	}
+	return r.sandbox.Err()
 }
 
 func newRuntime(lookup func(string) (backendrows.Row, bool), creds map[string]credsource.Row, sandbox connectorsandbox.Loader) *Runtime {
@@ -381,7 +402,8 @@ func (s *session) live() (*connectorhost.Connector, error) {
 }
 
 // sandboxFor is where the named row loads: its own sandbox when the loader
-// starts them, else the loader itself, nil when none is installed.
+// starts them, else the loader itself; ErrNoConnectorSandbox when the runtime
+// has none.
 func (r *Runtime) sandboxFor(name string) (connectorsandbox.Loader, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -390,7 +412,7 @@ func (r *Runtime) sandboxFor(name string) (connectorsandbox.Loader, error) {
 	}
 	l := r.sandbox
 	if l == nil {
-		l = connectorsandbox.Current()
+		return nil, connectorsandbox.ErrNoConnectorSandbox
 	}
 	ss, ok := l.(connectorsandbox.OwningLoader)
 	if !ok {

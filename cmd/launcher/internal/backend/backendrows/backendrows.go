@@ -489,10 +489,10 @@ func Load(ctx context.Context, row Row, o Options) (*connectorhost.Connector, er
 		Client:    o.Client,
 		Audit:     connectorhost.NewAuditLog(audit),
 	}
-	if o.Sandbox != nil {
-		return o.Sandbox.LoadNetwork(ctx, wasm, n)
+	if o.Sandbox == nil {
+		return nil, fmt.Errorf("backend %q: %w", row.Name, connectorsandbox.ErrNoConnectorSandbox)
 	}
-	return connectorsandbox.LoadNetwork(ctx, wasm, n)
+	return o.Sandbox.LoadNetwork(ctx, wasm, n)
 }
 
 // Snapshot captures the applied rows and registered gates and returns the

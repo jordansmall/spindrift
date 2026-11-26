@@ -206,7 +206,6 @@ func fixtureWasm(t *testing.T) string {
 	if dir == "" {
 		t.Skipf("%s is unset; it names the dir holding the fixture Connector .wasm files", fixturesEnv)
 	}
-	t.Cleanup(connectorsandbox.Use(connectorsandboxtest.InProcess()))
 	return filepath.Join(dir, "network.wasm")
 }
 
@@ -230,6 +229,7 @@ func TestLoadResolvesTheCredentialHostSideAndEnforcesTheRoutes(t *testing.T) {
 		Routes: []connectorhost.Route{{Method: "GET", Host: host, Path: "/repos"}},
 	}
 	c, err := backendrows.Load(context.Background(), r, backendrows.Options{
+		Sandbox: connectorsandboxtest.InProcess(),
 		Getenv: func(k string) string {
 			if k == "FIXTURE_TOKEN" {
 				return "tok-123"
@@ -280,7 +280,8 @@ func TestLoadFailsClosedWithoutTheCredential(t *testing.T) {
 		Routes: []connectorhost.Route{{Method: "GET", Host: srv.Listener.Addr().String(), Path: "/repos"}},
 	}
 	c, err := backendrows.Load(context.Background(), r, backendrows.Options{
-		Getenv: func(string) string { return "" }, Client: srv.Client(),
+		Sandbox: connectorsandboxtest.InProcess(),
+		Getenv:  func(string) string { return "" }, Client: srv.Client(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -305,7 +306,8 @@ func loadBasic(t *testing.T, srv *httptest.Server, env map[string]string) *conne
 		Routes: []connectorhost.Route{{Method: "GET", Host: srv.Listener.Addr().String(), Path: "/repos"}},
 	}
 	c, err := backendrows.Load(context.Background(), r, backendrows.Options{
-		Getenv: func(k string) string { return env[k] }, Client: srv.Client(),
+		Sandbox: connectorsandboxtest.InProcess(),
+		Getenv:  func(k string) string { return env[k] }, Client: srv.Client(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -691,17 +693,16 @@ func (l *recordingLoader) LoadNetwork(_ context.Context, _ []byte, n connectorho
 
 // A reload is a Load like any other, so under the Connector sandbox the
 // replacement is loaded into it too.
-func TestLoadRoutesEveryLoadThroughTheInstalledSandbox(t *testing.T) {
+func TestLoadRoutesEveryLoadThroughTheOptionsSandbox(t *testing.T) {
 	t.Chdir(t.TempDir())
 	module := filepath.Join(t.TempDir(), "x.wasm")
 	if err := os.WriteFile(module, []byte("\x00asm"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	l := &recordingLoader{}
-	t.Cleanup(connectorsandbox.Use(l))
 	r := backendrows.Row{Name: "fixture", Module: module, CredentialEnv: "TOKEN"}
 	for range 2 {
-		if _, err := backendrows.Load(context.Background(), r, backendrows.Options{}); err == nil || err.Error() != "recorded" {
+		if _, err := backendrows.Load(context.Background(), r, backendrows.Options{Sandbox: l}); err == nil || err.Error() != "recorded" {
 			t.Fatalf("Load = %v, want the sandbox's error", err)
 		}
 	}
@@ -785,11 +786,10 @@ func TestLoadFailsWhenTheAuditFileWillNotOpen(t *testing.T) {
 		t.Fatal(err)
 	}
 	l := &recordingLoader{}
-	t.Cleanup(connectorsandbox.Use(l))
 	r := row("gone", getRepos)
 	r.Module = filepath.Join(dir, "absent.wasm")
 
-	_, err := backendrows.Load(context.Background(), r, backendrows.Options{})
+	_, err := backendrows.Load(context.Background(), r, backendrows.Options{Sandbox: l})
 	want := filepath.Join(logDir, connectorrecord.Name("gone", ".audit.jsonl"))
 	if err == nil || !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), "read module") {
 		t.Fatalf("err = %v, want the audit open failure naming %s, not the module read", err, want)
@@ -905,5 +905,25 @@ func TestUseSkipsARowWithAnUnusableGitRemoteEnv(t *testing.T) {
 				t.Error("BaseError(forge) = nil, want why the row was dropped")
 			}
 		})
+	}
+}
+
+// A Load with no sandbox fails closed rather than reaching for one installed
+// process-wide.
+func TestLoadWithoutASandboxFailsWithErrNoConnectorSandbox(t *testing.T) {
+	t.Chdir(t.TempDir())
+	module := filepath.Join(t.TempDir(), "x.wasm")
+	if err := os.WriteFile(module, []byte("\x00asm"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	l := &recordingLoader{}
+	t.Cleanup(connectorsandbox.Use(l))
+	r := backendrows.Row{Name: "fixture", Module: module, CredentialEnv: "TOKEN"}
+
+	if _, err := backendrows.Load(context.Background(), r, backendrows.Options{}); !errors.Is(err, connectorsandbox.ErrNoConnectorSandbox) {
+		t.Fatalf("Load = %v, want ErrNoConnectorSandbox", err)
+	}
+	if len(l.networks) != 0 {
+		t.Errorf("installed sandbox saw loads %v, want none", l.networks)
 	}
 }

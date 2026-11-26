@@ -18,7 +18,6 @@ import (
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorruntime"
-	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/connectorsetup"
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatch"
@@ -2251,10 +2250,10 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return cmdCompleteIssues(connectors)
 	}
 	if verb == daemon.LateMergeSweepVerb {
-		return sandboxVerdict(cmdLateMergeSweep(connectors, stdout, stderr), stderr)
+		return sandboxVerdict(cmdLateMergeSweep(connectors, stdout, stderr), connectors, stderr)
 	}
 	if handler, ok := verbHandlers[verb]; ok {
-		return sandboxVerdict(handler(connectors, rest, stdout, stderr), stderr)
+		return sandboxVerdict(handler(connectors, rest, stdout, stderr), connectors, stderr)
 	}
 	// Unrecognized subcommand prints help rather than dispatching (issue #555).
 	fmt.Fprintf(stderr, "unknown subcommand: %s\n\n", verb)
@@ -2266,10 +2265,10 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 // to dispatch) but whose Connector sandbox did not start. A load site is free
 // to swallow that error (a probe falls to its next answer), so the run's
 // result is not left to them.
-func sandboxVerdict(code int, stderr io.Writer) int {
+func sandboxVerdict(code int, connectors *connectorruntime.Runtime, stderr io.Writer) int {
 	switch exitcode.Dispatch(code) {
 	case exitcode.Dispatched, exitcode.QueueEmpty, exitcode.NoneDispatchable:
-		if err := connectorsandbox.Failure(); err != nil {
+		if err := connectors.SandboxFailure(); err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
 			return int(exitcode.Failed)
 		}
