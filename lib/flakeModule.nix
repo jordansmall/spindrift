@@ -833,6 +833,8 @@ in
           ) row
         )
       );
+      # Refuses a second declaration; see names.declaredOnce.
+      apply = names.declaredOnce options.spindrift.connectors;
       default = { };
       description = "Connector rows, built from `spindrift.connectorData`; a Consumer sets only the switches.";
     };
@@ -850,6 +852,8 @@ in
           in
           if error != null then throw error else lib.concatMap (d: d.value) validated;
       };
+      # Refuses a second declaration; see names.declaredOnce.
+      apply = names.declaredOnce options.spindrift.connectorData;
       default = [ ];
       example = lib.literalExpression "[ (import ./data.nix { inherit core; }) ]";
       description = ''

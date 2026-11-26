@@ -1,8 +1,9 @@
 # Issue #7562: a Connector registers only as data (`spindrift.connectorData`),
 # and core refuses a second registration of a name however it is expressed.
-# Each hostile registration below must fail evaluation of the full flake
-# module, and the message it fails with is pinned on the pure function that
-# words it: builtins.tryEval cannot read a thrown message.
+# Each hostile registration below, a redeclaration of the options included,
+# must fail evaluation of the full flake module, and the message it fails
+# with is pinned on the pure function that words it: builtins.tryEval cannot
+# read a thrown message.
 {
   pkgs,
   fixtures,
@@ -15,7 +16,9 @@ let
     mkForce
     mkIf
     mkMerge
+    mkOption
     mkOverride
+    types
     ;
   names = import ../../lib/connector-names.nix;
   connectorData = import ../../lib/connector-data.nix;
@@ -35,6 +38,60 @@ let
   inherit (fixtures) fails hasAll registerData;
   rowsFail = modules: fails (configOf (consumerWith modules)).connectors;
   inFile = file: mod: mod // { _file = file; };
+  debugOptions = (consumerWith [ ]).debug.options.spindrift;
+
+  # A type whose own `typeMerge` outlives every merge: a second declaration
+  # carrying it keeps its type rather than falling back to core's.
+  selfMergingType = t: t // { typeMerge = _: selfMergingType t; };
+  # A second declaration of spindrift.<option> by a hostile module must fail
+  # evaluation of the option, whatever its type and whichever module is
+  # first: the stock type, a type merging on its own, or only an `apply`.
+  redeclarationRefused =
+    {
+      option,
+      stockType,
+      hostileConfig,
+      hostileApply,
+    }:
+    let
+      hostile =
+        decl: config:
+        inFile "hostile.nix" {
+          options.spindrift.${option} = mkOption decl;
+          config.spindrift.${option} = config;
+        };
+      refused = modules: fails (configOf (fixtures.connectorConsumerVia modules)).${option};
+      data = registerData githubData;
+      inBothPositions =
+        h:
+        builtins.all refused [
+          [
+            coreModule
+            data
+            h
+          ]
+          [
+            h
+            coreModule
+            data
+          ]
+          [
+            coreModule
+            batteries
+            h
+          ]
+          [
+            h
+            coreModule
+            batteries
+          ]
+        ];
+    in
+    inBothPositions (hostile { type = stockType; } hostileConfig)
+    && inBothPositions (hostile { type = selfMergingType stockType; } hostileConfig)
+    && inBothPositions (
+      inFile "hostile.nix" { options.spindrift.${option} = mkOption { apply = hostileApply; }; }
+    );
 
   # What a hostile module would set on github's row to replace it.
   hostileRow = {
@@ -166,6 +223,36 @@ in
       "no Connector 'nosuch' is registered"
       "spindrift.connectorData"
     ]) "the unregistered refusal must name the Connector, the file and the rule";
+    assert assertMsg (
+      builtins.length debugOptions.connectors.declarations == 1
+    ) "control: core alone declares spindrift.connectors once";
+    assert assertMsg (redeclarationRefused {
+      option = "connectors";
+      stockType = types.attrsOf (types.submodule { freeformType = types.lazyAttrsOf types.raw; });
+      hostileConfig.github = mkForce hostileRow;
+      hostileApply =
+        v:
+        v
+        // {
+          github = v.github // {
+            routes = [ ];
+          };
+        };
+    }) "a second declaration of spindrift.connectors must fail evaluation, however its type merges";
+    assert assertMsg (hasAll
+      (names.redeclaredError "spindrift.connectors" [
+        "core.nix"
+        "hostile.nix"
+      ])
+      [
+        "spindrift.connectors"
+        "hostile.nix"
+        "declared once, by core"
+        "registers only as data"
+        "spindrift.connectorData"
+        "a name has one definer"
+      ]
+    ) "the redeclaration refusal must name the option, the files and the rule";
     pkgs.runCommand "connector-registration-refuses-row-override" { } "touch $out";
 
   # Hole 2: a module reusing another Connector's key. A Connector export is
@@ -286,6 +373,27 @@ in
     assert assertMsg (
       names.registrationError (definitionsOf [ (inFile "a.nix" (registerData githubData)) ]) == null
     ) "a single registration must not be reported as a duplicate";
+    assert assertMsg (
+      builtins.length debugOptions.connectorData.declarations == 1
+    ) "control: core alone declares spindrift.connectorData once";
+    assert assertMsg (redeclarationRefused {
+      option = "connectorData";
+      stockType = types.listOf types.raw;
+      hostileConfig = [ (githubData // { routes = [ ]; }) ];
+      hostileApply = map (d: d // { routes = [ ]; });
+    }) "a second declaration of spindrift.connectorData must fail evaluation, however its type merges";
+    assert assertMsg (hasAll
+      (names.redeclaredError "spindrift.connectorData" [
+        "core.nix"
+        "hostile.nix"
+      ])
+      [
+        "spindrift.connectorData"
+        "hostile.nix"
+        "declared once, by core"
+        "a name has one definer"
+      ]
+    ) "the redeclaration refusal must name the option, the files and the rule";
     pkgs.runCommand "connector-registration-refuses-two-data-registrations" { } "touch $out";
 
   # A Connector's export is its own row: data naming any other spindrift
