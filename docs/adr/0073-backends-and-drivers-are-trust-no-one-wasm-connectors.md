@@ -1208,7 +1208,11 @@ installation token, whose permissions it cannot read, so for those the token's
 scope and the Route table are the whole bound. Having
 the host restrict which GraphQL operations a Connector may send would let
 primary mode keep a narrower token; that is possible future work, out of scope
-here.
+here. (Amended by issue #7566: the `POST /graphql` Route now declares the
+documents the github Connector sends, and the host refuses any other query
+text. GraphQL variables stay free, so a declared mutation, `closeIssue` for
+one, can still target anything the token reaches, and the token's scope still
+bounds that.)
 
 ## Amendment (issue #6960): a merge refusal has its own error class
 

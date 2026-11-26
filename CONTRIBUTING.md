@@ -347,7 +347,9 @@ and in the in-box `box` program; the only bash left is the generated shim that
   driverkit helpers a Connector needs (`ToolTarget`, `ErrorText`,
   `CompactJSON`, `SessionKey`, `SessionUUID`, `LineFramer`), pinned by
   `TestHelperParity`, `TestStreamFilterParity` and `TestLineFramerParity` in
-  `sdk/driver/twin_test.go`. Fixture Connectors live under
+  `sdk/driver/twin_test.go`, and of the GraphQL document check
+  (`graphQLQuery`, `matchDocument` in `sdk/connector/fakehost.go`), pinned by
+  `nix/checks/graphql-query-twin-parity.nix`. Fixture Connectors live under
   `nix/fixtures/connector-wasm`, except the fixture Driver Connector, which is
   `nix/fixtures/connector` itself.
 - **`connectors/`** — shipped Connector subflakes, each its own Go module built
