@@ -91,9 +91,9 @@ func errNoIssue(t tracker.Target, number string) error {
 	return connector.Errorf(connector.NotFound, "POST /graphql: no issue %s in %s", number, t.Repo)
 }
 
-// removeLabels resolves the issue and label node ids in one query, then removes
-// the labels in one mutation. A label the repository lacks is already absent,
-// the state asked for; a missing issue is an error.
+// removeLabels resolves each label's node id, one fixed lookup per name, then
+// removes the labels in one mutation. A label the repository lacks is already
+// absent, the state asked for; a missing issue is an error.
 func removeLabels(t tracker.Target, number string, remove []string) error {
 	names := nonEmpty(remove)
 	if len(names) == 0 {
@@ -103,55 +103,41 @@ func removeLabels(t tracker.Target, number string, remove []string) error {
 	if err != nil {
 		return err
 	}
-	// Names travel as variables, never interpolated into the document.
-	decls := "$owner:String!,$repo:String!,$number:Int!"
-	sel := "issue(number:$number){id}"
-	for i, name := range names {
-		v := "n" + strconv.Itoa(i)
-		decls += ",$" + v + ":String!"
-		sel += " l" + strconv.Itoa(i) + ":label(name:$" + v + "){id}"
-		vars[v] = name
-	}
-	var data struct {
-		Repository map[string]json.RawMessage `json:"repository"`
-	}
-	if err := graphql(t.API, "query("+decls+"){repository(owner:$owner,name:$repo){"+sel+"}}", vars, &data); err != nil {
-		return err
-	}
-	if data.Repository == nil {
-		return errNoRepository(t)
-	}
-	var issue *struct {
-		ID string `json:"id"`
-	}
-	if raw := data.Repository["issue"]; raw != nil {
-		if err := json.Unmarshal(raw, &issue); err != nil {
+	var issueID string
+	var ids []string
+	// N labels cost N+1 GraphQL requests: a fixed document cannot take a list
+	// of names to look up, so the rate-limit cost grows with the label count.
+	for _, name := range names {
+		// Names travel as variables, never interpolated into the document.
+		vars["name"] = name
+		var data struct {
+			Repository *struct {
+				Issue *struct {
+					ID string `json:"id"`
+				} `json:"issue"`
+				Label *struct {
+					ID string `json:"id"`
+				} `json:"label"`
+			} `json:"repository"`
+		}
+		if err := graphql(t.API, labelIDQuery, vars, &data); err != nil {
 			return err
 		}
-	}
-	if issue == nil {
-		return errNoIssue(t, number)
-	}
-	var ids []string
-	for i := range names {
-		var label *struct {
-			ID string `json:"id"`
+		if data.Repository == nil {
+			return errNoRepository(t)
 		}
-		if raw := data.Repository["l"+strconv.Itoa(i)]; raw != nil {
-			if err := json.Unmarshal(raw, &label); err != nil {
-				return err
-			}
+		if data.Repository.Issue == nil {
+			return errNoIssue(t, number)
 		}
-		if label != nil {
-			ids = append(ids, label.ID)
+		issueID = data.Repository.Issue.ID
+		if data.Repository.Label != nil {
+			ids = append(ids, data.Repository.Label.ID)
 		}
 	}
 	if len(ids) == 0 {
 		return nil
 	}
-	return graphql(t.API,
-		"mutation($id:ID!,$ids:[ID!]!){removeLabelsFromLabelable(input:{labelableId:$id,labelIds:$ids}){clientMutationId}}",
-		map[string]any{"id": issue.ID, "ids": ids}, nil)
+	return graphql(t.API, removeLabelsMutation, map[string]any{"id": issueID, "ids": ids}, nil)
 }
 
 // issueComment posts r.Body, with the research marker line restored atop it
@@ -216,9 +202,7 @@ func closeIssue(t tracker.Target, number string) error {
 			} `json:"issue"`
 		} `json:"repository"`
 	}
-	if err := graphql(t.API,
-		"query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){issue(number:$number){id}}}",
-		vars, &data); err != nil {
+	if err := graphql(t.API, issueIDQuery, vars, &data); err != nil {
 		return err
 	}
 	if data.Repository == nil {
@@ -227,9 +211,7 @@ func closeIssue(t tracker.Target, number string) error {
 	if data.Repository.Issue == nil {
 		return errNoIssue(t, number)
 	}
-	return graphql(t.API,
-		"mutation($id:ID!){closeIssue(input:{issueId:$id,stateReason:COMPLETED}){clientMutationId}}",
-		map[string]any{"id": data.Repository.Issue.ID}, nil)
+	return graphql(t.API, closeIssueMutation, map[string]any{"id": data.Repository.Issue.ID}, nil)
 }
 
 func labelsPath(t tracker.Target) string { return "/repos/" + t.Repo + "/labels" }
