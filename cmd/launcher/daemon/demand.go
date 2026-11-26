@@ -101,7 +101,7 @@ func buildTrackerSources(connectors *connectorruntime.Runtime, doc *inputdoc.Doc
 	}
 	// The row-credential rule launcherchecks applies to a selected backend:
 	// without it NewIssueTracker fails with a Connector-construction error that
-	// never names the knob. In production resolveConnectorCredentials already
+	// never names the knob. In production the connector runtime already
 	// refused an unset credential for every Connector-routed row, so this is the
 	// fallback that keeps the probe's reason naming the knob. A row whose
 	// runtime source holds a token (a `_CMD` form) is set whatever the knob says.

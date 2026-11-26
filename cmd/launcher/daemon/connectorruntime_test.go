@@ -11,6 +11,7 @@ import (
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectorsandbox"
+	"spindrift.dev/launcher/internal/connectorsetup"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/runner"
 )
@@ -28,15 +29,6 @@ func init() {
 	})
 }
 
-// useRealConnectorSandbox puts back the production Loader builder that
-// TestMain swaps for the in-process engine.
-func useRealConnectorSandbox(t *testing.T) {
-	t.Helper()
-	prev := newConnectorSandboxLoader
-	newConnectorSandboxLoader = realConnectorSandboxLoader
-	t.Cleanup(func() { newConnectorSandboxLoader = prev })
-}
-
 func refusingDocT(t *testing.T, settings map[string]string) *inputdoc.Document {
 	t.Helper()
 	doc := demandDocT(settings)
@@ -48,9 +40,8 @@ func refusingDocT(t *testing.T, settings map[string]string) *inputdoc.Document {
 
 // The Daemon counts demand through a Connector row in its own process, so that
 // load must go to the sandbox it installs, never to an engine it hosts itself.
-func TestInstallConnectorSandbox_DemandTrackerLoadGoesToTheSandbox(t *testing.T) {
+func TestConnectorRuntime_DemandTrackerLoadGoesToTheSandbox(t *testing.T) {
 	clearKnobEnvT(t)
-	useRealConnectorSandbox(t)
 	t.Cleanup(connectorsandbox.Use(nil))
 	t.Cleanup(backendrows.Snapshot())
 
@@ -71,8 +62,12 @@ func TestInstallConnectorSandbox_DemandTrackerLoadGoesToTheSandbox(t *testing.T)
 	doc := refusingDocT(t, map[string]string{"ISSUE_TRACKER": "github", "REPO_SLUG": "o/r", "LABEL": "ready-for-agent"})
 	t.Setenv(ghTokenEnv, "tok")
 
-	defer installConnectorSandbox(doc, t.TempDir())()
-	sources, missing := buildDemandSources(demandRuntime(t), doc, workKinds)
+	rt, err := connectorsetup.New(connectorInput(doc, workKinds, t.TempDir()), connectorsetup.Options{RequireCredential: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+	sources, missing := buildDemandSources(rt, doc, workKinds)
 	if len(missing) != 0 {
 		t.Fatalf("missing sources: %v", missing)
 	}
@@ -86,10 +81,13 @@ func TestInstallConnectorSandbox_DemandTrackerLoadGoesToTheSandbox(t *testing.T)
 	}
 }
 
-func TestInstallConnectorSandbox_CloserStopsTheSandbox(t *testing.T) {
-	useRealConnectorSandbox(t)
+func TestConnectorRuntime_CloseStopsTheSandbox(t *testing.T) {
 	t.Cleanup(connectorsandbox.Use(nil))
-	installConnectorSandbox(refusingDocT(t, nil), t.TempDir())()
+	rt, err := connectorsetup.New(connectorInput(refusingDocT(t, nil), nil, t.TempDir()), connectorsetup.Options{RequireCredential: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = rt.Close()
 	if _, err := connectorsandbox.Load(t.Context(), []byte("x")); err == nil || errors.Is(err, connectorsandbox.ErrNoConnectorSandbox) {
 		t.Fatalf("load after close = %v, want the closed sandbox's error", err)
 	}

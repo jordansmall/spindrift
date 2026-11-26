@@ -12,12 +12,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectorruntime"
-	"spindrift.dev/launcher/internal/credsource"
+	"spindrift.dev/launcher/internal/connectorsetup"
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge/github"
@@ -38,11 +37,26 @@ func useGithubConnectorRow(t *testing.T) {
 	}
 }
 
+// stubSecretCmd runs every credential `_CMD` the runtime resolves through run.
 func stubSecretCmd(t *testing.T, run func(string) (string, error)) {
 	t.Helper()
-	saved := secretCmdRunner
-	secretCmdRunner = run
-	t.Cleanup(func() { secretCmdRunner = saved })
+	build := newConnectorRuntime
+	newConnectorRuntime = func(in connectorsetup.Input, opts connectorsetup.Options) (*connectorruntime.Runtime, error) {
+		opts.Run = run
+		return build(in, opts)
+	}
+	t.Cleanup(func() { newConnectorRuntime = build })
+}
+
+// connectorRuntimeT builds the runtime mainRun would for doc and kinds, closing
+// it with the test.
+func connectorRuntimeT(t *testing.T, doc *inputdoc.Document, kinds []daemon.Kind) (*connectorruntime.Runtime, error) {
+	t.Helper()
+	rt, err := newConnectorRuntime(connectorInput(doc, kinds, t.TempDir()), connectorsetup.Options{RequireCredential: true})
+	if err == nil {
+		t.Cleanup(func() { _ = rt.Close() })
+	}
+	return rt, err
 }
 
 func failIfRun(t *testing.T) func(string) (string, error) {
@@ -54,7 +68,7 @@ func failIfRun(t *testing.T) func(string) (string, error) {
 
 var workKinds = []daemon.Kind{daemon.KindOf(dispatchkind.Work)}
 
-func TestResolveConnectorCredentials_CmdFormFillsCredentialEnv(t *testing.T) {
+func TestConnectorRuntime_CmdFormFillsCredentialEnv(t *testing.T) {
 	clearKnobEnvT(t)
 	useGithubConnectorRow(t)
 	t.Setenv(ghTokenEnv, "")
@@ -62,14 +76,14 @@ func TestResolveConnectorCredentials_CmdFormFillsCredentialEnv(t *testing.T) {
 	var ran string
 	stubSecretCmd(t, func(cmd string) (string, error) { ran = cmd; return "tok-1\n", nil })
 
-	creds, _, err := resolveConnectorCredentials(demandDocT(map[string]string{"ISSUE_TRACKER": "github"}), workKinds, &bytes.Buffer{})
+	rt, err := connectorRuntimeT(t, demandDocT(map[string]string{"ISSUE_TRACKER": "github"}), workKinds)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ran != "fetch-token" {
 		t.Errorf("ran %q, want fetch-token", ran)
 	}
-	if got := tokenOf(creds, "github"); got != "tok-1" {
+	if got := tokenOf(rt, "github"); got != "tok-1" {
 		t.Errorf("github credential = %q, want tok-1", got)
 	}
 	if got := os.Getenv(ghTokenEnv); got != "" {
@@ -77,25 +91,22 @@ func TestResolveConnectorCredentials_CmdFormFillsCredentialEnv(t *testing.T) {
 	}
 }
 
-func TestResolveConnectorCredentials_CmdWinsOverPlainEnv(t *testing.T) {
+func TestConnectorRuntime_CmdWinsOverPlainEnv(t *testing.T) {
 	clearKnobEnvT(t)
 	useGithubConnectorRow(t)
 	t.Setenv(ghTokenEnv, "stale")
 	t.Setenv(ghTokenEnv+"_CMD", "fetch-token")
 	stubSecretCmd(t, func(string) (string, error) { return "fresh\n", nil })
-	creds, refresh, err := resolveConnectorCredentials(demandDocT(map[string]string{"ISSUE_TRACKER": "github"}), workKinds, &bytes.Buffer{})
+	rt, err := connectorRuntimeT(t, demandDocT(map[string]string{"ISSUE_TRACKER": "github"}), workKinds)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if refresh == nil {
-		t.Error("refresh is nil, want the _CMD credential refreshed")
-	}
-	if got := tokenOf(creds, "github"); got != "fresh" {
+	if got := tokenOf(rt, "github"); got != "fresh" {
 		t.Errorf("github credential = %q, want fresh", got)
 	}
 }
 
-func TestResolveConnectorCredentials_SecretCmdTemplateAloneResolves(t *testing.T) {
+func TestConnectorRuntime_SecretCmdTemplateAloneResolves(t *testing.T) {
 	clearKnobEnvT(t)
 	useGithubConnectorRow(t)
 	t.Setenv(ghTokenEnv, "")
@@ -106,40 +117,32 @@ func TestResolveConnectorCredentials_SecretCmdTemplateAloneResolves(t *testing.T
 	stubSecretCmd(t, func(cmd string) (string, error) { ran = cmd; return out, nil })
 	doc := demandDocT(map[string]string{"ISSUE_TRACKER": "github"})
 
-	creds, refresh, err := resolveConnectorCredentials(doc, workKinds, &bytes.Buffer{})
+	rt, err := connectorRuntimeT(t, doc, workKinds)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ran != "rbw get spindrift-gh-token" {
 		t.Errorf("ran %q, want the template rendered for the credential env", ran)
 	}
-	if got := tokenOf(creds, "github"); got != "tok-1" {
+	if got := tokenOf(rt, "github"); got != "tok-1" {
 		t.Errorf("github credential = %q, want tok-1", got)
-	}
-	if refresh == nil {
-		t.Fatal("refresh is nil, want the template-sourced credential refreshed")
-	}
-	out = "tok-2"
-	refresh()
-	if got := tokenOf(creds, "github"); got != "tok-2" {
-		t.Errorf("after refresh github credential = %q, want tok-2", got)
 	}
 
 	// Nothing was exported, so a restart-in-place successor re-resolves.
-	out = "tok-3"
-	succ, _, err := resolveConnectorCredentials(doc, workKinds, &bytes.Buffer{})
-	if err != nil || tokenOf(succ, "github") != "tok-3" {
-		t.Errorf("successor credential = %q, %v; want tok-3", tokenOf(succ, "github"), err)
+	out = "tok-2"
+	succ, err := connectorRuntimeT(t, doc, workKinds)
+	if err != nil || tokenOf(succ, "github") != "tok-2" {
+		t.Errorf("successor credential = %q, %v; want tok-2", tokenOf(succ, "github"), err)
 	}
 }
 
-func TestResolveConnectorCredentials_RefusesWhenNeitherFormSet(t *testing.T) {
+func TestConnectorRuntime_RefusesWhenNeitherFormSet(t *testing.T) {
 	clearKnobEnvT(t)
 	useGithubConnectorRow(t)
 	t.Setenv(ghTokenEnv, "")
 	t.Setenv(ghTokenEnv+"_CMD", "")
 	stubSecretCmd(t, failIfRun(t))
-	_, _, err := resolveConnectorCredentials(demandDocT(map[string]string{"ISSUE_TRACKER": "github"}), workKinds, &bytes.Buffer{})
+	_, err := connectorRuntimeT(t, demandDocT(map[string]string{"ISSUE_TRACKER": "github"}), workKinds)
 	if err == nil {
 		t.Fatal("want a refusal")
 	}
@@ -150,13 +153,13 @@ func TestResolveConnectorCredentials_RefusesWhenNeitherFormSet(t *testing.T) {
 	}
 }
 
-func TestResolveConnectorCredentials_CmdFailureRefusesWithoutSecret(t *testing.T) {
+func TestConnectorRuntime_CmdFailureRefusesWithoutSecret(t *testing.T) {
 	clearKnobEnvT(t)
 	useGithubConnectorRow(t)
 	t.Setenv(ghTokenEnv, "")
 	t.Setenv(ghTokenEnv+"_CMD", "fetch-token")
 	stubSecretCmd(t, func(string) (string, error) { return "partial-secret", errors.New("boom partial-secret") })
-	_, _, err := resolveConnectorCredentials(demandDocT(map[string]string{"ISSUE_TRACKER": "github"}), workKinds, &bytes.Buffer{})
+	_, err := connectorRuntimeT(t, demandDocT(map[string]string{"ISSUE_TRACKER": "github"}), workKinds)
 	if err == nil || strings.Contains(err.Error(), "partial-secret") {
 		t.Fatalf("err = %v, want a value-free refusal", err)
 	}
@@ -170,7 +173,7 @@ func TestResolveConnectorCredentials_CmdFailureRefusesWithoutSecret(t *testing.T
 	}
 }
 
-func TestResolveConnectorCredentials_UnreadRowsNeverRunCmd(t *testing.T) {
+func TestConnectorRuntime_UnreadRowsNeverRunCmd(t *testing.T) {
 	butler := []daemon.Kind{daemon.KindOf(dispatchkind.Butler)}
 	for _, tc := range []struct {
 		name    string
@@ -187,12 +190,9 @@ func TestResolveConnectorCredentials_UnreadRowsNeverRunCmd(t *testing.T) {
 			t.Setenv(ghTokenEnv+"_CMD", "fetch-token")
 			t.Setenv("SECRET_CMD", "rbw get spindrift-{name}")
 			stubSecretCmd(t, failIfRun(t))
-			_, refresh, err := resolveConnectorCredentials(demandDocT(map[string]string{"ISSUE_TRACKER": tc.tracker, "CODE_FORGE": "local"}), tc.kinds, &bytes.Buffer{})
+			_, err := connectorRuntimeT(t, demandDocT(map[string]string{"ISSUE_TRACKER": tc.tracker, "CODE_FORGE": "local"}), tc.kinds)
 			if err != nil {
 				t.Fatal(err)
-			}
-			if refresh != nil {
-				t.Error("refresh is non-nil, want nil with nothing _CMD-sourced")
 			}
 		})
 	}
@@ -214,82 +214,45 @@ func useJiraConnectorRow(t *testing.T) {
 
 // jira's Strategy is ConnectorRouted, so its row's credential is in the
 // Daemon's probe path.
-func TestResolveConnectorCredentials_JiraRowResolves(t *testing.T) {
+func TestConnectorRuntime_JiraRowResolves(t *testing.T) {
 	clearKnobEnvT(t)
 	useJiraConnectorRow(t)
 	t.Setenv("SECRET_CMD", "vault get {name}")
 	var ran []string
 	stubSecretCmd(t, func(cmd string) (string, error) { ran = append(ran, cmd); return "tok\n", nil })
-	creds, _, err := resolveConnectorCredentials(demandDocT(map[string]string{"ISSUE_TRACKER": "jira"}), workKinds, &bytes.Buffer{})
+	rt, err := connectorRuntimeT(t, demandDocT(map[string]string{"ISSUE_TRACKER": "jira"}), workKinds)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(ran) == 0 {
 		t.Error("secret command did not run, want the jira credential resolved")
 	}
-	if got := tokenOf(creds, "jira"); got != "tok" {
+	if got := tokenOf(rt, "jira"); got != "tok" {
 		t.Errorf("jira credential = %q, want tok", got)
 	}
 }
 
-func TestResolveConnectorCredentials_JiraRowRefusesWithoutCredential(t *testing.T) {
+func TestConnectorRuntime_JiraRowRefusesWithoutCredential(t *testing.T) {
 	clearKnobEnvT(t)
 	useJiraConnectorRow(t)
 	stubSecretCmd(t, failIfRun(t))
-	_, _, err := resolveConnectorCredentials(demandDocT(map[string]string{"ISSUE_TRACKER": "jira"}), workKinds, &bytes.Buffer{})
+	_, err := connectorRuntimeT(t, demandDocT(map[string]string{"ISSUE_TRACKER": "jira"}), workKinds)
 	if err == nil || !strings.Contains(err.Error(), jiraTokenEnv) {
 		t.Fatalf("err = %v, want a refusal naming %s", err, jiraTokenEnv)
 	}
 }
 
-func TestResolveConnectorCredentials_RefreshReResolvesCmdCredentials(t *testing.T) {
-	clearKnobEnvT(t)
-	useGithubConnectorRow(t)
-	t.Setenv(ghTokenEnv, "")
-	t.Setenv(ghTokenEnv+"_CMD", "fetch-token")
-	out, fail := "tok-1", false
-	stubSecretCmd(t, func(string) (string, error) {
-		if fail {
-			return "tok-leak", errors.New("exit")
-		}
-		return out, nil
-	})
-	var stderr bytes.Buffer
-	creds, refresh, err := resolveConnectorCredentials(demandDocT(map[string]string{"ISSUE_TRACKER": "github"}), workKinds, &stderr)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	out = "tok-2"
-	refresh()
-	if got := tokenOf(creds, "github"); got != "tok-2" {
-		t.Errorf("after refresh github credential = %q, want tok-2", got)
-	}
-
-	fail = true
-	refresh()
-	if got := tokenOf(creds, "github"); got != "tok-2" {
-		t.Errorf("after failed refresh github credential = %q, want the old tok-2", got)
-	}
-	if !strings.Contains(stderr.String(), ghTokenEnv) || strings.Contains(stderr.String(), "tok-") {
-		t.Errorf("warning %q must name the credential and carry no secret", stderr.String())
-	}
-}
-
-func TestResolveConnectorCredentials_PlainEnvIsNotRefreshed(t *testing.T) {
+func TestConnectorRuntime_PlainEnvIsReadWithoutCmd(t *testing.T) {
 	clearKnobEnvT(t)
 	useGithubConnectorRow(t)
 	t.Setenv(ghTokenEnv, "plain")
 	t.Setenv(ghTokenEnv+"_CMD", "")
 	stubSecretCmd(t, failIfRun(t))
-	creds, refresh, err := resolveConnectorCredentials(demandDocT(map[string]string{"ISSUE_TRACKER": "github"}), workKinds, &bytes.Buffer{})
+	rt, err := connectorRuntimeT(t, demandDocT(map[string]string{"ISSUE_TRACKER": "github"}), workKinds)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if refresh != nil {
-		t.Error("refresh is non-nil, want nil with nothing _CMD-sourced")
-	}
-	if got := tokenOf(creds, "github"); got != "plain" {
+	if got := tokenOf(rt, "github"); got != "plain" {
 		t.Errorf("github credential = %q, want plain", got)
 	}
 }
@@ -436,12 +399,10 @@ func TestDemandProbe_CountsThroughTheConnectorWithACmdCredential(t *testing.T) {
 	stubSecretCmd(t, func(string) (string, error) { return "tok-1\n", nil })
 
 	doc := demandDocT(map[string]string{"ISSUE_TRACKER": "github", "REPO_SLUG": "o/r"})
-	creds, _, err := resolveConnectorCredentials(doc, workKinds, &bytes.Buffer{})
+	rt, err := connectorRuntimeT(t, doc, workKinds)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt := connectorruntime.FromRegistries(creds)
-	t.Cleanup(func() { _ = rt.Close() })
 	sources, missing := buildDemandSources(rt, doc, workKinds)
 	if len(missing) != 0 {
 		t.Fatalf("missing sources: %v", missing)
@@ -460,18 +421,9 @@ func TestDemandProbe_CountsThroughTheConnectorWithACmdCredential(t *testing.T) {
 	}
 }
 
-func stubConnectorWatch(t *testing.T) *[]func() {
-	t.Helper()
-	var started []func()
-	saved := startConnectorCredentialWatch
-	startConnectorCredentialWatch = func(refresh func(), _ time.Duration) { started = append(started, refresh) }
-	t.Cleanup(func() { startConnectorCredentialWatch = saved })
-	return &started
-}
-
 // mainRun is driven from a non-git directory so it refuses at the checkout
-// lookup, after the watcher start and before the lock and preflight.
-func TestMainRun_StartsTheConnectorCredentialWatcherForACmdSourcedRow(t *testing.T) {
+// lookup, after the runtime is built and before the lock and preflight.
+func TestMainRun_BuildsTheRuntimeRefreshingCmdCredentials(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		flags []string
@@ -485,7 +437,13 @@ func TestMainRun_StartsTheConnectorCredentialWatcherForACmdSourcedRow(t *testing
 			t.Cleanup(backendrows.Snapshot())
 			t.Setenv(ghTokenEnv+"_CMD", "fetch-token")
 			stubSecretCmd(t, func(string) (string, error) { return "tok", nil })
-			started := stubConnectorWatch(t)
+			var built []connectorsetup.Options
+			build := newConnectorRuntime
+			newConnectorRuntime = func(in connectorsetup.Input, opts connectorsetup.Options) (*connectorruntime.Runtime, error) {
+				built = append(built, opts)
+				return build(in, opts)
+			}
+			t.Cleanup(func() { newConnectorRuntime = build })
 			docPath := writeConnectorDocT(t, "", map[string]string{"ISSUE_TRACKER": "github"})
 			t.Chdir(t.TempDir())
 
@@ -493,9 +451,8 @@ func TestMainRun_StartsTheConnectorCredentialWatcherForACmdSourcedRow(t *testing
 			if got := mainRun(append([]string{"--input", docPath}, tc.flags...), &stdout, &stderr); got != tc.want {
 				t.Fatalf("mainRun() = %d, want %d; stderr = %q", got, tc.want, stderr.String())
 			}
-			wantStarted := tc.name == "running"
-			if got := len(*started) == 1 && (*started)[0] != nil; got != wantStarted {
-				t.Errorf("watcher started with a refresh = %v (%d starts), want %v", got, len(*started), wantStarted)
+			if len(built) != 1 || built[0].RefreshEvery != connectorCredentialRefresh || !built[0].RequireCredential {
+				t.Errorf("runtime options = %+v, want one build refreshing every %s and refusing an unset credential", built, connectorCredentialRefresh)
 			}
 		})
 	}
@@ -503,7 +460,7 @@ func TestMainRun_StartsTheConnectorCredentialWatcherForACmdSourcedRow(t *testing
 
 // A forgejo row is read as the CODE_FORGE and as the ISSUE_TRACKER, so the
 // credential gate resolves its credential on either axis.
-func TestResolveConnectorCredentials_ForgejoRowResolvesAsForgeOrTracker(t *testing.T) {
+func TestConnectorRuntime_ForgejoRowResolvesAsForgeOrTracker(t *testing.T) {
 	const forgejoTokenEnv = "FORGEJO_TOKEN"
 	for _, tc := range []struct {
 		name, template, forge string
@@ -532,14 +489,14 @@ func TestResolveConnectorCredentials_ForgejoRowResolvesAsForgeOrTracker(t *testi
 			}
 			doc := demandDocT(map[string]string{"CODE_FORGE": tc.forge, "ISSUE_TRACKER": tracker})
 
-			creds, _, err := resolveConnectorCredentials(doc, workKinds, &bytes.Buffer{})
+			rt, err := connectorRuntimeT(t, doc, workKinds)
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("err = %v, want error: %v", err, tc.wantErr)
 			}
 			if ran != tc.wantRan {
 				t.Errorf("secret command ran = %v, want %v", ran, tc.wantRan)
 			}
-			if got := tokenOf(creds, "forgejo"); tc.wantRan && got != "tok" {
+			if got := tokenOf(rt, "forgejo"); tc.wantRan && got != "tok" {
 				t.Errorf("forgejo credential = %q, want tok", got)
 			}
 		})
@@ -548,7 +505,7 @@ func TestResolveConnectorCredentials_ForgejoRowResolvesAsForgeOrTracker(t *testi
 
 // FORGEJO_TOKEN is a core secret yet the daemon resolves it through the
 // forgejo row, so its `_CMD` form fills it as a Connector credential does.
-func TestResolveConnectorCredentials_ForgejoTokenCmdFillsFORGEJO_TOKEN(t *testing.T) {
+func TestConnectorRuntime_ForgejoTokenCmdFillsFORGEJO_TOKEN(t *testing.T) {
 	clearKnobEnvT(t)
 	t.Cleanup(backendrows.Snapshot())
 	raw := `[{"name":"forgejo","module":"/nonexistent.wasm","credentialEnv":"FORGEJO_TOKEN",
@@ -563,21 +520,21 @@ func TestResolveConnectorCredentials_ForgejoTokenCmdFillsFORGEJO_TOKEN(t *testin
 	stubSecretCmd(t, func(cmd string) (string, error) { ranCmd = cmd; return "tok-f\n", nil })
 	doc := demandDocT(map[string]string{"CODE_FORGE": "forgejo", "ISSUE_TRACKER": "local"})
 
-	creds, _, err := resolveConnectorCredentials(doc, workKinds, &bytes.Buffer{})
+	rt, err := connectorRuntimeT(t, doc, workKinds)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ranCmd != "fetch-forgejo-token" {
 		t.Errorf("ran %q, want fetch-forgejo-token", ranCmd)
 	}
-	if got := tokenOf(creds, "forgejo"); got != "tok-f" {
+	if got := tokenOf(rt, "forgejo"); got != "tok-f" {
 		t.Errorf("forgejo credential = %q, want tok-f", got)
 	}
 }
 
 // A routed github row is read as the CODE_FORGE through its Connector, so its
 // credential resolves even with a local tracker.
-func TestResolveConnectorCredentials_GithubForgeRowResolves(t *testing.T) {
+func TestConnectorRuntime_GithubForgeRowResolves(t *testing.T) {
 	clearKnobEnvT(t)
 	useGithubConnectorRow(t)
 	t.Setenv(ghTokenEnv, "")
@@ -587,7 +544,7 @@ func TestResolveConnectorCredentials_GithubForgeRowResolves(t *testing.T) {
 	stubSecretCmd(t, func(string) (string, error) { ran = true; return "tok\n", nil })
 	doc := demandDocT(map[string]string{"CODE_FORGE": "github", "ISSUE_TRACKER": "local"})
 
-	_, _, err := resolveConnectorCredentials(doc, workKinds, &bytes.Buffer{})
+	_, err := connectorRuntimeT(t, doc, workKinds)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -599,7 +556,7 @@ func TestResolveConnectorCredentials_GithubForgeRowResolves(t *testing.T) {
 // Under a GH_HOST other than github.com the github gate drops the row (its
 // Routes pin api.github.com), so gh serves it and the Daemon resolves no
 // Connector credential for it.
-func TestResolveConnectorCredentials_GithubRowGatedOffUnderGHEHostRunsNoCmd(t *testing.T) {
+func TestConnectorRuntime_GithubRowGatedOffUnderGHEHostRunsNoCmd(t *testing.T) {
 	clearKnobEnvT(t)
 	t.Cleanup(backendrows.Snapshot())
 	raw := `[{"name":"github","module":"/nonexistent.wasm","credentialEnv":"` + ghTokenEnv + `",
@@ -617,27 +574,32 @@ func TestResolveConnectorCredentials_GithubRowGatedOffUnderGHEHostRunsNoCmd(t *t
 	t.Setenv(ghTokenEnv+"_CMD", "fetch-token")
 	stubSecretCmd(t, failIfRun(t))
 
-	_, refresh, err := resolveConnectorCredentials(demandDocT(map[string]string{"ISSUE_TRACKER": "github"}), workKinds, &bytes.Buffer{})
+	_, err := connectorRuntimeT(t, demandDocT(map[string]string{"ISSUE_TRACKER": "github"}), workKinds)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if refresh != nil {
-		t.Error("a credential refresh was set up for a row the GH_HOST gate dropped")
 	}
 }
 
 // tokenOf is the secret the runtime would read for the named row.
-func tokenOf(creds map[string]credsource.Row, row string) string {
-	if s := creds[row].Secret; s != nil {
-		return s.Value()
+func tokenOf(rt *connectorruntime.Runtime, name string) string {
+	if rt == nil {
+		return ""
 	}
-	return ""
+	row, ok := rt.Row(name)
+	if !ok {
+		return ""
+	}
+	cred, err := rt.GitCredential(row)()
+	if err != nil {
+		return ""
+	}
+	return cred.Password
 }
 
 // GH_TOKEN_REFRESH_FILE reaches the Connector runtime from the Daemon's
 // document or its environment: a token rewritten into the file is the github
 // row's next git credential, with no GH_TOKEN of its own.
-func TestResolveConnectorCredentials_RefreshFileRotatesGitCredential(t *testing.T) {
+func TestConnectorRuntime_RefreshFileRotatesGitCredential(t *testing.T) {
 	for _, tier := range []string{"document", "environment"} {
 		t.Run(tier, func(t *testing.T) {
 			clearKnobEnvT(t)
@@ -653,12 +615,10 @@ func TestResolveConnectorCredentials_RefreshFileRotatesGitCredential(t *testing.
 				t.Setenv("GH_TOKEN_REFRESH_FILE", path)
 			}
 
-			creds, _, err := resolveConnectorCredentials(demandDocT(settings), workKinds, &bytes.Buffer{})
+			rt, err := connectorRuntimeT(t, demandDocT(settings), workKinds)
 			if err != nil {
 				t.Fatalf("a refresh file stands in for an unset GH_TOKEN: %v", err)
 			}
-			rt := connectorruntime.FromRegistries(creds)
-			t.Cleanup(func() { _ = rt.Close() })
 			row, ok := rt.Row("github")
 			if !ok {
 				t.Fatal("no github row")
