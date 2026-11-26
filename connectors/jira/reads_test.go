@@ -706,3 +706,23 @@ func TestTransportFailureIsTransient(t *testing.T) {
 		}
 	})
 }
+
+// A search whose pages never end fails with a Permanent error naming the
+// endpoint, not a truncated list.
+func TestSearchCloudFailsPastPageBound(t *testing.T) {
+	n := 0
+	script(t, func(connector.Request, *url.URL) (int, string) {
+		n++
+		return 200, fmt.Sprintf(`{"issues":[],"isLast":false,"nextPageToken":"t%d"}`, n)
+	})
+	_, err := searchCloud(cloud, "project = ENG", 1000000)
+	if err == nil {
+		t.Fatal("searchCloud succeeded past the page bound")
+	}
+	if c := classOf(t, err); c != connector.Permanent {
+		t.Errorf("class = %v, want Permanent", c)
+	}
+	if !strings.HasPrefix(err.Error(), "GET /rest/api/2/search/jql: ") {
+		t.Errorf("err = %v, want the endpoint as prefix", err)
+	}
+}

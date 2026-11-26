@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net/url"
 	"reflect"
 	"strings"
@@ -212,5 +213,36 @@ func TestProjectKeyRefusedBeforeAnyRequest(t *testing.T) {
 	}
 	if len(*got) != 0 {
 		t.Fatalf("requests sent for refused project keys: %v", *got)
+	}
+}
+
+// A createmeta listing that never ends fails with a Permanent error naming the
+// endpoint, not a truncated list.
+func TestCreateMetaFailsPastPageBound(t *testing.T) {
+	createMetaServer(t, func(*url.URL) string {
+		return `{"total":1000000,"values":[{"id":"1","name":"Bug"}]}`
+	})
+	_, err := createMeta(server, "Bug")
+	if err == nil {
+		t.Fatal("createMeta succeeded past the page bound")
+	}
+	var ce *connector.Error
+	if !errors.As(err, &ce) {
+		t.Fatalf("err = %v, want *connector.Error", err)
+	}
+	if ce.Class != connector.Permanent {
+		t.Errorf("class = %v, want Permanent", ce.Class)
+	}
+	if !strings.HasPrefix(err.Error(), "GET /rest/api/2/issue/createmeta/ENG/issuetypes: ") {
+		t.Errorf("err = %v, want the endpoint as prefix", err)
+	}
+}
+
+// A fetch error already names its request, so the paging wrapper adds no prefix.
+func TestCreateMetaFetchErrorIsNotPrefixed(t *testing.T) {
+	script(t, func(connector.Request, *url.URL) (int, string) { return 500, "{}" })
+	_, err := createMeta(server, "Bug")
+	if err == nil || strings.HasPrefix(err.Error(), "GET /rest/api/2/") {
+		t.Fatalf("err = %v, want a bare SendJSON error", err)
 	}
 }
