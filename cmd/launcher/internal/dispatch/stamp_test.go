@@ -19,16 +19,16 @@ import (
 )
 
 // stampDriverName is a Driver name no real Driver uses: the stamp test records
-// it and the ingester resolves it through the registry, so the test proves the
+// it and the ingester resolves it through the Driver set, so the test proves the
 // stamp carries the Dispatch's Driver name rather than a hard-coded one.
 const stampDriverName = "stamp-fake"
 
-// Not seamtest.RegisterDriver: it registers only the default name "claude",
+// stampDrivers holds only stampDriverName, not seamtest's default "claude",
 // which would not prove the stamp records the Dispatch's own Driver name.
-var registerStampDriver = sync.OnceFunc(func() {
+var stampDrivers = sync.OnceValue(func() *driver.Set {
 	s := testStrategy
 	s.Name = stampDriverName
-	driver.Register(s)
+	return driver.NewSet(s)
 })
 
 // stampBoxOutput is what each fake Box writes: one pass with a turn and a
@@ -45,11 +45,12 @@ func stampBoxOutput(n int) []byte {
 // logs back through the ingester: all four are one stamped Record whose ID
 // matches the record_id every box report carried.
 func TestDispatchStamp_EveryPassLogCarriesOneRecordID(t *testing.T) {
-	registerStampDriver()
+
 	readRecords := testutil.InstallPipeReporter(t)
 
 	cfg := retryConfig(3, 0, 0)
 	cfg.Kind = "work"
+	cfg.Drivers = stampDrivers()
 	cfg.Stamp = hostop.DispatchStart{
 		Revision:      "abc123",
 		RoleModels:    map[string]string{"main": "opus"},
@@ -118,7 +119,7 @@ func TestDispatchStamp_EveryPassLogCarriesOneRecordID(t *testing.T) {
 		}
 	}
 
-	s, err := dispatchrecord.Open(d.pwd)
+	s, err := dispatchrecord.Open(d.pwd, stampDrivers())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,9 +172,10 @@ func afterStamp(t *testing.T, log []byte) string {
 // head of the primary log, so its fix and conflict logs and a later
 // dispatch_settled op land on that Record, not a fresh one.
 func TestDispatchStamp_AdoptedFixContinuesPriorRecord(t *testing.T) {
-	registerStampDriver()
+
 	cfg := retryConfig(1, 0, 0)
 	cfg.Kind = "work"
+	cfg.Drivers = stampDrivers()
 	claim := time.Date(2026, 5, 1, 7, 0, 0, 0, time.UTC)
 	prior := dispatchrecord.RecordID("work", "1", claim)
 
@@ -199,7 +201,7 @@ func TestDispatchStamp_AdoptedFixContinuesPriorRecord(t *testing.T) {
 	if got, _ := dispatchrecord.ReadStamp(d.fixLogPath(1)); got.RecordID != prior {
 		t.Errorf("fix log stamp = %q, want %q", got.RecordID, prior)
 	}
-	rec, _, err := dispatchrecord.ParseLog(d.fixLogPath(1))
+	rec, _, err := dispatchrecord.ParseLog(d.fixLogPath(1), stampDrivers())
 	if err != nil || !rec.ClaimTime.Equal(claim) {
 		t.Errorf("fix log claim time = %v (err %v), want %v", rec.ClaimTime, err, claim)
 	}
@@ -229,6 +231,7 @@ func TestDispatchStamp_FixWithoutPrimaryLogMintsFresh(t *testing.T) {
 func TestEnsureRecordID_WarnsOnUnreadablePrimaryLog(t *testing.T) {
 	cfg := retryConfig(1, 0, 0)
 	cfg.Kind = "work"
+	cfg.Drivers = stampDrivers()
 	now := time.Date(2026, 5, 2, 8, 0, 0, 0, time.UTC)
 	clock := Clock{Now: func() time.Time { return now }, Sleep: func(time.Duration) {}}
 

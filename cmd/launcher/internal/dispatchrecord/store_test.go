@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/passmachine"
@@ -56,7 +57,7 @@ func workLog(ts string, cost float64) []string {
 
 func openStore(t *testing.T, root string) *Store {
 	t.Helper()
-	s, err := Open(root)
+	s, err := Open(root, testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +95,7 @@ func TestStoreIngestRoundTripsParsedRecord(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	p := putLog(t, root, "issue-12.log", workLog("2026-03-01T10:00:00.123Z", 1.5)...)
-	want, _, err := ParseLog(p)
+	want, _, err := ParseLog(p, testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1965,7 +1966,7 @@ func statAndParse(t *testing.T, p string) (os.FileInfo, Record, bool, time.Time)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec, prov, seg, err := parseLog(p)
+	rec, prov, seg, err := parseLog(p, testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2033,8 +2034,8 @@ func TestStoreIngestDiscardsParseOfLogChangedMidParse(t *testing.T) {
 	p := putLog(t, root, "issue-42.log", stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1)...)
 	s := openStore(t, root)
 	calls := 0
-	parseLogFile = func(path string) (Record, bool, time.Time, error) {
-		rec, prov, seg, err := parseLog(path)
+	parseLogFile = func(path string, drivers *driver.Set) (Record, bool, time.Time, error) {
+		rec, prov, seg, err := parseLog(path, drivers)
 		if calls++; calls == 1 {
 			appendLog(t, p, workLog("2026-05-01T09:30:00Z", 2)...)
 		}
@@ -2171,7 +2172,7 @@ func TestStoreCoincidentSatelliteLeavesStampedPrimaryRow(t *testing.T) {
 	putPrimary := func(t *testing.T, root string) { putLog(t, root, "issue-42.log", primary...) }
 	putFix := func(t *testing.T, root string) { putLog(t, root, "issue-42-fix-1.log", fix...) }
 	fixPath := putLog(t, t.TempDir(), "issue-42-fix-1.log", fix...)
-	if frec, _, fseg, err := parseLog(fixPath); err != nil || frec.ID != id || !fseg.Equal(stampClaim) {
+	if frec, _, fseg, err := parseLog(fixPath, testDrivers); err != nil || frec.ID != id || !fseg.Equal(stampClaim) {
 		t.Fatalf("fix parse = %q at %v, err %v, want id %q at the claim", frec.ID, fseg, err, id)
 	}
 

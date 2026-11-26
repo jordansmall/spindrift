@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/seamtest"
@@ -50,7 +51,7 @@ func TestParseLogStampedDriverReadsThePassLog(t *testing.T) {
 		opLine(hostop.SpindriftOp{Op: "dispatch_settled", Settled: &hostop.DispatchSettled{
 			RecordID: id, State: "complete", Reason: "merged"}}),
 	)
-	rec, _, err := ParseLog(p)
+	rec, _, err := ParseLog(p, testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +90,7 @@ func TestParseLogStampedDriverPassNamesItsModels(t *testing.T) {
 		usageCall("m2", "claude-sonnet-4", 200, 100, 300, 30, 0.02),
 		usageCall("m3", "gpt-5", 300, 150, 500, 50, 0.03),
 	)
-	rec, _, err := ParseLog(p)
+	rec, _, err := ParseLog(p, testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +103,7 @@ func TestParseLogUnregisteredDriverIsReported(t *testing.T) {
 	t.Parallel()
 	lines := append([]string{driverStamp("nope")}, workLog("2026-05-01T09:00:00Z", 1)...)
 	p := writeLog(t, "issue-42.log", lines...)
-	if _, _, err := ParseLog(p); err == nil || !strings.Contains(err.Error(), "nope") {
+	if _, _, err := ParseLog(p, testDrivers); err == nil || !strings.Contains(err.Error(), "nope") {
 		t.Fatalf("ParseLog err = %v, want one naming the driver", err)
 	}
 
@@ -121,7 +122,7 @@ func TestParseLogUnregisteredDriverIsReported(t *testing.T) {
 func TestParseLogEmptyDriverStampReadsAsClaude(t *testing.T) {
 	t.Parallel()
 	lines := append([]string{driverStamp("")}, workLog("2026-05-01T09:00:00Z", 1.5)...)
-	rec, _, err := ParseLog(writeLog(t, "issue-42.log", lines...))
+	rec, _, err := ParseLog(writeLog(t, "issue-42.log", lines...), testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +136,7 @@ func TestParseLogStampNotFirstTypedLineIsReported(t *testing.T) {
 	// A typed JSON line that is not an event precedes the stamp, so ReadStamp
 	// cannot see it and would pick the default Driver for a log stamped with another.
 	p := writeLog(t, "issue-42.log", `{"type":"unknown"}`+"\n", driverStamp(altDriver), usageCall("m1", "gpt-5", 1, 1, 1, 1, 0))
-	if _, _, err := ParseLog(p); err == nil || !strings.Contains(err.Error(), "not first") {
+	if _, _, err := ParseLog(p, testDrivers); err == nil || !strings.Contains(err.Error(), "not first") {
 		t.Fatalf("ParseLog err = %v, want a stamp-not-first error", err)
 	}
 }
@@ -145,11 +146,26 @@ func TestParseLogUntimestampedTypedLineBeforeClaudeStampStillStamped(t *testing.
 	// ReadStamp cannot see past the typed line, but the loop accepts the stamp;
 	// both read it in the claude grammar, so the log ingests as stamped.
 	lines := append([]string{`{"type":"system"}` + "\n", driverStamp("claude")}, workLog("2026-05-01T09:00:00Z", 1)...)
-	rec, _, err := ParseLog(writeLog(t, "issue-42.log", lines...))
+	rec, _, err := ParseLog(writeLog(t, "issue-42.log", lines...), testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if rec.Attribution != AttributionStamped || rec.ID != RecordID("work", "42", stampClaim) {
 		t.Fatalf("record = %+v, want the stamped Record", rec)
+	}
+}
+
+func TestParseLogResolvesTheStampedDriverFromTheSetItIsGiven(t *testing.T) {
+	t.Parallel()
+	p := writeLog(t, "issue-42.log", append([]string{driverStamp("claude")}, workLog("2026-05-01T09:00:00Z", 1)...)...)
+	if _, _, err := ParseLog(p, testDrivers); err != nil {
+		t.Fatalf("ParseLog with claude in the set: %v", err)
+	}
+	alt := seamtest.Strategy()
+	alt.Name = altDriver
+	withoutClaude := driver.NewSet(alt)
+	_, _, err := ParseLog(p, withoutClaude)
+	if err == nil || !strings.Contains(err.Error(), "no Driver row supplies its Connector module") {
+		t.Fatalf("ParseLog with no claude in the set: err = %v, want the no-Driver-row error", err)
 	}
 }

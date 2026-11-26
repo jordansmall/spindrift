@@ -97,7 +97,7 @@ func seedRecordsSettled(t *testing.T, root string, keyBase, n int, first time.Ti
 		}
 		ids = append(ids, id)
 	}
-	s, err := dispatchrecord.Open(root)
+	s, err := dispatchrecord.Open(root, testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,6 +128,7 @@ func tuningPolicy(root string, minRecords int) Policy {
 	p := testRunPolicy(0, "tuning")
 	p.Chores = []chore.Chore{{Name: "tuning", Every: 24 * time.Hour, Records: true, FindingLabel: chore.FindingLabel("tuning")}}
 	p.RecordsRoot = root
+	p.Drivers = testDrivers
 	p.Knobs = tuningKnobs(minRecords, 0)
 	return p
 }
@@ -304,7 +305,7 @@ func TestSweep_Tuning_StoresSnapshotAndLedgerRef(t *testing.T) {
 	tr := newTuningRun(t)
 	var storedAtLaunch bool
 	tr.onRun = func(id string) {
-		s, err := dispatchrecord.Open(root)
+		s, err := dispatchrecord.Open(root, testDrivers)
 		if err != nil {
 			t.Error(err)
 			return
@@ -327,7 +328,7 @@ func TestSweep_Tuning_StoresSnapshotAndLedgerRef(t *testing.T) {
 	if !storedAtLaunch {
 		t.Error("the snapshot was not in the store when the Box launched")
 	}
-	store, err := dispatchrecord.Open(root)
+	store, err := dispatchrecord.Open(root, testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -666,7 +667,7 @@ func writeKindRecordLog(t *testing.T, root, kind, key string, claim time.Time, s
 
 func ingestRecords(t *testing.T, root string) {
 	t.Helper()
-	s, err := dispatchrecord.Open(root)
+	s, err := dispatchrecord.Open(root, testDrivers)
 	if err != nil {
 		t.Fatal(err)
 	}

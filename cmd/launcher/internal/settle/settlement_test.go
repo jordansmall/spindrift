@@ -13,7 +13,7 @@ import (
 )
 
 func TestSettled_ReturnsSettlement(t *testing.T) {
-	got := Settled(dispatchkey.Issue("7"), "", ForReason(dispatchrecord.ReasonMerged), hostop.DispatchSettled{PRURL: testPR, Note: "n"})
+	got := Settled(dispatchkey.Issue("7"), "", ForReason(dispatchrecord.ReasonMerged), hostop.DispatchSettled{PRURL: testPR, Note: "n"}, testDrivers)
 
 	want := Settlement{Verdict: ForReason(dispatchrecord.ReasonMerged), PRURL: testPR, Note: "n"}
 	if got != want {

@@ -254,8 +254,9 @@ func RecordID(kind, key string, claim time.Time) string {
 // the store windows into its Dispatch. A log with no non-blank line yields
 // ErrEmptyLog. provisional reports that no event carried a timestamp, so the
 // claim time fell back to the file mtime and appended output can move the ID.
-func ParseLog(path string) (rec Record, provisional bool, err error) {
-	rec, provisional, _, err = parseLog(path)
+// The stamp's Driver resolves through drivers.
+func ParseLog(path string, drivers *driver.Set) (rec Record, provisional bool, err error) {
+	rec, provisional, _, err = parseLog(path, drivers)
 	return rec, provisional, err
 }
 
@@ -287,15 +288,15 @@ func ReadStamp(path string) (stamp hostop.DispatchStart, ok bool) {
 
 // namesDriver reports whether name, with the empty name reading as the default
 // Driver, resolves to d.
-func namesDriver(name string, d driver.Driver) bool {
-	sd, err := driver.New(name)
+func namesDriver(drivers *driver.Set, name string, d driver.Driver) bool {
+	sd, err := drivers.New(name)
 	return err == nil && sd.Name() == d.Name()
 }
 
 // parseLog is ParseLog plus the log's segment identity: the stamp's Started, or
 // the claim time of an inferred Record. It keys the log's passes within a
 // Record that several logs contribute to.
-func parseLog(path string) (rec Record, provisional bool, segment time.Time, err error) {
+func parseLog(path string, drivers *driver.Set) (rec Record, provisional bool, segment time.Time, err error) {
 	base := filepath.Base(path)
 	key, _, chain := ChainKey(base)
 	info, err := os.Stat(path)
@@ -305,7 +306,7 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 	// The stamp names the Driver whose grammar the rest of the log is in; an
 	// unstamped log predates Driver choice and reads as claude.
 	pre, stamped := ReadStamp(path)
-	d, err := driver.New(pre.Driver)
+	d, err := drivers.New(pre.Driver)
 	if err != nil {
 		return Record{}, false, time.Time{}, fmt.Errorf("dispatch_start: %w", err)
 	}
@@ -412,7 +413,7 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 	// ReadStamp picked the Driver before the loop ran; a stamp only the loop
 	// accepted is fine when it names that same Driver, else the log was read in
 	// the wrong grammar.
-	if stamp != nil && !namesDriver(stamp.Driver, d) {
+	if stamp != nil && !namesDriver(drivers, stamp.Driver, d) {
 		return Record{}, false, time.Time{}, errors.New("dispatch_start: stamp not first in log, Driver unknown")
 	}
 	if len(tallies) != len(shells) {

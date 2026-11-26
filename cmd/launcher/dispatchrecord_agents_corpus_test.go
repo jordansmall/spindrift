@@ -46,7 +46,7 @@ func corpusRecord(t *testing.T, drv, corpus string, before ...string) dispatchre
 	if err := os.WriteFile(p, []byte(log+string(b)), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	rec, _, err := dispatchrecord.ParseLog(p)
+	rec, _, err := dispatchrecord.ParseLog(p, sharedDriverSet(t))
 	if err != nil {
 		t.Fatal(err)
 	}

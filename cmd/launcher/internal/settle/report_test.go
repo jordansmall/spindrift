@@ -134,7 +134,7 @@ func TestRecoverOpenPR_CompleteThenDemoted_EmitsSingleFailedSettledRecord(t *tes
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 	s := newTestSettle(c, fc, openAfterMerge{roFake{fc}})
 
-	recoverOpenPR(t, s, &dispatch.Fake{RecordIDResult: "work:9@t"}, "9", testPR)
+	recoverOpenPR(t, s, &dispatch.Fake{RecordIDResult: "work:9@t", DriversResult: testDrivers}, "9", testPR)
 
 	recs := withoutCIWait(readRecords())
 	if len(recs) != 1 {
@@ -470,7 +470,7 @@ func TestInternalSeam_FlushSettled_SettlesRecordFromPrimaryLog(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "9", Labels: []string{"agent-in-progress"}})
 	s := New(Config{LogPath: func(num string) string { return logPath }}, fc, fc)
-	d := &dispatch.Fake{RecordIDResult: "work:9@t"}
+	d := &dispatch.Fake{RecordIDResult: "work:9@t", DriversResult: testDrivers}
 
 	s.latchPR("9", testPR)
 	s.transitionState("9", ForReason(dispatchrecord.ReasonCIRed), "red")
@@ -504,7 +504,7 @@ func TestInternalSeam_FlushSettled_SkipsAppendWithoutRecordOrLog(t *testing.T) {
 	s := New(Config{LogPath: func(num string) string { return logPath }}, fc, fc)
 
 	s.transitionState("9", ForReason(dispatchrecord.ReasonCIRed), "")
-	s.flushSettled(&dispatch.Fake{RecordIDResult: "work:9@t"}, "9")
+	s.flushSettled(&dispatch.Fake{RecordIDResult: "work:9@t", DriversResult: testDrivers}, "9")
 	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
 		t.Errorf("missing log was created (stat err = %v)", err)
 	}

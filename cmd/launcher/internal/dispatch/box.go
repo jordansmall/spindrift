@@ -326,7 +326,7 @@ func (d *Dispatch) ensureRecordID() {
 	if d.recordID != "" {
 		return
 	}
-	rec, _, err := dispatchrecord.ParseLog(d.logPath())
+	rec, _, err := dispatchrecord.ParseLog(d.logPath(), d.cfg.Drivers)
 	if err == nil && rec.Attribution == dispatchrecord.AttributionStamped {
 		d.recordID, d.claimTime = rec.ID, rec.ClaimTime
 		return
@@ -342,6 +342,10 @@ func (d *Dispatch) ensureRecordID() {
 func (d *Dispatch) RecordID() string {
 	return d.recordID
 }
+
+// Drivers returns the Driver set Config carries, which the Dispatch's Record
+// is ingested through.
+func (d *Dispatch) Drivers() *driver.Set { return d.cfg.Drivers }
 
 // LogPath returns the Dispatch's primary Pass log.
 func (d *Dispatch) LogPath() string {

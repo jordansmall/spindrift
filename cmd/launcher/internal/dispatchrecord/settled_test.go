@@ -28,7 +28,7 @@ func TestRecordSettledIngestsSettledOutcome(t *testing.T) {
 	path := putLog(t, root, "issue-7.log", stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1)...)
 	var warn bytes.Buffer
 
-	RecordSettled(&warn, "7", path, settledDS(RecordID("work", "42", stampClaim)))
+	RecordSettled(&warn, "7", path, settledDS(RecordID("work", "42", stampClaim)), testDrivers)
 
 	recs := settledRecords(t, root)
 	if len(recs) != 1 {
@@ -56,7 +56,7 @@ func TestRecordSettledTokenedStampSurvivesIngest(t *testing.T) {
 			path := putLog(t, root, "issue-7.log", append([]string{stamp}, workLog("2026-05-01T09:00:00Z", 1)...)...)
 			var warn bytes.Buffer
 
-			RecordSettled(&warn, "7", path, settledDS(id))
+			RecordSettled(&warn, "7", path, settledDS(id), testDrivers)
 
 			recs := settledRecords(t, root)
 			if len(recs) != 1 || recs[0].Outcome != "complete" || recs[0].OutcomeSource != OutcomeSourceSettled {
@@ -119,7 +119,7 @@ func TestRecordSettledMissingLogIsNotCreated(t *testing.T) {
 	path := filepath.Join(hostpaths.LogDir(root), "issue-7.log")
 	var warn bytes.Buffer
 
-	RecordSettled(&warn, "7", path, settledDS(RecordID("work", "42", stampClaim)))
+	RecordSettled(&warn, "7", path, settledDS(RecordID("work", "42", stampClaim)), testDrivers)
 
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("log was created: err = %v", err)
@@ -142,7 +142,7 @@ func TestRecordSettledEmptyRecordIDLeavesLogAlone(t *testing.T) {
 	}
 	var warn bytes.Buffer
 
-	RecordSettled(&warn, "7", path, settledDS(""))
+	RecordSettled(&warn, "7", path, settledDS(""), testDrivers)
 
 	after, err := os.ReadFile(path)
 	if err != nil {
@@ -164,7 +164,7 @@ func TestRecordSettledEmptyLogPathIsSilent(t *testing.T) {
 	t.Parallel()
 	var warn bytes.Buffer
 
-	RecordSettled(&warn, "7", "", settledDS(RecordID("work", "42", stampClaim)))
+	RecordSettled(&warn, "7", "", settledDS(RecordID("work", "42", stampClaim)), testDrivers)
 
 	if warn.Len() != 0 {
 		t.Fatalf("warn = %q", warn.String())

@@ -37,13 +37,13 @@ func newReclaimFixture(t *testing.T) (fc *forge.Fake, fr *runner.Fake, factory *
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	seamtest.RegisterDriver(t)
-	drv, err := driver.New("")
+	drivers := driver.NewSet(seamtest.Strategy())
+	drv, err := drivers.New("")
 	if err != nil {
-		t.Fatalf("driver.New: %v", err)
+		t.Fatalf("drivers.New: %v", err)
 	}
 	fr = runner.NewFake()
-	factory, err = dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	factory, err = dispatch.NewFactory(dispatch.Config{Drivers: drivers}, dir, fr, drv, dispatch.RealClock())
 	if err != nil {
 		t.Fatalf("dispatch.NewFactory: %v", err)
 	}

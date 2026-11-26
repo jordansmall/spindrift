@@ -11,6 +11,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchrecord"
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/outcome"
@@ -332,7 +333,7 @@ func (s *Settle) flushSettled(d dispatch.Dispatcher, num string) Settlement {
 	if d == nil {
 		// A nil Dispatcher has no Record, so nothing is appended: the primary
 		// log's stamp may name an unrelated one.
-		return Settled(dispatchkey.Issue(num), "", rec.verdict, ds)
+		return Settled(dispatchkey.Issue(num), "", rec.verdict, ds, nil)
 	}
 	ds.RecordID = d.RecordID()
 	var path string
@@ -341,7 +342,7 @@ func (s *Settle) flushSettled(d dispatch.Dispatcher, num string) Settlement {
 	}
 	// An adopt's Dispatcher never Ran: it carries the prior Record's ID when a
 	// fix or conflict pass adopted it, else none and the stamp supplies it.
-	return SettledPrior(dispatchkey.Issue(num), path, rec.verdict, ds)
+	return SettledPrior(dispatchkey.Issue(num), path, rec.verdict, ds, d.Drivers())
 }
 
 // Settled is the single terminal-record emitter for every settle path (only
@@ -349,7 +350,7 @@ func (s *Settle) flushSettled(d dispatch.Dispatcher, num string) Settlement {
 // State and Reason, as a dispatch_settled op in the primary Pass log and the
 // Record store, then reports it. Best-effort; see
 // dispatchrecord.AppendSettled for what gates the append.
-func Settled(key dispatchkey.Key, logPath string, v Verdict, ds hostop.DispatchSettled) Settlement {
+func Settled(key dispatchkey.Key, logPath string, v Verdict, ds hostop.DispatchSettled, drivers *driver.Set) Settlement {
 	if v.reason == "" {
 		panic("settle: Settled needs a Verdict from ForReason, not the zero value")
 	}
@@ -357,7 +358,7 @@ func Settled(key dispatchkey.Key, logPath string, v Verdict, ds hostop.DispatchS
 		panic("settle: Settled got an in-progress Verdict; those reasons are never recorded")
 	}
 	ds.State, ds.Reason = v.State().String(), v.Reason()
-	dispatchrecord.RecordSettled(os.Stderr, key.String(), logPath, ds)
+	dispatchrecord.RecordSettled(os.Stderr, key.String(), logPath, ds, drivers)
 	report.Settled(key, ds.State, ds.Note, ds.PRURL, ds.RecordID)
 	return Settlement{Verdict: v, PRURL: ds.PRURL, Note: ds.Note}
 }
@@ -366,20 +367,20 @@ func Settled(key dispatchkey.Key, logPath string, v Verdict, ds hostop.DispatchS
 // Record ID (recover's, an adopt's): the Record it settles is the prior
 // Dispatch's, so a ds with no RecordID takes the one stamped at the head of
 // logPath. Use it only where that prior Record is genuinely the target.
-func SettledPrior(key dispatchkey.Key, logPath string, v Verdict, ds hostop.DispatchSettled) Settlement {
+func SettledPrior(key dispatchkey.Key, logPath string, v Verdict, ds hostop.DispatchSettled, drivers *driver.Set) Settlement {
 	if ds.RecordID == "" && logPath != "" {
 		if s, ok := dispatchrecord.ReadStamp(logPath); ok {
 			ds.RecordID = s.RecordID
 		}
 	}
-	return Settled(key, logPath, v, ds)
+	return Settled(key, logPath, v, ds, drivers)
 }
 
 // SettledBy settles d's own Record: the terminal state of a Dispatch that was
 // Run (or failed trying), keyed by what d minted. A Dispatch that failed before
 // minting a Record ID appends nothing rather than touching an earlier one.
 func SettledBy(d dispatch.Dispatcher, key dispatchkey.Key, v Verdict, note string) Settlement {
-	return Settled(key, d.LogPath(), v, hostop.DispatchSettled{RecordID: d.RecordID(), Note: note})
+	return Settled(key, d.LogPath(), v, hostop.DispatchSettled{RecordID: d.RecordID(), Note: note}, d.Drivers())
 }
 
 // latchPR records the PR num's gate is working, for flushSettled to name on

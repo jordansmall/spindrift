@@ -20,7 +20,7 @@ func (p Policy) withStore(fn func(*dispatchrecord.Store) error) error {
 	if p.RecordsRoot == "" {
 		return errNoRecordsRoot
 	}
-	store, err := dispatchrecord.Open(p.RecordsRoot)
+	store, err := dispatchrecord.Open(p.RecordsRoot, p.Drivers)
 	if err != nil {
 		return fmt.Errorf("open dispatch records store: %w", err)
 	}

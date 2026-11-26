@@ -352,6 +352,7 @@ func cmdButler(lc *launchContext, choreName string, stderr io.Writer) int {
 		PatchMaxLines:     lc.config.ButlerPatchMaxLines,
 		BranchPrefix:      lc.config.BranchPrefix,
 		RecordsRoot:       lc.pwd,
+		Drivers:           lc.config.connectors.Drivers(),
 		Knobs:             lc.config.knobLookup,
 	}
 

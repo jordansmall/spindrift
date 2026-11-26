@@ -758,6 +758,7 @@ func dispatchConfig(c config, pwd string, it forge.IssueTracker, lw *localloop.W
 	reader := issueReader(c, it, os.Stderr)
 	return dispatch.Config{
 		BoxEnvVars: c.boxEnvVars,
+		Drivers:    c.connectors.Drivers(),
 		ResolveEnv: hostGitConfigResolver(c, localBaseBranchResolver(c, it, lw, cf, caps)),
 		// The explicit flag only, not resolvedKnob (issue #3171): document and
 		// schema-default values already reached the baked roster at eval time,
@@ -1254,7 +1255,7 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 		if queue {
 			return err
 		}
-		return recoverFailed(it, caps, issueNum, err, stdout, stderr)
+		return recoverFailed(c, it, caps, issueNum, err, stdout, stderr)
 	}
 
 	if fetchErr != nil {
@@ -1304,7 +1305,7 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 	declineUnreviewed := func() error {
 		note := dispatchrecord.UnreviewedNote + "; needs human triage"
 		fmt.Fprintf(stdout, "    #%s  status=skipped  note=%s\n", issueNum, note)
-		return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: %s", issueNum, note), stdout, stderr)
+		return recoverFailed(c, it, caps, issueNum, fmt.Errorf("issue %s: %s", issueNum, note), stdout, stderr)
 	}
 	var (
 		d   *dispatch.Dispatch
@@ -1378,7 +1379,7 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 				// the issue is not stranded agent-in-progress with no run.
 				v, note, restoreErr := settle.Transition(it, iss.number, forge.InProgress, settle.ForReason(dispatchrecord.ReasonStopped), "stopped before the bundle relay")
 				// Reported even if the restore failed, as transitionState does.
-				recoverSettled(iss.number, v, note)
+				recoverSettled(c, iss.number, v, note)
 				if restoreErr != nil {
 					return nil, fmt.Errorf("recover: restore #%s to %s: %w", issueNum, c.FailedLabel, restoreErr)
 				}
@@ -1457,10 +1458,10 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 			note += "; " + forge.WorkflowPermissionRemedy(issueNum)
 		}
 		fmt.Fprintf(stdout, "    #%s  status=failed  note=%s\n", issueNum, note)
-		return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: %w", issueNum, relayErr), stdout, stderr)
+		return recoverFailed(c, it, caps, issueNum, fmt.Errorf("issue %s: %w", issueNum, relayErr), stdout, stderr)
 	}
 	fmt.Fprintf(stdout, "    #%s  status=skipped  note=no open PR on %s\n", issueNum, branch)
-	return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: no open PR", issueNum), stdout, stderr)
+	return recoverFailed(c, it, caps, issueNum, fmt.Errorf("issue %s: no open PR", issueNum), stdout, stderr)
 }
 
 // recoverFailed is recoverIssue's single terminal-failure exit, so a recover
@@ -1468,7 +1469,7 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 // agent-failed (issue #2477). The workflow's claim strips the prior terminal
 // label before this process starts, so the pre-claim state has to be read back
 // out of the issue timeline via the optional PriorClaimStateReader.
-func recoverFailed(it forge.IssueTracker, caps forge.Capabilities, num string, origErr error, stdout, stderr io.Writer) error {
+func recoverFailed(c config, it forge.IssueTracker, caps forge.Capabilities, num string, origErr error, stdout, stderr io.Writer) error {
 	if caps.PriorClaimStateReader == nil {
 		return origErr
 	}
@@ -1490,7 +1491,7 @@ func recoverFailed(it forge.IssueTracker, caps forge.Capabilities, num string, o
 	// Emitted only once the transition succeeded; a failed one returns
 	// origErr for the caller to settle. Inline rather than via settle/gate.go's
 	// latch, which guards paths that can reach a second terminal transition.
-	recoverSettled(num, v, note)
+	recoverSettled(c, num, v, note)
 	if commentErr := it.Comment(num, note); commentErr != nil {
 		fmt.Fprintf(stderr, "    ?? #%s: could not post recover-declined comment: %v\n", num, commentErr)
 	}
@@ -2296,6 +2297,6 @@ func primaryLogPath(num string) string {
 // recoverSettled is a recover terminal settle that holds no Dispatcher: it
 // settles the prior work Dispatch's Record, so the empty RecordID makes
 // settle.SettledPrior read the ID from the primary log's dispatch_start stamp.
-func recoverSettled(num string, v settle.Verdict, note string) {
-	settle.SettledPrior(dispatchkey.Issue(num), primaryLogPath(num), v, hostop.DispatchSettled{Note: note})
+func recoverSettled(c config, num string, v settle.Verdict, note string) {
+	settle.SettledPrior(dispatchkey.Issue(num), primaryLogPath(num), v, hostop.DispatchSettled{Note: note}, c.connectors.Drivers())
 }

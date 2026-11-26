@@ -24,6 +24,7 @@ func stampedFake(t *testing.T, recordID string) (*dispatch.Fake, string) {
 	}
 	d := dispatch.NewFake()
 	d.LogPathResult = path
+	d.DriversResult = testDrivers
 	d.RecordIDResult = recordID
 	return d, path
 }

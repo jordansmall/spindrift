@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatchrecord"
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/flock"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/hostop"
@@ -81,14 +82,15 @@ func ClaimLateMergeSweep(root string, now time.Time) (ok bool, err error) {
 // A Record with no primary log or claim time is skipped, as is a PR URL that
 // is not absolute http(s), since the forge client takes it as an argument. A
 // per-Record failure warns and moves on, except a rate limit, which ends the
-// sweep. mc, when non-nil, fills the merge commit.
-func LateMerges(root string, pr forge.PRForge, mc forge.MergeCommitReader, now time.Time, warn io.Writer) (merged []string, err error) {
+// sweep. mc, when non-nil, fills the merge commit. Records are ingested through
+// drivers.
+func LateMerges(root string, drivers *driver.Set, pr forge.PRForge, mc forge.MergeCommitReader, now time.Time, warn io.Writer) (merged []string, err error) {
 	// No log directory means nothing to upgrade; opening the store would
 	// create an empty one.
 	if _, err := os.Stat(hostpaths.LogDir(root)); errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
-	store, err := dispatchrecord.Open(root)
+	store, err := dispatchrecord.Open(root, drivers)
 	if err != nil {
 		return nil, err
 	}

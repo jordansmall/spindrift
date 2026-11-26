@@ -4,12 +4,15 @@ import (
 	"os"
 	"testing"
 
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/seamtest"
 )
 
+// testDrivers is the Driver set tests read stamped logs through: claude, which
+// nothing else in this package links in.
+var testDrivers *driver.Set
+
 func TestMain(m *testing.M) {
-	// Tests that parse a stamped log, or resolve "claude" directly, need that
-	// Driver registered, and nothing else in this package links it in.
-	seamtest.RegisterStrategy(seamtest.Strategy())
+	testDrivers = driver.NewSet(seamtest.Strategy())
 	os.Exit(m.Run())
 }

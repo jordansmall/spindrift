@@ -15,6 +15,7 @@ import (
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/driver/driverrows"
 	"spindrift.dev/launcher/internal/fixturebuild"
 )
@@ -131,4 +132,20 @@ func RunWithClaudeConnector(m *testing.M) int {
 		return 1
 	}
 	return m.Run()
+}
+
+// Drivers is the Driver set a Launcher built from the claude Connector's row
+// plus natives offers, with Connectors loaded in-process: for a test that reads
+// a log stamped with a real Driver and has no runtime of its own.
+func Drivers(t testing.TB, natives []driverkit.Strategy) *driver.Set {
+	t.Helper()
+	raw, err := WithClaudeRow(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := driverrows.Parse(raw, natives)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rows.Hosted(connectorsandboxtest.InProcess().Load)
 }

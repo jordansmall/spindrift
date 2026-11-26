@@ -81,8 +81,8 @@ var testStrategy = func() driverkit.Strategy {
 type fakeDriver struct {
 	ClassifyFn func(logPath string) (driver.Classification, error)
 	// DriverName is the Driver name the stamp records; empty keeps the
-	// Strategy's. Dispatch Records ingest the logs these tests stamp through the
-	// registered Driver the stamp names, so a test that ingests registers it.
+	// Strategy's. Dispatch Records ingest the logs these tests stamp through
+	// Config.Drivers, so a test that ingests puts the Driver the stamp names there.
 	DriverName string
 	// SessionTotals sums KindResult events for the run totals instead of every
 	// KindUsage, for tests asserting a session summary's API time, turns or wall
