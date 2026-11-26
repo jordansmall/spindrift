@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net/textproto"
 	"net/url"
@@ -20,8 +21,9 @@ import (
 // RequestHeaders and ResponseHeaders declare the headers beyond the fixed sets
 // the Connector may send and read on this Route.
 //
-// Documents is the host's POST-only GraphQL query allowlist; the fake decodes
-// it but does not yet apply it.
+// Documents is the host's POST-only GraphQL query allowlist: the request body's
+// "query" text must equal one declared text exactly. The fake applies it with
+// the host's strict body walk.
 type Route struct {
 	Method          string            `json:"method"`
 	Host            string            `json:"host"`
@@ -176,6 +178,18 @@ func (h *FakeHost) match(in Request) (int, error) {
 	if strings.HasPrefix(u.Path, "/") && path.Clean(u.Path) == u.Path && u.RawPath == "" {
 		for i, r := range h.routes {
 			if r.Method == in.Method && strings.EqualFold(r.Host, u.Host) && admitsPath(r.Path, u.Path) {
+				if r.Documents != nil {
+					if u.RawQuery != "" {
+						return refuse("%s %s%s: a route that declares documents admits no query string", in.Method, u.Host, u.Path)
+					}
+					query, qerr := graphQLQuery(in.Body)
+					if qerr != nil {
+						return refuse("%s %s%s: %v", in.Method, u.Host, u.Path, qerr)
+					}
+					if matchDocument(r.Documents, query) == "" {
+						return refuse("%s %s%s: query is not a document the route declares", in.Method, u.Host, u.Path)
+					}
+				}
 				// Sorted, so the refusal names the same header whatever the map order.
 				for _, k := range slices.Sorted(maps.Keys(in.Headers)) {
 					c := textproto.CanonicalMIMEHeaderKey(k)
@@ -197,6 +211,74 @@ func (h *FakeHost) match(in Request) (int, error) {
 		}
 	}
 	return refuse("no route admits %s %s%s", in.Method, u.Host, u.Path)
+}
+
+// maxBodyKeyEcho bounds an unknown body key quoted in a refusal. Twin:
+// cmd/launcher/internal/connectorhost/network.go, pinned by
+// nix/checks/graphql-query-twin-parity.nix.
+const maxBodyKeyEcho = 256
+
+// graphQLQuery mirrors the host's helper of the same name: the "query" text of
+// a body that is exactly a JSON object of query, variables and operationName,
+// each at most once, with nothing after it. It is strict because the server's
+// JSON parser is not Go's, so any spelling or duplicate that could be read two
+// ways is refused rather than judged.
+func graphQLQuery(body string) (string, error) {
+	errShape := errors.New(`body is not a JSON object with a string "query"`)
+	dec := json.NewDecoder(strings.NewReader(body))
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return "", errShape
+	}
+	var query string
+	seen := map[string]bool{}
+	for dec.More() {
+		tok, err := dec.Token()
+		key, ok := tok.(string)
+		if err != nil || !ok {
+			return "", errShape
+		}
+		if key != "query" && key != "variables" && key != "operationName" {
+			if len(key) > maxBodyKeyEcho {
+				key = key[:maxBodyKeyEcho] + "..."
+			}
+			return "", fmt.Errorf("body key %q is not allowed", key)
+		}
+		if seen[key] {
+			return "", fmt.Errorf("body key %q is duplicated", key)
+		}
+		seen[key] = true
+		if key == "query" {
+			err = dec.Decode(&query)
+		} else {
+			var skip json.RawMessage
+			err = dec.Decode(&skip)
+		}
+		if err != nil {
+			return "", errShape
+		}
+	}
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('}') {
+		return "", errShape
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return "", errors.New("body has trailing data after the JSON object")
+	}
+	if !seen["query"] {
+		return "", errShape
+	}
+	return query, nil
+}
+
+// matchDocument returns the first name, in sorted order, whose document is
+// query, or "" when none is. Twin: cmd/launcher/internal/connectorhost/network.go,
+// pinned by nix/checks/graphql-query-twin-parity.nix.
+func matchDocument(docs map[string]string, query string) string {
+	for _, name := range slices.Sorted(maps.Keys(docs)) {
+		if docs[name] == query {
+			return name
+		}
+	}
+	return ""
 }
 
 // admitsPath is the host's subtree test for one root. ";" is refused because
