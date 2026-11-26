@@ -1612,3 +1612,37 @@ The Launcher no longer installs the sandbox on each path that can load a
 Connector. Since #7554 the Launcher and the Daemon each install it once, in
 `connectorsetup.New`, when the program builds its Connector runtime.
 Sandboxes still start lazily, on a Connector's first load.
+
+## Amendment (issue #7556): the Driver registry and the sandbox install are folded into the runtime
+
+The Connector runtime now holds the Drivers as well as the backend rows. The
+process-wide Driver registry is deleted, with its registered Drivers, lazy
+Connector Drivers, primary rows, shadows and Descriptor overlay, and so is the
+process-wide sandbox install. Each program builds a `driver.Set` from its
+parsed Driver rows (`driverrows.Parse`), and every Driver load goes through its
+runtime. Two Sets load nothing and so sit outside it: the Launcher's
+package-level `launcherDriverRows`, parsed before the runtime exists so
+`activeCredentialRules` can read the row Descriptor overlay through
+`Hosted(nil)`, and `assemble-prompt`'s `driver.NewSet(bundle.Drivers()...)`,
+which needs only the natives. The Launcher and the Daemon turn the rows into a Set with `Hosted`,
+which loads each Driver Connector into the runtime's shared sandbox. The Box,
+`driver-exec` and the orchestrator read their row file into a runtime built by
+`connectorruntime.InProcess`, which has no sandbox and no backend rows and
+loads only first-party Driver Connectors, in process; any other fails with
+`driverrows.ErrNotFirstParty`, as before.
+
+Whether a load has a sandbox is now a property of how its runtime was built. A
+runtime built with none fails every backend and Driver load with
+`ErrNoConnectorSandbox`, and one whose sandbox cannot start fails with
+`ErrConnectorSandboxStart` and never falls back to loading in process, so the
+Launcher still fails closed. This supersedes the #7554 amendment where it says
+`connectorsetup.New` installs the sandbox: it now hands the runtime a sandbox
+it owns, and `connectorsandbox.Use`, `Current` and `Installed` no longer
+exist. The test helpers built on the process registry went with it
+(`drivertest.Isolate`, `seamtest.RegisterDriver` and the `seamtest/bundled`
+fixture); a test builds its own runtime or Set.
+
+The backend row registry is the one piece still process-wide:
+`backendrows.Use` and `Lookup` apply and read the rows of the program, and
+`connectorruntime.FromRegistries` builds a runtime over them. Folding that in
+is left for later.

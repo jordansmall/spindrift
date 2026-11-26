@@ -780,10 +780,13 @@ before one runs, since pinning the Harness already accepts the first kind
 has no Connector), official, community.
 
 **Connector runtime**:
-The one value a binary builds to own every Connector it uses: the rows, the
-[[Connector sandbox]]es, the credentials and the live Connectors, with one
-shutdown. Decided 2026-11-23 and not yet built (ADR 0073). _Avoid_: Connector
-host (that loads and polices one Connector), registry, bootstrap.
+The one value a binary builds to own every Connector it uses: the backend
+rows' sessions, the credentials, the [[Connector sandbox]]es and the Driver
+rows with the Driver set they yield, with one shutdown. The Launcher and the
+daemon build theirs from the input document; the Box-side programs build one
+from the Box's row file, which loads only first-party Driver Connectors, in
+process (ADR 0073). _Avoid_: Connector host (that loads and polices one
+Connector), registry, bootstrap.
 
 **Built-in backend**:
 A backend that stays native in core because it needs capabilities Connectors

@@ -1644,20 +1644,20 @@ matches it against its terminal markers. Which fields are strict is each
 decoder's choice; opencode's cases close this section. Change the Go doc and
 this section together.
 
-A Driver's host-side half is one `driverkit.Strategy` literal, registered with
-a single `driver.Register` call in the bundle package
-(`cmd/launcher/internal/driver/bundle`); `driverkit.New` turns it into the
-one shared implementation, `driverkit.Driver`, which satisfies
-`driver.Driver`, so an author writes a literal and never calls a reader. The
-registry package imports no Driver: only the binaries (launcher, box, driver-exec,
-orchestrator, quickstart and daemon) import the bundle. A library test that
-needs a Driver either calls `seamtest.RegisterDriver`, which registers
-seamtest's compiled-Connector `Strategy()` (the fake Driver) under the `claude`
-name unless the bundle is linked, or registers that `Strategy()` itself once
-from a `TestMain` via `driver.Register`; it never imports the bundle or a
-Driver.
+A Driver's host-side half is one `driverkit.Strategy` literal, listed in the
+bundle package (`cmd/launcher/internal/driver/bundle`, `bundle.Drivers`);
+`driverkit.New` turns it into the one shared implementation,
+`driverkit.Driver`, which satisfies `driver.Driver`, so an author writes a
+literal and never calls a reader. Nothing registers a Driver process-wide: a
+binary parses its Driver rows against the bundled Strategies
+(`driverrows.Parse`) and takes the resulting `driver.Set` from its Connector
+runtime. The `driver` package imports no Driver: only the binaries (launcher,
+box, driver-exec, orchestrator, quickstart and daemon) import the bundle. A
+library test that needs a Driver builds its own `driver.Set` from seamtest's
+compiled-Connector `Strategy()` (the fake Driver); it never imports the bundle
+or a Driver.
 `TestOnlyBinariesReachTheBundle` fails on any package outside the binaries
-and the `seamtest/bundled` fixture whose tests reach the bundle, a Driver,
+whose tests reach the bundle, a Driver,
 or a backend adapter other than `git` and `local` (which core keeps), which
 is what lets the core `launcher-go-test` check build from a source holding
 no Driver and no github, forgejo or jira adapter (ADR 0066 decision 8, ADR
@@ -2530,14 +2530,14 @@ store and its substituters.
 
 The mark has one purpose. A Driver Connector decodes in-process inside the Box,
 which holds the agent's model credential and the repo, plus a forge token until
-#6757. The Box entry (`driverrows.UseFile`, used by driver-exec, the
-orchestrator and the box) still registers an unmarked module row, but loading
-that Driver fails with `driverrows.ErrNotFirstParty`, and there is no
+#6757. The Box entry (`connectorruntime.InProcess`, which driver-exec, the
+orchestrator and the box build from the Box's row file) still accepts an
+unmarked module row, but loading that Driver fails with `driverrows.ErrNotFirstParty`, and there is no
 in-process fallback. The Box's other Drivers run normally, and an unmarked
 shadow row is skipped with that reason and never fails the run. So a Consumer's
 outside Driver row reaches the Launcher and is refused only when the Box loads
 it; third-party Driver Connectors wait for a design that decodes somewhere
-empty. The mark does not touch the Launcher: host-side `Use` is ungated,
+empty. The mark does not touch the Launcher: host-side `Hosted` is ungated,
 Backend Connectors (`github`, `jira`) carry none, and the mandatory Connector
 sandbox (#6763, not yet landed) will take every Launcher-hosted Connector with
 no first-party exception (ADR 0073 amendment, issue #7019).
@@ -4683,9 +4683,11 @@ never falling back to its own process.
   (`driver-exec` loads them in the Box's own process and refuses any other)
   and test binaries, which install the in-process engine from
   `connectorsandboxtest`. The Launcher and the daemon each build one
-  Connector runtime per process through the same constructor, which installs
-  the sandbox through the same runner and artifacts as the Launcher's
-  children; the daemon's serves its own demand counting. Sandboxes start on a
+  Connector runtime per process through the same constructor, which gives the
+  runtime a sandbox over the same runner and artifacts as the Launcher's
+  children; the daemon's serves its own demand counting. Nothing installs a
+  sandbox process-wide: a runtime built without one fails every load with
+  `ErrNoConnectorSandbox`. Sandboxes start on a
   Connector's first load, so a command that loads none starts none. Closing
   the runtime records each backend's sandbox totals, so the daemon too may
   append one totals line to the github audit file, only when that file already
