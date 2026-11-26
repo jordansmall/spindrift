@@ -25,7 +25,7 @@ import (
 
 func TestRouteTableValidation(t *testing.T) {
 	good := connectorhost.Route{Method: "GET", Host: "api.example.com", Path: "/repos"}
-	if err := connectorhost.ValidateRoutes([]connectorhost.Route{good, {Method: "POST", Host: "127.0.0.1:8443", Path: "/a/b"}}); err != nil {
+	if err := connectorhost.ValidateRoutes([]connectorhost.Route{good, {Method: "POST", Host: "127.0.0.1:8443", Path: "/a/b"}, {Method: "GET", Host: "h.io", Path: "/a/*/c"}}); err != nil {
 		t.Fatalf("good table refused: %v", err)
 	}
 	bad := map[string]struct {
@@ -33,6 +33,8 @@ func TestRouteTableValidation(t *testing.T) {
 		want error
 	}{
 		"blanket root":   {connectorhost.Route{Method: "GET", Host: "h.io", Path: "/"}, registryvocab.ErrPatternBlanketRoot},
+		"wildcard root":  {connectorhost.Route{Method: "GET", Host: "h.io", Path: "/*"}, connectorhost.ErrRouteWildcardRoot},
+		"wildcard first": {connectorhost.Route{Method: "GET", Host: "h.io", Path: "/*/x"}, connectorhost.ErrRouteWildcardRoot},
 		"trailing slash": {connectorhost.Route{Method: "GET", Host: "h.io", Path: "/a/"}, registryvocab.ErrPatternNotCanonical},
 		"dot-dot":        {connectorhost.Route{Method: "GET", Host: "h.io", Path: "/a/../b"}, registryvocab.ErrPatternNotCanonical},
 		"relative":       {connectorhost.Route{Method: "GET", Host: "h.io", Path: "a/b"}, registryvocab.ErrPatternNotCanonical},

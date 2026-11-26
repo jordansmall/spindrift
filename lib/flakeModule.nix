@@ -740,7 +740,7 @@ in
                           };
                           path = mkOption {
                             type = types.str;
-                            description = "Path, a subtree root; `{repo}` stands for the tracker's owner/name slug.";
+                            description = "Path, a subtree root (a `*` segment matches exactly one segment); `{repo}` stands for the tracker's owner/name slug.";
                           };
                           followRedirect = mkOption {
                             type = types.nullOr types.bool;

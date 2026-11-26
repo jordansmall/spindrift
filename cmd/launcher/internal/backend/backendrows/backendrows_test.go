@@ -682,6 +682,17 @@ func TestUseStillValidatesAnUnconfiguredBaseRow(t *testing.T) {
 	}
 }
 
+func TestUseRefusesALeadingWildcardOnABaseRouteBeforeThePrefixIsAdded(t *testing.T) {
+	for _, path := range []string{"/*", "/*/x"} {
+		isolate(t)
+		r := connectorhost.Route{Method: "GET", Host: "{base}", Path: path}
+		err := backendrows.Use(rows(t, []backendrows.Row{baseRow(r)}), envOf("https://h/jira"))
+		if !errors.Is(err, connectorhost.ErrRouteWildcardRoot) {
+			t.Errorf("path %q: err = %v, want ErrRouteWildcardRoot", path, err)
+		}
+	}
+}
+
 func TestUseMapsARootBaseRouteToTheBarePrefix(t *testing.T) {
 	isolate(t)
 	root := connectorhost.Route{Method: "GET", Host: "{base}", Path: "/"}

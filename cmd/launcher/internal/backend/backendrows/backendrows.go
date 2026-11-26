@@ -297,10 +297,13 @@ func resolveBase(row Row, lookup func(string) string) (_ Row, unusable, _ error)
 		u, prefix, unusable = &url.URL{Scheme: "https", Host: unsetHost}, "", err
 	}
 	host := u.Host
-	apply := func(routes []connectorhost.Route) []connectorhost.Route {
+	apply := func(routes []connectorhost.Route) ([]connectorhost.Route, error) {
 		out := slices.Clone(routes)
 		for i := range out {
 			if out[i].Host == BaseHost {
+				if err := connectorhost.CheckWildcardRoot(out[i].Path); err != nil {
+					return nil, fmt.Errorf("backend %q: %w: route %q: %w", row.Name, connectorhost.ErrRouteTable, out[i].String(), err)
+				}
 				out[i].Host = host
 				out[i].NamedByKnob = true
 				// "/" is the base's own subtree root: prefix+"/" is not canonical.
@@ -311,10 +314,15 @@ func resolveBase(row Row, lookup func(string) string) (_ Row, unusable, _ error)
 				}
 			}
 		}
-		return out
+		return out, nil
 	}
-	row.Routes = apply(row.Routes)
-	row.AcceptedRoutes = apply(row.AcceptedRoutes)
+	var applyErr error // err above is the unusable-base error, already in unusable
+	if row.Routes, applyErr = apply(row.Routes); applyErr != nil {
+		return row, nil, applyErr
+	}
+	if row.AcceptedRoutes, applyErr = apply(row.AcceptedRoutes); applyErr != nil {
+		return row, nil, applyErr
+	}
 	return row, unusable, nil
 }
 

@@ -20,6 +20,7 @@ import (
 var admitCaseRoutes = []connectorhost.Route{
 	{Method: "GET", Host: "jira.example.com", Path: "/rest/api/2"},
 	{Method: "POST", Host: "jira.example.com", Path: "/rest/api/2/issue"},
+	{Method: "GET", Host: "jira.example.com", Path: "/rest/api/3/issue/*/comment"},
 	{Method: "GET", Host: "other.example.com:8443", Path: "/"},
 	{Method: "POST", Host: "api.example.com", Path: "/graphql", RequestHeaders: []string{"X-Api-Version"}, ResponseHeaders: []string{"X-OAuth-Scopes"}, Documents: map[string]string{"viewer": "query { viewer { login } }"}},
 }
@@ -57,6 +58,11 @@ var admitCases = []admitCase{
 	{rule: "pathPattern", name: "query is not path", method: "GET", url: "https://jira.example.com/rest/api/2?x=1", admit: true},
 	{rule: "pathPattern", name: "outside the subtree", method: "GET", url: "https://jira.example.com/rest/api/2issuefoo", refuse: "no route admits GET jira.example.com/rest/api/2issuefoo"},
 	{rule: "pathPattern", name: "sibling prefix", method: "POST", url: "https://jira.example.com/rest/api/2/issuefoo", refuse: "no route admits POST jira.example.com/rest/api/2/issuefoo"},
+	{rule: "wildcardSegment", name: "one segment", method: "GET", url: "https://jira.example.com/rest/api/3/issue/X-1/comment", admit: true},
+	{rule: "wildcardSegment", name: "under the pattern", method: "GET", url: "https://jira.example.com/rest/api/3/issue/X-1/comment/9", admit: true},
+	{rule: "wildcardSegment", name: "segment missing", method: "GET", url: "https://jira.example.com/rest/api/3/issue/comment", refuse: "no route admits GET jira.example.com/rest/api/3/issue/comment"},
+	{rule: "wildcardSegment", name: "the wildcard alone", method: "GET", url: "https://jira.example.com/rest/api/3/issue/X-1", refuse: "no route admits GET jira.example.com/rest/api/3/issue/X-1"},
+	{rule: "wildcardSegment", name: "another leaf", method: "GET", url: "https://jira.example.com/rest/api/3/issue/X-1/other", refuse: "no route admits GET jira.example.com/rest/api/3/issue/X-1/other"},
 	{rule: "semicolon", name: "dot-dot semicolon", method: "GET", url: "https://jira.example.com/rest/api/2/..;/x", refuse: "no route admits GET jira.example.com/rest/api/2/..;/x"},
 	{rule: "semicolon", name: "path parameter", method: "GET", url: "https://jira.example.com/rest/api/2/issue;x=1", refuse: "no route admits GET jira.example.com/rest/api/2/issue;x=1"},
 	{rule: "requestHeaders", name: "fixed header needs no declaration", method: "GET", url: "https://jira.example.com/rest/api/2", headers: map[string]string{"Accept": "application/json"}, admit: true},
