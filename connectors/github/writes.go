@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"strings"
 
 	"spindrift.dev/sdk/connector"
@@ -50,15 +49,16 @@ func autoMergeAllowed(t forge.Target) (bool, error) {
 }
 
 // branchPath escapes branch for the URL path, keeping "/" a separator
-// (agent/issue-N). An empty, "." or ".." segment is refused: it would
-// resolve outside the route subtree the host allows.
+// (agent/issue-N). PathSegment refuses an empty, "." or ".." segment, which
+// would resolve outside the route subtree the host allows, and a ";".
 func branchPath(branch string) (string, error) {
 	segs := strings.Split(branch, "/")
 	for i, s := range segs {
-		if s == "" || s == "." || s == ".." {
-			return "", fmt.Errorf("branch %q has an empty, \".\" or \"..\" path segment", branch)
+		seg, err := connector.PathSegment(s)
+		if err != nil {
+			return "", fmt.Errorf("branch %q: %w", branch, err)
 		}
-		segs[i] = url.PathEscape(s)
+		segs[i] = seg
 	}
 	return strings.Join(segs, "/"), nil
 }
