@@ -332,14 +332,19 @@ func TestFollowRedirectHopFromAKnobNamedRouteDialsAPublicAddress(t *testing.T) {
 	}
 }
 
-func TestFollowRedirectSubtreeAppliesToANonLogsGet(t *testing.T) {
+func TestFollowRedirectWildcardRouteAdmitsOnlyTheLogsPath(t *testing.T) {
 	target := newBackend(t, func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, strings.Repeat("x", 100)+"tail") })
 	origin := redirectingOrigin(t, target.URL+"/blob")
 	var audit bytes.Buffer
-	n := netFor(origin, &audit, connectorhost.Route{Method: "GET", Host: origin.host(), Path: "/actions/jobs", FollowRedirect: true})
-	// /actions/jobs/7 is the job JSON, not /{id}/logs: the root admits it, with
-	// the same hop and tail treatment.
-	status, body, err := n.Do(context.Background(), fmt.Appendf(nil, `{"method":"GET","url":"%s/actions/jobs/7"}`, origin.URL), 8)
+	n := netFor(origin, &audit, connectorhost.Route{Method: "GET", Host: origin.host(), Path: "/actions/jobs/*/logs", FollowRedirect: true})
+	for _, p := range []string{"/actions/jobs/7", "/actions/jobs/logs", "/actions/jobs/7/other", "/actions/jobs", "/actions/jobs/7/logsx"} {
+		_, _, err := n.Do(context.Background(), fmt.Appendf(nil, `{"method":"GET","url":"%s%s"}`, origin.URL, p), 8)
+		if !errors.Is(err, connectorhost.ErrRouteRefused) {
+			t.Errorf("GET %s: err = %v, want ErrRouteRefused", p, err)
+		}
+	}
+	audit.Reset()
+	status, body, err := n.Do(context.Background(), fmt.Appendf(nil, `{"method":"GET","url":"%s/actions/jobs/7/logs"}`, origin.URL), 8)
 	if err != nil || status != 200 || string(body) != "xxxxtail" {
 		t.Fatalf("got %d %q %v, want the hop followed and the tail kept", status, body, err)
 	}

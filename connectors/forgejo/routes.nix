@@ -18,18 +18,20 @@
 #
 # It is the narrowest table the subtree-only Route model can express, not an
 # exact one. The repository read cannot be pinned to the repository document
-# itself: its root also admits every GET under the repository, which is why
-# the other reads but the log need no root of their own, and the Connector
-# sends only the ones above. The log read rides its own `/actions/jobs` root,
+# itself: its root also admits every GET under the repository, which is why the
+# other reads but the log need no root of their own, and the Connector sends
+# only the ones above. The log read rides its own `/actions/jobs/*/logs` Route,
 # listed first because the first match wins, so a log over the response cap
-# arrives as its tail, not as a failed read. Forgejo serves the log directly,
-# with no redirect; `followRedirect` is what selects tail mode. The write roots
-# over-admit too: `POST /pulls` also admits review creation, `PATCH /pulls` any
-# PR edit, `POST /issues` any issue's comment or label add, `PUT /issues` any
-# issue's label replace, `PATCH /issues` any issue edit, and `POST /labels` any
-# label create. The org-label read cannot be pinned to the owner, since core
-# substitutes only `{repo}`: `GET /orgs` admits every org read, as the GitHub
-# table's unpinned `GET /search/issues` does; the route admits no write.
+# arrives as its tail, not as a failed read; any other GET under `/actions/jobs`
+# falls to the repository root, without tail mode. Forgejo serves the log
+# directly, with no redirect; `followRedirect` is what selects tail mode. The
+# write roots over-admit too: `POST /pulls` also admits review creation, `PATCH
+# /pulls` any PR edit, `POST /issues` any issue's comment or label add, `PUT
+# /issues` any issue's label replace, `PATCH /issues` any issue edit, and `POST
+# /labels` any label create. The org-label read cannot be pinned to the owner,
+# since core substitutes only `{repo}`: `GET /orgs` admits every org read, as
+# the GitHub table's unpinned `GET /search/issues` does; the route admits no
+# write.
 #
 # The issue count reads `X-Total-Count` off a `GET /issues` answer, which the
 # repository root admits, so that Route declares `responseHeaders`; the host hands
@@ -38,7 +40,7 @@
   {
     method = "GET";
     host = "{base}";
-    path = "/api/v1/repos/{repo}/actions/jobs";
+    path = "/api/v1/repos/{repo}/actions/jobs/*/logs";
     followRedirect = true;
   }
   {
