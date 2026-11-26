@@ -1685,53 +1685,59 @@ is left for later.
 
 ## Amendment (issue #7553): what two and three sandboxes cost a dispatch
 
+
 A dispatch now holds the Drivers' shared sandbox and one sandbox per
 credential-holding Connector, so it starts two or three where it started one.
 Measured with the `-x2` and `-x3` rows this issue added to the #7018 benches,
 which start that many sandboxes from one runner, one after another, and hold
 them all live (`BenchmarkConnectorSandboxStart`, whose `start-ns` sums their
-starts) or
-rotate one Connector's calls across them (`BenchmarkConnectorSandboxHostCall`,
-the `network.wasm` fixture against a local TLS backend). Medians of 5 rounds,
-one row per invocation, rows shuffled within each round (#7074); Linux 6.18.58
-amd64, Ryzen 9 5950X, 32 threads, go1.26.8, wazero v1.11.0, connector-host
-0.35.0. The process column ran inside a Box, not on the bare workstation, so
-compare within this table only. The ratio beside each multi-sandbox figure is
-the median of its per-round ratios against the one-sandbox row of the same
-column and round.
+starts) or rotate one Connector's calls across them
+(`BenchmarkConnectorSandboxHostCall`, the `network.wasm` fixture against a
+local TLS backend). Medians of 5 rounds, one row per invocation, the 18
+sandbox rows shuffled within each round (#7074), with the in-process row's 5
+runs after them; Linux 6.18.58 amd64, Ryzen 9 5950X, 32 threads, go1.26.8,
+wazero v1.11.0, connector-host 0.35.0; rootless podman 5.8.9 on crun 1.30.1
+and cgroup v2; bubblewrap 0.13.1 with the `lib/seccomp.nix` filter. All
+columns come from one run on a workstation, not a Box, so compare ratios
+within this table, not with #7018's. The ratio beside each multi-sandbox
+figure is the median of its per-round ratios against the one-sandbox row of
+the same column and round.
 
 | bench | in-process (interpreter) | process sandbox | podman | bwrap |
 |---|---|---|---|---|
-| Start, one sandbox | n/a | 2.20 ms | pending | pending |
-| Start, two sandboxes | n/a | 4.46 ms (2.02×) | pending | pending |
-| Start, three sandboxes | n/a | 6.70 ms (3.01×) | pending | pending |
-| One call making one `http_request`, one sandbox | 1.83 ms | 1.86 ms | pending | pending |
-| The same call, rotated over two sandboxes | n/a | 1.95 ms (+5.3%) | pending | pending |
-| The same call, rotated over three sandboxes | n/a | 2.05 ms (+12.1%) | pending | pending |
+| Start, one sandbox | n/a | 2.51 ms | 193.5 ms | 21.57 ms |
+| Start, two sandboxes | n/a | 4.86 ms (1.99×) | 384.6 ms (1.97×) | 44.93 ms (2.00×) |
+| Start, three sandboxes | n/a | 7.11 ms (2.86×) | 593.0 ms (3.02×) | 66.48 ms (3.11×) |
+| One call making one `http_request`, one sandbox | 1.76 ms | 1.91 ms | 1.98 ms | 1.93 ms |
+| The same call, rotated over two sandboxes | n/a | 1.99 ms (+6.4%) | 2.08 ms (+3.8%) | 1.97 ms (−0.6%) |
+| The same call, rotated over three sandboxes | n/a | 2.07 ms (+10.4%) | 2.25 ms (+13.5%) | 2.05 ms (+4.8%) |
 
-Start scales linearly: each extra sandbox is one more runner start to the
-host's hello, 2.2 ms under the process runner, with the per-round ratios
-inside 1.99 to 2.15 for two and 2.97 to 3.18 for three. The whole Start cycle,
-which adds the claude Connector's first load and the teardown, is 207, 418 and
-621 ms; the load is paid per Connector whether or not it has a sandbox of its
-own, so it is not a cost of the extra sandboxes. A Host call costs 0.09 ms more
-spread over two live sandboxes and 0.19 ms more over three, with per-round
-ratios from +0.3% to +24% and +7% to +39%; the cause is not established. A real
+Start scales linearly under every runtime: each extra sandbox is one more
+runner start to the host's hello. The per-round ratios for two sandboxes fall
+inside 1.68 to 2.10 (process), 1.89 to 2.23 (podman) and 1.85 to 2.22
+(bwrap), and for three inside 2.68 to 3.03, 2.96 to 3.18 and 2.70 to 3.28. The
+whole Start cycle, which adds the claude Connector's first load and the
+teardown, is 235, 456 and 645 ms under the process runner, 554, 1131 and
+1722 ms under podman, and 240, 485 and 730 ms under bwrap; the load is paid
+per Connector whether or not it has a sandbox of its own, so it is not a cost
+of the extra sandboxes, while podman's longer teardown is. A Host call rotated
+over two or three live sandboxes costs between 0.6% less and 13.5% more, with
+per-round ratios from −10% to +43%; the cause is not established, and a real
 dispatch does not rotate one Connector across sandboxes, so this bounds rather
 than measures what a backend row's calls pay.
 
-The extra sandboxes stay well under a second per dispatch under the process
-runner: two extra cost 4.5 ms. The isolating runtimes are not measured here.
-If they scale as the process runner does, the #7018 single starts (20.73 ms
-under bwrap, 206.4 ms under podman) put the two extra sandboxes at about 41 ms
-under bwrap, well under a second, and about 413 ms under podman, under a second
-but not well under it. The pending columns confirm or correct that.
+Two extra sandboxes cost a dispatch 4.6 ms under the process runner and
+44.9 ms under bwrap, well under a second, and 399.5 ms under podman, under a
+second but not well under it. That confirms the estimate the first draft of
+this amendment scaled from the #7018 single starts (41 and 413 ms). Podman's
+two fifths of a second is paid once per dispatch, at startup.
 
-**Pending: the bwrap and podman columns.** Neither runs in a Box. A Box's own
-sandbox refuses the mount namespace bwrap needs (`bwrap: Failed to make /
-slave: Operation not permitted`), and a podman column measured inside a Box
-would not be representative. A human fills both columns on a Linux workstation,
-outside any Box, with podman and bwrap installed, from the repo root:
+bwrap could not write its cgroup `pids.max` and `memory.max` on this host, as
+in the #7018 run, so its rows ran with cgroup tracking but without those two
+limits. None of these rows runs in a Box: a Box's own sandbox refuses the
+mount namespace bwrap needs (`bwrap: Failed to make / slave: Operation not
+permitted`), and a podman row inside a Box would not be representative. To
+rerun them on a Linux workstation with podman and bwrap, from the repo root:
 
 ```sh
 export SPINDRIFT_DRIVER_CONNECTOR_WASM=$(nix build --no-link --print-out-paths .#claude-connector)/claude.wasm
@@ -1752,9 +1758,10 @@ for round in 1 2 3 4 5; do
     ../../seam.test -test.run '^$' -test.bench "ConnectorSandbox$row\$" -test.benchtime "$bt"
   done
 done
+for round in 1 2 3 4 5; do
+  ../../seam.test -test.run '^$' -test.bench 'ConnectorSandboxHostCall/in-process$' -test.benchtime 2s
+done
 ```
 
 Take each row's median `start-ns` (Start) and `ns/op` (HostCall), and its
-ratios against the one-sandbox row of its own runtime and round. The process
-rows rerun beside them, so the workstation's process column can replace this
-Box's. A later amendment records what that run measures.
+ratios against the one-sandbox row of its own runtime and round.
