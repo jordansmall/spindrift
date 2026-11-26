@@ -319,3 +319,10 @@ func SetInterpreterCache(shared bool) (restore func()) {
 		interpreterCache = old
 	}
 }
+
+// PublicAddress is the address classifier a literal Route host is checked by.
+var PublicAddress = publicAddress
+
+// CheckSeams is checkSeams, so a test can pass the testBinary a production
+// binary would see.
+func CheckSeams(n Network, testBinary bool) error { return checkSeams(n, testBinary) }

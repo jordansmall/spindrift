@@ -12,6 +12,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"path"
 	"regexp"
@@ -194,6 +195,13 @@ type Route struct {
 	RequestHeaders  []string          `json:"requestHeaders,omitempty"`
 	ResponseHeaders []string          `json:"responseHeaders,omitempty"`
 	Documents       map[string]string `json:"documents,omitempty"`
+
+	// NamedByKnob marks a host an Operator knob supplied ({base}), which may
+	// resolve anywhere; every other host is a literal the Connector declared
+	// and must resolve to a public address (checkedDial). The zero value is
+	// the checked one, and the tag keeps a Connector's own table from setting
+	// it.
+	NamedByKnob bool `json:"-"`
 }
 
 func (r Route) String() string {
@@ -333,6 +341,9 @@ type AuditEntry struct {
 	// Document names the declared GraphQL document the body matched, on a
 	// route that declares Documents.
 	Document string `json:"document,omitempty"`
+	// AddressCheck says how a literal Route host's address was checked: one of
+	// the AddressCheck* values, empty for a host an Operator knob named.
+	AddressCheck string `json:"address_check,omitempty"`
 }
 
 // The wire values of AuditEntry.RateLimit; docs/reference.md documents them.
@@ -429,6 +440,14 @@ type Network struct {
 	// of a FollowRedirect route; CheckRedirect is set on a copy, so the
 	// caller's client is untouched.
 	Client *http.Client
+	// PublicForTest replaces the public-address classifier and LookupForTest the
+	// system resolver, for a harness that dials a local test server through a
+	// literal host. A production binary that sets either fails to load (checkSeams).
+	PublicForTest func(netip.Addr) bool
+	LookupForTest func(ctx context.Context, host string) ([]netip.Addr, error)
+	// checked is Client's transport swapped for one that dials only public
+	// addresses; set at load, nil when Client's transport is not an *http.Transport.
+	checked *http.Client
 	// Audit receives one entry per request; required.
 	Audit *AuditLog
 	// requestTimeout bounds one http_request; zero means httpRequestTimeout.
@@ -693,9 +712,21 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 	if n.Client != nil {
 		client = *n.Client
 	}
+	if !matched.NamedByKnob {
+		var checked *http.Client
+		checked, entry.AddressCheck = n.literalClient(req)
+		if checked != nil {
+			client = *checked
+		}
+	}
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	resp, serr := client.Do(req)
 	if serr != nil {
+		var refused *notPublicError
+		if errors.As(serr, &refused) {
+			entry.AddressCheck = AddressCheckRefused
+			return 0, nil, nil, refuse("%s %s%s: %v", in.Method, u.Host, u.Path, refused)
+		}
 		return 0, nil, nil, sendFailed("", serr)
 	}
 	if matched.FollowRedirect && resp.StatusCode >= 300 && resp.StatusCode < 400 {
