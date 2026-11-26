@@ -114,8 +114,8 @@ func TestLauncherCredentialsCoverDriverRules(t *testing.T) {
 	for _, k := range inputdoc.SecretKnobs {
 		knobs[k.Env] = true
 	}
-	for _, name := range driver.Names() {
-		rules, _ := driver.CredentialRules(name)
+	for _, name := range driver.DescriptorNames() {
+		rules, _ := driver.NewSet().CredentialRules(name)
 		for _, r := range rules {
 			for _, env := range r.Env {
 				if _, ok := creds[env]; !ok {

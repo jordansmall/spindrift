@@ -88,12 +88,14 @@ func forbiddenInClosure(out string, forbidden func(path string) bool) []string {
 // tested without the others. The Driver list comes from the registry, so a
 // new Driver is covered the moment it registers.
 func TestDriverTestClosuresStandAlone(t *testing.T) {
+	t.Parallel()
 	names := nativeNames()
 	if len(names) == 0 {
 		t.Fatal("driver.DescriptorNames() is empty; nothing to guard")
 	}
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			pkg := registry + "/" + name
 			out := goList(t, "-deps", "-test", "-f", "{{.ImportPath}}", pkg+"/...")
 			for _, path := range forbiddenInClosure(out, forbiddenFor(name, names)) {
@@ -104,6 +106,7 @@ func TestDriverTestClosuresStandAlone(t *testing.T) {
 }
 
 func TestForbiddenInClosureReportsPlantedImports(t *testing.T) {
+	t.Parallel()
 	forbidden := forbiddenFor("claude", []string{"claude", "codex"})
 	m := registry
 	out := "fmt\n" + m + "/claude\n" + m + "/claude/sub\n" + m + "/driverkit\n" +
@@ -198,6 +201,7 @@ func corpusProblems(root string, names []string) []string {
 // registered Driver owns. A Connector-only Driver keeps its corpus beside its
 // Connector and is replayed by driverrows's TestCorpus.
 func TestEveryDriverRunsItsCorpus(t *testing.T) {
+	t.Parallel()
 	names := driver.DescriptorNames()
 	if len(names) == 0 {
 		t.Fatal("driver.DescriptorNames() is empty; nothing to guard")
@@ -230,6 +234,7 @@ func writeTree(t *testing.T, root string, files map[string]string) {
 }
 
 func TestCorpusProblemsReportsMissingPieces(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	const corpusTest = "package x\nfunc TestCorpus(t *testing.T) { conformance.Run(t, s, d) }"
 	writeTree(t, root, map[string]string{
@@ -258,6 +263,7 @@ func TestCorpusProblemsReportsMissingPieces(t *testing.T) {
 }
 
 func TestCorpusProblemsSurfacesReadErrors(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
 		// A file where the corpus directory belongs: not a missing corpus.

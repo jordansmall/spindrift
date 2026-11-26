@@ -11,8 +11,8 @@ import "spindrift.dev/launcher/internal/driver/driverkit"
 // the run (issue #5354). ResolveExit surfaces an unrecovered mid-run error
 // event the CLI hides behind exit 0 (issues #2263, #5391).
 //
-// Strategy is read-only by convention: the registry copies it at init and tests
-// pass it to driverkit.New and conformance.Run, so never assign to it.
+// Strategy is read-only by convention: bundle.Drivers hands it to driver.NewSet
+// and tests pass it to driverkit.New and conformance.Run, so never assign to it.
 var Strategy = driverkit.Strategy{
 	Name:              "opencode",
 	NewDecoder:        NewDecoder,

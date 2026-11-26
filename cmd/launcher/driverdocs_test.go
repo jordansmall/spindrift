@@ -37,7 +37,7 @@ func TestReferenceGuide_DriverCredentialListMatchesRules(t *testing.T) {
 		byName[m[1]] = b
 	}
 
-	names := driver.Names()
+	names := driver.DescriptorNames()
 	for name := range byName {
 		if !slices.Contains(names, name) {
 			t.Errorf("docs/reference.md credential list names Driver %q, which is not registered; remove the bullet", name)
@@ -48,7 +48,7 @@ func TestReferenceGuide_DriverCredentialListMatchesRules(t *testing.T) {
 	// so each maps to the set of Drivers that own it.
 	owners := map[string][]string{}
 	for _, name := range names {
-		rules, _ := driver.CredentialRules(name)
+		rules, _ := driver.NewSet().CredentialRules(name)
 		for _, r := range rules {
 			for _, env := range r.Env {
 				owners[env] = append(owners[env], name)
@@ -62,7 +62,7 @@ func TestReferenceGuide_DriverCredentialListMatchesRules(t *testing.T) {
 			t.Errorf("docs/reference.md credential list has no bullet for Driver %q; add one from lib/drivers/%s.nix", name, name)
 			continue
 		}
-		rules, _ := driver.CredentialRules(name)
+		rules, _ := driver.NewSet().CredentialRules(name)
 		for _, r := range rules {
 			for _, env := range r.Env {
 				if !strings.Contains(bullet, "`"+env+"`") {

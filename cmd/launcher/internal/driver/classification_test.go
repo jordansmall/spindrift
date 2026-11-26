@@ -10,6 +10,7 @@ import (
 // re-exports to alias every driverkit.Reason, so a new Reason cannot silently
 // vanish from launcher-facing code (issue #2269).
 func TestReasonAliases_CoverAllDriverkitReasons(t *testing.T) {
+	t.Parallel()
 	aliased := map[driverkit.Reason]bool{
 		RateLimit:       true,
 		Overloaded:      true,

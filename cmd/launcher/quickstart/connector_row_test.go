@@ -18,9 +18,9 @@ import (
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectorruntime"
+	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
 	"spindrift.dev/launcher/internal/credsource/credsourcetest"
 	"spindrift.dev/launcher/internal/doctor"
-	"spindrift.dev/launcher/internal/driver/drivertest"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/github"
 )
@@ -150,10 +150,6 @@ func TestMain(m *testing.M) {
 }
 
 func runMain(m *testing.M) int {
-	if err := drivertest.UseClaudeConnector(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
 	api := newGithubAPI()
 	defer api.Close()
 	getenv, ok, err := rowEnvAt(api.Listener.Addr().String())
@@ -452,11 +448,11 @@ func TestQuickstartDoctorPass_RunsNoGh(t *testing.T) {
 	}
 }
 
-// testRuntime is a Connector runtime over the applied rows, closed with the
-// test.
+// testRuntime is a Connector runtime over the applied rows and the in-process
+// engine, closed with the test.
 func testRuntime(t *testing.T) *connectorruntime.Runtime {
 	t.Helper()
-	rt := connectorruntime.FromRegistries(credsourcetest.Applied(), nil)
+	rt := connectorruntime.FromRegistries(credsourcetest.Applied(), connectorsandboxtest.InProcess())
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt
 }

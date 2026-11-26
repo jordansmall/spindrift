@@ -69,6 +69,7 @@ func ecosystemImportViolations(t *testing.T, moduleRoot, moduleName, bundleDir s
 // No core package may import an ecosystem package: the Bundle is the one place
 // that names them, so a binary links an ecosystem only by linking the Bundle.
 func TestNoCorePackageImportsAnEcosystemPackage(t *testing.T) {
+	t.Parallel()
 	moduleName := readModuleName(t, filepath.Join(realModuleRoot, "go.mod"))
 	bundleDir := filepath.Join(realModuleRoot, "internal", "driver", "bundle")
 	violations, permitted := ecosystemImportViolations(t, realModuleRoot, moduleName, bundleDir)
@@ -81,6 +82,7 @@ func TestNoCorePackageImportsAnEcosystemPackage(t *testing.T) {
 }
 
 func TestEcosystemImportViolationsClassifiesPlantedImports(t *testing.T) {
+	t.Parallel()
 	const mod = "example.com/fixturemodule"
 	imp := func(pkg string, paths ...string) string {
 		s := "package " + pkg + "\n\nimport (\n"

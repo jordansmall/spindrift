@@ -13,6 +13,7 @@ import (
 // TestNewUnknownDriverErrors verifies that an unrecognized DRIVER value is
 // rejected rather than silently falling back.
 func TestNewUnknownDriverErrors(t *testing.T) {
+	t.Parallel()
 	if _, err := NewSet().New("bogus"); err == nil {
 		t.Fatal("New(\"bogus\"): expected error, got nil")
 	}
@@ -21,6 +22,7 @@ func TestNewUnknownDriverErrors(t *testing.T) {
 // TestProviderNamespacedModels pins the Go mirror of the Nix
 // providerNamespacedModels fact, including names New would reject.
 func TestProviderNamespacedModels(t *testing.T) {
+	t.Parallel()
 	for name, want := range map[string]bool{
 		"opencode": true,
 		"pi":       true,
@@ -38,6 +40,7 @@ func TestProviderNamespacedModels(t *testing.T) {
 // fact: only a Driver that reads effort from a model id's `:<level>` suffix
 // carries levels (issue #5625).
 func TestEffortOnModelLevels(t *testing.T) {
+	t.Parallel()
 	want := []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"}
 	if got := NewSet().EffortOnModelLevels("pi"); !slices.Equal(got, want) {
 		t.Errorf("EffortOnModelLevels(pi) = %v, want %v", got, want)
@@ -50,6 +53,7 @@ func TestEffortOnModelLevels(t *testing.T) {
 }
 
 func TestCredentialRulesClaudeAlwaysApplies(t *testing.T) {
+	t.Parallel()
 	rules, ok := NewSet().CredentialRules("claude")
 	if !ok || len(rules) != 1 {
 		t.Fatalf("CredentialRules(claude) = %v, %v; want one rule", rules, ok)
@@ -67,6 +71,7 @@ func TestCredentialRulesClaudeAlwaysApplies(t *testing.T) {
 }
 
 func TestCredentialRulesOpencodeAppliesOnlyToCopilot(t *testing.T) {
+	t.Parallel()
 	rules, ok := NewSet().CredentialRules("opencode")
 	if !ok || len(rules) != 1 {
 		t.Fatalf("CredentialRules(opencode) = %v, %v; want one rule", rules, ok)
@@ -84,6 +89,7 @@ func TestCredentialRulesOpencodeAppliesOnlyToCopilot(t *testing.T) {
 }
 
 func TestCredentialRulesPiOnePerProvider(t *testing.T) {
+	t.Parallel()
 	rules, ok := NewSet().CredentialRules("pi")
 	if !ok {
 		t.Fatal("CredentialRules(pi) not found")
@@ -129,6 +135,7 @@ func TestCredentialRulesPiOnePerProvider(t *testing.T) {
 }
 
 func TestCredentialRuleSatisfied(t *testing.T) {
+	t.Parallel()
 	r := CredentialRule{Env: []string{"A", "B"}}
 	for _, tc := range []struct {
 		name string
@@ -151,6 +158,7 @@ func TestCredentialRuleSatisfied(t *testing.T) {
 }
 
 func TestCredentialRulesEmptyNameIsClaude(t *testing.T) {
+	t.Parallel()
 	got, ok := NewSet().CredentialRules("")
 	want, _ := NewSet().CredentialRules("claude")
 	if !ok || !reflect.DeepEqual(got, want) {
@@ -159,12 +167,14 @@ func TestCredentialRulesEmptyNameIsClaude(t *testing.T) {
 }
 
 func TestCredentialRulesUnknownDriver(t *testing.T) {
+	t.Parallel()
 	if rules, ok := NewSet().CredentialRules("nope"); ok || rules != nil {
 		t.Errorf("CredentialRules(nope) = %v, %v; want nil, false", rules, ok)
 	}
 }
 
 func TestAddConnectorPanicsOnLazyDuplicate(t *testing.T) {
+	t.Parallel()
 	s := NewSet()
 	s.AddConnector("lazydup", nil)
 	defer func() {
@@ -176,6 +186,7 @@ func TestAddConnectorPanicsOnLazyDuplicate(t *testing.T) {
 }
 
 func TestNewSetPanicsOnDuplicateNative(t *testing.T) {
+	t.Parallel()
 	defer func() {
 		if recover() == nil {
 			t.Error("NewSet of a repeated native name did not panic")
@@ -186,6 +197,7 @@ func TestNewSetPanicsOnDuplicateNative(t *testing.T) {
 
 // Each Set owns its Drivers, Descriptors and shadows.
 func TestSetsAreIndependent(t *testing.T) {
+	t.Parallel()
 	a, b := NewSet(driverkit.Strategy{Name: "only-a"}), NewSet()
 	a.AddConnector("lazy-a", nil)
 	a.UseDescriptor(Descriptor{Name: "claude", ProviderNamespacedModels: true})
@@ -203,26 +215,10 @@ func TestSetsAreIndependent(t *testing.T) {
 	if _, ok := b.ShadowModule("only-a"); ok {
 		t.Error("a shadow recorded in one Set is in another")
 	}
-	if ProviderNamespacedModels("claude") || Has("only-a") {
-		t.Error("a Set changed the process-wide shims' Set")
-	}
-}
-
-// Covers the temporary Snapshot shim.
-func TestSnapshotRestoresProcessSet(t *testing.T) {
-	restore := Snapshot()
-	Register(driverkit.Strategy{Name: "snapshotted"})
-	UseDescriptor(Descriptor{Name: "snapshotadded"})
-	restore()
-	if Has("snapshotted") {
-		t.Error("restore left a registered Driver")
-	}
-	if _, ok := DescriptorFor("snapshotadded"); ok {
-		t.Error("restore left an added Descriptor")
-	}
 }
 
 func TestUsePrimaryReplacesNativeInNew(t *testing.T) {
+	t.Parallel()
 	s := NewSet(driverkit.Strategy{Name: "prim"})
 	s.UsePrimary("prim", func() (driverkit.Strategy, error) {
 		return driverkit.Strategy{Name: "prim", SessionFlags: func(mode, _, _, _ string) (driverkit.SessionFlag, error) {
@@ -248,6 +244,7 @@ func TestUsePrimaryReplacesNativeInNew(t *testing.T) {
 }
 
 func TestUsePrimaryLoadFailureNamesDriverAndDoesNotFallBack(t *testing.T) {
+	t.Parallel()
 	s := NewSet(driverkit.Strategy{Name: "prim"})
 	s.UsePrimary("prim", func() (driverkit.Strategy, error) { return driverkit.Strategy{}, errors.New("boom") })
 	d, err := s.New("prim")
@@ -257,6 +254,7 @@ func TestUsePrimaryLoadFailureNamesDriverAndDoesNotFallBack(t *testing.T) {
 }
 
 func TestUsePrimaryPanicsWithoutNativeOrOnRepeat(t *testing.T) {
+	t.Parallel()
 	s := NewSet(driverkit.Strategy{Name: "twice"})
 	load := func() (driverkit.Strategy, error) { return driverkit.Strategy{}, nil }
 	mustPanic := func(what string, f func()) {
@@ -278,6 +276,7 @@ func TestUsePrimaryPanicsWithoutNativeOrOnRepeat(t *testing.T) {
 // A Descriptor without a registered Driver is a Connector-only Driver whose
 // row never arrived; the error says so, not "unknown".
 func TestNewDescriptorWithoutDriverNamesTheMissingRow(t *testing.T) {
+	t.Parallel()
 	s := NewSet()
 	s.UseDescriptor(Descriptor{Name: "rowless"})
 	for _, name := range []string{"rowless", "claude"} {
@@ -292,6 +291,7 @@ func TestNewDescriptorWithoutDriverNamesTheMissingRow(t *testing.T) {
 }
 
 func TestSessionArgs(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name    string
 		driver  string

@@ -1787,7 +1787,7 @@ func TestApplySecretCmdFallback_DriverCredentials(t *testing.T) {
 // Provider's key, a miss errors only when a visible tier selects that
 // Provider, and a miss for a Provider no tier uses is tolerated.
 func TestApplySecretCmdFallback_PiProviderKeys(t *testing.T) {
-	rules, ok := driver.CredentialRules("pi")
+	rules, ok := driver.NewSet().CredentialRules("pi")
 	if !ok || len(rules) == 0 {
 		t.Fatal("pi Driver has no credential rules")
 	}

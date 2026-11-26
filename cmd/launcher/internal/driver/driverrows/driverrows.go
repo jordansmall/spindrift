@@ -1,8 +1,8 @@
-// Package driverrows opens the Driver set at runtime: it parses the Driver rows
-// of the launcher input document (ADR 0020) and builds a driver.Set from them,
-// the generated Descriptors overlaid by the rows and each Connector-backed row
-// registered for lazy loading. It is a package of its own because it imports
-// both driver and connectorhost, and connectorhost must not import driver.
+// Package driverrows builds a Driver set from the Driver rows of the launcher
+// input document (ADR 0020): the generated Descriptors overlaid by the rows and
+// each Connector-backed row added for lazy loading. It is a package of its own
+// because it imports both driver and connectorhost, and connectorhost must not
+// import driver.
 package driverrows
 
 import (
@@ -218,30 +218,6 @@ func (r Rows) apply(s *driver.Set, p loadPolicy, host Loader) {
 			s.AddConnector(row.Name, load)
 		}
 	}
-}
-
-// Temporary process-wide shims; deleted by #7556's last slice.
-
-// Use applies the rows in raw to the process Set, the Launcher's way: any
-// Connector loads through connectorsandbox.Load.
-func Use(raw json.RawMessage) error {
-	r, err := Parse(raw, driver.ProcessNatives())
-	if err != nil {
-		return err
-	}
-	r.apply(driver.Process(), hostLoads, connectorsandbox.Load)
-	return nil
-}
-
-// UseFile applies the rows in the file at path to the process Set, the Box's
-// way: a Connector not marked FirstParty fails with ErrNotFirstParty.
-func UseFile(path string) error {
-	r, err := ReadFile(path, driver.ProcessNatives())
-	if err != nil {
-		return err
-	}
-	r.apply(driver.Process(), boxLoads, nil)
-	return nil
 }
 
 // notFirstParty is the one text of a refused Driver Connector, shared by the

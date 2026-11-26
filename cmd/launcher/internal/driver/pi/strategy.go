@@ -10,8 +10,8 @@ import "spindrift.dev/launcher/internal/driver/driverkit"
 // failed turn the CLI hides behind exit 0. Heartbeat tracking is left zero, so
 // a model is labelled by its exact id.
 //
-// Strategy is read-only by convention: the registry copies it at init and tests
-// pass it to driverkit.New and conformance.Run, so never assign to it.
+// Strategy is read-only by convention: bundle.Drivers hands it to driver.NewSet
+// and tests pass it to driverkit.New and conformance.Run, so never assign to it.
 var Strategy = driverkit.Strategy{
 	Name:              "pi",
 	NewDecoder:        NewDecoder,

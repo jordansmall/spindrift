@@ -96,6 +96,7 @@ func lineOf(t *testing.T, src, needle string) int {
 // containment or comments, and the subpackage and the unparseable testdata
 // file prove the scan never descends into either.
 func TestScanForEcosystemLiterals_FixtureDetectsViolation(t *testing.T) {
+	t.Parallel()
 	// The fixture draws its names from the registered Strategies, so deleting a
 	// Strategy cannot fail this test for a reason unrelated to the scanner.
 	names := registeredNames(t, 4)
@@ -330,6 +331,7 @@ func buildSyntheticEcosystemModule(t *testing.T, plantedReader, plantedRoot, pla
 // registryvocab but must be skipped by path, or its own names would count as
 // findings.
 func TestDeriveEcosystemImporters_NewImporterPickedUpAutomatically(t *testing.T) {
+	t.Parallel()
 	names := registeredNames(t, 1)
 	plantedName := names[0]
 	root, moduleName := buildSyntheticEcosystemModule(t, plantedName, plantedName, plantedName)
@@ -367,6 +369,7 @@ func TestDeriveEcosystemImporters_NewImporterPickedUpAutomatically(t *testing.T)
 // main package does import internal/ecosystem today, but the second assertion
 // relies only on the unconditional inclusion, not on that import staying true.
 func TestDeriveEcosystemImporters_MainPackageCoveredUnconditionally(t *testing.T) {
+	t.Parallel()
 	names := registeredNames(t, 1)
 	plantedName := names[0]
 	root, moduleName := buildSyntheticEcosystemModule(t, plantedName, plantedName, plantedName)
@@ -394,6 +397,7 @@ func TestDeriveEcosystemImporters_MainPackageCoveredUnconditionally(t *testing.T
 // registry layer; registryvocab sits below ecosystem itself), and that a
 // planted ecosystem name in either is found.
 func TestDeriveEcosystemImporters_InternalLeavesCoveredUnconditionally(t *testing.T) {
+	t.Parallel()
 	names := registeredNames(t, 1)
 	plantedName := names[0]
 	root, moduleName := buildSyntheticEcosystemModule(t, plantedName, plantedName, plantedName)
@@ -508,6 +512,7 @@ func containmentFindings(t *testing.T, moduleRoot, moduleName, registerFile stri
 // (barred from importing core by ADR 0047) is covered via registryvocab.
 // It lives here because only the Bundle registers every Strategy.
 func TestEcosystemNamesStayInTheirOwnPackage(t *testing.T) {
+	t.Parallel()
 	moduleName := readModuleName(t, filepath.Join(realModuleRoot, "go.mod"))
 	registerFile := filepath.Join(realModuleRoot, "internal", "driver", "bundle", "ecosystems.go")
 	findings := containmentFindings(t, realModuleRoot, moduleName, registerFile, registeredNames(t, 1))
@@ -564,6 +569,7 @@ func containmentModule(t *testing.T, extra map[string]string) []string {
 }
 
 func TestContainmentFindingsClassifiesPlantedLiterals(t *testing.T) {
+	t.Parallel()
 	const eco = "example.com/fixturemodule/internal/ecosystem"
 	plant := func(pkg, name string) string {
 		return "package " + pkg + "\n\nimport _ \"" + eco + "\"\n\nvar Planted = \"" + name + "\"\n"
@@ -601,6 +607,7 @@ func TestContainmentFindingsClassifiesPlantedLiterals(t *testing.T) {
 }
 
 func TestPackageDirsPrunesRootVendorTestdataAndDotDirs(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	for _, d := range []string{"vendor/x", "internal/vendor/b", "testdata/t", ".hidden/h"} {
 		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {

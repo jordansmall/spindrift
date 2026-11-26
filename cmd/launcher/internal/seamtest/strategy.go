@@ -7,18 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"testing"
 	"time"
 
 	"spindrift.dev/launcher/internal/connectorhost"
-	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/fixturebuild"
 )
-
-// fakeDriverName is the name the fake CLI is invoked under, so the Strategy
-// must be registered under it for the launcher to find a Driver for it.
-const fakeDriverName = "claude"
 
 // Strategy is the fake Driver: the compiled Connector seamtest-driver.wasm
 // loaded through connectorhost, so every core test crosses the real Connector
@@ -70,36 +64,4 @@ func Millis(rfc3339 string) int64 {
 		panic(err)
 	}
 	return t.UnixMilli()
-}
-
-var registerMu sync.Mutex
-
-// registerIfAbsent registers the Strategy build returns under name unless a
-// Driver of that name is registered; build runs only then, so a linked bundle
-// never loads the Connector. The registry panics on a duplicate name and is
-// not synchronized: registerMu orders registrations only, so register before
-// any parallel test reads it.
-func registerIfAbsent(name string, build func() driverkit.Strategy) {
-	registerMu.Lock()
-	defer registerMu.Unlock()
-	if _, err := driver.New(name); err == nil {
-		return
-	}
-	driver.Register(build())
-}
-
-// RegisterDriver installs Strategy() as the "claude" Driver when none is
-// registered, and does nothing when one is (a test binary that links the
-// bundle keeps the real Driver). Call it before any parallel test reads the
-// registry.
-func RegisterDriver(tb testing.TB) {
-	tb.Helper()
-	registerIfAbsent(fakeDriverName, Strategy)
-}
-
-// RegisterStrategy installs s under its own Name when no Driver of that name
-// is registered, and does nothing when one is. It takes no testing.TB so a
-// TestMain can call it; the same ordering caveat as RegisterDriver applies.
-func RegisterStrategy(s driverkit.Strategy) {
-	registerIfAbsent(s.Name, func() driverkit.Strategy { return s })
 }

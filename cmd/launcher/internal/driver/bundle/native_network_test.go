@@ -34,6 +34,7 @@ func nativeNetworkBackends(strats []backendkit.Strategy) []string {
 // network backend. The row's connectorOnly flag is the one definition of
 // "native" (lib/connector-names.nix reads the same flag).
 func TestBundleRegistersNoNativeNetworkAdapter(t *testing.T) {
+	t.Parallel()
 	if got := nativeNetworkBackends(backendkit.Strategies()); len(got) != 0 {
 		t.Errorf("Bundle registers native network adapter(s) %v: network backends are Connectors (ADR 0073), so set connectorOnly on the row or delete the adapter", got)
 	}
@@ -51,6 +52,7 @@ func TestNativeNetworkBackendsReportsPlantedRegistration(t *testing.T) {
 // ConnectorRouted is the Strategy-side half of the row's connectorOnly: a
 // connector-only row's adapter reads through its Connector.
 func TestConnectorOnlyStrategiesAreConnectorRouted(t *testing.T) {
+	t.Parallel()
 	for _, s := range backendkit.Strategies() {
 		if s.ConnectorOnly && !s.ConnectorRouted {
 			t.Errorf("connector-only backend %q is not ConnectorRouted", s.Name)

@@ -1,6 +1,7 @@
 // Package drivertest holds the assertion a binary's test runs to prove it
-// links the Driver bundle, and the TestMain hook that registers the claude
-// Connector, the one Driver the bundle does not link.
+// links the Driver bundle, and builders of the Driver sets and rows documents a
+// test needs when it has no runtime of its own: the claude Connector is the one
+// Driver the bundle does not link, so they supply it from its row.
 package drivertest
 
 import (
@@ -12,7 +13,6 @@ import (
 	"slices"
 	"testing"
 
-	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
@@ -31,23 +31,6 @@ func RequireBundled(t testing.TB, drivers *driver.Set) {
 	if _, err := drivers.New("no-such-driver"); err == nil {
 		t.Error(`New("no-such-driver") succeeded, want an unknown-DRIVER error`)
 	}
-}
-
-// Isolate restores the Driver registry and Descriptors when t ends, so a test
-// may register Drivers and apply Driver rows without leaking them to the tests
-// that follow.
-func Isolate(t testing.TB) {
-	t.Helper()
-	t.Cleanup(driver.Snapshot())
-}
-
-// InProcessSandbox installs the in-process Connector engine as the Connector
-// sandbox until t ends, for a test that has the Launcher's path (driverrows.Use)
-// load a real Connector. Without it that load fails with
-// connectorsandbox.ErrNoConnectorSandbox.
-func InProcessSandbox(t testing.TB) {
-	t.Helper()
-	t.Cleanup(connectorsandbox.Use(connectorsandboxtest.InProcess()))
 }
 
 // claudeRows is the one-row Driver rows document for the claude Connector;
@@ -89,26 +72,9 @@ func WithClaudeRow(raw json.RawMessage) (json.RawMessage, error) {
 	return json.Marshal(append(rows, row...))
 }
 
-// UseClaudeConnector registers the claude Driver from the compiled claude
-// Connector through driverrows.Use, the production path; claude has no native
-// Strategy, so a test binary that resolves it needs this. It also installs the
-// in-process engine as the Connector sandbox for the rest of the process, as
-// the Launcher's path refuses the load without one. An unresolvable wasm is an
-// error, never a skip (ADR 0067); the Connector loads lazily, on the first
-// New.
-func UseClaudeConnector() error {
-	raw, err := claudeRows(false)
-	if err != nil {
-		return err
-	}
-	connectorsandbox.Use(connectorsandboxtest.InProcess())
-	return driverrows.Use(raw)
-}
-
 // ClaudeRowsFile writes the first-party claude Driver row the Nix renders into
 // the Box's rows file and returns its path, for a test that runs a built
-// binary: the in-process registration of UseClaudeConnector does not reach a
-// subprocess, which opens its registry from this file.
+// binary, which builds its Drivers from this file.
 func ClaudeRowsFile(t testing.TB) string {
 	t.Helper()
 	raw, err := claudeRows(true)
@@ -120,18 +86,6 @@ func ClaudeRowsFile(t testing.TB) string {
 		t.Fatal(err)
 	}
 	return path
-}
-
-// RunWithClaudeConnector is TestMain's body: it registers the claude Connector
-// and runs the tests, or reports why it could not and fails the binary.
-//
-//	func TestMain(m *testing.M) { os.Exit(drivertest.RunWithClaudeConnector(m)) }
-func RunWithClaudeConnector(m *testing.M) int {
-	if err := UseClaudeConnector(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	return m.Run()
 }
 
 // Drivers is the Driver set a Launcher built from the claude Connector's row

@@ -23,6 +23,7 @@ var testRules = []CredentialRule{
 }
 
 func TestAuthContentCheck(t *testing.T) {
+	t.Parallel()
 	const oauth = `{"type":"oauth","access":"SECRET-A","refresh":"SECRET-R","expires":1}`
 	tests := []struct {
 		name    string
@@ -80,6 +81,7 @@ func TestAuthContentCheck(t *testing.T) {
 }
 
 func TestAuthContentCheckSortsProviders(t *testing.T) {
+	t.Parallel()
 	err := testAuth.Check(`{"zed":{"type":"oauth"},"anthropic":{"type":"oauth"}}`, testRules)
 	if err == nil {
 		t.Fatal("want error")
@@ -91,26 +93,28 @@ func TestAuthContentCheckSortsProviders(t *testing.T) {
 }
 
 func TestAuthContentFor(t *testing.T) {
-	a, ok := AuthContentFor("pi")
+	t.Parallel()
+	a, ok := NewSet().AuthContentFor("pi")
 	if !ok || a.Env != "PI_AUTH_CONTENT" || len(a.OAuthProviders) != 1 || a.OAuthProviders[0] != "github-copilot" {
 		t.Errorf("pi AuthContentFor = %+v, %v", a, ok)
 	}
 	for _, name := range []string{"claude", "opencode", "", "nope"} {
-		if _, ok := AuthContentFor(name); ok {
+		if _, ok := NewSet().AuthContentFor(name); ok {
 			t.Errorf("AuthContentFor(%q) ok, want none", name)
 		}
 	}
 }
 
 func TestPiAPIKeyProvidersResolveToNamedVariable(t *testing.T) {
-	a, ok := AuthContentFor("pi")
+	t.Parallel()
+	a, ok := NewSet().AuthContentFor("pi")
 	if !ok {
 		t.Fatal("pi has no AuthContent")
 	}
 	if len(a.APIKeyProviderFor) == 0 {
 		t.Fatal("pi maps no OAuth id to an API-key Provider")
 	}
-	rules, rulesOK := CredentialRules("pi")
+	rules, rulesOK := NewSet().CredentialRules("pi")
 	if !rulesOK {
 		t.Fatal("pi has no credential rules")
 	}

@@ -120,6 +120,7 @@ func spliceSpan(doc string, s docSpan, body string) (string, error) {
 }
 
 func TestReferenceDocs_GeneratedSpans(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join("..", "..", "..", "..", "..", "docs", "reference.md")
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -153,6 +154,7 @@ func TestReferenceDocs_GeneratedSpans(t *testing.T) {
 }
 
 func TestSpliceSpan(t *testing.T) {
+	t.Parallel()
 	s := docSpan{"X", nil}
 	doc := "before\n" + s.begin() + "old\n" + s.end() + "after\n"
 	got, err := spliceSpan(doc, s, "new\n")

@@ -76,11 +76,8 @@ func TestNewDispatchFactoryPrimaryLoadFailureFailsRun(t *testing.T) {
 }
 
 // The Launcher's Drivers are the runtime's: a runtime whose rows supply no
-// claude Connector offers none, whatever else the process has registered.
+// claude Connector offers none.
 func TestNewDispatchFactoryTakesItsDriverFromTheRuntime(t *testing.T) {
-	if _, err := driver.Process().New("claude"); err != nil {
-		t.Fatalf("the process set has no claude Driver, so this proves nothing: %v", err)
-	}
 	rt := connectorruntime.FromRegistries(nil, connectorsandboxtest.InProcess())
 	rt.UseDriverRows(primaryRows(t, "unused"))
 	f, err := newDispatchFactory(config{driver: "claude", connectors: rt}, "", nil, nil, nil, nil, forge.Capabilities{})
