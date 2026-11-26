@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -125,6 +126,37 @@ func checkDeclaredHeaders(field string, names []string, never func(string) bool)
 	return nil
 }
 
+var documentName = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
+
+// checkDeclaredDocuments validates a route's Documents, naming the first
+// problem in name order. A nil map is an unconstrained route; a non-nil empty
+// one is a mistake, so JSON "documents":{} is refused.
+func checkDeclaredDocuments(method string, docs map[string]string) error {
+	if docs == nil {
+		return nil
+	}
+	if method != http.MethodPost {
+		return errors.New("documents are allowed on POST only")
+	}
+	if len(docs) == 0 {
+		return errors.New("documents: must declare at least one")
+	}
+	owner := make(map[string]string, len(docs))
+	for _, n := range slices.Sorted(maps.Keys(docs)) {
+		switch text := docs[n]; {
+		case !documentName.MatchString(n):
+			return fmt.Errorf("documents: %q is not a valid name", n)
+		case text == "":
+			return fmt.Errorf("documents: %q has no text", n)
+		case owner[text] != "":
+			return fmt.Errorf("documents: %q and %q declare the same text", owner[text], n)
+		default:
+			owner[text] = n
+		}
+	}
+	return nil
+}
+
 // Route admits one slice of a network Connector's traffic: an exact uppercase
 // Method, an exact host[:port] (case-insensitive, the port significant), and a
 // Path subtree root in registryvocab.PathSet form. A route does not restrict the
@@ -146,13 +178,20 @@ func checkDeclaredHeaders(field string, names []string, never func(string) bool)
 // could carry the credential or the host's identity (neverRequestHeader,
 // neverResponseHeader), one that is not a valid header token, and one declared
 // twice.
+//
+// Documents names the GraphQL query texts a POST route's body may carry, each
+// under a name the audit reports; the match is on text, with variables free.
+// String shows the names, so a Route-table diff does too. validate rejects an
+// empty set, a name outside [A-Za-z][A-Za-z0-9_]*, an empty text, two names
+// sharing a text, and any method but POST.
 type Route struct {
-	Method          string   `json:"method"`
-	Host            string   `json:"host"`
-	Path            string   `json:"path"`
-	FollowRedirect  bool     `json:"followRedirect,omitempty"`
-	RequestHeaders  []string `json:"requestHeaders,omitempty"`
-	ResponseHeaders []string `json:"responseHeaders,omitempty"`
+	Method          string            `json:"method"`
+	Host            string            `json:"host"`
+	Path            string            `json:"path"`
+	FollowRedirect  bool              `json:"followRedirect,omitempty"`
+	RequestHeaders  []string          `json:"requestHeaders,omitempty"`
+	ResponseHeaders []string          `json:"responseHeaders,omitempty"`
+	Documents       map[string]string `json:"documents,omitempty"`
 }
 
 func (r Route) String() string {
@@ -166,8 +205,21 @@ func (r Route) String() string {
 	if len(r.ResponseHeaders) > 0 {
 		s += " (reads " + strings.Join(sortedNames(r.ResponseHeaders), ", ") + ")"
 	}
+	if len(r.Documents) > 0 {
+		// The text's hash, so an edit under an unchanged name still shows.
+		var docs []string
+		for _, name := range slices.Sorted(maps.Keys(r.Documents)) {
+			sum := sha256.Sum256([]byte(r.Documents[name]))
+			docs = append(docs, name+"@"+hex.EncodeToString(sum[:documentHashBytes]))
+		}
+		s += " (documents " + strings.Join(docs, ", ") + ")"
+	}
 	return s
 }
+
+// documentHashBytes is how many leading bytes of a document's SHA-256 Route.String
+// shows: eight hex digits, the width docs/reference.md states.
+const documentHashBytes = 4
 
 // sortedNames returns names canonicalised and sorted, so declarations that
 // differ only in case render the same.
@@ -219,6 +271,9 @@ func (r Route) validate() error {
 		return err
 	}
 	if err := checkDeclaredHeaders("responseHeaders", r.ResponseHeaders, neverResponseHeader); err != nil {
+		return err
+	}
+	if err := checkDeclaredDocuments(r.Method, r.Documents); err != nil {
 		return err
 	}
 	return registryvocab.CheckPathPattern(r.Path)

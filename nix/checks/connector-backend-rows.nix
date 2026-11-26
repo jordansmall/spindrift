@@ -261,6 +261,65 @@ let
       };
       why = "exactly";
     }
+    {
+      route = goodRoute // {
+        method = "POST";
+        documents = { };
+      };
+      why = "documents: must declare at least one";
+    }
+    {
+      route = goodRoute // {
+        method = "POST";
+        documents = {
+          "1bad" = "query{a}";
+        };
+      };
+      why = ''documents: "1bad" is not a valid name'';
+    }
+    {
+      route = goodRoute // {
+        method = "POST";
+        documents = {
+          a = "";
+        };
+      };
+      why = ''documents: "a" has no text'';
+    }
+    {
+      route = goodRoute // {
+        method = "POST";
+        documents = {
+          a = "query{a}";
+          b = "query{a}";
+        };
+      };
+      why = ''documents: "a" and "b" declare the same text'';
+    }
+    {
+      route = goodRoute // {
+        method = "POST";
+        documents = [ "query{a}" ];
+      };
+      why = "exactly";
+    }
+    {
+      route = goodRoute // {
+        method = "POST";
+        documents = {
+          a = 1;
+        };
+      };
+      why = "exactly";
+    }
+    {
+      route = goodRoute // {
+        documents = {
+          a = "query{a}";
+        };
+      };
+      why = "documents are allowed on POST only";
+    }
   ];
   goodRoutes = [
     goodRoute
@@ -297,6 +356,16 @@ let
       // {
         requestHeaders = [ ];
         responseHeaders = [ ];
+      }
+    )
+    (
+      goodRoute
+      // {
+        method = "POST";
+        documents = {
+          closeIssue = "mutation($id:ID!){closeIssue(input:{issueId:$id}){issue{id}}}";
+          Viewer_2 = "query{viewer{login}}";
+        };
       }
     )
   ];
@@ -348,6 +417,29 @@ in
     assert assertMsg (
       !(evaluates (withRoute (goodRoute // { responseHeaders = [ "Set-Cookie" ]; })))
     ) "a route declaring a never-declarable response header must fail evaluation";
+    assert assertMsg (evaluates (
+      withRoute (
+        goodRoute
+        // {
+          method = "POST";
+          documents = {
+            a = "query{a}";
+          };
+        }
+      )
+    )) "control: a POST route declaring documents must evaluate";
+    assert assertMsg (
+      !(evaluates (
+        withRoute (
+          goodRoute
+          // {
+            documents = {
+              a = "query{a}";
+            };
+          }
+        )
+      ))
+    ) "a GET route declaring documents must fail evaluation";
     assert assertMsg (
       !(evaluates (withRows {
         fixture = row // {
