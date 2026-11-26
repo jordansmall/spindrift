@@ -167,17 +167,17 @@ func TestIssueHTTPError(t *testing.T) {
 func TestHTTPErrorCarriesJirasReason(t *testing.T) {
 	for _, tc := range []struct{ name, body, want string }{
 		{"errorMessages", `{"errorMessages":["The value 'orders-apii' does not exist for the field 'component'."],"errors":{}}`,
-			"GET /rest/api/2/issue/ENG-1?properties=spindrift.dedup: status 400: The value 'orders-apii' does not exist for the field 'component'."},
+			"GET https://example.atlassian.net/jira/rest/api/2/issue/ENG-1?properties=spindrift.dedup: status 400: The value 'orders-apii' does not exist for the field 'component'."},
 		{"field errors", `{"errorMessages":[],"errors":{"jql":"bad clause"}}`,
-			"GET /rest/api/2/issue/ENG-1?properties=spindrift.dedup: status 400: jql: bad clause"},
-		{"not json", `<html>nope</html>`, "GET /rest/api/2/issue/ENG-1?properties=spindrift.dedup: status 400"},
-		{"empty", ``, "GET /rest/api/2/issue/ENG-1?properties=spindrift.dedup: status 400"},
+			"GET https://example.atlassian.net/jira/rest/api/2/issue/ENG-1?properties=spindrift.dedup: status 400: jql: bad clause"},
+		{"not json", `<html>nope</html>`, "GET https://example.atlassian.net/jira/rest/api/2/issue/ENG-1?properties=spindrift.dedup: status 400"},
+		{"empty", ``, "GET https://example.atlassian.net/jira/rest/api/2/issue/ENG-1?properties=spindrift.dedup: status 400"},
 		{"multi-line", `{"errorMessages":["line one\r\nline two\u0007\tend"],"errors":{}}`,
-			"GET /rest/api/2/issue/ENG-1?properties=spindrift.dedup: status 400: line one  line two  end"},
+			"GET https://example.atlassian.net/jira/rest/api/2/issue/ENG-1?properties=spindrift.dedup: status 400: line one  line two  end"},
 		{"separators and bidi overrides", `{"errorMessages":["a\u2028b\u2029c\u202ed"],"errors":{}}`,
-			"GET /rest/api/2/issue/ENG-1?properties=spindrift.dedup: status 400: a b c d"},
+			"GET https://example.atlassian.net/jira/rest/api/2/issue/ENG-1?properties=spindrift.dedup: status 400: a b c d"},
 		{"oversized", `{"errorMessages":["x` + strings.Repeat("é", maxReason) + `"],"errors":{}}`,
-			"GET /rest/api/2/issue/ENG-1?properties=spindrift.dedup: status 400: x" + strings.Repeat("é", maxReason/2-1) + "…"},
+			"GET https://example.atlassian.net/jira/rest/api/2/issue/ENG-1?properties=spindrift.dedup: status 400: x" + strings.Repeat("é", maxReason/2-1) + "…"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			script(t, func(connector.Request, *url.URL) (int, string) { return 400, tc.body })
@@ -458,8 +458,10 @@ func mustQuery(t *testing.T, r connector.Request) url.Values {
 
 func TestReadWithEmptyBodyErrors(t *testing.T) {
 	serve(t, "/jira/rest/api/2/issue/ENG-1", "")
-	if _, err := issue(cloud, "ENG-1"); err == nil || !strings.Contains(err.Error(), "decode") {
-		t.Fatalf("err = %v, want a decode error", err)
+	_, err := issue(cloud, "ENG-1")
+	var ce *connector.Error
+	if err == nil || !strings.Contains(err.Error(), "decode") || !errors.As(err, &ce) || ce.Class != connector.Permanent {
+		t.Fatalf("err = %v, want a Permanent decode error", err)
 	}
 }
 

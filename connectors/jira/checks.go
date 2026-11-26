@@ -18,13 +18,9 @@ const (
 // probe is one authenticated read. A non-2xx is reported as its status, not an
 // error, so core decides what an auth failure means.
 func probe(t tracker.Target) (int, error) {
-	resp, err := connector.HTTPRequest(connector.Request{
-		Method:  "GET",
-		URL:     t.API + "/rest/api/2/myself",
-		Headers: map[string]string{"Accept": "application/json"},
-	})
-	if err != nil {
-		return 0, connector.Errorf(connector.Transient, "%w", err)
+	resp, err := connector.SendJSON(connector.Request{Method: "GET", URL: t.API + "/rest/api/2/myself"}, nil, nil)
+	if resp.Status == 0 {
+		return 0, err
 	}
 	return resp.Status, nil
 }
