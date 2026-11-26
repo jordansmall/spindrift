@@ -253,3 +253,97 @@ func TestLiteralRouteOverACustomTransportIsAuditedUnchecked(t *testing.T) {
 		t.Fatalf("sent = %d, audit = %+v, want address_check %q", stub.sent, e, connectorhost.AddressCheckCustomTransport)
 	}
 }
+
+// hopTo is a LookupForTest that resolves the origin's literal host to
+// 127.0.0.1 and every other name to addr.
+func hopTo(addr string) func(context.Context, string) ([]netip.Addr, error) {
+	return func(_ context.Context, host string) ([]netip.Addr, error) {
+		if host == "127.0.0.1" {
+			return []netip.Addr{netip.MustParseAddr("127.0.0.1")}, nil
+		}
+		return []netip.Addr{netip.MustParseAddr(addr)}, nil
+	}
+}
+
+func hopRefused(t *testing.T, n *connectorhost.Network, origin, target *backend, audit *bytes.Buffer) {
+	t.Helper()
+	raw := fmt.Appendf(nil, `{"method":"GET","url":"%s/logs/1"}`, origin.URL)
+	status, _, err := n.Do(context.Background(), raw, 1<<10)
+	if !errors.Is(err, connectorhost.ErrRouteRefused) {
+		t.Fatalf("err = %v, want ErrRouteRefused", err)
+	}
+	if status != http.StatusFound || target.hits.Load() != 0 {
+		t.Fatalf("status = %d, target hits = %d, want the 302 and no hop sent", status, target.hits.Load())
+	}
+	e := auditLines(t, audit)
+	if len(e) != 1 || e[0].Decision != connectorhost.DecisionRefused || e[0].Status != http.StatusFound ||
+		e[0].RedirectStatus != http.StatusFound || e[0].AddressCheck != connectorhost.AddressCheckRefused ||
+		e[0].RedirectHost != "hop.example:"+hopPort(target) {
+		t.Fatalf("audit = %+v, want a refusal of the hop after a 302", e)
+	}
+	if strings.Contains(e[0].Reason, "sig=") || strings.Contains(err.Error(), "sig=") {
+		t.Errorf("the hop's signed query leaked: %q / %v", e[0].Reason, err)
+	}
+}
+
+func hopPort(b *backend) string { return fmt.Sprint(b.Listener.Addr().(*net.TCPAddr).Port) }
+
+func TestFollowRedirectHopRefusesANonPublicAddressAfterAPublicFirstHost(t *testing.T) {
+	for _, addr := range []string{"10.0.0.1", "169.254.169.254", "100.100.100.200"} {
+		t.Run(addr, func(t *testing.T) {
+			target := okBackend(t)
+			origin := redirectingOrigin(t, "https://hop.example:"+hopPort(target)+"/blob?sig=secret")
+			var audit bytes.Buffer
+			n := netFor(origin, &audit, connectorhost.Route{Method: "GET", Host: origin.host(), Path: "/logs", FollowRedirect: true})
+			n.LookupForTest = hopTo(addr)
+			// Only the origin's loopback passes: the first host is public, the hop is not.
+			n.PublicForTest = func(a netip.Addr) bool { return a == netip.MustParseAddr("127.0.0.1") }
+			hopRefused(t, n, origin, target, &audit)
+			if e := auditLines(t, &audit); !strings.Contains(e[0].Reason, addr) {
+				t.Errorf("reason %q does not name %s", e[0].Reason, addr)
+			}
+		})
+	}
+}
+
+func TestFollowRedirectHopFromAKnobNamedRouteIsChecked(t *testing.T) {
+	target := okBackend(t)
+	origin := redirectingOrigin(t, "https://hop.example:"+hopPort(target)+"/blob?sig=secret")
+	var audit bytes.Buffer
+	n := netFor(origin, &audit, connectorhost.Route{Method: "GET", Host: origin.host(), Path: "/logs", FollowRedirect: true, NamedByKnob: true})
+	n.PublicForTest = nil
+	n.LookupForTest = hopTo("127.0.0.1")
+	hopRefused(t, n, origin, target, &audit)
+}
+
+func TestFollowRedirectHopFromAKnobNamedRouteDialsAPublicAddress(t *testing.T) {
+	target := okBackend(t)
+	// example.com is the name the httptest certificate covers.
+	origin := redirectingOrigin(t, "https://example.com:"+hopPort(target)+"/blob")
+	var audit bytes.Buffer
+	n := netFor(origin, &audit, connectorhost.Route{Method: "GET", Host: origin.host(), Path: "/logs", FollowRedirect: true, NamedByKnob: true})
+	n.LookupForTest = resolvingTo("127.0.0.1")
+	status, body, err := n.Do(context.Background(), fmt.Appendf(nil, `{"method":"GET","url":"%s/logs/1"}`, origin.URL), 1<<10)
+	if err != nil || status != 200 || string(body) != "ok" {
+		t.Fatalf("got %d %q %v", status, body, err)
+	}
+	if e := auditLines(t, &audit); len(e) != 1 || e[0].AddressCheck != connectorhost.AddressCheckPublic {
+		t.Fatalf("audit = %+v, want the hop's address_check %q", e, connectorhost.AddressCheckPublic)
+	}
+}
+
+func TestFollowRedirectSubtreeAppliesToANonLogsGet(t *testing.T) {
+	target := newBackend(t, func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, strings.Repeat("x", 100)+"tail") })
+	origin := redirectingOrigin(t, target.URL+"/blob")
+	var audit bytes.Buffer
+	n := netFor(origin, &audit, connectorhost.Route{Method: "GET", Host: origin.host(), Path: "/actions/jobs", FollowRedirect: true})
+	// /actions/jobs/7 is the job JSON, not /{id}/logs: the root admits it, with
+	// the same hop and tail treatment.
+	status, body, err := n.Do(context.Background(), fmt.Appendf(nil, `{"method":"GET","url":"%s/actions/jobs/7"}`, origin.URL), 8)
+	if err != nil || status != 200 || string(body) != "xxxxtail" {
+		t.Fatalf("got %d %q %v, want the hop followed and the tail kept", status, body, err)
+	}
+	if e := auditLines(t, &audit); len(e) != 1 || e[0].RedirectHost != target.host() || e[0].RedirectStatus != http.StatusFound {
+		t.Fatalf("audit = %+v", e)
+	}
+}

@@ -326,6 +326,9 @@ type AuditEntry struct {
 	RetryAfter string `json:"retry_after,omitempty"`
 	// RedirectHost is the host of the one hop a FollowRedirect route followed.
 	RedirectHost string `json:"redirect_host,omitempty"`
+	// RedirectStatus is the 3xx the hop followed or was refused on; Status is
+	// the hop's answer, which would otherwise hide it.
+	RedirectStatus int `json:"redirect_status,omitempty"`
 	// Headers names, sorted and canonical, every header the host set on the
 	// request (the guest's plus the credential); never a value. It omits what
 	// the transport adds (User-Agent, Accept-Encoding, Content-Length) and the
@@ -738,6 +741,7 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 				return status, nil, nil, refuse("redirect from %s%s: only https locations without userinfo are followed", u.Host, u.Path)
 			}
 			entry.RedirectHost = loc.Host
+			entry.RedirectStatus = status
 			// A fresh request: the guest's headers and the credential must not
 			// leave the admitted host. The hop's share covers its body read; the
 			// caller's deadline expiring instead would kill the Connector rather
@@ -767,8 +771,23 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 			// range on a zero-length blob can draw a 416 from Azure-style hosts;
 			// harmless, as an empty log yields no excerpt either way.
 			hop.Header.Set("Range", fmt.Sprintf("bytes=-%d", maxBody))
-			resp, serr = client.Do(hop)
+			// The hop is always address-checked, even from a knob-named route: a
+			// server the Operator trusts must not redirect into the private
+			// network.
+			hopper := client
+			checked, check := n.literalClient(hop)
+			if checked != nil {
+				hopper = *checked
+				hopper.CheckRedirect = client.CheckRedirect
+			}
+			entry.AddressCheck = check
+			resp, serr = hopper.Do(hop)
 			if serr != nil {
+				var refused *notPublicError
+				if errors.As(serr, &refused) {
+					entry.AddressCheck = AddressCheckRefused
+					return status, nil, nil, refuse("redirect from %s%s: %v", u.Host, u.Path, refused)
+				}
 				return status, nil, nil, hopFailed(serr)
 			}
 		} else {
