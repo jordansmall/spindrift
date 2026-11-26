@@ -637,7 +637,9 @@ target as `redirect_host`. The hop asks for the tail with a `Range` suffix and i
 bounded to half of what remains of the request's network timeout, failing
 non-fatally (not killing the Connector) past it. `Route.String` shows the
 opt-in, so the Route-table diff `spindrift doctor` prints, and a baseline that
-lacks it, count it as a widening.
+lacks it, count it as a widening. (Amended by issue #7567: the hop's target must resolve
+to a public address, so a signed URL cannot aim the host at loopback, a private
+network or the metadata endpoint; see the finished Host call policy below.)
 
 ## Amendment (issue #6863): a composed PR forge lets the Connector write PRs
 
