@@ -46,11 +46,9 @@ const (
 	routeRepoVar  = "{repo}"
 )
 
-// httpMethods, fixedRequestHeaders and neverRequestHeader mirror the host's
-// (cmd/launcher/internal/connectorhost); the SDK module cannot import them, so a
-// change there lands here too. The response-side allowlist (ResponseHeaders) is
-// deliberately not applied: the fake serves no response headers, so a
-// conformance run against it does not check response reads.
+// httpMethods, fixedRequestHeaders, neverRequestHeader, fixedResponseHeaders
+// and neverResponseHeader mirror the host's (cmd/launcher/internal/connectorhost);
+// the SDK module cannot import them, so a change there lands here too.
 var httpMethods = []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"}
 
 var fixedRequestHeaders = []string{
@@ -60,13 +58,25 @@ var fixedRequestHeaders = []string{
 
 // neverRequestHeader reports a request header no Route may declare; name is
 // canonical. The host rejects such a declaration when it loads the Route table,
-// which the fake does not, so the fake refuses the header even if declared.
+// which the fake does not, so the fake refuses a declared one at request time.
 func neverRequestHeader(name string) bool {
 	switch name {
 	case "Authorization", "Cookie", "Host", "Forwarded", "Via", "X-Real-Ip":
 		return true
 	}
 	return strings.HasPrefix(name, "X-Forwarded-") || strings.HasPrefix(name, "Proxy-")
+}
+
+var fixedResponseHeaders = []string{
+	"Content-Type", "Content-Length", "Content-Range", "Date", "ETag",
+	"Last-Modified", "Link", "Location", "Retry-After",
+}
+
+// neverResponseHeader reports a response header no Route may expose; name is
+// canonical. The host rejects a declaration at load, which the fake does not, so
+// the fake withholds it even if declared.
+func neverResponseHeader(name string) bool {
+	return name == "Set-Cookie" || name == "Set-Cookie2"
 }
 
 // LoadRoutes decodes the declared Route table from RoutesEnv.
@@ -197,13 +207,11 @@ func (h *FakeHost) match(in Request) (int, error) {
 					if len(name) > MaxHeaderName {
 						name = name[:MaxHeaderName] + "..."
 					}
+					if !slices.Contains(fixedRequestHeaders, c) && !declares(r.RequestHeaders, c) {
+						return refuse("%s %s%s: request header %q is not declared by the route", in.Method, u.Host, u.Path, name)
+					}
 					if neverRequestHeader(c) {
 						return refuse("%s %s%s: request header %q can never be declared", in.Method, u.Host, u.Path, name)
-					}
-					declared := slices.Contains(fixedRequestHeaders, c) ||
-						slices.ContainsFunc(r.RequestHeaders, func(d string) bool { return textproto.CanonicalMIMEHeaderKey(d) == c })
-					if !declared {
-						return refuse("%s %s%s: request header %q is not declared by the route", in.Method, u.Host, u.Path, name)
 					}
 				}
 				return i, nil
@@ -294,12 +302,22 @@ func admitsPath(root, p string) bool {
 // by t.Cleanup. A request no Route admits fails the test with the refusal, as
 // the real host aborts the call; an admitted one is recorded in the returned
 // slice and answered by answer, whose error reaches HTTPRequest as a transport
-// failure.
+// failure. ResponseHeader reads the answer's Header, limited to what the matched
+// Route may read.
 func (h *FakeHost) Serve(t TB, answer func(Request) (Response, error)) *[]Request {
 	t.Helper()
 	sent := &[]Request{}
-	saved := hostCall
-	t.Cleanup(func() { hostCall = saved })
+	saved, savedHeader := hostCall, headerCall
+	t.Cleanup(func() { hostCall, headerCall = saved, savedHeader })
+	var held map[string]string // canonical name -> value, the last answer's readable headers
+	headerCall = func(name, out []byte) (uint64, error) {
+		v, ok := held[textproto.CanonicalMIMEHeaderKey(string(name))]
+		if !ok {
+			return 0, nil
+		}
+		copy(out, v)
+		return 1<<32 | uint64(len(v)), nil
+	}
 	hostCall = func(raw, resp []byte) (uint64, error) {
 		var req Request
 		dec := json.NewDecoder(bytes.NewReader(raw))
@@ -313,6 +331,7 @@ func (h *FakeHost) Serve(t TB, answer func(Request) (Response, error)) *[]Reques
 		}
 		h.used[i] = true
 		*sent = append(*sent, req)
+		held = nil
 		out, err := answer(req)
 		if err != nil {
 			return uint64(copy(resp, err.Error())), nil
@@ -320,9 +339,31 @@ func (h *FakeHost) Serve(t TB, answer func(Request) (Response, error)) *[]Reques
 		if len(out.Body) > len(resp) {
 			t.Fatalf("connector: fake host answer is %d bytes, over the %d-byte response limit", len(out.Body), len(resp))
 		}
+		held = h.routes[i].readable(out.Header)
 		return uint64(out.Status)<<32 | uint64(copy(resp, out.Body)), nil
 	}
 	return sent
+}
+
+// declares reports whether list names the canonical header c.
+func declares(list []string, c string) bool {
+	return slices.ContainsFunc(list, func(d string) bool { return textproto.CanonicalMIMEHeaderKey(d) == c })
+}
+
+// readable is the part of header the Route lets a Connector read, keyed by
+// canonical name.
+func (r Route) readable(header map[string]string) map[string]string {
+	out := map[string]string{}
+	for k, v := range header {
+		c := textproto.CanonicalMIMEHeaderKey(k)
+		if neverResponseHeader(c) {
+			continue
+		}
+		if declares(fixedResponseHeaders, c) || declares(r.ResponseHeaders, c) {
+			out[c] = v
+		}
+	}
+	return out
 }
 
 // Unused returns the declared Routes, in declaration order, that no admitted
