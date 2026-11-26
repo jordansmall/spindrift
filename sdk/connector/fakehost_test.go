@@ -260,3 +260,46 @@ func TestLoadRoutesDecodesHeaderDeclarations(t *testing.T) {
 		t.Errorf("ResolveRoutes = %v, %v; want the declarations kept", resolved, err)
 	}
 }
+
+func TestAdmitDocuments(t *testing.T) {
+	h := NewFakeHost([]Route{
+		{Method: "POST", Host: "h.example.com", Path: "/graphql", Documents: map[string]string{"viewer": "{ viewer { id } }", "other": "{ other }"}},
+		{Method: "POST", Host: "h.example.com", Path: "/free"},
+	})
+	tests := []struct {
+		name, path, body string
+		want             string // empty: admitted; else the exact reason
+	}{
+		{"declared, arbitrary variables", "/graphql", `{"query":"{ viewer { id } }","variables":{"a":[1,{"b":null}]},"operationName":"x"}`, ""},
+		{"declared, query only", "/graphql", `{"query":"{ other }"}`, ""},
+		{"undeclared document", "/graphql", `{"query":"{ secrets }"}`, `POST h.example.com/graphql: query is not a document the route declares`},
+		{"altered text", "/graphql", `{"query":"{ viewer { id } } "}`, `POST h.example.com/graphql: query is not a document the route declares`},
+		{"duplicate query", "/graphql", `{"query":"{ viewer { id } }","query":"{ secrets }"}`, `POST h.example.com/graphql: body key "query" is duplicated`},
+		{"case-variant key", "/graphql", `{"Query":"{ viewer { id } }"}`, `POST h.example.com/graphql: body key "Query" is not allowed`},
+		{"extra key", "/graphql", `{"query":"{ viewer { id } }","extensions":{}}`, `POST h.example.com/graphql: body key "extensions" is not allowed`},
+		{"trailing data", "/graphql", `{"query":"{ viewer { id } }"} {}`, `POST h.example.com/graphql: body has trailing data after the JSON object`},
+		{"no query", "/graphql", `{"variables":{}}`, `POST h.example.com/graphql: body is not a JSON object with a string "query"`},
+		{"non-string query", "/graphql", `{"query":1}`, `POST h.example.com/graphql: body is not a JSON object with a string "query"`},
+		{"not an object", "/graphql", `[]`, `POST h.example.com/graphql: body is not a JSON object with a string "query"`},
+		{"empty body", "/graphql", ``, `POST h.example.com/graphql: body is not a JSON object with a string "query"`},
+		{"query string on a documents route", "/graphql?query=%7Bsecrets%7D", `{"query":"{ viewer { id } }"}`, `POST h.example.com/graphql: a route that declares documents admits no query string`},
+		{"unconstrained route", "/free", `anything at all`, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := h.Admit(Request{Method: "POST", URL: "https://h.example.com" + tc.path, Body: tc.body})
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("Admit = %v, want admitted", err)
+				}
+				return
+			}
+			if !errors.Is(err, ErrRouteRefused) {
+				t.Fatalf("err = %v, want ErrRouteRefused", err)
+			}
+			if got := strings.TrimPrefix(err.Error(), ErrRouteRefused.Error()+": "); got != tc.want {
+				t.Errorf("reason = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

@@ -103,6 +103,7 @@ let
     // (import ./dispatch-labels.nix common)
     // (import ./gh-token-intervals.nix common)
     // (import ./guard-runner-twin-parity.nix common)
+    // (import ./graphql-query-twin-parity.nix common)
     // (import ./dashboard-js.nix common)
     // (import ./opencode-guards.nix common)
     // (import ./opencode-formatter-lsp-pin.nix common)
