@@ -30,13 +30,18 @@ func (s *stubTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
+// fuzzDocument is the one document the fuzz route declares.
+const fuzzDocument = `query { viewer { login } }`
+
 // FuzzHTTPRequest feeds arbitrary bytes to http_request as the guest's request
 // body: request decoding, the URL cap and parse, the method set and route
 // matching, against a Network whose transport is a stub. Whatever the input,
 // only an https request to the route host with a method in the fixed set and
 // no header outside the fixed set, the route's declared extras and the host's
 // credential (a redirect hop carries only a Range) may
-// reach the transport, the failure must name a sentinel, and a refused
+// reach the transport, a request to the document-constrained route carries a
+// body whose "query" is the declared document, the failure must name a
+// sentinel, and a refused
 // oversized URL or unknown method must not be echoed into the error or the
 // audit entry. The seeds are the f.Add calls below. See FuzzHandshake for the
 // -fuzzminimizetime=0 advice on long sessions.
@@ -55,6 +60,12 @@ func FuzzHTTPRequest(f *testing.F) {
 		`{"method":"` + strings.Repeat("M", 4096) + `","url":"https://api.example.com/v1/items"}`,
 		`{"method":"GET","url":"https://api.example.com/` + strings.Repeat("a", maxHTTPURL) + `"}`,
 		`{"method":"GET","url":"https://api.example.com/v1/items?` + strings.Repeat("q", maxHTTPURL-len("https://api.example.com/v1/items?")) + `"}`,
+		`{"method":"POST","url":"https://api.example.com/v1/graphql","body":"{\"query\":\"query { viewer { login } }\",\"variables\":{\"a\":[1]},\"operationName\":\"V\"}"}`,
+		`{"method":"POST","url":"https://api.example.com/v1/graphql","body":"{\"query\":\"query  { viewer { login } }\"}"}`,
+		`{"method":"POST","url":"https://api.example.com/v1/graphql","body":"{\"query\":\"query { viewer { login } }\",\"query\":\"mutation { x }\"}"}`,
+		`{"method":"POST","url":"https://api.example.com/v1/graphql","body":"{\"mutation\":1,\"Query\":\"query { viewer { login } }\"}"}`,
+		`{"method":"POST","url":"https://api.example.com/v1/graphql","body":"{\"query\":\"query { viewer { login } }\"} x"}`,
+		`{"method":"POST","url":"https://api.example.com/v1/graphql"}`,
 		`{"method":"GET","url":`,
 		`{"method":"GET","url":"https://api.example.com/v1/items"} {}`,
 		`{"method":"GET","url":"https://api.example.com/v1/items","extra":1}`,
@@ -80,6 +91,7 @@ func FuzzHTTPRequest(f *testing.F) {
 			Routes: []Route{
 				{Method: "GET", Host: "api.example.com", Path: "/v1/items", FollowRedirect: true, RequestHeaders: []string{"X-Declared"}},
 				{Method: "POST", Host: "api.example.com", Path: "/v1/items"},
+				{Method: "POST", Host: "api.example.com", Path: "/v1/graphql", Documents: map[string]string{"Viewer": fuzzDocument}},
 			},
 			Authorize: func(r *http.Request) error {
 				r.Header.Set("Authorization", "Bearer host")
@@ -96,12 +108,18 @@ func FuzzHTTPRequest(f *testing.F) {
 			// The route host gets the fixed set, the matched route's extras and the
 			// host's credential; the redirect hop gets a Range and nothing the
 			// guest set.
-			// Matching by method alone is sound only while the fuzz routes share
-			// host and path and differ by method; keep that or change this lookup.
+			// Matching by method and path prefix is sound only while the fuzz routes
+			// share a host and differ by method or path; keep that or change this lookup.
 			var extras []string
 			for _, route := range n.Routes {
-				if route.Method == r.Method {
+				if route.Method == r.Method && strings.HasPrefix(r.URL.Path, route.Path) {
 					extras = route.RequestHeaders
+				}
+			}
+			if r.Method == "POST" && r.URL.Path == "/v1/graphql" {
+				data, _ := io.ReadAll(r.Body)
+				if query, ok := sentFuzzQuery(data); !ok || query != fuzzDocument {
+					t.Fatalf("constrained route sent body %q for %q", data, raw)
 				}
 			}
 			for k := range r.Header {
@@ -140,7 +158,11 @@ func FuzzHTTPRequest(f *testing.F) {
 		var in httpRequest
 		dec := json.NewDecoder(bytes.NewReader(raw))
 		dec.DisallowUnknownFields()
-		if dec.Decode(&in) != nil || dec.More() || err == nil {
+		decoded := dec.Decode(&in) == nil && !dec.More()
+		if decoded && e.BodySHA256 == "" {
+			t.Fatalf("decoded request without a body hash: %q", lines[0])
+		}
+		if !decoded || err == nil {
 			return
 		}
 		if (len(in.URL) > maxHTTPURL || !slices.Contains(httpMethods, in.Method)) && errors.Is(err, ErrRouteRefused) {
@@ -149,4 +171,43 @@ func FuzzHTTPRequest(f *testing.F) {
 			}
 		}
 	})
+}
+
+// sentFuzzQuery walks the sent body with its own token loop, not graphQLQuery,
+// so it fails on a body that lenient decoding would read as the declared
+// document: duplicate or case-variant keys, other keys, trailing data.
+func sentFuzzQuery(data []byte) (string, bool) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return "", false
+	}
+	var query string
+	seen := map[string]bool{}
+	for dec.More() {
+		tok, err := dec.Token()
+		key, isStr := tok.(string)
+		if err != nil || !isStr || seen[key] {
+			return "", false
+		}
+		seen[key] = true
+		var val json.RawMessage
+		switch key {
+		case "query":
+			err = dec.Decode(&query)
+		case "variables", "operationName":
+			err = dec.Decode(&val)
+		default:
+			return "", false
+		}
+		if err != nil {
+			return "", false
+		}
+	}
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('}') {
+		return "", false
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return "", false
+	}
+	return query, seen["query"]
 }

@@ -142,7 +142,7 @@ func TestNetworkSendsAdmittedRequestWithHostCredential(t *testing.T) {
 		t.Errorf("request not forwarded: %v %v", r.Header, r.URL)
 	}
 	lines := auditLines(t, &audit)
-	want := connectorhost.AuditEntry{Connector: "demo", Route: "GET " + b.host() + " /repos", Method: "GET", Host: b.host(), Path: "/repos/x", Query: "q=1", Status: 200, Size: 5, Decision: connectorhost.DecisionSent, Headers: []string{"Accept", "Authorization"}}
+	want := connectorhost.AuditEntry{Connector: "demo", Route: "GET " + b.host() + " /repos", Method: "GET", Host: b.host(), Path: "/repos/x", Query: "q=1", Status: 200, Size: 5, Decision: connectorhost.DecisionSent, Headers: []string{"Accept", "Authorization"}, BodySHA256: sha("")}
 	if len(lines) != 1 || !reflect.DeepEqual(lines[0], want) {
 		t.Fatalf("audit = %+v, want [%+v]", lines, want)
 	}
