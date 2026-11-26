@@ -1532,10 +1532,10 @@ A name has one definer, however it is expressed:
   reused the Connector's module key has no Connector module left to replace.
 - A data key core does not know, such as one setting the Box image, hooks or
   prompts, fails with the unknown-key message.
-- A Consumer module that redeclares the `spindrift.connectors` option with its
-  own type drops core's merge, and with it these refusals. That module is the
-  Consumer's own configuration, outside the threat model: a Connector exports
-  data, not a module, so it cannot ship such a redeclaration.
+- A module that redeclares `spindrift.connectors` or `spindrift.connectorData`
+  fails evaluation, whatever its type and whichever module comes first: core's
+  `apply` on each option counts the declarations, and a second `apply` is
+  refused by nixpkgs rather than dropped.
 
 `nix/checks/connector-registration.nix` pins each refusal. The row-override and
 key-reuse holes were reproduced against the full flake module before the fix.

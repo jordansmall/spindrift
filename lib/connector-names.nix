@@ -6,6 +6,10 @@
 # is a Consumer's switch on a registered row (issues #6797, #6810, #6998), not
 # a registration.
 rec {
+  # Wording and `file` shared by the refusals and the data-built definitions.
+  dataFile = "spindrift.connectorData";
+  dataOnlyRule = "registers only as data, through ${dataFile}";
+
   # The Consumer switches a backend row refuses (issue #7456), in the order
   # the refusal lists them. One source for the module's `definedSwitches` and
   # the switches `dataRow` rejects as stray keys.
@@ -241,13 +245,13 @@ rec {
     name: file: keys:
     "Connector '${name}': ${file} sets ${
       builtins.concatStringsSep ", " (map (k: "'${k}'") keys)
-    } on spindrift.connectors.${name}; a Connector row registers only as data, through spindrift.connectorData, and spindrift.connectors.${name} takes only the switches ${builtins.concatStringsSep ", " switchNames}";
+    } on spindrift.connectors.${name}; a Connector row ${dataOnlyRule}, and spindrift.connectors.${name} takes only the switches ${builtins.concatStringsSep ", " switchNames}";
 
   # Why a definition of `spindrift.connectors.<name>` is refused when no data
   # registers `name`: a switch has no row to apply to.
   unregisteredRowError =
     name: file:
-    "Connector '${name}': ${file} defines spindrift.connectors.${name}, but no Connector '${name}' is registered; a Connector registers only as data, through spindrift.connectorData, and spindrift.connectors.${name} takes only switches on a registered row";
+    "Connector '${name}': ${file} defines spindrift.connectors.${name}, but no Connector '${name}' is registered; a Connector ${dataOnlyRule}, and spindrift.connectors.${name} takes only switches on a registered row";
 
   # Why `spindrift.connectorData` cannot carry a priority below the default:
   # an override would discard another definer's registration. `registered` is
@@ -296,7 +300,7 @@ rec {
               else
                 [
                   {
-                    file = "spindrift.connectorData";
+                    file = dataFile;
                     value = data;
                   }
                 ]
@@ -344,7 +348,7 @@ rec {
             defs
             ++ [
               {
-                file = "spindrift.connectorData";
+                file = dataFile;
                 value = builtins.mapAttrs (_: _: { }) registered;
               }
             ]
@@ -357,4 +361,20 @@ rec {
           merged;
       substSubModules = m: registeredRowSet registered (type.substSubModules m);
     };
+
+  # A second declaration of `option` would replace the type that enforces
+  # the data-only and one-definer rules.
+  redeclaredError =
+    option: declarations:
+    "${option} must be declared once, by core, but is declared in ${builtins.concatStringsSep ", " declarations}: a second declaration would replace the type that enforces that a Connector ${dataOnlyRule}, and that a name has one definer. Register the Connector in spindrift.connectorData instead.";
+
+  # `value` of `option`, refused when more than one module declares it. Used as
+  # the option's `apply`: a second declaration's type can win the merge, but
+  # core's `apply` cannot be dropped, since nixpkgs refuses a second `apply`.
+  declaredOnce =
+    opt: value:
+    if builtins.length opt.declarations == 1 then
+      value
+    else
+      throw (redeclaredError (builtins.concatStringsSep "." opt.loc) opt.declarations);
 }
