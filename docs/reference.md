@@ -2407,22 +2407,22 @@ mean at runtime is issue #6751. The worked example is the fixture Connector in
 
 - **Route table.** A tracker or forge Connector's row may carry `routes`, a
   list of `{method, host, path}` submodules (default `[ ]`): the only HTTP
-  traffic its `http_request` Host call may send (see Network Connectors under [Connector
-  protocol](#connector-protocol)). `method` is one of `GET`, `HEAD`, `POST`,
-  `PUT`, `PATCH` or `DELETE`, `host` an exact `host[:port]`, and `path` a
-  subtree root, where a `*` segment matches exactly one request segment (as in
-  `/jobs/*/logs`). `{repo}` in a `path` stands for the repository's
-  `owner/name` slug, which `connectortracker.Routes` fills at
-  run time because the slug is config, not something the Connector's package
-  can know. The option is a declaration only: the host validates the table when
-  it loads the Connector, and no binary loads one from this option yet. A
-  backend row's table is `backend.routes` instead ([Backend rows on a
-  Connector](#backend-rows-on-a-connector)), and there a route may also carry
-  `requestHeaders` and `responseHeaders`, lists of header names that widen the
-  fixed header sets, and a `POST` route may carry `documents`, an attrset from
-  a name to the exact GraphQL query text its body may hold, and such a route
-  refuses any URL query string (see Network Connectors under
-  [Connector protocol](#connector-protocol)):
+  traffic its `http_request` Host call may send (see Network Connectors under
+  [Connector protocol](#connector-protocol)). `method` is one of `GET`, `HEAD`,
+  `POST`, `PUT`, `PATCH` or `DELETE`, `host` an exact `host[:port]`, and `path`
+  a subtree root, where a `*` segment matches exactly one request segment (as
+  in `/jobs/*/logs`) but never leads the path (that would blanket the host).
+  `{repo}` in a `path` stands for the repository's `owner/name` slug, which
+  `connectortracker.Routes` fills at run time because the slug is config,
+  not something the Connector's package can know. The option is a declaration
+  only: the host validates the table when it loads the Connector, and no binary
+  loads one from this option yet. A backend row's table is `backend.routes`
+  instead ([Backend rows on a Connector](#backend-rows-on-a-connector)),
+  and there a route may also carry `requestHeaders` and `responseHeaders`,
+  lists of header names that widen the fixed header sets, and a `POST` route
+  may carry `documents`, an attrset from a name to the exact GraphQL query
+  text its body may hold, and such a route refuses any URL query string
+  (see Network Connectors under [Connector protocol](#connector-protocol)):
 
   ```nix
   { method = "GET"; host = "{base}"; path = "/api/v1/repos/{repo}";
@@ -4197,107 +4197,120 @@ description and a regen.
   checks each request against the Connector's **Route table**: a method, a
   `host[:port]` and a path pattern per route. Path patterns follow the
   registry-route rules (`registryvocab.CheckPathPattern`): canonical absolute
-  paths, no blanket `/`, no `?` or `#`. The host sends only an `https` URL
-  whose canonical, unescaped path a route admits. It attaches the credential
-  itself, admits only allowed request headers (see Header sets below), never follows a redirect (unless the route sets `followRedirect`:
+  paths, no blanket `/`, no `?` or `#`. The host itself
+  (`ErrRouteWildcardRoot`) and the Nix declaration check also refuse a leading
+  `*` segment, which would blanket the whole host. The host sends only an
+  `https` URL whose canonical, unescaped path a route admits. It attaches the
+  credential itself, admits only allowed request headers (see Header sets
+  below), never follows a redirect (unless the route sets `followRedirect`:
   GET only, one hop, sent without the credential or the guest's headers,
   asking for the tail with a `Range` suffix and bounded to half of what
   remains of that request's 60-second timeout (or of the caller's deadline, if
   sooner), failing non-fatally past it; the target host in the audit
-  `redirect_host`), and caps the body at 4 MiB (or `respCap`, if smaller;
-  a `followRedirect` route keeps the last bytes of a larger body instead
-  of failing). The host resolves each destination itself and dials only a
+  `redirect_host`), and caps the body at 4 MiB (or `respCap`, if smaller; a
+  `followRedirect` route keeps the last bytes of a larger body instead of
+  failing). The host resolves each destination itself and dials only a
   **public** address (global unicast; not loopback, RFC 1918, `fc00::/7`,
-  link-local such as `169.254.169.254`, `0.0.0.0/8` or `100.64.0.0/10`; an
-  IPv4-mapped or NAT64 `64:ff9b::/96` address is judged by the IPv4 inside it).
+  link-local such as `169.254.169.254`, `0.0.0.0/8`, `100.64.0.0/10`,
+  `192.0.0.0/24`, `198.18.0.0/15`, `240.0.0.0/4`, the IPv4-compatible `::/96`,
+  NAT64's local-use `64:ff9b:1::/48`, site-local `fec0::/10`, or the
+  IPv4-embedding 6to4 `2002::/16` and Teredo `2001::/32`; an IPv4-mapped or
+  NAT64 `64:ff9b::/96` address is judged by the IPv4 inside it). The dial goes
+  through the HTTP client's own dialer, so its timeouts and keep-alive hold.
   This covers a host the Connector declared as a literal and every redirect
   hop, whatever named the first host. A host a Route takes from an
   operator-set knob (`{base}`) is exempt, so a self-hosted forge or Jira on a
   private address works. A refusal is `ErrRouteRefused`, fatal like any other,
   and its audit `reason` names the address; a refused redirect names the
   redirect host, never the signed URL. Behind an environment proxy
-  (`HTTP_PROXY`/`HTTPS_PROXY`) or a non-default HTTP client the host never
-  sees the address dialled, so the check cannot apply: the request proceeds
-  and `address_check` says `not applied`. An unmatched or malformed request
-  is refused unsent with `ErrRouteRefused`, naming the Connector, method, host and path. A request
-  header outside the allowed set is refused the same way, and audited. A refusal,
-  an oversized body (`ErrResponseTooLarge`) and a pointer outside module
-  memory fail closed: the call fails and the Connector is closed. A transport
-  failure is not fatal: status `0` hands the guest a fixed reason, never
-  the error detail. The detail (the unset credential variable, the
-  transport's error) stays host-side: when the call then fails, `Call`'s
-  error carries it, and so does a Connector's `.log`. The response body is
-  arbitrary upstream bytes: the host checks only its size and the
-  status/length framing, while the Connector's result is schema-checked as
-  for any call. A route does not restrict the query string, except that a route
-  declaring documents admits none, since a GraphQL server may read `?query=` on
-  a `POST` and run a document the host never matched. A `POST` route may
-  restrict the body with `documents`, a non-empty attrset from a name (a
-  letter, then letters, digits and underscores) to a non-empty query text, no
-  two names sharing a text. The host sends the request only if the body is one
-  JSON object whose `query` string is byte-identical to a declared text. The
-  body walk is strict, because the server's JSON parser is not Go's: only the
-  exact keys `query`, `variables` and `operationName` are allowed, none twice,
-  and nothing may follow the object; anything else is refused unsent. Nothing
-  parses GraphQL and `variables` stay unchecked, so a declared mutation can
-  still be aimed at any object the credential reaches. A route that declares
-  no documents admits any body. Each Host call
-  writes one JSON line to the audit log, with `connector`,
-  `route`, `method`, `host`, `path`, `query`, `status`, `size` and `decision`
-  (`sent`, `refused` or `failed`), plus `reason` on a refusal or failure,
-  `body_sha256` (the hex SHA-256 of the request body the guest supplied, absent
-  whenever no body was decoded: a request too malformed to carry one, and a
-  line the host writes without a request), `document` (on a route that
-  declares documents, the matched name), `address_check` (`public`, `refused:
-  not public`, `not applied: proxy` or `not applied: custom transport`; absent
-  for a knob-named host whose request took no redirect hop), `redirect_host`
-  and `redirect_status` (the redirect hop's host and the 3xx that led to it,
-  also set when the hop is refused; once the hop is sent, `status` is its
-  answer), and,
-  when set, `headers` (the sorted canonical names of every header the host set
-  on the request, the guest's plus the credential's `Authorization`, never a
-  value; headers the transport adds, such as `User-Agent`, are not listed),
-  `rate_limit` (`primary` or `secondary`, on a 403 that carries a
-  rate-limit signal or on any 429) and `retry_after` (the `Retry-After` header, on a 403 or
-  429; [Backend Connectors](#backend-connectors) has the classification); a
-  request the log cannot record fails closed (`ErrAudit`) and leaves no line.
-  Any failed call of a network Connector whose failure no Host call already
-  audited adds a `failed` line naming the Connector. The SDK's
-  `connector.HTTPRequest` wraps the import. A second, additive import,
-  `spindrift.http_response_header(namePtr, nameLen, outPtr, outCap i32) -> i64`,
-  reads one header of the last `http_request`'s response (the SDK's
+  (`HTTP_PROXY`/`HTTPS_PROXY`) the host never sees the address dialled, so the
+  check cannot apply: the request proceeds and `address_check` says `not
+  applied: proxy`, on a knob-named host's line too. A client whose transport
+  is not an `*http.Transport` cannot be checked, so a production binary
+  refuses to load a Connector with one; only a test binary may. An unmatched
+  or malformed request is refused unsent with `ErrRouteRefused`, naming the
+  Connector, method, host and path. A request header outside the allowed set
+  is refused the same way, and audited. A refusal, an oversized body
+  (`ErrResponseTooLarge`) and a pointer outside module memory fail closed: the
+  call fails and the Connector is closed. A transport failure is not fatal:
+  status `0` hands the guest a fixed reason, never the error detail. The
+  detail (the unset credential variable, the transport's error) stays
+  host-side: when the call then fails, `Call`'s error carries it, and so does
+  a Connector's `.log`. The response body is arbitrary upstream bytes: the
+  host checks only its size and the status/length framing, while the
+  Connector's result is schema-checked as for any call. A route does not
+  restrict the query string, except that a route declaring documents admits
+  none, since a GraphQL server may read `?query=` on a `POST` and run a
+  document the host never matched. A `POST` route may restrict the body with
+  `documents`, a non-empty attrset from a name (a letter, then letters, digits
+  and underscores) to a non-empty query text, no two names sharing a text. The
+  host sends the request only if the body is one JSON object whose `query`
+  string is byte-identical to a declared text. The body walk is strict,
+  because the server's JSON parser is not Go's: only the exact keys `query`,
+  `variables` and `operationName` are allowed, none twice, and nothing may
+  follow the object; anything else is refused unsent. Nothing parses GraphQL
+  and `variables` stay unchecked, so a declared mutation can still be aimed at
+  any object the credential reaches. A route that declares no documents admits
+  any body. Each Host call writes one JSON line to the audit log, with
+  `connector`, `route`, `method`, `host`, `path`, `query`, `status`, `size`
+  and `decision` (`sent`, `refused` or `failed`), plus `reason` on a refusal
+  or failure, `body_sha256` (the hex SHA-256 of the request body the guest
+  supplied, absent whenever no body was decoded: a request too malformed to
+  carry one, and a line the host writes without a request), `document` (on a
+  route that declares documents, the matched name), `address_check` (`public`,
+  `refused: not public`, `not applied: proxy`, `not applied: proxy lookup
+  failed` (the lookup erred, so the request is not dialled directly and the
+  error surfaces) or `not applied: custom transport`; absent for a knob-named
+  host whose request is neither proxied nor took a redirect hop; it describes
+  the last dial, so a followed hop's outcome replaces the first request's),
+  `redirect_host` and `redirect_status` (the redirect hop's host and the 3xx
+  that led to it, also set when the hop is refused, whether for its address or
+  for a non-https or userinfo location with a host; once the hop is sent,
+  `status` is its answer), and, when set, `headers` (the sorted canonical
+  names of every header the host set on the request, the guest's plus the
+  credential's `Authorization`, never a value; headers the transport adds,
+  such as `User-Agent`, are not listed), `rate_limit` (`primary` or
+  `secondary`, on a 403 that carries a rate-limit signal or on any 429) and
+  `retry_after` (the `Retry-After` header, on a 403 or 429; [Backend
+  Connectors](#backend-connectors) has the classification); a request the log
+  cannot record fails closed (`ErrAudit`) and leaves no line. Any failed call
+  of a network Connector whose failure no Host call already audited adds a
+  `failed` line naming the Connector. The SDK's `connector.HTTPRequest` wraps
+  the import. A second, additive import,
+  `spindrift.http_response_header(namePtr, nameLen, outPtr, outCap i32) ->
+  i64`, reads one header of the last `http_request`'s response (the SDK's
   `connector.ResponseHeader`); a Connector that never imports it is unchanged.
   The name is case-insensitive and repeated values join with `, `. The result
   is `found << 32 | n`: `found` is 1 for a present header (an empty value is
   present) and 0 for an absent one, `n` is the value's full length, and at
   most `outCap` bytes are written at `outPtr`, so a short buffer asks again.
   `Set-Cookie` is never served, and a refused, failed or oversized request
-  leaves every name absent. A guest reads only the fixed response headers
-  and the matched route's `responseHeaders`; any other name is absent (the
-  host's own rate-limit classification still sees the whole response).
-  **Header sets.** A guest may send, on any route, `Accept`,
-  `Accept-Language`, `Cache-Control`, `Content-Type`, `If-Match`,
-  `If-Modified-Since`, `If-None-Match` and `If-Unmodified-Since`, and read
-  `Content-Type`, `Content-Length`, `Content-Range`, `Date`, `ETag`,
-  `Last-Modified`, `Link`, `Location` and `Retry-After`. A route declares an
-  extra with `requestHeaders` or `responseHeaders` (names, any case). Never
-  declarable, since the host owns the credential and the connection's
-  identity: request `Host`, `Cookie`, `Authorization`, `Forwarded`, `Via`,
-  `X-Real-IP`, `X-Forwarded-*` and `Proxy-*`; response `Set-Cookie` and
-  `Set-Cookie2`. Evaluation fails on one, and the host refuses such a table
-  at load. The github Connector declares `X-GitHub-Api-Version` on every
-  route and `X-OAuth-Scopes` (response) on `POST /graphql`; forgejo declares
+  leaves every name absent. A guest reads only the fixed response headers and
+  the matched route's `responseHeaders`; any other name is absent (the host's
+  own rate-limit classification still sees the whole response). **Header
+  sets.** A guest may send, on any route, `Accept`, `Accept-Language`,
+  `Cache-Control`, `Content-Type`, `If-Match`, `If-Modified-Since`,
+  `If-None-Match` and `If-Unmodified-Since`, and read `Content-Type`,
+  `Content-Length`, `Content-Range`, `Date`, `ETag`, `Last-Modified`, `Link`,
+  `Location` and `Retry-After`. A route declares an extra with
+  `requestHeaders` or `responseHeaders` (names, any case). Never declarable,
+  since the host owns the credential and the connection's identity: request
+  `Host`, `Cookie`, `Authorization`, `Forwarded`, `Via`, `X-Real-IP`,
+  `X-Forwarded-*` and `Proxy-*`; response `Set-Cookie` and `Set-Cookie2`.
+  Evaluation fails on one, and the host refuses such a table at load. The
+  github Connector declares `X-GitHub-Api-Version` on every route and
+  `X-OAuth-Scopes` (response) on `POST /graphql`; forgejo declares
   `X-Total-Count` (response) on its repository route. A credential taken from
   `GH_TOKEN_REFRESH_FILE` reaches a request without touching `GH_TOKEN`: the
   Connector runtime's credential source for the github row re-reads the file
-  on every request, so the first request after a rotation
-  carries the new token and none is dropped; every rotation must replace the
-  file by rename, as `gh-token-refresher` does. A backend Connector row
-  declares its Route table under
-  `backend` ([Backend rows on a Connector](#backend-rows-on-a-connector)),
-  checked at evaluation with the same path rules; a tracker or forge Connector
-  declares its own with the `routes` option (see **Route table** under
-  [Connector subflake shape](#connector-subflake-shape)).
+  on every request, so the first request after a rotation carries the new
+  token and none is dropped; every rotation must replace the file by rename,
+  as `gh-token-refresher` does. A backend Connector row declares its Route
+  table under `backend` ([Backend rows on a
+  Connector](#backend-rows-on-a-connector)), checked at evaluation with the
+  same path rules; a tracker or forge Connector declares its own with the
+  `routes` option (see **Route table** under [Connector subflake
+  shape](#connector-subflake-shape)).
 - **Tracker capabilities.** A tracker Connector advertises `"tracker"`,
   meaning it serves `tracker.listIssues` and `tracker.issue`, and optionally
   `"tracker.comments"`, `"tracker.nativeDeps"`, `"tracker.blocks"`,

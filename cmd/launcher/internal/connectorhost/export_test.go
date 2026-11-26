@@ -56,12 +56,14 @@ var LogWindow = logWindow
 
 // Do exposes the unexported do to the external tests.
 func (n *Network) Do(ctx context.Context, raw []byte, maxBody int) (int, []byte, error) {
+	n.useChecked()
 	status, body, _, err := n.do(ctx, raw, maxBody)
 	return status, body, err
 }
 
 // DoHeader is Do that also returns the response headers the host would hold.
 func (n *Network) DoHeader(ctx context.Context, raw []byte, maxBody int) (int, []byte, http.Header, error) {
+	n.useChecked()
 	return n.do(ctx, raw, maxBody)
 }
 
@@ -104,7 +106,10 @@ type HostCalls struct{ h *networkCalls }
 
 // NewHostCalls returns the handler a network Connector over n would serve its
 // Host calls with.
-func NewHostCalls(n *Network) *HostCalls { return &HostCalls{&networkCalls{n: n}} }
+func NewHostCalls(n *Network) *HostCalls {
+	n.useChecked()
+	return &HostCalls{&networkCalls{n: n}}
+}
 
 // HTTPRequest exposes the handler's httpRequest.
 func (t *HostCalls) HTTPRequest(ctx context.Context, raw []byte, bufCap int) (int, []byte, http.Header, error) {

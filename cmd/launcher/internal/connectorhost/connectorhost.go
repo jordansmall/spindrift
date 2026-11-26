@@ -298,6 +298,9 @@ func (c *Connector) Close(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.dead = true
+	if c.network != nil {
+		c.network.closeIdle()
+	}
 	return c.engine.close(ctx)
 }
 
@@ -505,8 +508,7 @@ func LoadNetworkCompiled(ctx context.Context, wasm []byte, n Network, cacheDir s
 func loadWith(ctx context.Context, wasm []byte, mk engineFactory, network *Network) (*Connector, error) {
 	c := &Connector{network: network, now: time.Now}
 	if network != nil {
-		// Once per Network, so the checked transport keeps its connections.
-		network.checked = network.newCheckedClient()
+		network.useChecked()
 	}
 	// A nil *networkCalls in the interface would read as a grant.
 	var host hostCalls

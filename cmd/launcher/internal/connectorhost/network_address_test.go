@@ -53,6 +53,22 @@ func TestPublicAddress(t *testing.T) {
 		"64:ff9b::a9fe:a9fe":     false,
 		"::ffff:169.254.169.254": false,
 		"::ffff:100.100.100.200": false,
+		"240.0.0.1":              false,
+		"192.0.0.9":              false,
+		"198.18.0.1":             false,
+		"198.19.255.255":         false,
+		"::8.8.8.8":              false,
+		"::808:808":              false,
+		"64:ff9b:1::808:808":     false,
+		"fec0::1":                false,
+		"2002:808:808::1":        false,
+		"2002:7f00:1::1":         false,
+		"2001::1":                false,
+		"2001:0:4136:e378::1":    false,
+		"198.20.0.1":             true,
+		"2001:1::1":              true,
+		"2003::1":                true,
+		"192.0.1.1":              true,
 	} {
 		if got := connectorhost.PublicAddress(netip.MustParseAddr(addr)); got != want {
 			t.Errorf("publicAddress(%s) = %v, want %v", addr, got, want)
@@ -75,6 +91,44 @@ func TestCheckSeamsRefusesATestSeamOutsideATestBinary(t *testing.T) {
 	}
 	if err := connectorhost.CheckSeams(connectorhost.Network{}, false); err != nil {
 		t.Errorf("a Network with no seam refused: %v", err)
+	}
+	custom := connectorhost.Network{Client: &http.Client{Transport: &admitCaseTransport{}}}
+	if err := connectorhost.CheckSeams(custom, false); err == nil {
+		t.Error("a custom transport accepted outside a test binary")
+	}
+	if err := connectorhost.CheckSeams(custom, true); err != nil {
+		t.Errorf("a custom transport refused in a test binary: %v", err)
+	}
+	plain := connectorhost.Network{Client: &http.Client{Transport: &http.Transport{}}}
+	if err := connectorhost.CheckSeams(plain, false); err != nil {
+		t.Errorf("an *http.Transport refused: %v", err)
+	}
+}
+
+func TestCheckedDialKeepsTheCallerTransportsDial(t *testing.T) {
+	b := okBackend(t)
+	route, raw := named(b, false)
+	n := netFor(b, &bytes.Buffer{}, route)
+	n.LookupForTest = resolvingTo("127.0.0.1")
+	var dialled atomic.Int32
+	tr := b.Client().Transport.(*http.Transport).Clone()
+	base := tr.DialContext
+	if base == nil {
+		base = (&net.Dialer{}).DialContext
+	}
+	tr.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		dialled.Add(1)
+		if !strings.HasPrefix(addr, "127.0.0.1:") {
+			t.Errorf("dialled %q, want the checked IP", addr)
+		}
+		return base(ctx, network, addr)
+	}
+	n.Client = &http.Client{Transport: tr}
+	if _, _, err := n.Do(context.Background(), raw, 1<<10); err != nil {
+		t.Fatal(err)
+	}
+	if dialled.Load() != 1 {
+		t.Fatalf("caller dial used %d times, want 1", dialled.Load())
 	}
 }
 
@@ -237,6 +291,26 @@ func TestLiteralRouteBehindAProxyIsAuditedUnchecked(t *testing.T) {
 	}
 }
 
+func TestLiteralRouteWhoseProxyErrsIsNeverDialledDirectly(t *testing.T) {
+	b := okBackend(t)
+	var audit bytes.Buffer
+	route, raw := named(b, false)
+	n := netFor(b, &audit, route)
+	tr := b.Client().Transport.(*http.Transport).Clone()
+	tr.Proxy = func(*http.Request) (*url.URL, error) { return nil, errors.New("proxy lookup failed") }
+	n.Client = &http.Client{Transport: tr}
+	_, _, err := n.Do(context.Background(), raw, 1<<10)
+	if err == nil || !strings.Contains(err.Error(), "proxy lookup failed") {
+		t.Fatalf("err = %v, want the proxy error", err)
+	}
+	if b.hits.Load() != 0 {
+		t.Fatal("the request was dialled directly, bypassing the proxy")
+	}
+	if e := auditLines(t, &audit); len(e) != 1 || e[0].AddressCheck != connectorhost.AddressCheckProxyErr {
+		t.Fatalf("audit = %+v, want address_check %q", e, connectorhost.AddressCheckProxyErr)
+	}
+}
+
 func TestLiteralRouteOverACustomTransportIsAuditedUnchecked(t *testing.T) {
 	var audit bytes.Buffer
 	stub := &admitCaseTransport{}
@@ -251,6 +325,25 @@ func TestLiteralRouteOverACustomTransportIsAuditedUnchecked(t *testing.T) {
 	}
 	if e := auditLines(t, &audit); stub.sent != 1 || len(e) != 1 || e[0].AddressCheck != connectorhost.AddressCheckCustomTransport {
 		t.Fatalf("sent = %d, audit = %+v, want address_check %q", stub.sent, e, connectorhost.AddressCheckCustomTransport)
+	}
+}
+
+func TestKnobNamedRouteBehindAProxyIsAuditedUnchecked(t *testing.T) {
+	b := okBackend(t)
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "refused", http.StatusBadGateway)
+	}))
+	t.Cleanup(proxy.Close)
+	proxyURL, _ := url.Parse(proxy.URL)
+	var audit bytes.Buffer
+	route, raw := named(b, true)
+	n := netFor(b, &audit, route)
+	tr := b.Client().Transport.(*http.Transport).Clone()
+	tr.Proxy = http.ProxyURL(proxyURL)
+	n.Client = &http.Client{Transport: tr}
+	_, _, _ = n.Do(context.Background(), raw, 1<<10)
+	if e := auditLines(t, &audit); len(e) != 1 || e[0].AddressCheck != connectorhost.AddressCheckProxy {
+		t.Fatalf("audit = %+v, want address_check %q", e, connectorhost.AddressCheckProxy)
 	}
 }
 
@@ -289,15 +382,19 @@ func hopRefused(t *testing.T, n *connectorhost.Network, origin, target *backend,
 func hopPort(b *backend) string { return fmt.Sprint(b.Listener.Addr().(*net.TCPAddr).Port) }
 
 func TestFollowRedirectHopRefusesANonPublicAddressAfterAPublicFirstHost(t *testing.T) {
-	for _, addr := range []string{"10.0.0.1", "169.254.169.254", "100.100.100.200"} {
+	for _, addr := range []string{"10.0.0.1", "169.254.169.254", "100.100.100.200", "127.0.0.1", "fe80::1"} {
 		t.Run(addr, func(t *testing.T) {
 			target := okBackend(t)
 			origin := redirectingOrigin(t, "https://hop.example:"+hopPort(target)+"/blob?sig=secret")
 			var audit bytes.Buffer
 			n := netFor(origin, &audit, connectorhost.Route{Method: "GET", Host: origin.host(), Path: "/logs", FollowRedirect: true})
 			n.LookupForTest = hopTo(addr)
-			// Only the origin's loopback passes: the first host is public, the hop is not.
-			n.PublicForTest = func(a netip.Addr) bool { return a == netip.MustParseAddr("127.0.0.1") }
+			// Only the first dial, the origin's, passes: the first host is public, the hop
+			// is not even when it resolves to the same loopback address.
+			var dials atomic.Int32
+			n.PublicForTest = func(a netip.Addr) bool {
+				return dials.Add(1) == 1 && a == netip.MustParseAddr("127.0.0.1")
+			}
 			hopRefused(t, n, origin, target, &audit)
 			if e := auditLines(t, &audit); !strings.Contains(e[0].Reason, addr) {
 				t.Errorf("reason %q does not name %s", e[0].Reason, addr)
