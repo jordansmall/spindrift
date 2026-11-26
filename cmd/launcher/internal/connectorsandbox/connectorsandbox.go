@@ -1,8 +1,8 @@
 // Package connectorsandbox is where the Launcher loads a Connector it hosts
-// into a Connector sandbox of the run. Each loading path installs the sandbox
-// package's Loader (Use) before its first load: its own Load is the sandbox
-// every Driver Connector shares, and an OwningLoader also starts one of its
-// own for each credential-holding Connector. With none, every load fails with
+// into a Connector sandbox of the run. connectorsetup.New installs the sandbox
+// package's Loader (Use) once per process: its own Load is the sandbox every
+// Driver Connector shares, and an OwningLoader also starts one of its own for
+// each credential-holding Connector. With none, every load fails with
 // ErrNoConnectorSandbox, so the Launcher never loads a Connector in its own
 // address space. The Box loads its first-party Drivers in-process via
 // driverrows, never through this package, and this package imports no runner

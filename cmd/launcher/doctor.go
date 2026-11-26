@@ -33,7 +33,6 @@ func cmdDoctor(connectors *connectorruntime.Runtime, opts doctorOptions, stdout,
 		fmt.Fprintf(stderr, "%s\n", err)
 		return int(exitcode.DoctorUnclassified)
 	}
-	defer rc.closeSandbox()
 	sweepOrphanedSandboxes(rc.config, stderr)
 	opts.interactive = isStdinTTY()
 	return doctorReport(rc, stdout, stderr, os.Stdin, opts)

@@ -27,6 +27,8 @@ import (
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/butler"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorruntime"
+	"spindrift.dev/launcher/internal/connectorsetup"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
@@ -6689,13 +6691,28 @@ func TestMainRun_InputDocument_InvalidBackendRowsAreConfigInvalid(t *testing.T) 
 	}
 }
 
-// A backend row's credential env resolves through <ENV>_CMD in mainRun, which
-// can only happen after backendrows.Use has installed the document's rows. The
-// row must be one this run reads (the active jira tracker): an unread row's
-// _CMD never runs.
-func TestMainRun_InputDocument_BackendRowCredentialFromCmd(t *testing.T) {
-	t.Cleanup(backendrows.Snapshot())
-	ran := stubSecretCmd(t, "", func(string) (string, error) { return "from-cmd\n", nil })
+// stubRuntimeBuild wraps newConnectorRuntime for the test: it records the
+// Options mainRun builds with and, when run is non-nil, installs it as the
+// runtime's `_CMD` runner.
+func stubRuntimeBuild(t *testing.T, run func(cmd string) (string, error)) func() []connectorsetup.Options {
+	t.Helper()
+	prev := newConnectorRuntime
+	t.Cleanup(func() { newConnectorRuntime = prev })
+	var seen []connectorsetup.Options
+	newConnectorRuntime = func(in connectorsetup.Input, opts connectorsetup.Options) (*connectorruntime.Runtime, error) {
+		if run != nil {
+			opts.Run = run
+		}
+		seen = append(seen, opts)
+		return prev(in, opts)
+	}
+	return func() []connectorsetup.Options { return seen }
+}
+
+// writeProbeJiraDoc writes an input document carrying one jira backend row
+// whose credential resolves through PROBE_TOKEN_CMD, and returns its path.
+func writeProbeJiraDoc(t *testing.T) string {
+	t.Helper()
 	t.Setenv("PROBE_BASE_URL", "https://acme.example/jira")
 	t.Setenv("PROBE_TOKEN", "")
 	t.Setenv("PROBE_TOKEN_CMD", "vault get probe")
@@ -6706,6 +6723,21 @@ func TestMainRun_InputDocument_BackendRowCredentialFromCmd(t *testing.T) {
 	if err := os.WriteFile(docPath, []byte(doc), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	return docPath
+}
+
+// A backend row's credential env resolves through <ENV>_CMD in the runtime
+// connectorsetup.New builds, which can only happen after backendrows.Use has
+// installed the document's rows. The row must be one this run reads (the
+// active jira tracker): an unread row's _CMD never runs.
+func TestMainRun_InputDocument_BackendRowCredentialFromCmd(t *testing.T) {
+	t.Cleanup(backendrows.Snapshot())
+	var ran []string
+	stubRuntimeBuild(t, func(cmd string) (string, error) {
+		ran = append(ran, cmd)
+		return "from-cmd\n", nil
+	})
+	docPath := writeProbeJiraDoc(t)
 	var stdout, stderr bytes.Buffer
 	mainRunT(t, []string{"--input", docPath, "--issue-tracker", "jira", "research"}, &stdout, &stderr)
 	// The credential lives in the row's source for the runtime to read; it is
@@ -6713,7 +6745,31 @@ func TestMainRun_InputDocument_BackendRowCredentialFromCmd(t *testing.T) {
 	if got := os.Getenv("PROBE_TOKEN"); got != "" {
 		t.Errorf("PROBE_TOKEN = %q, want the process environment untouched; stderr=%s", got, stderr.String())
 	}
-	if !reflect.DeepEqual(ran(), []string{"vault get probe"}) {
-		t.Errorf("ran %q", ran())
+	if !reflect.DeepEqual(ran, []string{"vault get probe"}) {
+		t.Errorf("ran %q", ran)
+	}
+}
+
+// mainRun hands the runtime the operator's TTY state, so a row `_CMD`'s vault
+// prompt reaches the terminal only when one is attached.
+func TestMainRun_RuntimeBuiltWithInteractiveTTY(t *testing.T) {
+	for _, interactive := range []bool{true, false} {
+		t.Run(fmt.Sprintf("interactive=%v", interactive), func(t *testing.T) {
+			t.Cleanup(backendrows.Snapshot())
+			orig := isInteractiveTTY
+			isInteractiveTTY = func() bool { return interactive }
+			t.Cleanup(func() { isInteractiveTTY = orig })
+			seen := stubRuntimeBuild(t, func(string) (string, error) { return "from-cmd\n", nil })
+			docPath := writeProbeJiraDoc(t)
+			var stdout, stderr bytes.Buffer
+			mainRunT(t, []string{"--input", docPath, "--issue-tracker", "jira", "research"}, &stdout, &stderr)
+			opts := seen()
+			if len(opts) == 0 {
+				t.Fatalf("mainRun built no Connector runtime; stderr=%s", stderr.String())
+			}
+			if got := opts[0].Interactive; got != interactive {
+				t.Errorf("Options.Interactive = %v, want %v", got, interactive)
+			}
+		})
 	}
 }

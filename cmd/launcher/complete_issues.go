@@ -30,12 +30,6 @@ func cmdCompleteIssues(connectors *connectorruntime.Runtime) int {
 	if checkBackendsRegistered(c) != nil {
 		return 0
 	}
-	// Ahead of the tracker: building it may load a Connector.
-	closeSandbox, err := installConnectorSandbox(c)
-	if err != nil {
-		return 0
-	}
-	defer closeSandbox()
 	it, err := newIssueTracker(c)
 	if err != nil {
 		return 0

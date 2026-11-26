@@ -54,12 +54,6 @@ func cmdShadowReplay(connectors *connectorruntime.Runtime, args []string, stdout
 		fmt.Fprintf(stderr, "no Pass logs (issue-*.log) found in %s; if downloaded with `gh run download <run-id>`, pass the nested agent-logs-<n> directory or use `gh run download <run-id> -n agent-logs-<n>`\n", dir)
 		return 1
 	}
-	closeSandbox, err := installConnectorSandbox(loadConfig(connectors))
-	if err != nil {
-		fmt.Fprintf(stderr, "%s\n", err)
-		return 1
-	}
-	defer closeSandbox()
 	code := 0
 	for _, log := range logs {
 		res, err := shadowreplay.Replay(context.Background(), name, native, connectorsandbox.Load, wasm, log)

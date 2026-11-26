@@ -20,9 +20,6 @@ type readContext struct {
 	issueTracker forge.IssueTracker
 	codeForge    forge.CodeForge
 	capabilities forge.Capabilities
-	// closeSandbox stops the Connector sandbox newReadContext installed; the
-	// caller owns it once construction succeeds.
-	closeSandbox func()
 }
 
 // newReadContext loads config and wires the tracker and forge (issue #2941).
@@ -38,16 +35,6 @@ func newReadContext(connectors *connectorruntime.Runtime, kind *dispatchkind.Des
 		// Carried so doctor can still report the bad name as a config finding.
 		return readContext{config: c}, err
 	}
-	// Ahead of the adapters: building one may load a Connector.
-	closeSandbox, err := installConnectorSandbox(c)
-	if err != nil {
-		return readContext{config: c}, err
-	}
-	defer func() {
-		if err != nil {
-			closeSandbox()
-		}
-	}()
 	it, err := newIssueTracker(c)
 	if err != nil {
 		return readContext{config: c}, err
@@ -68,7 +55,6 @@ func newReadContext(connectors *connectorruntime.Runtime, kind *dispatchkind.Des
 		issueTracker: it,
 		codeForge:    cf,
 		capabilities: caps,
-		closeSandbox: closeSandbox,
 	}, nil
 }
 

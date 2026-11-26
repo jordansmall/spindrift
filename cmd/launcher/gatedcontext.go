@@ -26,11 +26,6 @@ func newGatedContext(connectors *connectorruntime.Runtime, w io.Writer, kind *di
 	if err != nil {
 		return gatedContext{}, err
 	}
-	defer func() {
-		if err != nil {
-			rc.closeSandbox()
-		}
-	}()
 	if err := validate(rc.config); err != nil {
 		return gatedContext{}, err
 	}
