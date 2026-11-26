@@ -3682,9 +3682,18 @@ reason, and regen renders it below. Core's Network host and the SDK fake host
 `cmd/launcher/internal/connectorhost/admitcases_gen_test.go` and
 `sdk/connector/admitcases_gen_test.go`, so a side that breaks a written case
 fails its own test. The cases pin the two only where written: the conformance
-run against the real host stays the backstop, and the table leaves out address
-policy, which only the real host applies. A rule nobody wrote cases for shows
-as `(no cases)`.
+run against the real host stays the backstop. A rule nobody wrote cases for
+shows as `(no cases)`.
+
+The fake host checks the method, URL and path rules, the request headers (the
+fixed set plus the Route's declared `requestHeaders`; any other, `Authorization`
+included, is refused as not declared by the Route), the GraphQL documents of a
+Route that declares them, and the response headers: an answer's
+`connector.Response.Header` reaches `connector.ResponseHeader` only for the
+fixed set plus the Route's declared `responseHeaders`, and never `Set-Cookie`.
+It does not apply address policy, which only the real host checks, and it does
+not validate the Route table at load: the real host rejects a never-declarable
+header declaration there, where the fake refuses that header at request time.
 
 <!-- BEGIN GENERATED CONNECTOR ADMIT CASES -- nix run .#regen -- DO NOT EDIT -->
 The routes the cases run against:
@@ -4578,12 +4587,13 @@ description and a regen.
   generated `protocol_gen.go`, rendered from the description (see above), not
   hand-kept in step with core.
   For native `go test`, `connector.NewFakeHost(routes)` stands in for the
-  `http_request` Host call: it applies the Route admit rule, request headers included, to the table
+  `http_request` Host call: it applies the Route admit rule, with request headers, GraphQL documents and
+  the response-header allowlist (see the admit rule above), to the table
   `connector.LoadRoutes` reads from `SPINDRIFT_BACKEND_CONNECTOR_ROUTES` (which
   a Connector's checks export), refusing with core's reason, records each
   request sent, and reports the declared Routes no test used. It is a test
-  aid, not a control: it re-implements core's rule without the address
-  policy, and the real host stays the authority on every request.
+  aid, not a control: it does not apply the address policy, which only the
+  real host checks, and the real host stays the authority on every request.
   Three small helpers cover what HTTP-backed Connectors each rewrote.
   `connector.SendJSON(req, in, out)` sends through `HTTPRequest` with `in`
   JSON-encoded and decodes a 2xx answer into `out`; it classes a failed send
