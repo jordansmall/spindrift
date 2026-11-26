@@ -1682,3 +1682,79 @@ The backend row registry is the one piece still process-wide:
 `backendrows.Use` and `Lookup` apply and read the rows of the program, and
 `connectorruntime.FromRegistries` builds a runtime over them. Folding that in
 is left for later.
+
+## Amendment (issue #7553): what two and three sandboxes cost a dispatch
+
+A dispatch now holds the Drivers' shared sandbox and one sandbox per
+credential-holding Connector, so it starts two or three where it started one.
+Measured with the `-x2` and `-x3` rows this issue added to the #7018 benches,
+which start that many sandboxes from one runner, one after another, and hold
+them all live (`BenchmarkConnectorSandboxStart`, whose `start-ns` sums their
+starts) or
+rotate one Connector's calls across them (`BenchmarkConnectorSandboxHostCall`,
+the `network.wasm` fixture against a local TLS backend). Medians of 5 rounds,
+one row per invocation, rows shuffled within each round (#7074); Linux 6.18.58
+amd64, Ryzen 9 5950X, 32 threads, go1.26.8, wazero v1.11.0, connector-host
+0.35.0. The process column ran inside a Box, not on the bare workstation, so
+compare within this table only. The ratio beside each multi-sandbox figure is
+the median of its per-round ratios against the one-sandbox row of the same
+column and round.
+
+| bench | in-process (interpreter) | process sandbox | podman | bwrap |
+|---|---|---|---|---|
+| Start, one sandbox | n/a | 2.20 ms | pending | pending |
+| Start, two sandboxes | n/a | 4.46 ms (2.02×) | pending | pending |
+| Start, three sandboxes | n/a | 6.70 ms (3.01×) | pending | pending |
+| One call making one `http_request`, one sandbox | 1.83 ms | 1.86 ms | pending | pending |
+| The same call, rotated over two sandboxes | n/a | 1.95 ms (+5.3%) | pending | pending |
+| The same call, rotated over three sandboxes | n/a | 2.05 ms (+12.1%) | pending | pending |
+
+Start scales linearly: each extra sandbox is one more runner start to the
+host's hello, 2.2 ms under the process runner, with the per-round ratios
+inside 1.99 to 2.15 for two and 2.97 to 3.18 for three. The whole Start cycle,
+which adds the claude Connector's first load and the teardown, is 207, 418 and
+621 ms; the load is paid per Connector whether or not it has a sandbox of its
+own, so it is not a cost of the extra sandboxes. A Host call costs 0.09 ms more
+spread over two live sandboxes and 0.19 ms more over three, with per-round
+ratios from +0.3% to +24% and +7% to +39%; the cause is not established. A real
+dispatch does not rotate one Connector across sandboxes, so this bounds rather
+than measures what a backend row's calls pay.
+
+The extra sandboxes stay well under a second per dispatch under the process
+runner: two extra cost 4.5 ms. The isolating runtimes are not measured here.
+If they scale as the process runner does, the #7018 single starts (20.73 ms
+under bwrap, 206.4 ms under podman) put the two extra sandboxes at about 41 ms
+under bwrap, well under a second, and about 413 ms under podman, under a second
+but not well under it. The pending columns confirm or correct that.
+
+**Pending: the bwrap and podman columns.** Neither runs in a Box. A Box's own
+sandbox refuses the mount namespace bwrap needs (`bwrap: Failed to make /
+slave: Operation not permitted`), and a podman column measured inside a Box
+would not be representative. A human fills both columns on a Linux workstation,
+outside any Box, with podman and bwrap installed, from the repo root:
+
+```sh
+export SPINDRIFT_DRIVER_CONNECTOR_WASM=$(nix build --no-link --print-out-paths .#claude-connector)/claude.wasm
+export SPINDRIFT_CONNECTOR_FIXTURES_DIR=$(nix build --no-link --print-out-paths .#connector-wasm-fixtures)
+export SPINDRIFT_CONNECTOR_HOST=$(nix build --no-link --print-out-paths .#connector-host)/bin/connector-host
+export SPINDRIFT_BENCH_SECCOMP_FILTER=$(nix build --no-link --print-out-paths --impure --expr 'let f = builtins.getFlake (toString ./.); in import ./lib/seccomp.nix { pkgs = f.inputs.nixpkgs.legacyPackages.${builtins.currentSystem}; }')
+podman load -i "$(nix build --no-link --print-out-paths .#connector-sandbox-image)"
+export SPINDRIFT_BENCH_SANDBOX_IMAGE=spindrift-connector-sandbox:latest
+(cd cmd/launcher && go test -tags integration -c -o seam.test ./internal/seamtest/)
+cd cmd/launcher/internal/seamtest
+for round in 1 2 3 4 5; do
+  for rt in process bwrap podman; do
+    for x in '' -x2 -x3; do
+      echo "Start/sandbox-$rt$x 10x"
+      echo "HostCall/sandbox-$rt$x 2s"
+    done
+  done | shuf | while read -r row bt; do
+    ../../seam.test -test.run '^$' -test.bench "ConnectorSandbox$row\$" -test.benchtime "$bt"
+  done
+done
+```
+
+Take each row's median `start-ns` (Start) and `ns/op` (HostCall), and its
+ratios against the one-sandbox row of its own runtime and round. The process
+rows rerun beside them, so the workstation's process column can replace this
+Box's. A later amendment records what that run measures.
