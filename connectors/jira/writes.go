@@ -60,7 +60,11 @@ func transition(t tracker.Target, number string, r tracker.TransitionRequest) (t
 	if target.Status == "" {
 		return tracker.TransitionResult{Outcome: tracker.TransitionUnmapped}, nil
 	}
-	path := issuePath(number) + "/transitions"
+	base, err := issuePath(number)
+	if err != nil {
+		return tracker.TransitionResult{}, err
+	}
+	path := base + "/transitions"
 	var payload transitionsPayload
 	if err := get(t, path+"?expand=transitions.fields", &payload); err != nil {
 		return tracker.TransitionResult{}, err
@@ -122,7 +126,11 @@ func editLabels(t tracker.Target, number string, add, remove []string) error {
 	if len(ops) == 0 {
 		return nil
 	}
-	return do(t, "PUT", issuePath(number),
+	path, err := issuePath(number)
+	if err != nil {
+		return err
+	}
+	return do(t, "PUT", path,
 		map[string]any{"update": map[string]any{"labels": ops}}, nil)
 }
 
@@ -156,7 +164,11 @@ func comment(t tracker.Target, number string, r tracker.CommentRequest) error {
 	if r.Research {
 		req["properties"] = []map[string]any{{"key": researchPropertyKey, "value": true}}
 	}
-	return do(t, "POST", issuePath(number)+"/comment", req, nil)
+	path, err := issuePath(number)
+	if err != nil {
+		return err
+	}
+	return do(t, "POST", path+"/comment", req, nil)
 }
 
 // fileIssue creates an issue of type r.IssueType in the target's project and

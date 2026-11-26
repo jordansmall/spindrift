@@ -123,17 +123,35 @@ func TestIssueClosedWithBadDate(t *testing.T) {
 	}
 }
 
-// A key's "?" and "#" are escaped into the path, and one with a "/" is escaped
-// into a path the host's Route match refuses rather than one that climbs out.
+// A key's "?" and "#" are escaped into the path.
 func TestIssueKeyIsPathEscaped(t *testing.T) {
-	got := serve(t, "", `{}`)
-	_, _ = issue(cloud, "ENG-1?y#z")
+	got := script(t, func(connector.Request, *url.URL) (int, string) { return 200, `{}` })
+	if _, err := issue(cloud, "ENG-1?y#z"); err != nil {
+		t.Fatal(err)
+	}
 	if u := (*got)[0].URL; strings.Contains(u, "?y") {
 		t.Fatalf("key reached the URL raw: %s", u)
 	}
-	climb := connector.Request{Method: "GET", URL: site + issuePath("ENG-1/../../x")}
-	if err := host.Admit(climb); !errors.Is(err, connector.ErrRouteRefused) {
-		t.Fatalf("Admit(%s) = %v, want a refusal", climb.URL, err)
+}
+
+// A key that cannot stay one path segment is refused by the Connector before
+// any request is sent (the host would refuse "." and ".." and close the
+// Connector), and the Connector stays usable for the next call.
+func TestIssueKeyRefusedBeforeAnyRequest(t *testing.T) {
+	got := serve(t, "/jira/rest/api/2/issue/ENG-1", `{"key":"ENG-1"}`)
+	for _, key := range []string{"", ".", "..", "ENG-1/../../x", "a;b"} {
+		if _, err := issue(cloud, key); err == nil {
+			t.Errorf("issue(%q) succeeded, want a refusal", key)
+		}
+		if err := comment(cloud, key, tracker.CommentRequest{Body: "x"}); err == nil {
+			t.Errorf("comment(%q) succeeded, want a refusal", key)
+		}
+	}
+	if len(*got) != 0 {
+		t.Fatalf("requests sent for refused keys: %v", *got)
+	}
+	if _, err := issue(cloud, "ENG-1"); err != nil {
+		t.Fatalf("issue after refusals: %v", err)
 	}
 }
 
