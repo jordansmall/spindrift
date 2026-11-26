@@ -9,10 +9,10 @@
 # cannot add one. The App token-grant read, `GET /installation/repositories`,
 # is unpinned too (see tokengrant.go).
 #
-# This is the narrowest table the subtree-only Route model can express, not an
-# exact one: `GET /issues` also admits `/issues/comments/*` and
-# `/issues/events`, `POST /pulls` admits review creation, `PUT /pulls` admits
-# update-branch, and `/actions/jobs` admits every GET beside `/{id}/logs`.
+# This is the narrowest table the Route model (subtree roots, with a `*`
+# segment for exactly one segment) can express, not an exact one: `GET /issues`
+# also admits `/issues/comments/*` and `/issues/events`, `POST /pulls` admits
+# review creation, and `PUT /pulls` admits update-branch.
 # `POST /graphql` admits only the `documents` it declares: the host refuses a
 # body whose `query` is not byte-identical to one of them. Variables stay free,
 # so e.g. the close mutation still reaches any issue the token can, and the
@@ -27,11 +27,9 @@
 # with a 302 to a pre-signed blob URL on a varying host, so no host can be
 # pinned. The second request carries no credential and none of the guest's
 # headers. A log over the response cap arrives as its tail. The hop must dial a
-# public address. The Route is the whole `/actions/jobs` subtree because a
-# subtree root cannot express `/{id}/logs`; that is deliberate. The only other
-# GET under it is the job JSON, which never answers a 3xx, but tail mode applies
-# to the subtree: an over-cap job JSON arrives tail-truncated rather than as
-# ErrResponseTooLarge.
+# public address. The Route is `/actions/jobs/*/logs`, so only a job's log gets
+# the hop and tail mode; the job JSON at `/actions/jobs/{id}` is admitted by no
+# Route.
 #
 # Every Route declares `requestHeaders = apiVersion` (`[ "X-GitHub-Api-Version" ]`): the request
 # helper pins the API version on each request, and the host refuses a header
@@ -77,7 +75,7 @@ in
   {
     method = "GET";
     host = "api.github.com";
-    path = "/repos/{repo}/actions/jobs";
+    path = "/repos/{repo}/actions/jobs/*/logs";
     followRedirect = true;
     requestHeaders = apiVersion;
   }

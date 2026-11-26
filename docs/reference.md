@@ -2821,7 +2821,7 @@ Its read Route table is four routes on `api.github.com`: `GET
 /repos/{repo}/issues` (the list, issue, `dependencies/blocked_by` and
 `blocking` reads), `GET /repos/{repo}/pulls` (branch lookup, one PR), `POST
 /graphql` (the check rollup, the CI run link and the issue comments) and `GET
-/repos/{repo}/actions/jobs` (a failing job's log, `forge.jobLog`, for the fix
+/repos/{repo}/actions/jobs/*/logs` (a failing job's log, `forge.jobLog`, for the fix
 pass's `CI FAILURE` detail; issue #6893). The last sets `followRedirect`,
 because GitHub answers a log read with a 302 to a pre-signed blob URL on a host
 that varies; the host follows that one hop with no credential, and doctor shows
@@ -2833,11 +2833,11 @@ permissions.
 `GET /search/issues` serves the issue search; a Route restricts no query string,
 so its path cannot name `{repo}`, which is acceptable because the route is
 read-only and the Connector always adds a `repo:` qualifier, quoting the
-caller's text so it cannot add one. The subtree-only Route model
-(ADR 0047) makes the table the narrowest, not an exact one: `/issues` also
-admits `GET /issues/comments/*` and `/issues/events`, and `/actions/jobs`
-every other GET under it, none of which a read uses; a Route restricts no
-body to a repository, so no Route can pin `POST /graphql` to it. It does
+caller's text so it cannot add one. The Route model (ADR 0047: subtree roots,
+with a `*` segment for exactly one) makes the table the narrowest, not an exact
+one: `/issues` also admits `GET /issues/comments/*` and `/issues/events`, none
+of which a read uses; a Route restricts no body to a repository, so no Route
+can pin `POST /graphql` to it. It does
 declare documents, so the host refuses any query text but the eleven the
 Connector sends: the rollup, the issue-comments query, the repository-identity
 and token-grant queries, the ready-for-review, convert-to-draft and auto-merge
@@ -2976,7 +2976,7 @@ and the owner's org labels, and applies them by name when the org lookup is
 refused.
 
 Its Route table is the `{base}` host with
-`GET /api/v1/repos/{repo}/actions/jobs` (a failing
+`GET /api/v1/repos/{repo}/actions/jobs/*/logs` (a failing
 job's log, with `followRedirect` set: Forgejo serves the log directly, and the
 opt-in is what hands a log over the response cap back as its tail rather than
 failing the read), `GET /api/v1/repos/{repo}` (the subtree root, which admits
