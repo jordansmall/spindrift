@@ -61,6 +61,7 @@ func TestRunSurvivesDriverSettingNonblockOnSharedStderr(t *testing.T) {
 	bin := writeFakeDriver(t, dir, "fake-driver",
 		nonblockStderrEnv+"=1 exec "+self+" -test.run='^TestHelperNonblockStderrDriver$'\n")
 	cfg := execConfig{
+		drivers:      testDrivers(t),
 		driverBin:    bin,
 		logPath:      filepath.Join(dir, "stream.log"),
 		heartbeatLog: filepath.Join(dir, "heartbeat.log"),

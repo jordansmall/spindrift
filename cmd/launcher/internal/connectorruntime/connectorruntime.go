@@ -100,6 +100,16 @@ func FromRegistries(creds map[string]credsource.Row, sandbox connectorsandbox.Lo
 	return newRuntime(backendrows.Lookup, creds, sandbox)
 }
 
+// InProcess is the Box's runtime: no backend rows, no credentials and no
+// sandbox, offering the Drivers rows names loaded in-process, first-party
+// Connectors only (driverrows.Rows.InProcess). Any load through Load fails with
+// connectorsandbox.ErrNoConnectorSandbox.
+func InProcess(rows driverrows.Rows) *Runtime {
+	r := New(nil, nil, nil)
+	r.drivers = rows.InProcess()
+	return r
+}
+
 // HasSandbox is whether the runtime was built with a sandbox to load into; a
 // nil runtime has none.
 func (r *Runtime) HasSandbox() bool { return r != nil && r.sandbox != nil }

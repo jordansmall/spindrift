@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/driver"
 )
 
 func writeTestOutputs(t *testing.T) OutputPaths {
@@ -68,7 +70,7 @@ func TestWriteAssemblyWritesFilesAndLayersHandoff(t *testing.T) {
 	out := writeTestOutputs(t)
 	var warn strings.Builder
 
-	result, err := WriteAssembly(env, reg, testValidateMarkerRows(), testPassthrough(), out, &warn)
+	result, err := WriteAssembly(env, reg, driver.NewSet(), testValidateMarkerRows(), testPassthrough(), out, &warn)
 	if err != nil {
 		t.Fatalf("WriteAssembly: %v", err)
 	}
@@ -124,7 +126,7 @@ func TestWriteAssemblyNoAgentsJSONLeavesAgentsFileEmpty(t *testing.T) {
 	out := writeTestOutputs(t)
 	reg, env := writeRegistry(t)
 
-	result, err := WriteAssembly(env, reg, testValidateMarkerRows(), testPassthrough(), out, &strings.Builder{})
+	result, err := WriteAssembly(env, reg, driver.NewSet(), testValidateMarkerRows(), testPassthrough(), out, &strings.Builder{})
 	if err != nil {
 		t.Fatalf("WriteAssembly: %v", err)
 	}
@@ -141,7 +143,7 @@ func TestWriteAssemblyReviewPromptOnlyWhenRendered(t *testing.T) {
 		out := writeTestOutputs(t)
 		out.ReviewPrompt = ""
 		reg, env := writeRegistry(t)
-		result, err := WriteAssembly(env, reg, testValidateMarkerRows(), testPassthrough(), out, &strings.Builder{})
+		result, err := WriteAssembly(env, reg, driver.NewSet(), testValidateMarkerRows(), testPassthrough(), out, &strings.Builder{})
 		if err != nil {
 			t.Fatalf("WriteAssembly: %v", err)
 		}
@@ -157,7 +159,7 @@ func TestWriteAssemblyReviewPromptOnlyWhenRendered(t *testing.T) {
 		out := writeTestOutputs(t)
 		reg, env := writeRegistry(t)
 		env.DispatchKind = "research"
-		result, err := WriteAssembly(env, reg, nil, testPassthrough(), out, &strings.Builder{})
+		result, err := WriteAssembly(env, reg, driver.NewSet(), nil, testPassthrough(), out, &strings.Builder{})
 		if err != nil {
 			t.Fatalf("WriteAssembly: %v", err)
 		}
@@ -182,7 +184,7 @@ func TestWriteAssemblyValidateRejectWritesNoHandoff(t *testing.T) {
 		When: "readOnlyResearch", Message: "reject-message",
 	}}
 
-	_, err := WriteAssembly(env, reg, rows, testPassthrough(), out, &strings.Builder{})
+	_, err := WriteAssembly(env, reg, driver.NewSet(), rows, testPassthrough(), out, &strings.Builder{})
 	var ve *ValidateError
 	if !errors.As(err, &ve) {
 		t.Fatalf("err = %v, want *ValidateError", err)
@@ -207,7 +209,7 @@ func TestWriteAssemblyWarningsGoToWriter(t *testing.T) {
 	}}
 	var warn strings.Builder
 
-	if _, err := WriteAssembly(env, reg, rows, testPassthrough(), writeTestOutputs(t), &warn); err != nil {
+	if _, err := WriteAssembly(env, reg, driver.NewSet(), rows, testPassthrough(), writeTestOutputs(t), &warn); err != nil {
 		t.Fatalf("WriteAssembly: %v", err)
 	}
 	if warn.String() != "warn-message\n" {
@@ -220,7 +222,7 @@ func TestWriteAssemblyWriteErrorIsWrappedNotValidate(t *testing.T) {
 	out.Prompt = filepath.Join(t.TempDir(), "missing-dir", "prompt.md")
 	reg, env := writeRegistry(t)
 
-	_, err := WriteAssembly(env, reg, nil, testPassthrough(), out, &strings.Builder{})
+	_, err := WriteAssembly(env, reg, driver.NewSet(), nil, testPassthrough(), out, &strings.Builder{})
 	if err == nil || !strings.HasPrefix(err.Error(), "write prompt output: ") {
 		t.Fatalf("err = %v, want 'write prompt output:' prefix", err)
 	}
@@ -293,7 +295,7 @@ func TestWriteAssemblyReviewModelSuffixSetsReviewEffort(t *testing.T) {
 			p := testPassthrough()
 			p.Driver = tt.driver
 
-			result, err := WriteAssembly(env, reg, testValidateMarkerRows(), p, writeTestOutputs(t), &strings.Builder{})
+			result, err := WriteAssembly(env, reg, driver.NewSet(), testValidateMarkerRows(), p, writeTestOutputs(t), &strings.Builder{})
 			if err != nil {
 				t.Fatalf("WriteAssembly: %v", err)
 			}

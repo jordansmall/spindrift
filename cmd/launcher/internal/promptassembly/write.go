@@ -49,8 +49,9 @@ func (e *ValidateError) Unwrap() error { return e.Err }
 // prompt, agents JSON, optional review prompt and fragments, and finally the
 // Handoff JSON. Handoff is written last so a failure earlier never leaves a
 // handoff pointing at files that were not written. The returned Result carries
-// the layered Handoff.
-func WriteAssembly(env Env, reg Registry, markers []ValidateMarkerRow, p Passthrough, out OutputPaths, w io.Writer) (Result, error) {
+// the layered Handoff. drivers is the Set whose effort-on-model levels decide
+// the reviewer effort of a model-suffix level.
+func WriteAssembly(env Env, reg Registry, drivers *driver.Set, markers []ValidateMarkerRow, p Passthrough, out OutputPaths, w io.Writer) (Result, error) {
 	result, err := Assemble(env, reg)
 	if err != nil {
 		return result, err
@@ -82,7 +83,7 @@ func WriteAssembly(env Env, reg Registry, markers []ValidateMarkerRow, p Passthr
 	// model-suffix level, so a REVIEW_MODEL level suffix must set the reviewer
 	// effort too, unless REVIEW_EFFORT is explicit (issue #5625).
 	if env.ReviewEffortOverride == "" {
-		if level, ok := effortSuffixLevel(env.ReviewModelOverride, p.Driver); ok {
+		if level, ok := effortSuffixLevel(drivers, env.ReviewModelOverride, p.Driver); ok {
 			result.Handoff.ReviewEffort = level
 		}
 	}
@@ -148,11 +149,11 @@ func ScanSkillsFound(dir string) string {
 // effortSuffixLevel returns the trailing ":<level>" of model when level is one
 // of the Driver's effort-on-model levels, splitting at the last colon like
 // lib/effort-on-model.nix.
-func effortSuffixLevel(model, driverName string) (string, bool) {
+func effortSuffixLevel(drivers *driver.Set, model, driverName string) (string, bool) {
 	i := strings.LastIndexByte(model, ':')
 	if i < 0 {
 		return "", false
 	}
 	level := model[i+1:]
-	return level, slices.Contains(driver.EffortOnModelLevels(driverName), level)
+	return level, slices.Contains(drivers.EffortOnModelLevels(driverName), level)
 }

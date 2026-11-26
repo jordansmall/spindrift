@@ -24,6 +24,9 @@ import (
 // writeHandoffFile builds the -handoff-file fixture (issue #2975 slice 3).
 func writeHandoffFile(t *testing.T, h promptassembly.Handoff) string {
 	t.Helper()
+	if h.DriverRowsFile == "" {
+		h.DriverRowsFile = drivertest.ClaudeRowsFile(t) // the Box always hands driver-exec its rows file
+	}
 	data, err := json.Marshal(h)
 	if err != nil {
 		t.Fatalf("marshal handoff: %v", err)
@@ -339,9 +342,9 @@ func TestResolveExitAppliesOpencodeErrorEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	d, err := driver.New("opencode")
+	d, err := testDrivers(t).New("opencode")
 	if err != nil {
-		t.Fatalf("driver.New(opencode): %v", err)
+		t.Fatalf("New(opencode): %v", err)
 	}
 
 	if got := resolveExit(d, 0, logPath); got != 1 {
@@ -355,9 +358,9 @@ func TestResolveExitAppliesOpencodeErrorEvent(t *testing.T) {
 // TestResolveExitLeavesClaudeExitCodeUntouched pins the no-op case: claude's
 // ResolveExit trusts the child rc, so resolveExit must not change it.
 func TestResolveExitLeavesClaudeExitCodeUntouched(t *testing.T) {
-	d, err := driver.New("claude")
+	d, err := testDrivers(t).New("claude")
 	if err != nil {
-		t.Fatalf("driver.New(claude): %v", err)
+		t.Fatalf("New(claude): %v", err)
 	}
 
 	got := resolveExit(d, 7, filepath.Join(t.TempDir(), "does-not-exist.log"))
@@ -516,7 +519,6 @@ func TestMainRunRefusesThirdPartyHandoffDriverRows(t *testing.T) {
 // rows file and requires the not-first-party refusal before anything runs.
 func refusesDriverRows(t *testing.T, rows string) {
 	t.Helper()
-	drivertest.Isolate(t)
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")
 	if err := os.WriteFile(promptFile, []byte("run the fixture"), 0o600); err != nil {
@@ -551,7 +553,6 @@ func TestMainRunLoadsFirstPartyMarkedDriverRow(t *testing.T) {
 	if fixtures == "" {
 		t.Skip("SPINDRIFT_CONNECTOR_FIXTURES_DIR is unset")
 	}
-	drivertest.Isolate(t)
 	dir := t.TempDir()
 	b, err := json.Marshal([]map[string]any{{
 		"name":       "fixture",
@@ -640,7 +641,6 @@ func shadowRunDriverTo(t *testing.T, name, rows, logLine string, rc int, stdout 
 // Pass log path returned.
 func shadowRunDriverLog(t *testing.T, name, rows, logLine string, rc int, stdout, stderr io.Writer) (int, string) {
 	t.Helper()
-	drivertest.Isolate(t)
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.txt")
 	writeTestFile(t, promptFile, "run the task")
@@ -708,7 +708,7 @@ func nativeShadowRow(t *testing.T, module string) string {
 
 func shadowRow(t *testing.T, name, module string) string {
 	t.Helper()
-	desc, ok := driver.DescriptorFor(name)
+	desc, ok := testDrivers(t).DescriptorFor(name)
 	if !ok {
 		t.Fatalf("%s has no Descriptor", name)
 	}

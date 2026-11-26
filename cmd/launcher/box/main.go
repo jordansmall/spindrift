@@ -30,7 +30,8 @@ import (
 	"spindrift.dev/launcher/internal/boxclone"
 	"spindrift.dev/launcher/internal/branchrecovery"
 	"spindrift.dev/launcher/internal/bundleout"
-	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers and backends
+	"spindrift.dev/launcher/internal/connectorruntime"
+	"spindrift.dev/launcher/internal/driver/bundle" // also registers the bundled backends
 	"spindrift.dev/launcher/internal/driver/driverrows"
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/homelayout"
@@ -100,10 +101,18 @@ func mainRun(args []string, env promptassembly.Env, d deps) int {
 		}
 		return 2
 	}
-	if err := driverrows.UseFile(in.Assembly.Passthrough.DriverRowsFile); err != nil {
+	rows, err := driverrows.ReadFile(in.Assembly.Passthrough.DriverRowsFile, bundle.Drivers())
+	if err != nil {
 		fmt.Fprintln(d.Stderr, "box:", err)
 		return 1
 	}
+	rt := connectorruntime.InProcess(rows)
+	defer func() {
+		if err := rt.Close(); err != nil {
+			fmt.Fprintln(d.Stderr, "box:", err)
+		}
+	}()
+	in.Assembly.Drivers = rt.Drivers()
 	in = withDirDefaults(in, d.Getenv)
 	rc, err := run(in, env, d)
 	if err != nil {

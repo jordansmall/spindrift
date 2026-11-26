@@ -12,7 +12,6 @@ import (
 
 	"spindrift.dev/launcher/internal/branchrecovery"
 	"spindrift.dev/launcher/internal/conflictresolve"
-	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/testutil"
 	"spindrift.dev/launcher/internal/testutil/repopath"
@@ -34,6 +33,7 @@ func newCRFixture(t *testing.T) *crFixture {
 	f := &crFixture{fixture: newFixture(t)}
 	f.recovery.Conflict = true
 	f.in.Assembly = assemblyInputs{
+		Drivers:   testDrivers(t),
 		SkillsDir: t.TempDir(),
 		AssemblyFlags: promptassembly.AssemblyFlags{
 			RegistryFile: testutil.WriteRegistry(t, nil),
@@ -134,7 +134,7 @@ func (f *crFixture) completeRebase() {
 // would, so the Box can read it back as the pass summary.
 func (f *crFixture) answer(text string) {
 	f.t.Helper()
-	d, err := driver.New(f.in.Assembly.Passthrough.Driver)
+	d, err := f.in.Assembly.Drivers.New(f.in.Assembly.Passthrough.Driver)
 	if err != nil {
 		f.t.Fatal(err)
 	}

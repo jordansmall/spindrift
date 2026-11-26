@@ -38,11 +38,11 @@ func TestPassReadsShareOneDecode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pl := decodePassLog(logPath, "claude")
+	pl := decodePassLog(testDrivers(t), logPath, "claude")
 	scanPassLog(pl, passmachine.KindLegacy)
 	scanPassOutcome(pl)
 	scanReviewLog(pl)
-	report := config{driver: "claude"}.passReport(pl)
+	report := config{drivers: testDrivers(t), driver: "claude"}.passReport(pl)
 
 	if got := decodes.Load(); got != 1 {
 		t.Errorf("decodes = %d, want 1 (one decode for every read of the pass)", got)

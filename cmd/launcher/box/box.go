@@ -18,7 +18,6 @@ import (
 	"spindrift.dev/launcher/internal/branchrecovery"
 	"spindrift.dev/launcher/internal/bundleout"
 	"spindrift.dev/launcher/internal/dispatchkind"
-	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/forge"
@@ -531,7 +530,7 @@ func (r *boxRun) resume(prompt string) error {
 // when the pass reported one. A failed extraction after the pass still reports
 // the orchestrator's exit code.
 func (r *boxRun) pass(handoff, driverName, prompt, sessionMode string) (int, error) {
-	d, err := driver.New(driverName)
+	d, err := r.in.Assembly.Drivers.New(driverName)
 	if err != nil {
 		return 0, phaseErr("driver", err)
 	}
@@ -549,7 +548,7 @@ func (r *boxRun) pass(handoff, driverName, prompt, sessionMode string) (int, err
 	if err != nil {
 		return 0, phaseErr("driver", err)
 	}
-	argv, err := driver.SessionArgs(d.Name(), flags)
+	argv, err := r.in.Assembly.Drivers.SessionArgs(d.Name(), flags)
 	if err != nil {
 		return 0, phaseErr("driver", err)
 	}
@@ -581,7 +580,7 @@ func (r *boxRun) pass(handoff, driverName, prompt, sessionMode string) (int, err
 
 	rc := r.d.Orchestrate(r.orchestratorArgv(handoff, promptFile, sessionFile, streamLog))
 
-	text, err := resultText(driverName, streamLog)
+	text, err := r.resultText(driverName, streamLog)
 	if err != nil {
 		return rc, phaseErr("driver extract", err)
 	}

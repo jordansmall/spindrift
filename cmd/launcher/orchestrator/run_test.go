@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/driver/driverkit"
+	"spindrift.dev/launcher/internal/driver/drivertest"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/passmachine"
 	"spindrift.dev/launcher/internal/passmanifest"
@@ -25,6 +26,9 @@ import (
 // at (issue #2975).
 func writeHandoffFile(t *testing.T, dir string, h promptassembly.Handoff) string {
 	t.Helper()
+	if h.DriverRowsFile == "" {
+		h.DriverRowsFile = drivertest.ClaudeRowsFile(t) // the Box always hands the orchestrator its rows file
+	}
 	path := filepath.Join(dir, "handoff.json")
 	b, err := json.Marshal(h)
 	if err != nil {
@@ -99,7 +103,7 @@ func streamJSONResultLine(inputTokens, outputTokens int, costUSD float64) string
 // driver name degrades to the zero usage.Usage rather than panicking or
 // propagating an error the caller has no way to handle mid-loop.
 func TestPassReportDegradesOnUnresolvableDriver(t *testing.T) {
-	got := testPassReport(filepath.Join(t.TempDir(), "stream.log"), "not-a-real-driver", "").Totals
+	got := testPassReport(t, filepath.Join(t.TempDir(), "stream.log"), "not-a-real-driver", "").Totals
 	if got != (usage.Usage{}) {
 		t.Errorf("passReport().Totals = %+v, want the zero value for an unresolvable driver name", got)
 	}
@@ -110,7 +114,7 @@ func TestPassReportDegradesOnUnresolvableDriver(t *testing.T) {
 // written, an ordinary outcome for a pass cut short, degrades to the zero
 // usage.Usage silently, the same as an unresolvable driver name.
 func TestPassReportDegradesOnMissingLog(t *testing.T) {
-	got := testPassReport(filepath.Join(t.TempDir(), "never-written.log"), "claude", "").Totals
+	got := testPassReport(t, filepath.Join(t.TempDir(), "never-written.log"), "claude", "").Totals
 	if got != (usage.Usage{}) {
 		t.Errorf("passReport().Totals = %+v, want the zero value for a log that was never written", got)
 	}
@@ -120,7 +124,7 @@ func TestPassReportDegradesOnMissingLog(t *testing.T) {
 // not-found path (issue #3156), mirroring passReport's: a log path that was
 // never written degrades to the zero hostop.PassUsage silently.
 func TestAgentUsagePayloadDegradesOnMissingLog(t *testing.T) {
-	got := agentUsagePayload(testPassReport(filepath.Join(t.TempDir(), "never-written.log"), "claude", ""))
+	got := agentUsagePayload(testPassReport(t, filepath.Join(t.TempDir(), "never-written.log"), "claude", ""))
 	if !reflect.DeepEqual(got, hostop.PassUsage{}) {
 		t.Errorf("agentUsagePayload(passReport(...)) = %+v, want the zero value for a log that was never written", got)
 	}
@@ -145,7 +149,7 @@ func TestAgentUsagePayloadSumsAgentRows(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := agentUsagePayload(testPassReport(logPath, "claude", ""))
+	got := agentUsagePayload(testPassReport(t, logPath, "claude", ""))
 
 	want := hostop.PassUsage{
 		APICalls:                 2,
@@ -179,7 +183,7 @@ func TestAgentUsagePayloadOpencodeCarriesAPICalls(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := agentUsagePayload(testPassReport(logPath, "opencode", ""))
+	got := agentUsagePayload(testPassReport(t, logPath, "opencode", ""))
 
 	want := hostop.PassUsage{
 		APICalls:                 2,
@@ -237,6 +241,7 @@ exit 0
 		Issue:       "7",
 	})
 	cfg := config{
+		drivers:     testDrivers(t),
 		handoffFile: handoffFile,
 		promptFile:  filepath.Join(dir, "prompt.txt"),
 		sessionFile: filepath.Join(dir, "session.json"),
@@ -301,6 +306,7 @@ func TestBuildDriverExecCmdForwardsHandoffFileAndPerPassPaths(t *testing.T) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	cfg := config{
+		drivers:      testDrivers(t),
 		handoffFile:  "/some/path.json",
 		promptFile:   "p",
 		sessionFile:  "s",
@@ -343,6 +349,7 @@ func TestBuildDriverExecCmdNeverForwardsStateOrReviewPromptFile(t *testing.T) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		stateFile:        "/tmp/coordinator-run-state.json",
 		reviewPromptFile: "/tmp/coordinator-review-prompt.md",
 	}
@@ -372,6 +379,7 @@ func TestBuildDriverExecCmdForwardsTopLevelRoleFlag(t *testing.T) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	cfg := config{
+		drivers:      testDrivers(t),
 		topLevelRole: "reviewer",
 	}
 	cmd, err := buildDriverExecCmd(cfg)
@@ -408,6 +416,7 @@ exit 0
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	cfg := config{
+		drivers:    testDrivers(t),
 		promptFile: filepath.Join(dir, "prompt.txt"),
 		logPath:    filepath.Join(dir, "stream.log"),
 	}
@@ -463,6 +472,7 @@ exit 0
 		t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 		cfg := config{
+			drivers:    testDrivers(t),
 			promptFile: filepath.Join(dir, "prompt.txt"),
 			logPath:    filepath.Join(dir, "stream.log"),
 		}
@@ -501,6 +511,7 @@ exit 0
 		}
 
 		cfg := config{
+			drivers:          testDrivers(t),
 			promptFile:       promptFile,
 			reviewPromptFile: reviewPromptFile,
 			sessionFile:      sessionFile,
@@ -540,6 +551,7 @@ func TestRunPropagatesDriverExecExitCode(t *testing.T) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	cfg := config{
+		drivers:    testDrivers(t),
 		promptFile: filepath.Join(dir, "prompt.txt"),
 		logPath:    filepath.Join(dir, "stream.log"),
 	}
@@ -566,6 +578,7 @@ func TestRunSurfacesNoOutcomeMarkerAndPropagatesExitCodeWhenPassStalls(t *testin
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	cfg := config{
+		drivers:    testDrivers(t),
 		promptFile: filepath.Join(dir, "prompt.txt"),
 		logPath:    filepath.Join(dir, "stream.log"),
 	}
@@ -609,6 +622,7 @@ func TestRunReadsAndWritesRunState(t *testing.T) {
 	}
 
 	cfg := config{
+		drivers:        testDrivers(t),
 		promptFile:     promptFile,
 		logPath:        filepath.Join(dir, "stream.log"),
 		stateFile:      stateFile,
@@ -649,6 +663,7 @@ func TestRunEmitsRunStateErrorMarkerOnWriteFailure(t *testing.T) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	cfg := config{
+		drivers:    testDrivers(t),
 		promptFile: filepath.Join(dir, "prompt.txt"),
 		logPath:    filepath.Join(dir, "stream.log"),
 		stateFile:  filepath.Join(dir, "missing-parent", "run-state.json"),
@@ -679,6 +694,7 @@ func TestRunEmitsRunStateErrorMarkerOnReadFailure(t *testing.T) {
 	}
 
 	cfg := config{
+		drivers:    testDrivers(t),
 		promptFile: filepath.Join(dir, "prompt.txt"),
 		logPath:    filepath.Join(dir, "stream.log"),
 		stateFile:  stateFile,
@@ -706,6 +722,7 @@ func TestRunPreservesDriverExitCodeWhenRunStateWriteFails(t *testing.T) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	cfg := config{
+		drivers:    testDrivers(t),
 		promptFile: filepath.Join(dir, "prompt.txt"),
 		logPath:    filepath.Join(dir, "stream.log"),
 		stateFile:  filepath.Join(dir, "missing-parent", "run-state.json"),
@@ -736,6 +753,7 @@ func TestRunProceedsOnCorruptRunState(t *testing.T) {
 	}
 
 	cfg := config{
+		drivers:    testDrivers(t),
 		promptFile: filepath.Join(dir, "prompt.txt"),
 		logPath:    filepath.Join(dir, "stream.log"),
 		stateFile:  stateFile,
@@ -775,6 +793,7 @@ func TestRunKeepsPriorScoutBriefPathWhenConfigOmitsIt(t *testing.T) {
 	}
 
 	cfg := config{
+		drivers:    testDrivers(t),
 		promptFile: promptFile,
 		logPath:    filepath.Join(dir, "stream.log"),
 		stateFile:  stateFile,
@@ -812,6 +831,7 @@ func TestRunRecordsPassSummaryPathIntoRunState(t *testing.T) {
 	}
 
 	cfg := config{
+		drivers:         testDrivers(t),
 		promptFile:      promptFile,
 		logPath:         filepath.Join(dir, "stream.log"),
 		stateFile:       filepath.Join(dir, "run-state.json"),
@@ -854,6 +874,7 @@ func TestRunKeepsPriorPassSummaryPathWhenConfigOmitsIt(t *testing.T) {
 	}
 
 	cfg := config{
+		drivers:    testDrivers(t),
 		promptFile: promptFile,
 		logPath:    filepath.Join(dir, "stream.log"),
 		stateFile:  stateFile,
@@ -897,6 +918,7 @@ func TestRunClearsPassSummaryPathWhenPassDoesNotWriteFile(t *testing.T) {
 	}
 
 	cfg := config{
+		drivers:         testDrivers(t),
 		promptFile:      promptFile,
 		logPath:         filepath.Join(dir, "stream.log"),
 		stateFile:       stateFile,
@@ -934,6 +956,7 @@ func TestRunRecordsDispositionsPathIntoRunState(t *testing.T) {
 	}
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		logPath:          filepath.Join(dir, "stream.log"),
 		stateFile:        filepath.Join(dir, "run-state.json"),
@@ -976,6 +999,7 @@ func TestRunKeepsPriorDispositionsPathWhenConfigOmitsIt(t *testing.T) {
 	}
 
 	cfg := config{
+		drivers:    testDrivers(t),
 		promptFile: promptFile,
 		logPath:    filepath.Join(dir, "stream.log"),
 		stateFile:  stateFile,
@@ -1018,6 +1042,7 @@ func TestRunClearsDispositionsPathWhenPassDoesNotWriteFile(t *testing.T) {
 	}
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		logPath:          filepath.Join(dir, "stream.log"),
 		stateFile:        stateFile,
@@ -1055,6 +1080,7 @@ func TestRunRecordsDecisionsPathIntoRunState(t *testing.T) {
 	}
 
 	cfg := config{
+		drivers:       testDrivers(t),
 		promptFile:    promptFile,
 		logPath:       filepath.Join(dir, "stream.log"),
 		stateFile:     filepath.Join(dir, "run-state.json"),
@@ -1097,6 +1123,7 @@ func TestRunKeepsPriorDecisionsPathWhenConfigOmitsIt(t *testing.T) {
 	}
 
 	cfg := config{
+		drivers:    testDrivers(t),
 		promptFile: promptFile,
 		logPath:    filepath.Join(dir, "stream.log"),
 		stateFile:  stateFile,
@@ -1139,6 +1166,7 @@ func TestRunClearsDecisionsPathWhenPassDoesNotWriteFile(t *testing.T) {
 	}
 
 	cfg := config{
+		drivers:       testDrivers(t),
 		promptFile:    promptFile,
 		logPath:       filepath.Join(dir, "stream.log"),
 		stateFile:     stateFile,
@@ -1181,6 +1209,7 @@ func TestRunUnlinksStalePassSummaryPathBeforePass(t *testing.T) {
 	}
 
 	cfg := config{
+		drivers:         testDrivers(t),
 		promptFile:      promptFile,
 		logPath:         filepath.Join(dir, "stream.log"),
 		stateFile:       filepath.Join(dir, "run-state.json"),
@@ -1257,6 +1286,7 @@ func TestRunClearsPassSummaryPathWhenPassLeavesSeededFileUntouched(t *testing.T)
 	}
 
 	cfg := config{
+		drivers:         testDrivers(t),
 		promptFile:      promptFile,
 		logPath:         filepath.Join(dir, "stream.log"),
 		stateFile:       stateFile,
@@ -1318,6 +1348,7 @@ exit 0
 	stateFile := filepath.Join(dir, "run-state.json")
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		logPath:          filepath.Join(dir, "stream.log"),
@@ -1366,6 +1397,7 @@ func TestRunWithReviewPassKeepsPriorPassSummaryPathWhenConfigOmitsIt(t *testing.
 	}
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		logPath:          filepath.Join(dir, "stream.log"),
@@ -1404,6 +1436,7 @@ func TestRunEmitsVerdictMarkerOnStdout(t *testing.T) {
 	}
 
 	cfg := config{
+		drivers:         testDrivers(t),
 		promptFile:      promptFile,
 		logPath:         filepath.Join(dir, "stream.log"),
 		stateFile:       filepath.Join(dir, "run-state.json"),
@@ -1441,6 +1474,7 @@ func TestRunEmitsDecisionMarkerOnStdout(t *testing.T) {
 	}
 
 	cfg := config{
+		drivers:         testDrivers(t),
 		promptFile:      promptFile,
 		logPath:         filepath.Join(dir, "stream.log"),
 		stateFile:       filepath.Join(dir, "run-state.json"),
@@ -1486,6 +1520,7 @@ exit 0
 			stateFile := filepath.Join(dir, "run-state.json")
 
 			cfg := config{
+				drivers:          testDrivers(t),
 				promptFile:       promptFile,
 				logPath:          filepath.Join(dir, "stream.log"),
 				stateFile:        stateFile,
@@ -1556,6 +1591,7 @@ func runReviewLoopFixture(t *testing.T, round1Decisions, round2Decisions string)
 	stateFile = filepath.Join(dir, "run-state.json")
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
@@ -1615,6 +1651,7 @@ func TestRunDecisionOpsAlwaysHaveNonEmptyReason(t *testing.T) {
 		}
 
 		cfg := config{
+			drivers:         testDrivers(t),
 			promptFile:      promptFile,
 			logPath:         filepath.Join(dir, "stream.log"),
 			stateFile:       filepath.Join(dir, "run-state.json"),
@@ -1649,6 +1686,7 @@ exit 0
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	cfg := config{
+		drivers:    testDrivers(t),
 		promptFile: filepath.Join(dir, "prompt.txt"),
 		logPath:    filepath.Join(dir, "stream.log"),
 	}
@@ -1679,6 +1717,7 @@ exit 0
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	cfg := config{
+		drivers:    testDrivers(t),
 		promptFile: filepath.Join(dir, "prompt.txt"),
 		logPath:    filepath.Join(dir, "stream.log"),
 	}
@@ -1711,6 +1750,7 @@ exit 0
 	}
 
 	cfg := config{
+		drivers:         testDrivers(t),
 		promptFile:      promptFile,
 		logPath:         filepath.Join(dir, "stream.log"),
 		maxReviewRounds: 2,
@@ -1839,6 +1879,7 @@ func TestRunWithReviewPassSequenceOnBlockThenApprove(t *testing.T) {
 	stateFile := filepath.Join(dir, "run-state.json")
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
@@ -1970,6 +2011,7 @@ func TestRunWithReviewPassWritesPassManifest(t *testing.T) {
 	manifestPath := filepath.Join(dir, "pass-manifest.json")
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
@@ -2078,6 +2120,7 @@ func TestRunWithReviewPassLandDeltaNonZero(t *testing.T) {
 	manifestPath := filepath.Join(dir, "pass-manifest.json")
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
@@ -2152,6 +2195,7 @@ func TestRunWithReviewPassLandDeltaUnknownAnchor(t *testing.T) {
 	manifestPath := filepath.Join(dir, "pass-manifest.json")
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
@@ -2220,6 +2264,7 @@ func TestRunManifestPathEmptyWritesNoFile(t *testing.T) {
 	stateFile := filepath.Join(dir, "run-state.json")
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
@@ -2277,6 +2322,7 @@ exit 0
 	}
 
 	cfg := config{
+		drivers:      testDrivers(t),
 		promptFile:   promptFile,
 		logPath:      filepath.Join(dir, "stream.log"),
 		stateFile:    stateFile,
@@ -2360,6 +2406,7 @@ exit 0
 	}
 
 	cfg := config{
+		drivers:         testDrivers(t),
 		promptFile:      promptFile,
 		logPath:         filepath.Join(dir, "stream.log"),
 		stateFile:       filepath.Join(dir, "run-state.json"),
@@ -2441,6 +2488,7 @@ func TestRunWithReviewPassNudgeResumeContinuesManifestNumbering(t *testing.T) {
 	}
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
@@ -2559,6 +2607,7 @@ exit 0
 	}
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		logPath:          filepath.Join(dir, "stream.log"),
@@ -2683,6 +2732,7 @@ func TestRunWithReviewPassSeedsRoundTwoWithDeltaFocusFromRecordedAnchor(t *testi
 	stateFile := filepath.Join(dir, "run-state.json")
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
@@ -2769,6 +2819,7 @@ func TestRunWithReviewPassRoundOneNeverSeededEvenWithPriorState(t *testing.T) {
 	}
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
@@ -2824,6 +2875,7 @@ func TestRunWithReviewPassSeedsRoundTwoWithDispositions(t *testing.T) {
 	stateFile := filepath.Join(dir, "run-state.json")
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
@@ -2917,6 +2969,7 @@ func TestRunWithReviewPassSeedsPassThreeWithDecisionsRecord(t *testing.T) {
 	stateFile := filepath.Join(dir, "run-state.json")
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
@@ -3029,6 +3082,7 @@ func TestRunWithReviewPassPersistsDecisionsPathWhenTheFinalPassWritesIt(t *testi
 	stateFile := filepath.Join(dir, "run-state.json")
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
@@ -3176,6 +3230,7 @@ func TestRunWithReviewPassFirstPassPromptUnseededWhenStateStartsEmpty(t *testing
 	stateFile := filepath.Join(dir, "run-state.json")
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
@@ -3230,6 +3285,7 @@ func TestRunWithReviewPassRemovesPriorRoundSeededReviewPromptButKeepsTheLast(t *
 	stateFile := filepath.Join(dir, "run-state.json")
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
@@ -3306,6 +3362,7 @@ func TestRunWithReviewPassAccumulatesDispositionsAcrossRoundsInDispositionsLog(t
 	stateFile := filepath.Join(dir, "run-state.json")
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
@@ -3401,6 +3458,7 @@ func TestRunWithReviewPassEmitsRunStateErrorWhenDispositionsLogAppendFails(t *te
 	}
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
@@ -3450,6 +3508,7 @@ func TestRunWithReviewPassEmitsRunStateErrorWhenDispositionsTokenBudgetExceeded(
 	stateFile := filepath.Join(dir, "run-state.json")
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
@@ -3504,6 +3563,7 @@ func TestRunWithReviewPassEmitsRunStateErrorWhenDecisionsLogAppendFails(t *testi
 	}
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
@@ -3553,6 +3613,7 @@ func TestRunWithReviewPassEmitsRunStateErrorWhenDecisionsTokenBudgetExceeded(t *
 	stateFile := filepath.Join(dir, "run-state.json")
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
@@ -3606,6 +3667,7 @@ func TestRunWithReviewPassAccumulatesFindingsAcrossRoundsInFindingsLog(t *testin
 	stateFile := filepath.Join(dir, "run-state.json")
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
@@ -3718,6 +3780,7 @@ func TestRunWithReviewPassEmitsRunStateErrorWhenFindingsLogAppendFails(t *testin
 	}
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
@@ -3762,6 +3825,7 @@ func TestRunWithReviewPassSendsTopLevelRoleReviewerForReviewPassAndImplementorFo
 	stateFile := filepath.Join(dir, "run-state.json")
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
@@ -3835,6 +3899,7 @@ func TestRunWithReviewPassStopsWhenLandPassProducesNoOutcomeAfterApprove(t *test
 	stateFile := filepath.Join(dir, "run-state.json")
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		sessionFile:      sessionFile,
@@ -3913,6 +3978,7 @@ exit 0
 	}
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		logPath:          filepath.Join(dir, "stream.log"),
@@ -3986,6 +4052,7 @@ exit 0
 	}
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		logPath:          filepath.Join(dir, "stream.log"),
@@ -4048,6 +4115,7 @@ func TestRunWithReviewPassPromptNeverSeededWithPassSummary(t *testing.T) {
 	}
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		logPath:          filepath.Join(dir, "stream.log"),
@@ -4127,6 +4195,7 @@ exit 0
 	}
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		logPath:          filepath.Join(dir, "stream.log"),
@@ -4189,6 +4258,7 @@ exit 0
 	}
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		logPath:          filepath.Join(dir, "stream.log"),
@@ -4250,6 +4320,7 @@ exit 0
 	}
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		logPath:          filepath.Join(dir, "stream.log"),
@@ -4324,6 +4395,7 @@ func TestRunWithReviewPassIgnoresBudgetCapsWhenUnset(t *testing.T) {
 	}
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		logPath:          filepath.Join(dir, "stream.log"),
@@ -4386,6 +4458,7 @@ exit 0
 	}
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		logPath:          filepath.Join(dir, "stream.log"),
@@ -4451,6 +4524,7 @@ exit 0
 	}
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		logPath:          filepath.Join(dir, "stream.log"),
@@ -4535,6 +4609,7 @@ exit 0
 	}
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		logPath:          filepath.Join(dir, "stream.log"),
@@ -4595,6 +4670,7 @@ exit 0
 	stateFile := filepath.Join(dir, "run-state.json")
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		logPath:          filepath.Join(dir, "stream.log"),
@@ -4674,6 +4750,7 @@ exit 0
 	}
 
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		logPath:          filepath.Join(dir, "stream.log"),
@@ -4721,6 +4798,7 @@ func TestRunLoopsOnBlockThenApproveWithFreshSessionPerPass(t *testing.T) {
 
 	stateFile := filepath.Join(dir, "run-state.json")
 	cfg := config{
+		drivers:         testDrivers(t),
 		promptFile:      promptFile,
 		sessionFile:     filepath.Join(dir, "session.json"),
 		logPath:         filepath.Join(dir, "stream.log"),
@@ -4800,6 +4878,7 @@ func TestRunSeedsSubsequentPassPromptFromRunState(t *testing.T) {
 	}
 
 	cfg := config{
+		drivers:         testDrivers(t),
 		promptFile:      promptFile,
 		logPath:         filepath.Join(dir, "stream.log"),
 		stateFile:       filepath.Join(dir, "run-state.json"),
@@ -5821,6 +5900,7 @@ func TestRunSeedsFixBriefWithVerdictAfterBlock(t *testing.T) {
 	}
 
 	cfg := config{
+		drivers:         testDrivers(t),
 		promptFile:      promptFile,
 		logPath:         filepath.Join(dir, "stream.log"),
 		stateFile:       stateFile,
@@ -5875,6 +5955,7 @@ exit 0
 	}
 
 	cfg := config{
+		drivers:         testDrivers(t),
 		promptFile:      promptFile,
 		logPath:         filepath.Join(dir, "stream.log"),
 		maxReviewRounds: 2,
@@ -5915,6 +5996,7 @@ exit 0
 	}
 
 	cfg := config{
+		drivers:         testDrivers(t),
 		promptFile:      promptFile,
 		logPath:         filepath.Join(dir, "stream.log"),
 		maxReviewRounds: 2,
@@ -5960,6 +6042,7 @@ exit 0
 	}
 
 	cfg := config{
+		drivers:         testDrivers(t),
 		promptFile:      promptFile,
 		logPath:         filepath.Join(dir, "stream.log"),
 		maxReviewRounds: 0,
@@ -6006,6 +6089,7 @@ exit 0
 	}
 
 	cfg := config{
+		drivers:         testDrivers(t),
 		promptFile:      promptFile,
 		logPath:         filepath.Join(dir, "stream.log"),
 		stateFile:       filepath.Join(dir, "never-written-until-now.json"),
@@ -6054,7 +6138,7 @@ func TestScanPassLogDetectsOutcomeThroughStreamJSONAndMarkdownWrap(t *testing.T)
 		t.Fatal(err)
 	}
 
-	verdict, hasOutcome := scanPassLog(decodePassLog(logPath, "claude"), passmachine.KindLegacy)
+	verdict, hasOutcome := scanPassLog(decodePassLog(testDrivers(t), logPath, "claude"), passmachine.KindLegacy)
 	if verdict != "BLOCK" {
 		t.Errorf("verdict = %q, want %q", verdict, "BLOCK")
 	}
@@ -6074,7 +6158,7 @@ func TestScanPassLogFindsNothingInPlainStreamJSONNarration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	verdict, hasOutcome := scanPassLog(decodePassLog(logPath, "claude"), passmachine.KindLegacy)
+	verdict, hasOutcome := scanPassLog(decodePassLog(testDrivers(t), logPath, "claude"), passmachine.KindLegacy)
 	if verdict != "" {
 		t.Errorf("verdict = %q, want empty", verdict)
 	}
@@ -6097,7 +6181,7 @@ func TestScanPassLogBlockBeatsLaterInjectedApprove(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	verdict, _ := scanPassLog(decodePassLog(logPath, "claude"), passmachine.KindLegacy)
+	verdict, _ := scanPassLog(decodePassLog(testDrivers(t), logPath, "claude"), passmachine.KindLegacy)
 	if verdict != "BLOCK" {
 		t.Errorf("verdict = %q, want %q", verdict, "BLOCK")
 	}
@@ -6116,7 +6200,7 @@ func TestScanPassLogBlockBeatsEarlierInjectedApprove(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	verdict, _ := scanPassLog(decodePassLog(logPath, "claude"), passmachine.KindLegacy)
+	verdict, _ := scanPassLog(decodePassLog(testDrivers(t), logPath, "claude"), passmachine.KindLegacy)
 	if verdict != "BLOCK" {
 		t.Errorf("verdict = %q, want %q", verdict, "BLOCK")
 	}
@@ -6151,7 +6235,7 @@ func TestScanPassLogBlockBeatsInjectedApproveAcrossVectors(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			verdict, _ := scanPassLog(decodePassLog(logPath, "claude"), passmachine.KindLegacy)
+			verdict, _ := scanPassLog(decodePassLog(testDrivers(t), logPath, "claude"), passmachine.KindLegacy)
 			if verdict != "BLOCK" {
 				t.Errorf("verdict = %q, want %q", verdict, "BLOCK")
 			}
@@ -6171,7 +6255,7 @@ func TestScanPassLogApproveOnlyStillApproves(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	verdict, _ := scanPassLog(decodePassLog(logPath, "claude"), passmachine.KindLegacy)
+	verdict, _ := scanPassLog(decodePassLog(testDrivers(t), logPath, "claude"), passmachine.KindLegacy)
 	if verdict != "APPROVE" {
 		t.Errorf("verdict = %q, want %q", verdict, "APPROVE")
 	}
@@ -6191,7 +6275,7 @@ func TestScanPassLogIgnoresVerdictPlantedInOrdinaryToolResult(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	verdict, _ := scanPassLog(decodePassLog(logPath, "claude"), passmachine.KindLegacy)
+	verdict, _ := scanPassLog(decodePassLog(testDrivers(t), logPath, "claude"), passmachine.KindLegacy)
 	if verdict != "" {
 		t.Errorf("verdict = %q, want empty -- an ordinary tool_result must never count as a verdict", verdict)
 	}
@@ -6211,7 +6295,7 @@ func TestScanReviewLogExtractsVerdictAndFindings(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	verdict, findings := scanReviewLog(decodePassLog(logPath, "claude"))
+	verdict, findings := scanReviewLog(decodePassLog(testDrivers(t), logPath, "claude"))
 	if verdict != "BLOCK" {
 		t.Errorf("verdict = %q, want %q", verdict, "BLOCK")
 	}
@@ -6236,7 +6320,7 @@ func TestScanReviewLogStopsFindingsAtTheNextRenderedEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, findings := scanReviewLog(decodePassLog(logPath, "claude"))
+	_, findings := scanReviewLog(decodePassLog(testDrivers(t), logPath, "claude"))
 	if strings.Contains(findings, "unrelated trailing narration") {
 		t.Errorf("findings = %q, want it to stop before the next rendered event", findings)
 	}
@@ -6256,7 +6340,7 @@ func TestScanReviewLogFindsNothingInPlainNarration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	verdict, findings := scanReviewLog(decodePassLog(logPath, "claude"))
+	verdict, findings := scanReviewLog(decodePassLog(testDrivers(t), logPath, "claude"))
 	if verdict != "" {
 		t.Errorf("verdict = %q, want empty", verdict)
 	}
@@ -6278,7 +6362,7 @@ func TestScanReviewLogIgnoresQuotedVerdictInOwnFindings(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	verdict, _ := scanReviewLog(decodePassLog(logPath, "claude"))
+	verdict, _ := scanReviewLog(decodePassLog(testDrivers(t), logPath, "claude"))
 	if verdict != "BLOCK" {
 		t.Errorf("verdict = %q, want %q", verdict, "BLOCK")
 	}
@@ -6296,7 +6380,7 @@ func TestScanReviewLogRequiresStrictPrefixNotSubstring(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	verdict, findings := scanReviewLog(decodePassLog(logPath, "claude"))
+	verdict, findings := scanReviewLog(decodePassLog(testDrivers(t), logPath, "claude"))
 	if verdict != "" {
 		t.Errorf("verdict = %q, want empty", verdict)
 	}
@@ -6318,7 +6402,7 @@ func TestScanReviewLogIgnoresQuotedVerdictInToolOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	verdict, _ := scanReviewLog(decodePassLog(logPath, "claude"))
+	verdict, _ := scanReviewLog(decodePassLog(testDrivers(t), logPath, "claude"))
 	if verdict != "BLOCK" {
 		t.Errorf("verdict = %q, want %q", verdict, "BLOCK")
 	}
@@ -6337,7 +6421,7 @@ func TestScanReviewLogIgnoresQuotedVerdictInDiffHunk(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	verdict, _ := scanReviewLog(decodePassLog(logPath, "claude"))
+	verdict, _ := scanReviewLog(decodePassLog(testDrivers(t), logPath, "claude"))
 	if verdict != "BLOCK" {
 		t.Errorf("verdict = %q, want %q", verdict, "BLOCK")
 	}
@@ -6372,6 +6456,7 @@ exit 0
 	}
 
 	cfg := config{
+		drivers:         testDrivers(t),
 		promptFile:      promptFile,
 		logPath:         filepath.Join(dir, "stream.log"),
 		stateFile:       stateFile,
@@ -6560,6 +6645,7 @@ exit 0
 		}
 	}
 	cfg := config{
+		drivers:          testDrivers(t),
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,
 		logPath:          filepath.Join(dir, "stream.log"),
@@ -6614,7 +6700,7 @@ func TestPassReportRebasesResumedSessionAgainstBaselineFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r := testPassReport(logPath, "claude", baselineFile)
+	r := testPassReport(t, logPath, "claude", baselineFile)
 
 	if got := subagentOutput(r); got != 0 {
 		t.Errorf("(subagents) output = %d, want 0 (the prior pass's subagent output is baseline)", got)
@@ -6646,14 +6732,14 @@ func TestPassReportThreadsBaselineBetweenPasses(t *testing.T) {
 	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := subagentOutput(testPassReport(logPath, "claude", baselineFile)); got != 50 {
+	if got := subagentOutput(testPassReport(t, logPath, "claude", baselineFile)); got != 50 {
 		t.Fatalf("first pass (subagents) output = %d, want 50", got)
 	}
 	if err := os.WriteFile(logPath, []byte(resumedFixPassLog), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	if got := subagentOutput(testPassReport(logPath, "claude", baselineFile)); got != 0 {
+	if got := subagentOutput(testPassReport(t, logPath, "claude", baselineFile)); got != 0 {
 		t.Errorf("resumed pass (subagents) output = %d, want 0", got)
 	}
 }
@@ -6670,11 +6756,11 @@ func TestPassReportSurvivesCorruptBaselineFile(t *testing.T) {
 	if err := os.WriteFile(logPath, []byte(resumedFixPassLog), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if r := testPassReport(logPath, "claude", baselineFile); !r.Found {
+	if r := testPassReport(t, logPath, "claude", baselineFile); !r.Found {
 		t.Errorf("passReport = %+v, want the pass's report despite a corrupt baseline file", r)
 	}
 }
 
-func testPassReport(logPath, driverName, baselineFile string) usage.Report {
-	return config{logPath: logPath, driver: driverName, usageBaselineFile: baselineFile}.passReport(decodePassLog(logPath, driverName))
+func testPassReport(t testing.TB, logPath, driverName, baselineFile string) usage.Report {
+	return config{logPath: logPath, driver: driverName, usageBaselineFile: baselineFile}.passReport(decodePassLog(testDrivers(t), logPath, driverName))
 }

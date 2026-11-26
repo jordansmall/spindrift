@@ -7,7 +7,6 @@ import (
 	"slices"
 	"testing"
 
-	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/driver/opencode"
 	"spindrift.dev/launcher/internal/driver/pi"
@@ -506,7 +505,7 @@ func TestSessionAnswerReachesAgentArgv(t *testing.T) {
 			[]string{"--model", "m", "--session-id", uuid, "do it"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			argv, err := driver.SessionArgs(c.driver, c.answer)
+			argv, err := testDrivers(t).SessionArgs(c.driver, c.answer)
 			if err != nil {
 				t.Fatalf("SessionArgs: %v", err)
 			}

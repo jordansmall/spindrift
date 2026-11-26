@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"os"
@@ -15,7 +14,6 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/bindregistry"
-	"spindrift.dev/launcher/internal/driver/drivertest"
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/ecosystemtest/synthetic"
 	"spindrift.dev/launcher/internal/registrymanifest"
@@ -26,10 +24,6 @@ import (
 // vars unset (issue #3201): a run reaching a home-config write would otherwise
 // land in the real ambient one.
 func TestMain(m *testing.M) {
-	if err := drivertest.UseClaudeConnector(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
 	home, err := os.MkdirTemp("", "bindregistry-cmd-test-home")
 	if err != nil {
 		panic(err)

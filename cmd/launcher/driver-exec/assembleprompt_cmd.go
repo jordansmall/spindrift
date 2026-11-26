@@ -9,6 +9,8 @@ import (
 	"os"
 	"strings"
 
+	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/driver/bundle"
 	"spindrift.dev/launcher/internal/passmachine"
 	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/runstate"
@@ -156,7 +158,7 @@ func runAssemblePrompt(args []string, stdout, stderr io.Writer) int {
 	p.DevshellName = *devshellName
 	p.Caps.MaxSlices = *maxSlices
 	p.Caps.MaxReviewRounds = *maxReviewRounds
-	_, err = promptassembly.WriteAssembly(env, registry, validateMarkerRows, p, promptassembly.OutputPaths{
+	_, err = promptassembly.WriteAssembly(env, registry, driver.NewSet(bundle.Drivers()...), validateMarkerRows, p, promptassembly.OutputPaths{
 		Prompt:       *promptOutput,
 		AgentsJSON:   *agentsJSONOutput,
 		Handoff:      *handoffOutput,

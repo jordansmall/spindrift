@@ -12,7 +12,7 @@ import (
 
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/driver"
-	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers
+	"spindrift.dev/launcher/internal/driver/bundle" // also registers the bundled backends
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/driver/driverrows"
 	"spindrift.dev/launcher/internal/driver/shadow"
@@ -70,10 +70,14 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "driver-exec:", err)
 		return 1
 	}
-	if err := driverrows.UseFile(handoff.DriverRowsFile); err != nil {
+	rows, err := driverrows.ReadFile(handoff.DriverRowsFile, bundle.Drivers())
+	if err != nil {
 		fmt.Fprintln(stderr, "driver-exec:", err)
 		return 1
 	}
+	// Not a connectorruntime runtime: its package closure carries the backend
+	// adapters, which driver-exec must not link (issue #5738).
+	drivers := rows.InProcess()
 
 	if *promptFile == "" {
 		*promptFile = handoff.PromptFile
@@ -114,7 +118,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	d, err := driver.New(handoff.Driver)
+	d, err := drivers.New(handoff.Driver)
 	if err != nil {
 		fmt.Fprintln(stderr, "driver-exec:", err)
 		return 1
@@ -139,10 +143,11 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		fmt.Fprint(stdout, hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpPassModel, Model: model, Effort: effort}))
 	}
 
-	raw := newRawCopy(handoff.Driver, stderr)
+	raw := newRawCopy(drivers, handoff.Driver, stderr)
 	defer raw.remove()
 	rc, err := run(execConfig{
 		driver:       handoff.Driver,
+		drivers:      drivers,
 		driverBin:    handoff.DriverBin,
 		args:         args,
 		devshell:     handoff.Devshell,
@@ -155,12 +160,12 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	}, stdout)
 	if err != nil {
 		fmt.Fprintln(stderr, "driver-exec:", err)
-		runShadow(handoff.Driver, *logPath, raw.path(), 0, err, stdout)
+		runShadow(drivers, handoff.Driver, *logPath, raw.path(), 0, err, stdout)
 		return 1
 	}
 
 	exit := resolveExit(d, rc, *logPath)
-	runShadow(handoff.Driver, *logPath, raw.path(), rc, nil, stdout)
+	runShadow(drivers, handoff.Driver, *logPath, raw.path(), rc, nil, stdout)
 	return exit
 }
 
@@ -170,12 +175,12 @@ var shadowReplay = shadow.Run
 
 // shadowOf is the shadow decision runShadow and newRawCopy share: the Connector
 // module shadowing the named native Driver, and that Driver's Strategy.
-func shadowOf(name string) (module string, native driverkit.Strategy, ok bool) {
-	module, ok = driver.ShadowModule(name)
+func shadowOf(drivers *driver.Set, name string) (module string, native driverkit.Strategy, ok bool) {
+	module, ok = drivers.ShadowModule(name)
 	if !ok {
 		return "", driverkit.Strategy{}, false
 	}
-	native, ok = driver.NativeStrategy(name)
+	native, ok = drivers.NativeStrategy(name)
 	return module, native, ok
 }
 
@@ -188,14 +193,14 @@ func shadowOf(name string) (module string, native driverkit.Strategy, ok bool) {
 // the summary carries it as the error and nothing is replayed, so the Pass
 // cannot read as clean. rawPath is the copy of the CLI's stdout the stream
 // filter is replayed from, empty when there is none.
-func runShadow(name, logPath, rawPath string, rawExit int, runErr error, stdout io.Writer) {
+func runShadow(drivers *driver.Set, name, logPath, rawPath string, rawExit int, runErr error, stdout io.Writer) {
 	emit := func(op hostop.SpindriftOp) { fmt.Fprint(stdout, hostop.EncodeSpindriftOp(op)) }
 	resolved := driver.ResolveName(name)
-	if reason, ok := driver.ShadowSkipped(name); ok {
+	if reason, ok := drivers.ShadowSkipped(name); ok {
 		emit(hostop.SpindriftOp{Op: hostop.OpShadowSummary, ShadowSummary: &hostop.ShadowSummary{Driver: resolved, Error: reason}})
 		return
 	}
-	module, native, ok := shadowOf(name)
+	module, native, ok := shadowOf(drivers, name)
 	if !ok {
 		return
 	}

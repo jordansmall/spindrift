@@ -57,6 +57,7 @@ func TestRunDirectModePropagatesExitCode(t *testing.T) {
 	dir := t.TempDir()
 	bin := writeFakeDriver(t, dir, "fake-driver", "echo hi\nexit 7\n")
 	cfg := execConfig{
+		drivers:      testDrivers(t),
 		driverBin:    bin,
 		args:         nil,
 		logPath:      filepath.Join(dir, "stream.log"),
@@ -80,6 +81,7 @@ func TestRunUsesConfiguredDriverNotHardcodedClaude(t *testing.T) {
 	dir := t.TempDir()
 	bin := writeFakeDriver(t, dir, "fake-driver", "echo hi\nexit 0\n")
 	cfg := execConfig{
+		drivers:      testDrivers(t),
 		driver:       "not-a-real-driver",
 		driverBin:    bin,
 		logPath:      filepath.Join(dir, "stream.log"),
@@ -99,6 +101,7 @@ func TestRunTeesRawStreamToStdoutAndLogPath(t *testing.T) {
 	bin := writeFakeDriver(t, dir, "fake-driver", `printf '{"type":"result","result":"done"}\n'`)
 	logPath := filepath.Join(dir, "stream.log")
 	cfg := execConfig{
+		drivers:      testDrivers(t),
 		driverBin:    bin,
 		logPath:      logPath,
 		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
@@ -132,6 +135,7 @@ func TestRunWritesHeartbeatToFileNotRawJSON(t *testing.T) {
 	bin := writeFakeDriver(t, dir, "fake-driver", `printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"main.go"}}]}}\n{"type":"result","num_turns":1}\n'`)
 	heartbeatLog := filepath.Join(dir, "heartbeat.log")
 	cfg := execConfig{
+		drivers:      testDrivers(t),
 		driverBin:    bin,
 		logPath:      filepath.Join(dir, "stream.log"),
 		heartbeatLog: heartbeatLog,
@@ -166,6 +170,7 @@ func TestRunTopLevelRoleAppliesToHeartbeatSwitchHeader(t *testing.T) {
 	bin := writeFakeDriver(t, dir, "fake-driver", `printf '`+streamJSON+`'`)
 	heartbeatLog := filepath.Join(dir, "heartbeat.log")
 	cfg := execConfig{
+		drivers:      testDrivers(t),
 		driver:       "claude",
 		driverBin:    bin,
 		logPath:      filepath.Join(dir, "stream.log"),
@@ -198,6 +203,7 @@ func TestRunDevshellWrapsCommand(t *testing.T) {
 	writeFakeNix(t, dir, nixLog)
 
 	cfg := execConfig{
+		drivers:      testDrivers(t),
 		driverBin:    bin,
 		args:         []string{"--flag"},
 		devshell:     true,
@@ -249,6 +255,7 @@ func TestRunRelaunchesInBakedEnvOnEmptyStreamLaunchFailure(t *testing.T) {
 	writeFakeNixLaunchFail(t, dir)
 
 	cfg := execConfig{
+		drivers:      testDrivers(t),
 		driverBin:    bin,
 		devshell:     true,
 		devshellName: "default",
@@ -283,6 +290,7 @@ func TestRunDoesNotRelaunchWhenDevshellStreamIsNonEmpty(t *testing.T) {
 	writeFakeNix(t, dir, nixLog)
 
 	cfg := execConfig{
+		drivers:      testDrivers(t),
 		driverBin:    bin,
 		devshell:     true,
 		devshellName: "default",
@@ -316,6 +324,7 @@ func TestRunLogsObservabilityEventOnRelaunch(t *testing.T) {
 	writeFakeNixLaunchFail(t, dir)
 
 	cfg := execConfig{
+		drivers:      testDrivers(t),
 		driverBin:    bin,
 		devshell:     true,
 		devshellName: "default",
@@ -352,6 +361,7 @@ func fixtureConfig(t *testing.T, driverName, stream, tail string) execConfig {
 		t.Fatal(err)
 	}
 	return execConfig{
+		drivers:      testDrivers(t),
 		driver:       driverName,
 		driverBin:    writeFakeDriver(t, dir, "fake-driver", "cat "+fixture+"\n"+tail),
 		logPath:      filepath.Join(dir, "stream.log"),
@@ -490,6 +500,7 @@ func TestRunSurfacesStdoutCopyFailureWhenDriverExitsNonZero(t *testing.T) {
 	dir := t.TempDir()
 	bin := writeFakeDriver(t, dir, "fake-driver", "echo hi\nexit 3\n")
 	cfg := execConfig{
+		drivers:      testDrivers(t),
 		driverBin:    bin,
 		logPath:      filepath.Join(dir, "stream.log"),
 		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
@@ -515,6 +526,7 @@ func TestRunIgnoresDriverExecStderrWriteFailure(t *testing.T) {
 	dir := t.TempDir()
 	bin := writeFakeDriver(t, dir, "fake-driver", "echo oops > /dev/stderr\nexit 0\n")
 	cfg := execConfig{
+		drivers:      testDrivers(t),
 		driverBin:    bin,
 		logPath:      filepath.Join(dir, "stream.log"),
 		heartbeatLog: filepath.Join(dir, "heartbeat.log"),

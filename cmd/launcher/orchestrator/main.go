@@ -11,7 +11,7 @@ import (
 	"io"
 	"os"
 
-	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers
+	"spindrift.dev/launcher/internal/driver/bundle" // also registers the bundled backends
 	"spindrift.dev/launcher/internal/driver/driverrows"
 	"spindrift.dev/launcher/internal/passmachine"
 	"spindrift.dev/launcher/internal/promptassembly"
@@ -54,10 +54,14 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "orchestrator:", err)
 		return 1
 	}
-	if err := driverrows.UseFile(handoff.DriverRowsFile); err != nil {
+	rows, err := driverrows.ReadFile(handoff.DriverRowsFile, bundle.Drivers())
+	if err != nil {
 		fmt.Fprintln(stderr, "orchestrator:", err)
 		return 1
 	}
+	// Not a connectorruntime runtime: its package closure carries the backend
+	// adapters, which the orchestrator must not link (issue #5738).
+	drivers := rows.InProcess()
 
 	if *promptFile == "" {
 		*promptFile = handoff.PromptFile
@@ -103,6 +107,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 
 	rc, err := run(config{
 		driver:            handoff.Driver,
+		drivers:           drivers,
 		handoffFile:       *handoffFile,
 		promptFile:        *promptFile,
 		sessionFile:       *sessionFile,

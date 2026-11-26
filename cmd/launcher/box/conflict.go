@@ -11,7 +11,6 @@ import (
 
 	"spindrift.dev/launcher/internal/bindregistry"
 	"spindrift.dev/launcher/internal/conflictresolve"
-	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/promptassembly"
@@ -113,7 +112,7 @@ func (r *boxRun) conflictPass() (string, error) {
 // its stream log. The pass is advisory — success is the rebase state — so an
 // unreadable log means no summary, never a failed Box.
 func (r *boxRun) passSummary(driverName, streamLog string) string {
-	text, err := resultText(driverName, streamLog)
+	text, err := r.resultText(driverName, streamLog)
 	if err != nil {
 		fmt.Fprintf(r.d.Stdout, "==> WARNING: conflict-resolve pass summary unreadable: %v\n", err)
 		return ""
@@ -129,14 +128,14 @@ func resultTextPath(streamLog string) string { return streamLog + ".result" }
 // resultText is the Driver's result text for the Pass that wrote streamLog.
 // The orchestrator already decoded that log, so its published text is taken
 // and consumed; when it never got that far, the log is decoded here.
-func resultText(driverName, streamLog string) (string, error) {
+func (r *boxRun) resultText(driverName, streamLog string) (string, error) {
 	path := resultTextPath(streamLog)
 	b, err := os.ReadFile(path)
 	_ = os.Remove(path)
 	if err == nil {
 		return string(b), nil
 	}
-	d, err := driver.New(driverName)
+	d, err := r.in.Assembly.Drivers.New(driverName)
 	if err != nil {
 		return "", err
 	}

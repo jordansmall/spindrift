@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/driver"
 )
 
 func appendToFile(t *testing.T, path, text string) {
@@ -156,7 +158,7 @@ func TestWriteAssemblyRemovedVarInOverrideIsValidateError(t *testing.T) {
 	appendToFile(t, filepath.Join(env.PromptsDir, "issue-prompt.md"), "\n${TDD_STEP}\n")
 	out := writeTestOutputs(t)
 
-	_, err := WriteAssembly(env, reg, nil, testPassthrough(), out, &strings.Builder{})
+	_, err := WriteAssembly(env, reg, driver.NewSet(), nil, testPassthrough(), out, &strings.Builder{})
 	var ve *ValidateError
 	if !errors.As(err, &ve) {
 		t.Fatalf("err = %v, want *ValidateError", err)
@@ -308,7 +310,7 @@ func TestWriteAssemblyPrintsDeprecatedVarWarning(t *testing.T) {
 	appendToFile(t, filepath.Join(env.PromptsDir, "issue-prompt.md"), "\n${ISSUE_READ_LOCAL_STEP}\n")
 	w := new(strings.Builder)
 
-	if _, err := WriteAssembly(env, reg, nil, testPassthrough(), writeTestOutputs(t), w); err != nil {
+	if _, err := WriteAssembly(env, reg, driver.NewSet(), nil, testPassthrough(), writeTestOutputs(t), w); err != nil {
 		t.Fatalf("WriteAssembly: %v", err)
 	}
 	if !strings.Contains(w.String(), "use ${ISSUE_READ_STEP} instead") {

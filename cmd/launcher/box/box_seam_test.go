@@ -29,7 +29,7 @@ import (
 	"spindrift.dev/launcher/internal/testutil/repopath"
 )
 
-func TestMain(m *testing.M) { seamtest.MainWith(m, drivertest.UseClaudeConnector) }
+func TestMain(m *testing.M) { seamtest.MainWith(m, nil) }
 
 const (
 	seamIssue  = "7"

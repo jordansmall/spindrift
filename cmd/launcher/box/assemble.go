@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/promptassembly"
 )
@@ -17,6 +18,8 @@ import (
 type assemblyInputs struct {
 	promptassembly.AssemblyFlags
 	SkillsDir string
+	// Drivers is the Set the Box's runtime offers; mainRun fills it.
+	Drivers *driver.Set
 }
 
 // assemblePrompt produces the prompt, agents JSON, review prompt and handoff
@@ -47,7 +50,7 @@ func assemblePrompt(in assemblyInputs, env promptassembly.Env, w io.Writer) (str
 		Handoff:      filepath.Join(dir, "handoff.json"),
 		ReviewPrompt: filepath.Join(dir, "review-prompt.txt"),
 	}
-	if _, err := promptassembly.WriteAssembly(env, reg, markers, in.Passthrough, out, w); err != nil {
+	if _, err := promptassembly.WriteAssembly(env, reg, in.Drivers, markers, in.Passthrough, out, w); err != nil {
 		return "", err
 	}
 	emitPromptHashes(env, reg, w)
