@@ -1374,7 +1374,8 @@ loads first-party Driver Connectors directly under the unchanged
 
 The Launcher installs the sandbox on every path that can load a Connector
 (`run`, `recover`, `research`, `butler`, `doctor`, reconcile, `preview` and
-shell completion). The daemon installs a lazy sandbox for its own demand
+shell completion) (Amended by issue #7554: each program installs it once, in
+`connectorsetup.New`). The daemon installs a lazy sandbox for its own demand
 counting, through the same runner and artifacts as its Launcher children.
 Quickstart has no runner, artifacts or input document, so it cannot start one
 and loads no Connector: its token scope audit and finish-line doctor are
@@ -1604,3 +1605,10 @@ podman and bwrap, and asserts the Launcher refuses it with neither credential
 attached. Each extra sandbox costs one runner start, which the #7018 amendment
 measured at about 20 ms under bwrap and 200 ms under podman. See [the
 reference](../reference.md#connector-sandbox).
+
+## Amendment (issue #7554): one install per program, in `connectorsetup.New`
+
+The Launcher no longer installs the sandbox on each path that can load a
+Connector. Since #7554 the Launcher and the Daemon each install it once, in
+`connectorsetup.New`, when the program builds its Connector runtime.
+Sandboxes still start lazily, on a Connector's first load.
