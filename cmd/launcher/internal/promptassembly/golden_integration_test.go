@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/golden"
 	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/seamtest"
@@ -581,7 +582,7 @@ func assembleCell(t *testing.T, c *cellInputs, outDir string) (promptassembly.Re
 		Fragments:    filepath.Join(outDir, "fragments.txt"),
 	}
 	// Passthrough stays zero: the goldens pin only what Assemble itself derives.
-	result, err := promptassembly.WriteAssembly(env, reg, markers, promptassembly.Passthrough{}, out, os.Stderr)
+	result, err := promptassembly.WriteAssembly(env, reg, driver.NewSet(), markers, promptassembly.Passthrough{}, out, os.Stderr)
 	if err != nil {
 		t.Fatalf("WriteAssembly: %v", err)
 	}

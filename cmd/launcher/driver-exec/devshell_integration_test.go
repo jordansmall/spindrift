@@ -126,6 +126,7 @@ echo harness-tools-reachable
 	defer restore()
 
 	cfg := execConfig{
+		drivers:      testDrivers(t),
 		driverBin:    bin,
 		devshell:     true,
 		devshellName: "default",

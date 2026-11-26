@@ -36,6 +36,8 @@ type config struct {
 	// uses to pick a RenderTranscript strategy; driver-exec reads its own
 	// from the handoff. Empty means "claude", matching driver.New.
 	driver string
+	// drivers is the Set the orchestrator's runtime offers, which resolves driver.
+	drivers *driver.Set
 	// handoffFile is the shared static-config handoff document (issue
 	// #2975); see buildDriverExecCmd.
 	handoffFile string
@@ -640,7 +642,7 @@ func runDeltaReviewGate(cfg config, state *runstate.RunState, passLandDelta *lan
 		fmt.Fprintln(os.Stderr, "orchestrator: delta-review pass exited", deltaRC, "(dropped; the run keeps the land pass's rc)")
 	}
 
-	deltaPassLog := decodePassLog(deltaCfg.logPath, cfg.driver)
+	deltaPassLog := decodePassLog(cfg.drivers, deltaCfg.logPath, cfg.driver)
 	deltaVerdict, deltaFindings := scanReviewLog(deltaPassLog)
 	deltaReport := deltaCfg.passReport(deltaPassLog)
 	deltaUsageTotals := deltaReport.Totals
@@ -677,7 +679,7 @@ func runDeltaReviewGate(cfg config, state *runstate.RunState, passLandDelta *lan
 		if err := cfg.clearResultText(); err != nil {
 			return err
 		}
-		return appendResultEvent(cfg.logPath, cfg.driver, blocked.Line())
+		return appendResultEvent(cfg.drivers, cfg.logPath, cfg.driver, blocked.Line())
 	}
 
 	return nil
@@ -822,7 +824,7 @@ var decodeLog = driver.Driver.Decode
 // result text to cfg.resultTextFile from that same decode. The file is a
 // failure-soft extra: when it cannot be written the Box decodes the log itself.
 func (cfg config) decodeAndPublishPass() decodedPass {
-	p := decodePassLog(cfg.logPath, cfg.driver)
+	p := decodePassLog(cfg.drivers, cfg.logPath, cfg.driver)
 	if cfg.resultTextFile != "" && p.ok {
 		if err := writeFileAtomic(cfg.resultTextFile, []byte(p.log.ResultText())); err != nil {
 			fmt.Fprintln(os.Stderr, "orchestrator: write result text:", err)
@@ -870,8 +872,8 @@ func (cfg config) clearResultText() error {
 // decodePassLog decodes the pass log at logPath through the named Driver, once
 // per pass and before the next pass's driver-exec truncates it (issue #2694),
 // reporting why on stderr when it cannot.
-func decodePassLog(logPath, driverName string) decodedPass {
-	d, err := driver.New(driverName)
+func decodePassLog(drivers *driver.Set, logPath, driverName string) decodedPass {
+	d, err := drivers.New(driverName)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchestrator: decode pass log: resolve driver:", err)
 		return decodedPass{}
@@ -1249,8 +1251,8 @@ func buildDriverExecCmd(cfg config) (*exec.Cmd, error) {
 
 // appendResultEvent appends text to logPath as one synthetic final-result
 // event of the named Driver, so the Driver's own ResultText reads it back.
-func appendResultEvent(logPath, driverName, text string) error {
-	d, err := driver.New(driverName)
+func appendResultEvent(drivers *driver.Set, logPath, driverName, text string) error {
+	d, err := drivers.New(driverName)
 	if err != nil {
 		return err
 	}

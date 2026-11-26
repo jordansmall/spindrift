@@ -19,7 +19,9 @@ type execConfig struct {
 	// driver is the Driver's registry name (ADR 0009), so the heartbeat writer
 	// and main's exit-synthesis pass vary by the Driver a Box actually runs.
 	// Empty defaults to "claude", matching driver.New's own convention.
-	driver       string
+	driver string
+	// drivers resolves driver.
+	drivers      *driver.Set
 	driverBin    string
 	args         []string
 	devshell     bool
@@ -63,7 +65,7 @@ func run(cfg execConfig, stdout io.Writer) (int, error) {
 	}
 	defer heartbeatFile.Close()
 
-	d, err := driver.New(cfg.driver)
+	d, err := cfg.drivers.New(cfg.driver)
 	if err != nil {
 		return 0, err
 	}

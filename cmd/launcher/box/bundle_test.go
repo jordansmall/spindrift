@@ -6,4 +6,4 @@ import (
 	"spindrift.dev/launcher/internal/driver/drivertest"
 )
 
-func TestBinaryLinksDriverBundle(t *testing.T) { drivertest.RequireBundled(t) }
+func TestBinaryLinksDriverBundle(t *testing.T) { drivertest.RequireBundled(t, testDrivers(t)) }

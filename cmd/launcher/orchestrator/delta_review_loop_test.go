@@ -88,6 +88,7 @@ func fmtQuote(s string) string {
 }
 
 type deltaReviewLoopFixture struct {
+	drivers          *driver.Set
 	dir              string
 	logPath          string
 	driverName       string
@@ -104,6 +105,7 @@ func newDeltaReviewLoopFixture(t *testing.T) deltaReviewLoopFixture {
 	dir := t.TempDir()
 	f := deltaReviewLoopFixture{
 		dir:              dir,
+		drivers:          testDrivers(t),
 		logPath:          filepath.Join(dir, "stream.log"),
 		driverName:       "claude",
 		callLog:          filepath.Join(dir, "calls.log"),
@@ -124,6 +126,7 @@ func newDeltaReviewLoopFixture(t *testing.T) deltaReviewLoopFixture {
 
 func (f deltaReviewLoopFixture) config(maxSlices int) config {
 	return config{
+		drivers:          f.drivers,
 		promptFile:       f.promptFile,
 		reviewPromptFile: f.reviewPromptFile,
 		logPath:          f.logPath,
@@ -140,7 +143,7 @@ func (f deltaReviewLoopFixture) config(maxSlices int) config {
 // final-result events.
 func (f deltaReviewLoopFixture) finalOutcomeLine(t *testing.T) string {
 	t.Helper()
-	d, err := driver.New(f.driverName)
+	d, err := f.drivers.New(f.driverName)
 	if err != nil {
 		t.Fatalf("driver.New: %v", err)
 	}

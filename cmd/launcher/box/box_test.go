@@ -148,6 +148,7 @@ func newFixture(t *testing.T) *fixture {
 		RunStateFile:         filepath.Join(dir, "run-state.json"),
 	}
 	f.in.Assembly.SkillsDir = filepath.Join(dir, "driver-skills")
+	f.in.Assembly.Drivers = testDrivers(t)
 	if err := os.MkdirAll(f.knobs["HOME"], 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +272,7 @@ func (f *fixture) useDriver(name string) {
 // sessionID is the id the fixture's Driver pins at "initial"; opencode pins
 // none, so only claude and pi fit.
 func (f *fixture) sessionID() string {
-	d, err := driver.New(f.driverName)
+	d, err := f.in.Assembly.Drivers.New(f.driverName)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -323,7 +324,7 @@ func (f *fixture) orchestrate(argv []string) int {
 		s = f.resumes[0]
 		f.resumes = f.resumes[1:]
 	}
-	d, err := driver.New(f.driverName)
+	d, err := f.in.Assembly.Drivers.New(f.driverName)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -1688,6 +1689,7 @@ func assemblyFixture(t *testing.T, skills ...string) assemblyInputs {
 		}
 	}
 	return assemblyInputs{
+		Drivers:   testDrivers(t),
 		SkillsDir: skillsDir,
 		AssemblyFlags: promptassembly.AssemblyFlags{
 			// An empty registry: the tests that reach it cover box's wiring around
@@ -2420,15 +2422,15 @@ func TestPass_UsesOrchestratorResultTextWithoutDecodingTheLog(t *testing.T) {
 // A Driver that cannot render its session flags must stop the run: the
 // "initial" pass would otherwise start unpinned.
 func TestRun_SessionFlagsErrorIsDriverPhaseError(t *testing.T) {
-	defer driver.Snapshot()()
 	boom := errors.New("session store unreadable")
-	driver.Register(driverkit.Strategy{
+	flagfail := driverkit.Strategy{
 		Name: "flagfail",
 		SessionFlags: func(string, string, string, string) (driverkit.SessionFlag, error) {
 			return driverkit.SessionFlag{}, boom
 		},
-	})
+	}
 	f := newFixture(t)
+	f.in.Assembly.Drivers = driver.NewSet(flagfail)
 	f.useDriver("flagfail")
 	orchestrated := 0
 	f.d.Orchestrate = func([]string) int { orchestrated++; return 0 }
@@ -2458,17 +2460,17 @@ func TestRun_RefusedSessionAnswerIsDriverPhaseErrorAndNeverOrchestrates(t *testi
 		{"value with no flag", nil, driverkit.SessionFlag{Value: "--settings"}, `session value "--settings" with no flag`},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			defer driver.Snapshot()()
-			if c.row != nil {
-				driver.UseDescriptor(*c.row)
-			}
-			driver.Register(driverkit.Strategy{
+			drivers := driver.NewSet(driverkit.Strategy{
 				Name: "badflag",
 				SessionFlags: func(string, string, string, string) (driverkit.SessionFlag, error) {
 					return c.answer, nil
 				},
 			})
+			if c.row != nil {
+				drivers.UseDescriptor(*c.row)
+			}
 			f := newFixture(t)
+			f.in.Assembly.Drivers = drivers
 			f.useDriver("badflag")
 			orchestrated := 0
 			f.d.Orchestrate = func([]string) int { orchestrated++; return 0 }

@@ -47,7 +47,7 @@ func TestScanReviewLogOpencode(t *testing.T) {
 			if err := os.WriteFile(logPath, []byte(tc.content), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			verdict, findings := scanReviewLog(decodePassLog(logPath, "opencode"))
+			verdict, findings := scanReviewLog(decodePassLog(testDrivers(t), logPath, "opencode"))
 			if verdict != tc.wantVerdict {
 				t.Errorf("verdict = %q, want %q", verdict, tc.wantVerdict)
 			}
@@ -96,6 +96,7 @@ func TestRunWithReviewPassSequenceOpencodeBlockThenApprove(t *testing.T) {
 
 	var stdout bytes.Buffer
 	rc, err := run(config{
+		drivers:          testDrivers(t),
 		driver:           "opencode",
 		promptFile:       promptFile,
 		reviewPromptFile: reviewPromptFile,

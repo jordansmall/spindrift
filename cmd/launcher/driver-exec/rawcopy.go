@@ -5,6 +5,8 @@ import (
 	"io"
 	"os"
 	"sync"
+
+	"spindrift.dev/launcher/internal/driver"
 )
 
 // rawCopy is the scratch copy of the CLI's stdout a shadowed Driver's stream
@@ -25,8 +27,8 @@ type rawCopy struct {
 // will read it: no applicable shadow row, or a native Strategy with no stream
 // filter. It lives in the temp dir, not beside the Pass log, whose directory
 // CI uploads as an artifact.
-func newRawCopy(driverName string, stderr io.Writer) *rawCopy {
-	_, native, ok := shadowOf(driverName)
+func newRawCopy(drivers *driver.Set, driverName string, stderr io.Writer) *rawCopy {
+	_, native, ok := shadowOf(drivers, driverName)
 	if !ok || native.NewStreamFilter == nil {
 		return nil
 	}

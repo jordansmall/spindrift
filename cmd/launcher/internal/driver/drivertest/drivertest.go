@@ -20,16 +20,16 @@ import (
 	"spindrift.dev/launcher/internal/fixturebuild"
 )
 
-// RequireBundled fails t unless the calling binary registers exactly the
-// Drivers the Nix registry declares and refuses any other name: the bundle's
-// native Drivers plus claude, registered by UseClaudeConnector.
-func RequireBundled(t testing.TB) {
+// RequireBundled fails t unless drivers, the Set a binary's runtime offers, holds
+// exactly the Drivers the Nix registry declares and refuses any other name: the
+// bundle's native Drivers plus claude, from its row.
+func RequireBundled(t testing.TB, drivers *driver.Set) {
 	t.Helper()
-	if got, want := driver.Names(), driver.DescriptorNames(); !slices.Equal(got, want) {
-		t.Errorf("registered Drivers = %v, want %v: the binary must import internal/driver/bundle", got, want)
+	if got, want := drivers.Names(), driver.DescriptorNames(); !slices.Equal(got, want) {
+		t.Errorf("Drivers = %v, want %v: the binary must give its runtime internal/driver/bundle's Drivers", got, want)
 	}
-	if _, err := driver.New("no-such-driver"); err == nil {
-		t.Error(`driver.New("no-such-driver") succeeded, want an unknown-DRIVER error`)
+	if _, err := drivers.New("no-such-driver"); err == nil {
+		t.Error(`New("no-such-driver") succeeded, want an unknown-DRIVER error`)
 	}
 }
 
@@ -139,13 +139,23 @@ func RunWithClaudeConnector(m *testing.M) int {
 // a log stamped with a real Driver and has no runtime of its own.
 func Drivers(t testing.TB, natives []driverkit.Strategy) *driver.Set {
 	t.Helper()
-	raw, err := WithClaudeRow(nil)
+	s, err := NewDrivers(natives)
 	if err != nil {
 		t.Fatal(err)
+	}
+	return s
+}
+
+// NewDrivers is Drivers for a TestMain, which has no testing.TB: the error is
+// the caller's to report.
+func NewDrivers(natives []driverkit.Strategy) (*driver.Set, error) {
+	raw, err := WithClaudeRow(nil)
+	if err != nil {
+		return nil, err
 	}
 	rows, err := driverrows.Parse(raw, natives)
 	if err != nil {
-		t.Fatal(err)
+		return nil, err
 	}
-	return rows.Hosted(connectorsandboxtest.InProcess().Load)
+	return rows.Hosted(connectorsandboxtest.InProcess().Load), nil
 }
