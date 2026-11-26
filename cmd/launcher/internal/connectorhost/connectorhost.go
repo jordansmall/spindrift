@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"testing"
 	"time"
 
 	"spindrift.dev/launcher/internal/connectorprotocol"
@@ -474,6 +475,9 @@ func checkGrant(n Network) error {
 	if n.Name == "" || n.Audit == nil {
 		return errors.New("connector network grant needs a name and an audit log")
 	}
+	if err := checkSeams(n, testing.Testing()); err != nil {
+		return err
+	}
 	return ValidateRoutes(n.Routes)
 }
 
@@ -500,6 +504,10 @@ func LoadNetworkCompiled(ctx context.Context, wasm []byte, n Network, cacheDir s
 // network is the Host call grant, nil for none.
 func loadWith(ctx context.Context, wasm []byte, mk engineFactory, network *Network) (*Connector, error) {
 	c := &Connector{network: network, now: time.Now}
+	if network != nil {
+		// Once per Network, so the checked transport keeps its connections.
+		network.checked = network.newCheckedClient()
+	}
 	// A nil *networkCalls in the interface would read as a grant.
 	var host hostCalls
 	if network != nil {
