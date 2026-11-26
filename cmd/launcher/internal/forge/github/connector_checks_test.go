@@ -249,6 +249,7 @@ func loadTokenConnector(t *testing.T, b *tokenBackend, token string) *connectorh
 	conn, err := backendrows.Load(context.Background(), backendrows.Row{
 		Name: "github", Module: path, Routes: routes, CredentialEnv: tokenCredentialEnv,
 	}, backendrows.Options{
+		Sandbox: testSandbox(),
 		Getenv: func(k string) string {
 			if k == tokenCredentialEnv {
 				return token

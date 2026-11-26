@@ -64,7 +64,7 @@ func testRuntime(t *testing.T) *connectorruntime.Runtime {
 	return rt
 }
 
-// hookedSandbox is the installed sandbox: the in-process engine behind the load
+// hookedSandbox is the runtime's sandbox: the in-process engine behind the load
 // hook a test installs with hookLoads.
 type hookedSandbox struct{ connectorsandbox.Loader }
 

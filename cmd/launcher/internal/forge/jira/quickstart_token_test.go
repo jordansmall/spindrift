@@ -40,7 +40,7 @@ func TestAcquireToken_ValidTokenIsProbed(t *testing.T) {
 	}
 }
 
-// Quickstart installs no Connector sandbox, so the live check cannot run: the
+// Quickstart builds its runtime with no Connector sandbox, so the live check cannot run: the
 // token is accepted and the check is deferred to doctor.
 func TestAcquireToken_NoConnectorSandboxDefersToDoctor(t *testing.T) {
 	token, out, err := acquire("tok", func(string) error {

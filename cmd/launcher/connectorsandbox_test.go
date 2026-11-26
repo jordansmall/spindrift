@@ -124,7 +124,6 @@ func TestConnectorLoadingPathsUseTheProgramsRuntime(t *testing.T) {
 	}
 	for name, run := range paths {
 		t.Run(name, func(t *testing.T) {
-			t.Cleanup(connectorsandbox.Use(nil))
 			stubPastaOnPath(t)
 			setMinimalLocalBootstrapEnv(t, filepath.Join(t.TempDir(), "accum.git"))
 			setArtifact(t, "RUNTIME", "echo")
@@ -143,9 +142,6 @@ func TestConnectorLoadingPathsUseTheProgramsRuntime(t *testing.T) {
 			}
 			defer func() { _ = rt.Close() }()
 			run(t, rt)
-			if connectorsandbox.Current() != nil {
-				t.Fatal("a Connector-loading path installed a process-wide sandbox")
-			}
 		})
 	}
 }
@@ -155,7 +151,6 @@ func TestConnectorLoadingPathsUseTheProgramsRuntime(t *testing.T) {
 func TestMainRun_NoConnectorLoadStartsNoSandbox(t *testing.T) {
 	prev := newConnectorRuntime
 	newConnectorRuntime = connectorsetup.New
-	t.Cleanup(connectorsandbox.Use(nil))
 	t.Cleanup(func() { newConnectorRuntime = prev })
 	setRunner(t, "echo", countedKind)
 	t.Chdir(t.TempDir())
@@ -190,7 +185,6 @@ func TestConnectorRuntimeClose_RecordsSandboxTotals(t *testing.T) {
 	t.Cleanup(backendkit.ReplaceRegistryForTest([]backendkit.Strategy{
 		{RecordSandboxTotals: func(connectorsandbox.Stats) { calls++ }},
 	}))
-	t.Cleanup(connectorsandbox.Use(nil))
 	in, err := connectorInput()
 	if err != nil {
 		t.Fatal(err)
@@ -209,7 +203,6 @@ func TestConnectorRuntimeClose_RecordsSandboxTotals(t *testing.T) {
 }
 
 func TestConnectorRuntime_StartFailureFailsTheRun(t *testing.T) {
-	t.Cleanup(connectorsandbox.Use(nil))
 	in, err := connectorInput()
 	if err != nil {
 		t.Fatal(err)
@@ -265,7 +258,6 @@ func TestMainRun_ClosesTheRuntimeItBuilt(t *testing.T) {
 		opts.Sandbox = servedSandbox{connectorsandboxtest.InProcess()}
 		return prev(in, opts)
 	}
-	t.Cleanup(connectorsandbox.Use(nil))
 	t.Chdir(t.TempDir())
 
 	var stdout, stderr bytes.Buffer

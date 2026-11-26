@@ -21,9 +21,9 @@ import (
 )
 
 // Loader loads the Connector compiled in a wasm module. The caller picks it: a
-// Box main loads in-process (connectorhost.Load), a Launcher main through the
-// sandbox (connectorsandbox.Load), and the engine-reach guard holds each to its
-// side, so this package names neither.
+// Box main loads in-process (connectorhost.Load), a Launcher main through its
+// Connector runtime's sandbox (connectorruntime.Runtime.Load), and the
+// engine-reach guard holds each to its side, so this package names neither.
 type Loader func(ctx context.Context, wasm []byte) (*connectorhost.Connector, error)
 
 // Budget bounds one Pass replay, Connector load included. The orchestrator

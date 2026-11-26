@@ -1,18 +1,17 @@
 // Package connectorsandbox is where the Launcher loads a Connector it hosts
-// into a Connector sandbox of the run. connectorsetup.New installs the sandbox
-// package's Loader (Use) once per process: its own Load is the sandbox every
-// Driver Connector shares, and an OwningLoader also starts one of its own for
-// each credential-holding Connector. With none, every load fails with
-// ErrNoConnectorSandbox, so the Launcher never loads a Connector in its own
-// address space. The Box loads its first-party Drivers in-process via
-// driverrows, never through this package, and this package imports no runner
-// so the Box's binary does not link one.
+// into a Connector sandbox of the run. connectorsetup.New builds the Connector
+// runtime with the sandbox package's Loader: the runtime's own Load is the
+// sandbox every Driver Connector shares, and an OwningLoader also starts one
+// of its own for each credential-holding Connector. A runtime built with none
+// fails every load with ErrNoConnectorSandbox, so the Launcher never loads a
+// Connector in its own address space. The Box loads its first-party Drivers
+// in-process through its InProcess runtime, never through this package, and
+// this package imports no runner so the Box's binary does not link one.
 package connectorsandbox
 
 import (
 	"context"
 	"errors"
-	"sync/atomic"
 	"time"
 
 	"spindrift.dev/launcher/internal/connectorhost"
@@ -24,9 +23,11 @@ import (
 // Connector the Launcher's own address space.
 var ErrConnectorSandboxStart = errors.New("the Connector sandbox did not start")
 
-// ErrNoConnectorSandbox is a load with no Loader installed: unlike
-// ErrConnectorSandboxStart, the run's wiring, not the runner, is at fault.
-var ErrNoConnectorSandbox = errors.New("no Connector sandbox is installed")
+// ErrNoConnectorSandbox is a load through a Connector runtime built with no
+// sandbox: unlike ErrConnectorSandboxStart, the run's wiring, not the runner,
+// is at fault. The refusal is a property of how the runtime is built, so it
+// holds whatever else the process does.
+var ErrNoConnectorSandbox = errors.New("the Connector runtime has no Connector sandbox")
 
 // Loader is a sandbox that loads Connectors.
 type Loader interface {
@@ -60,66 +61,4 @@ type OwningLoader interface {
 type Stats struct {
 	Start time.Duration
 	connectorhost.HopStats
-}
-
-// holder lets the atomic hold a nil Loader.
-type holder struct{ l Loader }
-
-var current atomic.Pointer[holder]
-
-// Use installs l as where every Load and LoadNetwork go, and returns the
-// function that puts back what was installed before; nil installs none. Called
-// once per run, before any load.
-func Use(l Loader) (restore func()) {
-	prev := current.Swap(&holder{l})
-	return func() { current.Store(prev) }
-}
-
-// Current is the installed Loader, or nil when none is.
-func Current() Loader {
-	if h := current.Load(); h != nil {
-		return h.l
-	}
-	return nil
-}
-
-// Installed reports whether a Loader is installed, so a caller that never
-// installs one can say so before a load fails.
-func Installed() bool { return Current() != nil }
-
-// Load loads wasm into the installed sandbox, or fails with
-// ErrNoConnectorSandbox when none is.
-func Load(ctx context.Context, wasm []byte) (*connectorhost.Connector, error) {
-	if l := Current(); l != nil {
-		return l.Load(ctx, wasm)
-	}
-	return nil, ErrNoConnectorSandbox
-}
-
-// LoadNetwork loads wasm as a network Connector into the installed sandbox, or
-// fails with ErrNoConnectorSandbox when none is. An OwningLoader refuses it: a
-// network load goes through an owned sandbox (Own).
-func LoadNetwork(ctx context.Context, wasm []byte, n connectorhost.Network) (*connectorhost.Connector, error) {
-	if l := Current(); l != nil {
-		return l.LoadNetwork(ctx, wasm, n)
-	}
-	return nil, ErrNoConnectorSandbox
-}
-
-// Failure is the installed sandbox's start failure, which the run reports as
-// its own whatever the load site did with the error.
-func Failure() error {
-	if l := Current(); l != nil {
-		return l.Err()
-	}
-	return nil
-}
-
-// Report is the installed sandbox's Stats; false when none is installed or none
-// served.
-func Report() (Stats, bool) {
-	if l := Current(); l != nil {
-		return l.Stats()
-	}
-	return Stats{}, false
 }

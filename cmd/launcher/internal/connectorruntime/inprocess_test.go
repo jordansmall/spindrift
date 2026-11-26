@@ -29,6 +29,7 @@ func boxRuntime(t *testing.T, rows []map[string]any) *connectorruntime.Runtime {
 }
 
 func TestInProcessRuntimeLoadsFirstPartyDriverConnectorWithoutASandbox(t *testing.T) {
+	t.Parallel()
 	dir, err := fixturebuild.ConnectorDir()
 	if err != nil {
 		t.Fatal(err)
@@ -46,6 +47,7 @@ func TestInProcessRuntimeLoadsFirstPartyDriverConnectorWithoutASandbox(t *testin
 }
 
 func TestInProcessRuntimeRefusesDriverConnectorNotFirstParty(t *testing.T) {
+	t.Parallel()
 	rt := boxRuntime(t, []map[string]any{{"name": "outsider", "module": "/m/outsider.wasm"}})
 	if _, err := rt.Drivers().New("outsider"); !errors.Is(err, driverrows.ErrNotFirstParty) {
 		t.Fatalf("New(outsider) = %v, want ErrNotFirstParty", err)

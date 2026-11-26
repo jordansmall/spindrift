@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/golden"
 	"spindrift.dev/launcher/internal/hostop"
@@ -577,8 +576,8 @@ func TestStats_UnreadableLogWarnsAndExitsZero(t *testing.T) {
 	}
 }
 
-// Parsing a log loads the Driver's Connector, so stats must install the
-// Connector sandbox itself rather than lean on whatever the process has.
+// Parsing a log loads the Driver's Connector, so stats must build its runtime
+// with a Connector sandbox rather than load in its own process.
 func TestStats_InstallsConnectorSandbox(t *testing.T) {
 	root := t.TempDir()
 	dir := hostpaths.LogDir(root)
@@ -589,7 +588,6 @@ func TestStats_InstallsConnectorSandbox(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "issue-7.log"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(connectorsandbox.Use(nil))
 
 	stdout, stderr := runStats(t, root)
 	if strings.Contains(stderr, "warning") {

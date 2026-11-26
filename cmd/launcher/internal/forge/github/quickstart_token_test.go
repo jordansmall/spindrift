@@ -220,7 +220,7 @@ func TestAcquireToken_AuditsThePastedTokenForTheTargetRepo(t *testing.T) {
 	}
 }
 
-// Quickstart installs no Connector sandbox, so a classic token's scope audit
+// Quickstart builds its runtime with no Connector sandbox, so a classic token's scope audit
 // cannot run there; that defers to `spindrift doctor` rather than failing the
 // wizard or printing the raw error.
 func TestAcquireToken_NoConnectorSandboxDefersTheAuditAndContinues(t *testing.T) {

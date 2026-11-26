@@ -28,6 +28,7 @@ import (
 	"spindrift.dev/launcher/internal/butler"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectorruntime"
+	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
 	"spindrift.dev/launcher/internal/connectorsetup"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
@@ -6598,6 +6599,7 @@ func TestMainRun_InputDocument_AppliesBackendRows(t *testing.T) {
 	tr.TLSClientConfig.ServerName = "example.com"
 	t.Chdir(t.TempDir()) // the audit file opens under the working directory
 	c, err := backendrows.Load(context.Background(), row, backendrows.Options{
+		Sandbox: connectorsandboxtest.InProcess(),
 		Getenv: func(k string) string {
 			if k == "FIXTURE_TOKEN" {
 				return "tok-6805"
