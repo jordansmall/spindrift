@@ -28,7 +28,7 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/chore"
-	"spindrift.dev/launcher/internal/connectorruntime"
+	"spindrift.dev/launcher/internal/connectorsetup"
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers
@@ -716,11 +716,6 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	if err := backendrows.Use(doc.Backends, func(k string) string { return backendRowSetting(doc, stderr, k) }); err != nil {
 		return refuse(err)
 	}
-	sandboxWD, err := os.Getwd()
-	if err != nil {
-		return refuse(err)
-	}
-	defer installConnectorSandbox(doc, sandboxWD)()
 
 	// Reused for the runner config, so the warning and the strip agree.
 	stripped := strippedKeys(doc)
@@ -828,36 +823,35 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	}
 
 	// A Connector-routed tracker row's probe reads its credential from the
-	// runtime's source. Resolved ahead of the check-only return so a successor's
-	// smoke test also catches a missing or failing credential.
-	connectorCreds, refreshConnectorCreds, err := resolveConnectorCredentials(doc, args.Kinds, stderr)
+	// runtime's source. Built ahead of the check-only return so a successor's
+	// smoke test also catches a missing or failing credential. Nothing above
+	// loads a Connector, so the sandbox it installs is in place for every load.
+	pwd, err := os.Getwd()
 	if err != nil {
 		return refuse(err)
 	}
-	// Deferred after the sandbox so it closes first: a Connector closes through
-	// the sandbox that hosts it.
-	connectors := connectorruntime.FromRegistries(connectorCreds)
+	connectors, err := newConnectorRuntime(connectorInput(doc, args.Kinds, pwd), connectorsetup.Options{
+		RequireCredential: true, RefreshEvery: connectorCredentialRefresh,
+		OnRefreshError: func(env string, err error) {
+			fmt.Fprintf(stderr, "daemon: connector credential %s refresh failed, keeping the previous value: %v\n", env, err)
+		},
+	})
+	if err != nil {
+		return refuse(err)
+	}
 	defer func() { _ = connectors.Close() }()
 
 	// Before the lock and preflight: a freshly built successor smoke-tests
 	// itself this way beside the live daemon. Keep it ahead of the demand
-	// build too; only the Connector credential watcher has a test seam.
+	// build too.
 	if args.CheckOnly {
 		fmt.Fprintln(stderr, "daemon: check-only: input and config are valid")
 		return 0
 	}
 
-	if refreshConnectorCreds != nil {
-		startConnectorCredentialWatch(refreshConnectorCreds, connectorCredentialRefresh)
-	}
-
 	demand, demandMissing := buildDemandSources(connectors, doc, args.Kinds)
 
-	wd, err := os.Getwd()
-	if err != nil {
-		return refuse(err)
-	}
-	repoPath, err := repoRoot(wd)
+	repoPath, err := repoRoot(pwd)
 	if err != nil {
 		return refuse(err)
 	}
@@ -865,7 +859,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	clk := hostClock{}
 	em := daemon.NewEmitter(stdout, stderr, clk.Now)
 
-	gitDirPath, err := gitDir(wd)
+	gitDirPath, err := gitDir(pwd)
 	if err != nil {
 		return refuse(err)
 	}

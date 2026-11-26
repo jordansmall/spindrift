@@ -4,17 +4,14 @@ import (
 	"os"
 	"testing"
 
-	"spindrift.dev/launcher/internal/connectorsandbox"
-	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
+	"spindrift.dev/launcher/internal/connectorsetup/connectorsetuptest"
 	"spindrift.dev/launcher/internal/driver/drivertest"
-	"spindrift.dev/launcher/internal/inputdoc"
 )
 
-// A test binary has no runner to start a sandbox on, so the Loader run installs
-// is the in-process engine; useRealConnectorSandbox puts the production one back.
+// A test binary has no runner to start a sandbox on, so a runtime built without
+// a Sandbox hosts Connectors in the in-process engine; a test of the real
+// loader calls connectorsetup.New itself.
 func TestMain(m *testing.M) {
-	newConnectorSandboxLoader = func(*inputdoc.Document, string) connectorsandbox.Loader {
-		return connectorsandboxtest.InProcess()
-	}
+	newConnectorRuntime = connectorsetuptest.WithInProcessSandbox(newConnectorRuntime)
 	os.Exit(drivertest.RunWithClaudeConnector(m))
 }
