@@ -11,7 +11,8 @@ import (
 // by nix/regen.nix; see descriptor_gen.go. Edit the Driver rows and run
 // `nix run .#regen`.
 func TestParityWithNixDriverRegistry(t *testing.T) {
-	goNames := driver.Names()
+	t.Parallel()
+	goNames := bundledDrivers(t).Names()
 	nixNames := driver.DescriptorNames()
 
 	for _, n := range nixNames {
@@ -29,7 +30,8 @@ func TestParityWithNixDriverRegistry(t *testing.T) {
 // TestNewDefaultsToClaude verifies that an empty DRIVER value resolves to the
 // "claude" strategy, matching the nix side's default (ADR 0009).
 func TestNewDefaultsToClaude(t *testing.T) {
-	d, err := driver.New("")
+	t.Parallel()
+	d, err := bundledDrivers(t).New("")
 	if err != nil {
 		t.Fatalf("New(\"\"): %v", err)
 	}

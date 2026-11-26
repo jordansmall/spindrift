@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/connectorhost"
-	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/driver/driverkit/conformance"
 	"spindrift.dev/launcher/internal/fixturebuild"
@@ -70,24 +69,6 @@ func TestStrategyResultEventRoundTrips(t *testing.T) {
 	}
 }
 
-// This package links no Driver bundle, so the helper must install the
-// Strategy itself.
-func TestRegisterDriverInstallsStrategyWithoutBundle(t *testing.T) {
-	RegisterDriver(t)
-	RegisterDriver(t)
-	d, err := driver.New(fakeDriverName)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ev, err := d.ResultEvent("seam")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.HasPrefix(string(ev), `{"Kind":"result"`) {
-		t.Errorf("claude Driver encoded %q, want the seamtest canonical grammar", ev)
-	}
-}
-
 func TestStrategyDecodesHostOpLine(t *testing.T) {
 	line := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpPassStart, Pass: 2, Role: "review"})
 	evs := Strategy().NewDecoder()(line)
@@ -108,22 +89,6 @@ func TestLineRoundTripsThroughTheDecoder(t *testing.T) {
 	got := Strategy().NewDecoder()(strings.TrimSuffix(line, "\n")) // framers strip the terminator
 	if len(got) != 1 || got[0].Kind != want.Kind || got[0].MessageID != want.MessageID || got[0].Model != want.Model || got[0].Timestamp != want.Timestamp {
 		t.Errorf("decoded %+v, want %+v", got, want)
-	}
-}
-
-func TestRegisterStrategyKeepsAnExistingName(t *testing.T) {
-	first := Strategy()
-	first.Name = "seam-register-strategy"
-	RegisterStrategy(first)
-	second := first
-	second.ResultEvent = func(string) ([]byte, error) { return []byte("other"), nil }
-	RegisterStrategy(second)
-	d, err := driver.New(first.Name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ev, err := d.ResultEvent("x"); err != nil || string(ev) == "other" {
-		t.Errorf("ResultEvent = %q, %v; want the first registration kept", ev, err)
 	}
 }
 

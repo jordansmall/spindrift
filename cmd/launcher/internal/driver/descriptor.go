@@ -76,8 +76,8 @@ func (r CredentialRule) AppliesTo(models ...string) bool {
 }
 
 // DescriptorNames returns the sorted names of the generated Descriptors, one
-// per Driver in the Nix registry. A binary that links the bundle registers
-// exactly this set.
+// per Driver in the Nix registry. The bundle's Strategies cover exactly this
+// set.
 func DescriptorNames() []string {
 	names := make([]string, 0, len(descriptors))
 	for _, d := range descriptors {

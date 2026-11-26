@@ -628,12 +628,12 @@ func TestDriverSessionAnswerOverTheWireMeetsTheRow(t *testing.T) {
 	if err != nil || got != want {
 		t.Fatalf("SessionFlags = %+v, %v; want %+v", got, err, want)
 	}
-	argv, err := driver.SessionArgs("claude", got)
+	argv, err := driver.NewSet().SessionArgs("claude", got)
 	if err != nil || !reflect.DeepEqual(argv, []string{"--session-id", want.Value}) {
 		t.Errorf("SessionArgs(claude) = %q, %v; want the flag and the spaced value as two words", argv, err)
 	}
 	// opencode's row declares --title and --session, not the flag the Connector answered.
-	argv, err = driver.SessionArgs("opencode", got)
+	argv, err = driver.NewSet().SessionArgs("opencode", got)
 	if err == nil || argv != nil || !strings.Contains(err.Error(), `"opencode"`) || !strings.Contains(err.Error(), `"--session-id"`) {
 		t.Errorf("SessionArgs(opencode) = %q, %v; want a refusal naming the Driver and the undeclared flag", argv, err)
 	}

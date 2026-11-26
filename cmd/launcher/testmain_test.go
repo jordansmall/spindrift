@@ -59,9 +59,7 @@ func TestMain(m *testing.M) {
 	// family, which a test binary has none for, so the in-process engine
 	// comes in through Options.Sandbox; a test of the real wiring passes its own.
 	newConnectorRuntime = withClaudeConnector(connectorsetuptest.WithInProcessSandbox(newConnectorRuntime))
-	// The tests that still resolve Drivers through the process set (driver.New,
-	// driver.Names) need claude registered there.
-	seamtest.MainWith(m, drivertest.UseClaudeConnector)
+	seamtest.Main(m)
 }
 
 // withClaudeConnector adds claude's Connector row to the Driver rows the

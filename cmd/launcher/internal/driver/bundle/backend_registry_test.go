@@ -11,6 +11,7 @@ import (
 // backend.Registry is generated from lib/backends/*.nix by nix/regen.nix; the
 // Bundle must register a Strategy for every row, carrying the same Descriptor.
 func TestBackendStrategiesMatchNixRows(t *testing.T) {
+	t.Parallel()
 	for _, d := range backend.Registry {
 		s, ok := backendkit.ByName(d.Name)
 		if !ok {
@@ -31,6 +32,7 @@ func TestBackendStrategiesMatchNixRows(t *testing.T) {
 // A Code Forge row without a LandedBanner would panic main's forgeLandedLine at
 // the end of a run, so the gap is caught here instead.
 func TestCodeForgeStrategiesHaveLandedBanner(t *testing.T) {
+	t.Parallel()
 	for _, s := range backendkit.Strategies() {
 		if s.ValidAsCodeForge && s.LandedBanner == nil {
 			t.Errorf("Code Forge Strategy %q has no LandedBanner", s.Name)
@@ -41,6 +43,7 @@ func TestCodeForgeStrategiesHaveLandedBanner(t *testing.T) {
 // HostRepoDir is how core learns the Accumulation repo path, so a backend
 // declares it exactly when its repo is host-mediated.
 func TestHostRepoDirIffHostMediatedRemote(t *testing.T) {
+	t.Parallel()
 	for _, s := range backendkit.Strategies() {
 		if s.HostMediatedRemote != (s.HostRepoDir != nil) {
 			t.Errorf("backend %q: HostMediatedRemote=%v but HostRepoDir set=%v", s.Name, s.HostMediatedRemote, s.HostRepoDir != nil)

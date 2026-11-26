@@ -28,6 +28,7 @@ func familyRegistryDrift(rows, registered []string) []string {
 // families_gen.go. A new family needs a row and a Strategy the bundle
 // registers.
 func TestRunnerStrategiesMatchFamilyRows(t *testing.T) {
+	t.Parallel()
 	var rows []string
 	for _, f := range runner.Families {
 		rows = append(rows, f.Name)
@@ -38,6 +39,7 @@ func TestRunnerStrategiesMatchFamilyRows(t *testing.T) {
 }
 
 func TestFamilyRegistryDriftClassifiesPlantedInput(t *testing.T) {
+	t.Parallel()
 	if got := familyRegistryDrift([]string{"oci", "bwrap"}, []string{"bwrap", "oci"}); len(got) != 0 {
 		t.Errorf("matching sets reported drift: %v", got)
 	}

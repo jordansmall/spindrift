@@ -29,12 +29,6 @@ var bundleBinaries = []string{
 	module + "/quickstart",
 }
 
-// bundleFixtures are permanent exceptions: seamtest/bundled tests
-// RegisterDriver's bundle-present no-op.
-var bundleFixtures = []string{
-	module + "/internal/seamtest/bundled",
-}
-
 // coreBackends are the backends core keeps (ADR 0068, decision 7). Every other
 // backend row is guarded by default. Mirrored by coreBackendNames in
 // nix/checks/go.nix.
@@ -128,10 +122,11 @@ func bundleProblems(reach map[string][]string, binaries []string, list string) [
 }
 
 // TestOnlyBinariesReachTheBundle pins issues #5541, #5545 and #5648: only the
-// binaries (and the seamtest/bundled fixture) may reach the bundle, a Driver or
+// binaries may reach the bundle, a Driver or
 // a non-core backend adapter (github, forgejo, jira) in their tests; every
 // library package tests through seamtest's Strategy or the forge fake.
 func TestOnlyBinariesReachTheBundle(t *testing.T) {
+	t.Parallel()
 	names := driver.DescriptorNames()
 	if len(names) == 0 {
 		t.Fatal("driver.DescriptorNames() is empty; nothing to guard")
@@ -139,7 +134,7 @@ func TestOnlyBinariesReachTheBundle(t *testing.T) {
 	out := goList(t, "-test", "-f", `{{.ImportPath}}|{{.ForTest}}|{{join .Deps " "}}`, module+"/...")
 	backends := guardedBackends(t)
 	isSubject := func(path string) bool { return isGuarded(path, names, backends) }
-	for _, p := range bundleProblems(bundleReach(out, isSubject), slices.Concat(bundleBinaries, bundleFixtures), bundleList) {
+	for _, p := range bundleProblems(bundleReach(out, isSubject), bundleBinaries, bundleList) {
 		t.Error(p)
 	}
 }
@@ -152,7 +147,7 @@ var hostBundleBinaries = []string{
 }
 
 const (
-	bundleList     = "bundleBinaries and bundleFixtures"
+	bundleList     = "bundleBinaries"
 	hostBundleList = "hostBundleBinaries"
 )
 
@@ -162,6 +157,7 @@ func isHostBundle(path string) bool { return path == module+"/internal/hostbundl
 // settle, tuning and the Records store, out of every other package's test
 // closure.
 func TestOnlyButlerBinariesReachTheHostBundle(t *testing.T) {
+	t.Parallel()
 	out := goList(t, "-test", "-f", `{{.ImportPath}}|{{.ForTest}}|{{join .Deps " "}}`, module+"/...")
 	for _, p := range bundleProblems(bundleReach(out, isHostBundle), hostBundleBinaries, hostBundleList) {
 		t.Error(p)
@@ -191,6 +187,7 @@ func hostSideProblems(bin string, deps []string) []string {
 // TestBoxAndDriverExecLinkNoHostSide pins that the in-Box binaries' closures
 // do not grow the butler sweep's packages, dispatch or the Records store.
 func TestBoxAndDriverExecLinkNoHostSide(t *testing.T) {
+	t.Parallel()
 	for _, bin := range []string{"box", "driver-exec"} {
 		for _, p := range hostSideProblems(bin, strings.Fields(goList(t, "-deps", module+"/"+bin))) {
 			t.Error(p)
@@ -199,6 +196,7 @@ func TestBoxAndDriverExecLinkNoHostSide(t *testing.T) {
 }
 
 func TestBundleProblemsClassifiesPlantedReach(t *testing.T) {
+	t.Parallel()
 	names := []string{"claude", "opencode"}
 	m := module
 	backends := []string{m + "/internal/forge/jira", m + "/internal/forge/forgejo"}
@@ -218,8 +216,8 @@ func TestBundleProblemsClassifiesPlantedReach(t *testing.T) {
 	reach := bundleReach(out, isSubject)
 	got := bundleProblems(reach, []string{m + "/box"}, bundleList)
 	want := []string{
-		m + "/internal/stray's test closure reaches " + registry + "/claude; only bundleBinaries and bundleFixtures may",
-		m + "/internal/stray2's test closure reaches " + m + "/internal/forge/jira; only bundleBinaries and bundleFixtures may",
+		m + "/internal/stray's test closure reaches " + registry + "/claude; only bundleBinaries may",
+		m + "/internal/stray2's test closure reaches " + m + "/internal/forge/jira; only bundleBinaries may",
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("bundleProblems = %q, want %q", got, want)
@@ -241,6 +239,7 @@ func TestBundleProblemsClassifiesPlantedReach(t *testing.T) {
 }
 
 func TestHostSideProblemsClassifiesPlantedReach(t *testing.T) {
+	t.Parallel()
 	m := module
 	planted := []string{
 		"fmt", m + "/internal/dispatch", m + "/internal/dispatchrecord",
@@ -277,6 +276,7 @@ func ecosystemProblems(bin string, deps []string) []string {
 // Nix drops that file from the orchestrator's source, so the closure is taken
 // with the same files deleted through a go -overlay.
 func TestOrchestratorLinksNoEcosystem(t *testing.T) {
+	t.Parallel()
 	bundleDir, err := filepath.Abs("bundle")
 	if err != nil {
 		t.Fatal(err)
@@ -308,6 +308,7 @@ func TestOrchestratorLinksNoEcosystem(t *testing.T) {
 }
 
 func TestEcosystemProblemsClassifiesPlantedReach(t *testing.T) {
+	t.Parallel()
 	m := module
 	planted := []string{
 		"fmt", m + "/internal/ecosystem", m + "/internal/ecosystem/ecosystemtest",

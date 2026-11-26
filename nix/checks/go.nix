@@ -23,12 +23,12 @@ let
   # The Connector under connectors/<name>, built from the batteries core.
   connectorFor = dir: (import dir).lib.connector { core = import ../../core; };
   allDriverDirs = map driverDir driverNames;
-  # Everything that links the Driver bundle: the root package, its testdata,
-  # the mains and the bundled fixture. The root's *.go files are listed one by
-  # one because internal/ lies beneath it. They run in launcher-binaries-go-test,
-  # so the core go test derivation compiles without any Driver (ADR 0066
-  # decision 8). bundle-binaries-match-guard pins the mains and fixture to
-  # bundleBinaries and bundleFixtures in internal/driver/bundle_guard_test.go.
+  # Everything that links the Driver bundle: the root package, its testdata and
+  # the mains. The root's *.go files are listed one by one because internal/
+  # lies beneath it. They run in launcher-binaries-go-test, so the core go test
+  # derivation compiles without any Driver (ADR 0066 decision 8).
+  # bundle-binaries-match-guard pins the mains to bundleBinaries in
+  # internal/driver/bundle_guard_test.go.
   bundleMains = [
     "box"
     "daemon"
@@ -36,14 +36,13 @@ let
     "orchestrator"
     "quickstart"
   ];
-  bundleFixtureDirs = [ "internal/seamtest/bundled" ];
   bundleBinaryDirs =
     pkgs.lib.mapAttrsToList (n: _: launcherDir + "/${n}") (
       pkgs.lib.filterAttrs (n: t: t == "regular" && pkgs.lib.hasSuffix ".go" n) (
         builtins.readDir launcherDir
       )
     )
-    ++ map (d: launcherDir + "/${d}") ([ "testdata" ] ++ bundleMains ++ bundleFixtureDirs);
+    ++ map (d: launcherDir + "/${d}") ([ "testdata" ] ++ bundleMains);
   # The backends core keeps (ADR 0068, decision 7): the rows marked `core`.
   # Mirrors coreBackends in internal/driver/bundle_guard_test.go
   # (bundle-binaries-match-guard pins them). Every other backend row is
@@ -652,9 +651,9 @@ let
     cp -r ${../../connectors/claude/testdata} src/connectors/claude/testdata
     ${claudeConnectorEnv}
   '';
-  # TestMain and the driverrows corpus test register claude from its compiled
-  # Connector (drivertest.UseClaudeConnector); without this they would try to
-  # `nix build` it inside the sandbox.
+  # Tests that build a Driver Set load claude from its compiled Connector
+  # (drivertest.Drivers); without this they would try to `nix build` it inside
+  # the sandbox.
   claudeConnectorWasm = "${(connectorFor ../../connectors/claude).package pkgs}/claude.wasm";
   claudeConnectorEnv = "export SPINDRIFT_CLAUDE_CONNECTOR_WASM=${claudeConnectorWasm}";
   goTestInputs = [
@@ -1163,7 +1162,7 @@ driverGoTests
   launcher-binaries-go-test =
     let
       binaryPkgs = ". ${
-        pkgs.lib.concatMapStringsSep " " (d: "./${d}/...") (bundleMains ++ bundleFixtureDirs)
+        pkgs.lib.concatMapStringsSep " " (d: "./${d}/...") bundleMains
       } ./internal/driver ./internal/driver/bundle/...";
     in
     pkgs.runCommand "launcher-binaries-go-test"
@@ -1214,11 +1213,10 @@ driverGoTests
         touch $out
       '';
 
-  # bundleMains and bundleFixtureDirs are the module-relative entries of
-  # bundleBinaries and bundleFixtures in bundle_guard_test.go (its bare `module`
-  # entry is the root package, which bundleBinaryDirs lists separately). A list
-  # edited without the other would move a package between the core and
-  # binaries derivations.
+  # bundleMains are the module-relative entries of bundleBinaries in
+  # bundle_guard_test.go (its bare `module` entry is the root package, which
+  # bundleBinaryDirs lists separately). A list edited without the other would
+  # move a package between the core and binaries derivations.
   bundle-binaries-match-guard =
     let
       inherit (pkgs.lib)
@@ -1241,10 +1239,8 @@ driverGoTests
         map builtins.head (
           builtins.filter builtins.isList (builtins.split "module \\+ \"/([^\"]+)\"" body)
         );
-      guarded = sort lessThan (
-        entries (blockBody "bundleBinaries") ++ entries (blockBody "bundleFixtures")
-      );
-      listed = sort lessThan (bundleMains ++ bundleFixtureDirs);
+      guarded = sort lessThan (entries (blockBody "bundleBinaries"));
+      listed = sort lessThan bundleMains;
       guardedCore = sort lessThan (
         map builtins.head (
           builtins.filter builtins.isList (builtins.split "\"([^\"]+)\"" (blockBody "coreBackends"))
@@ -1254,7 +1250,7 @@ driverGoTests
     assert assertMsg (guardedCore == sort lessThan coreBackendNames)
       "coreBackendNames (nix/checks/go.nix) must equal coreBackends (internal/driver/bundle_guard_test.go); go.nix has: ${concatStringsSep ", " coreBackendNames}; the guard has: ${concatStringsSep ", " guardedCore}";
     assert assertMsg (guarded == listed)
-      "bundleMains ++ bundleFixtureDirs (nix/checks/go.nix) must equal the module + \"/<dir>\" entries of bundleBinaries and bundleFixtures (internal/driver/bundle_guard_test.go); go.nix has: ${concatStringsSep ", " listed}; the guard has: ${concatStringsSep ", " guarded}";
+      "bundleMains (nix/checks/go.nix) must equal the module + \"/<dir>\" entries of bundleBinaries (internal/driver/bundle_guard_test.go); go.nix has: ${concatStringsSep ", " listed}; the guard has: ${concatStringsSep ", " guarded}";
     pkgs.runCommand "bundle-binaries-match-guard" { } "touch $out";
 
   # Stands in for adapterRegistryChecks' independence half, which cannot hold

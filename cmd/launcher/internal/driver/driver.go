@@ -8,7 +8,6 @@ package driver
 import (
 	"fmt"
 	"io"
-	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -130,16 +129,6 @@ func NewSet(natives ...driverkit.Strategy) *Set {
 		s.natives[n.Name] = driverkit.New(n)
 	}
 	return s
-}
-
-// clone returns an independent copy of s.
-func (s *Set) clone() *Set {
-	return &Set{
-		natives:     maps.Clone(s.natives),
-		lazy:        maps.Clone(s.lazy),
-		descriptors: slices.Clone(s.descriptors),
-		shadows:     maps.Clone(s.shadows),
-	}
 }
 
 // AddConnector adds a Driver that load builds on first use, keyed on name.
@@ -353,62 +342,4 @@ func (s *Set) SessionArgs(name string, f driverkit.SessionFlag) ([]string, error
 		return nil, fmt.Errorf("driver %q answered session flag %q with value %q, which the CLI would read as a flag", name, f.Flag, f.Value)
 	}
 	return f.Args(), nil
-}
-
-// Temporary process-wide shims; deleted by #7556's last slice.
-
-// process is the Set the package-level shims read and write.
-var process = NewSet()
-
-// Register adds the native Strategy s to the process Set.
-func Register(s driverkit.Strategy) {
-	if process.Has(s.Name) {
-		panic("driver: duplicate registration for " + s.Name)
-	}
-	process.natives[s.Name] = driverkit.New(s)
-}
-
-// ProcessNatives returns the Strategies Register has added to the process Set.
-func ProcessNatives() []driverkit.Strategy {
-	var out []driverkit.Strategy
-	for _, name := range process.Names() {
-		if s, ok := process.NativeStrategy(name); ok {
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
-// Process returns the process Set, for the driverrows shims that apply rows to it.
-func Process() *Set { return process }
-
-// Snapshot captures the process Set and returns the function that restores it.
-func Snapshot() (restore func()) {
-	saved := process.clone()
-	return func() { process = saved }
-}
-
-func RegisterConnector(name string, load func() (driverkit.Strategy, error)) {
-	process.AddConnector(name, load)
-}
-func RegisterPrimary(name string, load func() (driverkit.Strategy, error)) {
-	process.UsePrimary(name, load)
-}
-func UseShadow(name, module string)                         { process.UseShadow(name, module) }
-func SkipShadow(name, reason string)                        { process.SkipShadow(name, reason) }
-func UseDescriptor(d Descriptor)                            { process.UseDescriptor(d) }
-func HasNative(name string) bool                            { return process.HasNative(name) }
-func Has(name string) bool                                  { return process.Has(name) }
-func NativeStrategy(name string) (driverkit.Strategy, bool) { return process.NativeStrategy(name) }
-func ShadowSkipped(name string) (string, bool)              { return process.ShadowSkipped(name) }
-func ShadowModule(name string) (string, bool)               { return process.ShadowModule(name) }
-func New(name string) (Driver, error)                       { return process.New(name) }
-func DescriptorFor(name string) (Descriptor, bool)          { return process.DescriptorFor(name) }
-func ProviderNamespacedModels(name string) bool             { return process.ProviderNamespacedModels(name) }
-func EffortOnModelLevels(name string) []string              { return process.EffortOnModelLevels(name) }
-func CredentialRules(name string) ([]CredentialRule, bool)  { return process.CredentialRules(name) }
-func AuthContentFor(name string) (AuthContent, bool)        { return process.AuthContentFor(name) }
-func Names() []string                                       { return process.Names() }
-func SessionArgs(name string, f driverkit.SessionFlag) ([]string, error) {
-	return process.SessionArgs(name, f)
 }

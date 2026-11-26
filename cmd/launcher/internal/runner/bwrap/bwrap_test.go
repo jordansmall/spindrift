@@ -4131,7 +4131,7 @@ func TestBwrapRun_ReclaimRefusedInsideLaunchWindow(t *testing.T) {
 // The pi Driver's Provider keys (issue #5480) are credentials like
 // OPENCODE_AUTH_CONTENT: off the bwrap command line, in the process env.
 func TestBwrapRun_PiProviderKeysOffArgvButInProcessEnv(t *testing.T) {
-	rules, ok := driver.CredentialRules("pi")
+	rules, ok := driver.NewSet().CredentialRules("pi")
 	if !ok || len(rules) == 0 {
 		t.Fatal("pi Driver has no credential rules")
 	}

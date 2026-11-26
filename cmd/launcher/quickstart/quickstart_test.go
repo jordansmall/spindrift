@@ -3961,7 +3961,7 @@ func TestGatherCredentials_UnlabelledRuleKeepsPlainPrompts(t *testing.T) {
 }
 
 func TestGatherCredentials_ClaudeRowPrompts(t *testing.T) {
-	rules, ok := driver.CredentialRules("claude")
+	rules, ok := driver.NewSet().CredentialRules("claude")
 	if !ok {
 		t.Fatal("no claude credential rules")
 	}

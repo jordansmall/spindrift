@@ -29,6 +29,7 @@ import (
 // literals because TestEcosystemNamesStayInTheirOwnPackage bars ecosystem-name
 // literals from every importer of internal/ecosystem, this package included.
 func TestRegisteredEcosystemOrderIsPinned(t *testing.T) {
+	t.Parallel()
 	want := []string{
 		cargo.Strategy.Name, npmfamily.Npm.Name, npmfamily.Yarn.Name,
 		npmfamily.Pnpm.Name, gomod.Strategy.Name, gradle.Strategy.Name,
@@ -304,6 +305,7 @@ func unregisteredStrategies(t *testing.T, ecosystemDir, ecosystemImport, registe
 // absent from the Register call would silently never bind, so the Bundle must
 // list every one.
 func TestEveryDeclaredStrategyIsRegisteredByTheBundle(t *testing.T) {
+	t.Parallel()
 	moduleName := readModuleName(t, filepath.Join(realModuleRoot, "go.mod"))
 	missing := unregisteredStrategies(t, filepath.Join(realModuleRoot, "internal", "ecosystem"), moduleName+"/internal/ecosystem", "ecosystems.go")
 	if len(missing) > 0 {
@@ -317,6 +319,7 @@ func TestEveryDeclaredStrategyIsRegisteredByTheBundle(t *testing.T) {
 // Looping Registered() covers every future ecosystem package, since
 // TestEveryDeclaredStrategyIsRegisteredByTheBundle keeps the list complete.
 func TestEveryRegisteredStrategyPairsConfigPathsWithParser(t *testing.T) {
+	t.Parallel()
 	registered := ecosystem.Registered()
 	if len(registered) == 0 {
 		t.Fatal("the Bundle registered no ecosystem Strategies")
@@ -338,6 +341,7 @@ func TestEveryRegisteredStrategyPairsConfigPathsWithParser(t *testing.T) {
 // cannot express (issue #5963); a second setter must be a deliberate change
 // here, not a silent one.
 func TestOnlyNuGetSetsInTreeRewrite(t *testing.T) {
+	t.Parallel()
 	for _, s := range ecosystem.Registered() {
 		if s.Name != nuget.Strategy.Name && s.InTreeRewrite != nil {
 			t.Errorf("Strategy %q sets InTreeRewrite; only nuget may", s.Name)
@@ -346,6 +350,7 @@ func TestOnlyNuGetSetsInTreeRewrite(t *testing.T) {
 }
 
 func TestUnregisteredStrategiesClassifiesPlantedInput(t *testing.T) {
+	t.Parallel()
 	eco := t.TempDir()
 	testutil.WriteFixture(t, eco, "rows.go", `package ecosystem
 
@@ -423,6 +428,7 @@ func init() {
 // A Register argument that is not a <package>.<Strategy> selector would drop
 // out of every comparison below, so reading one must fail.
 func TestReadRegisterArgsRejectsAnUnreadableArgument(t *testing.T) {
+	t.Parallel()
 	reg := t.TempDir()
 	testutil.WriteFixture(t, reg, "ecosystems.go", `package bundle
 
@@ -436,6 +442,7 @@ func init() { ecosystem.Register(ecosystem.Listed, local) }
 }
 
 func TestReadRegisterArgsResolvesQualifiersThroughImports(t *testing.T) {
+	t.Parallel()
 	reg := t.TempDir()
 	testutil.WriteFixture(t, reg, "ecosystems.go", `package bundle
 

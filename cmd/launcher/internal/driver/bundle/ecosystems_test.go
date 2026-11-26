@@ -25,6 +25,7 @@ func carryOverClause(retiredKey, owner, replacement, rest string) string {
 // panics on one that resolves to no Strategy. Core tests cannot link the real
 // registration, so this is where that guarantee is held.
 func TestEveryRetiredRouteKeyResolvesToARegisteredStrategy(t *testing.T) {
+	t.Parallel()
 	registered := ecosystem.Registered()
 	if len(registered) == 0 {
 		t.Fatal("the Bundle registered no ecosystem Strategies")
@@ -52,6 +53,7 @@ func TestEveryRetiredRouteKeyResolvesToARegisteredStrategy(t *testing.T) {
 // registryroutes' tests pin the mechanics with stand-ins, this pins the wording
 // an operator sees.
 func TestRetiredRouteInvalidValueNamesTheRealOwnersValidation(t *testing.T) {
+	t.Parallel()
 	const base = "\n[[routes]]\nmatch-host = \"repo.example.com\"\ncredential = { netrc = \"~/.netrc\" }\n"
 	for _, tc := range []struct {
 		name    string
