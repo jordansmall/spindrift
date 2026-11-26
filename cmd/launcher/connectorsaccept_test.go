@@ -61,6 +61,23 @@ func TestConnectorsAcceptWritesDeclaredHeaders(t *testing.T) {
 	}
 }
 
+func TestConnectorsAcceptWritesDeclaredDocuments(t *testing.T) {
+	rows := `[{"name":"github","module":"/m.wasm","credentialEnv":"GH_TOKEN",
+"routes":[{"method":"POST","host":"h.test","path":"/graphql","documents":{"Q":"query { a }"}}]}]`
+	path := filepath.Join(t.TempDir(), "baseline.json")
+	var stdout, stderr bytes.Buffer
+	if code := cmdConnectorsAccept(json.RawMessage(rows), []string{path}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr: %s", code, stderr.String())
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `"documents":{"Q":"query { a }"}`; !strings.Contains(string(got), want) {
+		t.Errorf("file lacks %s:\n%s", want, got)
+	}
+}
+
 func TestConnectorsAcceptDefaultsToTheConsumerFlakeRoot(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
