@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"spindrift.dev/launcher/internal/registryvocab"
@@ -362,7 +363,9 @@ type AuditEntry struct {
 	// route that declares Documents.
 	Document string `json:"document,omitempty"`
 	// AddressCheck says how a literal Route host's address was checked: one of
-	// the AddressCheck* values, empty for a host an Operator knob named.
+	// the AddressCheck* values, empty for a host an Operator knob named unless
+	// a proxy carries its request. It describes the last dial, so a followed
+	// redirect hop's outcome replaces the first request's.
 	AddressCheck string `json:"address_check,omitempty"`
 }
 
@@ -465,9 +468,14 @@ type Network struct {
 	// literal host. A production binary that sets either fails to load (checkSeams).
 	PublicForTest func(netip.Addr) bool
 	LookupForTest func(ctx context.Context, host string) ([]netip.Addr, error)
-	// checked is Client's transport swapped for one that dials only public
-	// addresses; set at load, nil when Client's transport is not an *http.Transport.
-	checked *http.Client
+	// checked builds, once and on first use, Client's transport swapped for one
+	// that dials only public addresses. A func, so a copy of the Network shares
+	// the one transport. useChecked sets this and checkedBuilt together and must
+	// run before a Network sends; literalClient and closeIdle dereference both.
+	checked func() *http.Client
+	// checkedBuilt is set once checked has built, so closeIdle skips cloning a
+	// transport no request used. Shared by pointer for the same reason.
+	checkedBuilt *atomic.Bool
 	// Audit receives one entry per request; required.
 	Audit *AuditLog
 	// requestTimeout bounds one http_request; zero means httpRequestTimeout.
@@ -728,25 +736,12 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 	}
 	entry.Headers = slices.Sorted(maps.Keys(req.Header))
 
-	client := http.Client{}
-	if n.Client != nil {
-		client = *n.Client
+	resp, serr := n.send(req, matched.NamedByKnob, &entry)
+	var refused *notPublicError
+	if errors.As(serr, &refused) {
+		return 0, nil, nil, refuse("%s %s%s: %v", in.Method, u.Host, u.Path, refused)
 	}
-	if !matched.NamedByKnob {
-		var checked *http.Client
-		checked, entry.AddressCheck = n.literalClient(req)
-		if checked != nil {
-			client = *checked
-		}
-	}
-	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	resp, serr := client.Do(req)
 	if serr != nil {
-		var refused *notPublicError
-		if errors.As(serr, &refused) {
-			entry.AddressCheck = AddressCheckRefused
-			return 0, nil, nil, refuse("%s %s%s: %v", in.Method, u.Host, u.Path, refused)
-		}
 		return 0, nil, nil, sendFailed("", serr)
 	}
 	if matched.FollowRedirect && resp.StatusCode >= 300 && resp.StatusCode < 400 {
@@ -754,11 +749,13 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 		if lerr == nil {
 			status = resp.StatusCode
 			resp.Body.Close()
+			if loc.Host != "" {
+				entry.RedirectHost = loc.Host
+				entry.RedirectStatus = status
+			}
 			if loc.Scheme != "https" || loc.User != nil || loc.Host == "" {
 				return status, nil, nil, refuse("redirect from %s%s: only https locations without userinfo are followed", u.Host, u.Path)
 			}
-			entry.RedirectHost = loc.Host
-			entry.RedirectStatus = status
 			// A fresh request: the guest's headers and the credential must not
 			// leave the admitted host. The hop's share covers its body read; the
 			// caller's deadline expiring instead would kill the Connector rather
@@ -791,20 +788,11 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 			// The hop is always address-checked, even from a knob-named route: a
 			// server the Operator trusts must not redirect into the private
 			// network.
-			hopper := client
-			checked, check := n.literalClient(hop)
-			if checked != nil {
-				hopper = *checked
-				hopper.CheckRedirect = client.CheckRedirect
+			resp, serr = n.send(hop, false, &entry)
+			if errors.As(serr, &refused) {
+				return status, nil, nil, refuse("redirect from %s%s: %v", u.Host, u.Path, refused)
 			}
-			entry.AddressCheck = check
-			resp, serr = hopper.Do(hop)
 			if serr != nil {
-				var refused *notPublicError
-				if errors.As(serr, &refused) {
-					entry.AddressCheck = AddressCheckRefused
-					return status, nil, nil, refuse("redirect from %s%s: %v", u.Host, u.Path, refused)
-				}
 				return status, nil, nil, hopFailed(serr)
 			}
 		} else {
@@ -840,6 +828,29 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 		return status, nil, nil, fmt.Errorf("%w: connector %q: over %d bytes", ErrResponseTooLarge, n.Name, maxBody)
 	}
 	return status, data, matched.readable(resp.Header), nil
+}
+
+// send sends req through the caller's client, or the address-checked one where
+// the check applies (see literalClient), never following a redirect, and
+// records the address_check outcome on entry, overwriting an earlier hop's: the
+// field describes the last dial. The check's refusal is a *notPublicError in err.
+func (n *Network) send(req *http.Request, knobNamed bool, entry *AuditEntry) (*http.Response, error) {
+	client := http.Client{}
+	if n.Client != nil {
+		client = *n.Client
+	}
+	checked, check := n.literalClient(req, knobNamed)
+	entry.AddressCheck = check
+	if checked != nil {
+		client = *checked
+	}
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := client.Do(req)
+	var refused *notPublicError
+	if errors.As(err, &refused) {
+		entry.AddressCheck = AddressCheckRefused
+	}
+	return resp, err
 }
 
 // readable is the part of h a guest may read on this route: the fixed set and

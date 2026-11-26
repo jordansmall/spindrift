@@ -511,6 +511,9 @@ func TestNetworkFollowRedirectRefusesPlaintextAndUserinfoTargets(t *testing.T) {
 			if len(lines) != 1 || lines[0].Decision != connectorhost.DecisionRefused {
 				t.Fatalf("audit = %+v, want one refused entry", lines)
 			}
+			if lines[0].RedirectHost != "127.0.0.1:1" || lines[0].RedirectStatus != http.StatusFound {
+				t.Errorf("audit = %+v, want the refused hop's host and status", lines[0])
+			}
 		})
 	}
 }
