@@ -669,11 +669,7 @@ func runnerConfig(c config) runner.Config {
 // (issue #2538), never c.runtime, which also carries operator-facing runtime
 // names that aren't a runner family literally.
 func runnerForKind(c config, rc runner.Config, pwd string) (runner.Runner, error) {
-	s, err := runner.Lookup(c.runnerKind)
-	if err != nil {
-		return nil, err
-	}
-	return s.New(rc, c.artifacts, c.knobLookup, pwd)
+	return runner.New(c.runnerKind, rc, c.artifacts, c.knobLookup, pwd)
 }
 
 // buildRunnerForKind is runnerForKind's `launcher build` counterpart, using

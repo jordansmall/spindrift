@@ -46,11 +46,7 @@ func (l *lazyStarter) Kill(name string) error {
 // runner would use.
 func ForKind(kind string, rc runner.Config, art inputdoc.Artifacts, l runner.KnobLookup, pwd string) *Pool {
 	return NewPool(&lazyStarter{build: func() (runner.Runner, error) {
-		s, err := runner.Lookup(kind)
-		if err != nil {
-			return nil, err
-		}
-		return s.New(rc, art, l, pwd)
+		return runner.New(kind, rc, art, l, pwd)
 	}}, runnerLabel(kind, rc.Runtime))
 }
 
