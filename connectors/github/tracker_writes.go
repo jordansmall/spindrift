@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"strconv"
 
@@ -23,18 +22,6 @@ const (
 // name no status.
 func trackerTransition(tracker.Target, string, tracker.TransitionRequest) (tracker.TransitionResult, error) {
 	return tracker.TransitionResult{Outcome: tracker.TransitionUnmapped}, nil
-}
-
-func postJSON(t tracker.Target, path string, body any, out any) error {
-	b, err := json.Marshal(body)
-	if err != nil {
-		return err
-	}
-	if out == nil {
-		_, err = fetch("POST", t.API, path, b)
-		return err
-	}
-	return call("POST", t.API, path, b, out)
 }
 
 func nonEmpty(names []string) []string {
@@ -62,7 +49,7 @@ func editLabels(t tracker.Target, number string, add, remove []string) error {
 	}
 	names := nonEmpty(add)
 	if len(names) > 0 {
-		if err := postJSON(t, base+"/labels", map[string][]string{"labels": names}, nil); err != nil {
+		if _, err := send("POST", t.API, base+"/labels", map[string][]string{"labels": names}, nil); err != nil {
 			return err
 		}
 	}
@@ -151,7 +138,8 @@ func issueComment(t tracker.Target, number string, r tracker.CommentRequest) err
 	if r.Research {
 		body = researchMarker + "\n" + body
 	}
-	return postJSON(t, base+"/comments", map[string]string{"body": body}, nil)
+	_, err = send("POST", t.API, base+"/comments", map[string]string{"body": body}, nil)
+	return err
 }
 
 // fileIssue creates the issue and returns its html_url. GitHub has no entity
@@ -178,7 +166,7 @@ func fileIssue(t tracker.Target, r tracker.IssueRequest) (string, error) {
 	var created struct {
 		HTMLURL string `json:"html_url"`
 	}
-	if err := postJSON(t, repoPath(t), req, &created); err != nil {
+	if _, err := send("POST", t.API, repoPath(t), req, &created); err != nil {
 		return "", err
 	}
 	if created.HTMLURL == "" {
@@ -237,7 +225,8 @@ func listLabels(t tracker.Target) ([]string, error) {
 // createLabel fails on an existing label, as `gh label create` does without
 // --force; core lists first and creates only the missing ones.
 func createLabel(t tracker.Target, name, description, color string) error {
-	return postJSON(t, labelsPath(t), map[string]string{
+	_, err := send("POST", t.API, labelsPath(t), map[string]string{
 		"name": name, "description": description, "color": color,
 	}, nil)
+	return err
 }

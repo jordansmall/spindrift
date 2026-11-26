@@ -34,7 +34,7 @@ func TestRoutesDeclareExactlyTheExtraHeadersSent(t *testing.T) {
 		}
 		return connector.Response{Status: 200}, nil
 	})
-	if _, err := requestWith("POST", "https://api.github.com", "/repos/o/r/issues", []byte("{}"), map[string]string{"If-None-Match": `"e"`}); err != nil {
+	if _, err := sendWith("POST", "https://api.github.com", "/repos/o/r/issues", map[string]string{}, nil, map[string]string{"If-None-Match": `"e"`}); err != nil {
 		t.Fatal(err)
 	}
 	slices.Sort(sent)

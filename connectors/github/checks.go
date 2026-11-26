@@ -1,8 +1,6 @@
 package main
 
 import (
-	"encoding/json"
-	"fmt"
 	"strconv"
 	"time"
 
@@ -19,8 +17,8 @@ const countInterval = 60 * time.Second
 // non-2xx is reported as its status, not an error, so core decides what an
 // auth failure means.
 func trackerProbe(t tracker.Target) (int, error) {
-	resp, err := request("GET", t.API, repoPath(t)+"?state=open&per_page=1", nil)
-	if err != nil {
+	resp, err := send("GET", t.API, repoPath(t)+"?state=open&per_page=1", nil, nil)
+	if resp.Status == 0 {
 		return 0, err
 	}
 	return resp.Status, nil
@@ -77,25 +75,19 @@ func count(t tracker.Target, q tracker.Query, limit int, fresh bool) (int, error
 		if conditional {
 			extra = map[string]string{"If-None-Match": cached.etag}
 		}
-		resp, err := requestWith("GET", t.API, pagePath, nil, extra)
-		if err != nil {
-			return 0, err
-		}
+		var raw []rawIssue
+		resp, err := sendWith("GET", t.API, pagePath, nil, &raw, extra)
 		if resp.Status == 304 && conditional {
 			return cached.count, nil
 		}
-		if !is2xx(resp.Status) {
+		if err != nil {
 			// A 304 with no If-None-Match sent lands here too: a protocol
 			// surprise whose empty body would otherwise read as a short page.
-			return 0, statusError("GET", pagePath, resp.Status)
+			return 0, err
 		}
 		if page == 1 {
 			// Read before the next request replaces the latest response.
 			etag, _ = responseHeader("ETag")
-		}
-		var raw []rawIssue
-		if err := json.Unmarshal(resp.Body, &raw); err != nil {
-			return 0, fmt.Errorf("GET %s: decode: %w", pagePath, err)
 		}
 		for _, r := range raw {
 			if r.PullRequest == nil {

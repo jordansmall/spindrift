@@ -191,7 +191,7 @@ func TestErrors(t *testing.T) {
 		"https://api.github.com/repos/o/r/issues/5": {Status: 403, Body: []byte("no")},
 	})
 	_, err := issue(tgt, "5")
-	if err == nil || !strings.Contains(err.Error(), "GET /repos/o/r/issues/5") || !strings.Contains(err.Error(), "403") {
+	if err == nil || !strings.Contains(err.Error(), "GET https://api.github.com/repos/o/r/issues/5") || !strings.Contains(err.Error(), "403") {
 		t.Fatalf("err = %v", err)
 	}
 	if _, err := issue(tgt, "6"); err == nil || !strings.Contains(err.Error(), "404") {

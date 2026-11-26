@@ -72,7 +72,7 @@ func branchExists(t forge.Target, branch string) (bool, error) {
 	var refs []struct {
 		Ref string `json:"ref"`
 	}
-	if err := call("GET", t.API, forgePath(t, "/git/matching-refs/heads/"+p), nil, &refs); err != nil {
+	if _, err := send("GET", t.API, forgePath(t, "/git/matching-refs/heads/"+p), nil, &refs); err != nil {
 		return false, err
 	}
 	for _, r := range refs {
@@ -89,35 +89,25 @@ func deleteBranch(t forge.Target, branch string) error {
 		return err
 	}
 	path := forgePath(t, "/git/refs/heads/"+p)
-	resp, err := request("DELETE", t.API, path, nil)
-	if err != nil {
-		return err
-	}
-	switch {
-	case is2xx(resp.Status):
-		return nil
-	case resp.Status == 422:
+	resp, err := send("DELETE", t.API, path, nil, nil)
+	if err != nil && resp.Status == 422 {
 		// GitHub answers 422 "Reference does not exist" for a missing ref; core
 		// counts a not-found delete as done.
 		return connector.Errorf(connector.NotFound, "DELETE %s: status 422", path)
 	}
-	return statusError("DELETE", path, resp.Status)
+	return err
 }
 
 // graphql posts one document and fails on a GraphQL errors array, which rides
 // a 200. data, when non-nil, receives the response's data object.
 func graphql(api, query string, vars map[string]any, data any) error {
-	body, err := json.Marshal(map[string]any{"query": query, "variables": vars})
-	if err != nil {
-		return err
-	}
 	var resp struct {
 		Errors []struct {
 			Message string `json:"message"`
 		} `json:"errors"`
 		Data json.RawMessage `json:"data"`
 	}
-	if err := call("POST", api, "/graphql", body, &resp); err != nil {
+	if _, err := send("POST", api, "/graphql", map[string]any{"query": query, "variables": vars}, &resp); err != nil {
 		return err
 	}
 	if len(resp.Errors) > 0 {
@@ -130,12 +120,8 @@ func graphql(api, query string, vars map[string]any, data any) error {
 }
 
 func open(t forge.Target, p forge.NewPR) (forge.PR, error) {
-	body, err := json.Marshal(p)
-	if err != nil {
-		return forge.PR{}, err
-	}
 	var raw rawPR
-	if err := call("POST", t.API, forgePath(t, "/pulls"), body, &raw); err != nil {
+	if _, err := send("POST", t.API, forgePath(t, "/pulls"), p, &raw); err != nil {
 		return forge.PR{}, err
 	}
 	return raw.pr(), nil
@@ -161,7 +147,7 @@ func behind(t forge.Target, number string) (int, error) {
 	var cmp struct {
 		BehindBy int `json:"behind_by"`
 	}
-	err = call("GET", t.API, forgePath(t, "/compare/"+basehead), nil, &cmp)
+	_, err = send("GET", t.API, forgePath(t, "/compare/"+basehead), nil, &cmp)
 	return cmp.BehindBy, err
 }
 
@@ -201,11 +187,7 @@ func comment(t forge.Target, number, body string) error {
 	if _, err := parseNumber(number); err != nil {
 		return err
 	}
-	b, err := json.Marshal(map[string]string{"body": body})
-	if err != nil {
-		return err
-	}
-	_, err = fetch("POST", t.API, forgePath(t, "/issues/"+number+"/comments"), b)
+	_, err := send("POST", t.API, forgePath(t, "/issues/"+number+"/comments"), map[string]string{"body": body}, nil)
 	return err
 }
 
@@ -220,11 +202,8 @@ func merge(t forge.Target, number string) error {
 		return err
 	}
 	path := forgePath(t, "/pulls/"+number+"/merge")
-	resp, err := request("PUT", t.API, path, []byte(`{"merge_method":"rebase"}`))
-	if err != nil {
-		return err
-	}
-	if is2xx(resp.Status) {
+	resp, err := send("PUT", t.API, path, map[string]string{"merge_method": "rebase"}, nil)
+	if err == nil {
 		return nil
 	}
 	if resp.Status == 405 {
@@ -239,7 +218,7 @@ func merge(t forge.Target, number string) error {
 			return connector.Errorf(connector.Permanent, "PUT %s: status 405: %s", path, m.Message)
 		}
 	}
-	return statusError("PUT", path, resp.Status)
+	return err
 }
 
 // refusesPRState reports whether a 405 message blames the PR's own state
@@ -270,19 +249,16 @@ func branchProtected(t forge.Target, branch string) (bool, error) {
 		return false, err
 	}
 	path := forgePath(t, "/branches/"+p+"/protection")
-	resp, err := request("GET", t.API, path, nil)
-	if err != nil {
-		return false, err
-	}
+	resp, err := send("GET", t.API, path, nil, nil)
 	switch {
-	case is2xx(resp.Status):
+	case err == nil:
 		return true, nil
 	case resp.Status != 404 && resp.Status != 403:
-		return false, statusError("GET", path, resp.Status)
+		return false, err
 	}
 	// The rules endpoint answers 200 with [] when none applies, never 404.
 	var rules []json.RawMessage
-	if err := call("GET", t.API, forgePath(t, "/rules/branches/"+p), nil, &rules); err != nil {
+	if _, err := send("GET", t.API, forgePath(t, "/rules/branches/"+p), nil, &rules); err != nil {
 		return false, err
 	}
 	if len(rules) > 0 || resp.Status == 404 {

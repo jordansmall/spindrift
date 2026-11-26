@@ -24,13 +24,13 @@ func classOf(t *testing.T, err error) connector.Class {
 	return ce.Class
 }
 
-func TestFetchClassesNon2xx(t *testing.T) {
+func TestSendClassesNon2xx(t *testing.T) {
 	for status, want := range map[int]connector.Class{
 		502: connector.Transient, 429: connector.RateLimited, 404: connector.NotFound,
 		403: connector.Auth, 405: connector.Permanent,
 	} {
 		stub(t, map[string]connector.Response{"https://api.github.com/repos/o/r/issues": {Status: status}})
-		_, err := fetch("GET", "https://api.github.com", "/repos/o/r/issues", nil)
+		_, err := send("GET", "https://api.github.com", "/repos/o/r/issues", nil, nil)
 		if got := classOf(t, err); got != want {
 			t.Errorf("status %d: class %q, want %q", status, got, want)
 		}
