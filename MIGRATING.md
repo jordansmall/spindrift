@@ -1,5 +1,21 @@
 # Migration Guide
 
+## The Network host refuses a GraphQL body no declared document matches (issue #7566)
+
+**A `POST` Route may declare `documents`, an attrset of name to exact GraphQL
+text, and the host then refuses any body whose query is not one of them.** The
+github Connector's `POST /graphql` Route declares the 11 documents it sends, so
+the Route baseline now records them and a new or changed document counts as a
+widening.
+
+- **Re-run `spindrift connectors accept` and commit the diff** to
+  `spindrift-connector-routes.json`. Until you do, your baseline records the
+  `POST /graphql` Route with no documents, so it admits any GraphQL body and a
+  later document change stays silent for you.
+- A third-party Connector with a `POST` Route that carries GraphQL may declare
+  `documents` on it; a Route without `documents` is unchanged. `documents` is
+  allowed on `POST` only and each name needs distinct, non-empty text.
+
 ## A Connector registers only as data, never as a flake module (issue #7562)
 
 **A Connector is no longer a flake module: a Consumer lists its data in

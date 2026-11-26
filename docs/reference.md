@@ -2418,13 +2418,18 @@ mean at runtime is issue #6751. The worked example is the fixture Connector in
   backend row's table is `backend.routes` instead ([Backend rows on a
   Connector](#backend-rows-on-a-connector)), and there a route may also carry
   `requestHeaders` and `responseHeaders`, lists of header names that widen the
-  fixed header sets (see Network Connectors under [Connector
-  protocol](#connector-protocol)):
+  fixed header sets, and a `POST` route may carry `documents`, an attrset from
+  a name to the exact GraphQL query text its body may hold, and such a route
+  refuses any URL query string (see Network Connectors under
+  [Connector protocol](#connector-protocol)):
 
   ```nix
   { method = "GET"; host = "{base}"; path = "/api/v1/repos/{repo}";
     requestHeaders = [ "X-Api-Version" ];   # a header the guest may send
     responseHeaders = [ "X-Total-Count" ];  # a header the guest may read
+  }
+  { method = "POST"; host = "api.github.com"; path = "/graphql";
+    documents.viewer = "query { viewer { login } }";  # the only query it may send
   }
   ```
 - **`flake.nix`.** The Connector's own flake pins core with
@@ -2729,7 +2734,7 @@ an object recording the whole grant:
 | `baseEnv` | the variable the `{base}` route host resolves from; omit for a fixed-host row |
 | `gitRemote` | the fixed Git remote URL; omit when the row has none |
 | `gitRemoteEnv` | the variable the Git remote URL is read from; omit when the row has none |
-| `routes` | the Route table, one `{method, host, path}` per route, `followRedirect`, `requestHeaders` and `responseHeaders` where set |
+| `routes` | the Route table, one `{method, host, path}` per route, `followRedirect`, `documents`, `requestHeaders` and `responseHeaders` where set |
 
 Every key is a string except `routes`. A part the entry omits is accepted as
 absent, so a row that declares it shows the part as widened. The older shape,
@@ -2746,10 +2751,17 @@ no entry, doctor lists its added routes but names no other part until the first
 method and host (compared literally) and its path is equal or an ancestor of
 the live path, and it sets `followRedirect` whenever
 the live one does, and it names every `requestHeaders` and `responseHeaders`
-entry the live one does (names compared case-insensitively). A new host,
-method or path, a new `followRedirect`, a newly declared request or response
-header, or a broader path (accepted `/repos/x`, live `/repos`), is a widening;
-doctor shows a route's declarations as `(sends <names>)` and `(reads <names>)`. A
+entry the live one does (names compared case-insensitively), and, if it declares
+`documents`, each of the live one's under the same name with the same text. A new
+host, method or path, a new `followRedirect`, a newly declared request or
+response header, or a broader path (accepted `/repos/x`, live `/repos`), is a
+widening; so is a new document, a document whose text changed, and a live route
+that drops the `documents` its accepted one declared, since a route with none
+admits any body. An accepted route that declares none already admits any body,
+so a live one that declares some is narrower and shows nothing. Doctor shows a
+route's declarations as `(sends <names>)`, `(reads <names>)` and
+`(documents <name@hash>)`, the hash being the first eight hex digits of the
+text's SHA-256, so an edited document shows under its unchanged name. A
 narrower or unchanged table shows nothing, and stale baseline entries are
 harmless. A non-empty `routes` must pass the Route-table rules above, so `/`
 or a non-canonical path fails evaluation; an empty list is fine.
@@ -2824,12 +2836,15 @@ caller's text so it cannot add one. The subtree-only Route model
 (ADR 0047) makes the table the narrowest, not an exact one: `/issues` also
 admits `GET /issues/comments/*` and `/issues/events`, and `/actions/jobs`
 every other GET under it, none of which a read uses; a Route restricts no
-body, so `POST /graphql` admits any GraphQL document, mutations included, and
-no Route can pin it to the repository: the Connector sends the rollup, the
-issue-comments query, repository-identity and token-grant queries, the
-draft-flip and auto-merge mutations, the label-id query and removal mutation,
-and the issue-close query and mutation there (issues #6808, #6881, #6882,
-#6887). The write roots over-admit too: `POST /pulls` also admits review and
+body to a repository, so no Route can pin `POST /graphql` to it. It does
+declare documents, so the host refuses any query text but the eleven the
+Connector sends: the rollup, the issue-comments query, the repository-identity
+and token-grant queries, the ready-for-review, convert-to-draft and auto-merge
+mutations, the issue-id and label-id queries, the label removal mutation and
+the issue-close mutation (issues #6808, #6881, #6882, #6887, #7566). Label
+removal runs one fixed lookup per name, with the name only in variables. The
+variables are not restricted, so a declared mutation can still be aimed at any
+object the token reaches. The write roots over-admit too: `POST /pulls` also admits review and
 review-comment creation, and `PUT /pulls` update-branch. It skips pull
 requests in the REST issues list.
 
@@ -3422,10 +3437,13 @@ token scoped to the one repository with these repository permissions:
 
 A classic token needs the `repo` scope (`public_repo` for a public repository).
 
-The Route table admits `POST /graphql`, whose body the host does not restrict.
-So the untrusted Connector can exercise a credential that can
-push to the repository, not only write issues and PRs, and the token's scope is
-the only barrier. [ADR 0073's #7209
+The Route table admits `POST /graphql`, but only for the documents it declares
+(see Network Connectors under [Connector protocol](#connector-protocol)), so
+the untrusted Connector can send only the GraphQL operations the github
+Connector ships. GraphQL variables stay free: a declared mutation such as
+`closeIssue` can still target any issue the token reaches. So the Connector can
+exercise a credential that can push to the repository, not only write issues
+and PRs, and the token's scope is the barrier on what those operations touch. [ADR 0073's #7209
 amendment](adr/0073-backends-and-drivers-are-trust-no-one-wasm-connectors.md#amendment-issue-7209-a-primary-github-connector-holds-a-push-capable-credential)
 records the trade-off.
 
@@ -4168,11 +4186,26 @@ description and a regen.
   error carries it, and so does a Connector's `.log`. The response body is
   arbitrary upstream bytes: the host checks only its size and the
   status/length framing, while the Connector's result is schema-checked as
-  for any call. A route does not restrict the query string. Each Host call
+  for any call. A route does not restrict the query string, except that a route
+  declaring documents admits none, since a GraphQL server may read `?query=` on
+  a `POST` and run a document the host never matched. A `POST` route may
+  restrict the body with `documents`, a non-empty attrset from a name (a
+  letter, then letters, digits and underscores) to a non-empty query text, no
+  two names sharing a text. The host sends the request only if the body is one
+  JSON object whose `query` string is byte-identical to a declared text. The
+  body walk is strict, because the server's JSON parser is not Go's: only the
+  exact keys `query`, `variables` and `operationName` are allowed, none twice,
+  and nothing may follow the object; anything else is refused unsent. Nothing
+  parses GraphQL and `variables` stay unchecked, so a declared mutation can
+  still be aimed at any object the credential reaches. A route that declares
+  no documents admits any body. Each Host call
   writes one JSON line to the audit log, with `connector`,
   `route`, `method`, `host`, `path`, `query`, `status`, `size` and `decision`
-  (`sent`, `refused` or `failed`), plus `reason` on a refusal or failure, and,
-  when set, `headers` (the sorted canonical names of every header the host set
+  (`sent`, `refused` or `failed`), plus `reason` on a refusal or failure,
+  `body_sha256` (the hex SHA-256 of the request body the guest supplied, absent
+  whenever no body was decoded: a request too malformed to carry one, and a
+  line the host writes without a request), `document` (on a route that
+  declares documents, the matched name), and, when set, `headers` (the sorted canonical names of every header the host set
   on the request, the guest's plus the credential's `Authorization`, never a
   value; headers the transport adds, such as `User-Agent`, are not listed),
   `rate_limit` (`primary` or `secondary`, on a 403 that carries a
