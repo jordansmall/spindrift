@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"net/url"
 	"reflect"
 	"strconv"
 	"strings"
@@ -317,7 +318,10 @@ func TestDeleteBranchMissingIsNotFound(t *testing.T) {
 func TestPRsForBranchWalksPastFiftyPages(t *testing.T) {
 	const pages = 60
 	host.Serve(t, func(r connector.Request) (connector.Response, error) {
-		page, _ := strconv.Atoi(strings.Split(strings.Split(r.URL, "page=")[1], "&")[0])
+		page, err := pageOf(r)
+		if err != nil {
+			return connector.Response{}, err
+		}
 		if page > pages {
 			return ok(`[]`), nil
 		}
@@ -330,6 +334,39 @@ func TestPRsForBranchWalksPastFiftyPages(t *testing.T) {
 	prs, err := prsForBranch(ftgt, "b")
 	if err != nil || len(prs) != 2 || prs[0].Number != strconv.Itoa(pages) {
 		t.Fatalf("prs = %#v, err = %v", prs, err)
+	}
+}
+
+func TestPRsForBranchAcceptsExactlyMaxPages(t *testing.T) {
+	host.Serve(t, func(r connector.Request) (connector.Response, error) {
+		page, err := pageOf(r)
+		if err != nil {
+			return connector.Response{}, err
+		}
+		if page > maxPages {
+			return ok(`[]`), nil
+		}
+		return ok(`[{"number":` + strconv.Itoa(page) + `,"html_url":"u","state":"open","head":{"ref":"b","sha":"s"}}]`), nil
+	})
+	prs, err := prsForBranch(ftgt, "b")
+	if err != nil || len(prs) != maxPages {
+		t.Fatalf("got %d prs, err = %v, want %d prs", len(prs), err, maxPages)
+	}
+}
+
+func TestPRsForBranchStopsAtThePageBound(t *testing.T) {
+	var sent int
+	host.Serve(t, func(r connector.Request) (connector.Response, error) {
+		sent++
+		return ok(`[{"number":` + strconv.Itoa(sent) + `,"html_url":"u","state":"open","head":{"ref":"x","sha":"s"}}]`), nil
+	})
+	_, err := prsForBranch(ftgt, "b")
+	var ce *connector.Error
+	if !errors.As(err, &ce) || ce.Class != connector.Permanent || !strings.Contains(err.Error(), strconv.Itoa(maxPages)) {
+		t.Fatalf("err = %#v, want a Permanent error naming the %d-page bound", err, maxPages)
+	}
+	if sent != maxPages+1 {
+		t.Fatalf("sent %d requests, want exactly %d", sent, maxPages+1)
 	}
 }
 
@@ -492,4 +529,14 @@ func TestFailedSendIsTransient(t *testing.T) {
 	if !errors.As(err, &ce) || ce.Class != connector.Transient {
 		t.Errorf("probe error = %v; want a Transient *connector.Error", err)
 	}
+}
+
+// pageOf reads the request's page query. A fake-host handler returns the error
+// rather than calling t.Fatal, which is unsafe off the test goroutine.
+func pageOf(r connector.Request) (int, error) {
+	u, err := url.Parse(r.URL)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(u.Query().Get("page"))
 }

@@ -13,6 +13,13 @@ import (
 
 const pageSize = 100
 
+// maxPages bounds a listing walk. The host refuses a call past 128
+// http_requests and closes the Connector, so an unbounded walk would be killed
+// anyway; one walk takes at most maxPages+1 requests and fails with a clear
+// error instead. The cap is per walk: labelUnion makes two, so there the host
+// can still close the Connector first.
+const maxPages = 100
+
 type rawPR struct {
 	Number         int    `json:"number"`
 	URL            string `json:"html_url"`
@@ -75,25 +82,34 @@ func parseNumber(number string) (int, error) {
 // pageUntilEmpty reads path's pages until one is empty: Forgejo caps `limit`
 // below pageSize on some instances, so a short page does not mark the end. A
 // page whose first item repeats the previous page's ends the walk too, for a
-// forge that ignores `page`. There is no page bound: Forgejo caps each page at
-// its MAX_RESPONSE_ITEMS, so a large repo's PR list legitimately runs past any
-// fixed count.
+// forge that ignores `page`. The walk may fetch page maxPages+1 only to learn
+// the listing ended there; finding a real page there fails with a Permanent
+// error naming the bound. The +1 gives the empty-page end rule its extra fetch,
+// so this error fires instead of Pages' own overflow error.
 func pageUntilEmpty[T any, K comparable](api, path string, q url.Values, key func(T) K) ([]T, error) {
 	var items []T
 	var prevFirst K
-	for page := 1; ; page++ {
+	err := connector.Pages(maxPages+1, 1, func(page int) (int, bool, error) {
 		q.Set("limit", strconv.Itoa(pageSize))
 		q.Set("page", strconv.Itoa(page))
 		var batch []T
 		if err := send("GET", api, path+"?"+q.Encode(), nil, &batch); err != nil {
-			return nil, err
+			return 0, false, err
 		}
 		if len(batch) == 0 || (page > 1 && key(batch[0]) == prevFirst) {
-			return items, nil
+			return 0, false, nil
+		}
+		if page > maxPages {
+			return 0, false, connector.Errorf(connector.Permanent, "listing has more than %d pages", maxPages)
 		}
 		prevFirst = key(batch[0])
 		items = append(items, batch...)
+		return page + 1, true, nil
+	})
+	if err != nil {
+		return nil, err
 	}
+	return items, nil
 }
 
 // prsForBranch lists every PR and keeps those headed at branch: Forgejo's list
