@@ -4682,13 +4682,15 @@ never falling back to its own process.
 - **What stays in-process.** Only the Box's first-party Driver Connectors
   (`driver-exec` loads them in the Box's own process and refuses any other)
   and test binaries, which install the in-process engine from
-  `connectorsandboxtest`. Every Launcher command that can load a Connector
-  (`run`, `recover`, `research`, `butler`, `reconcile`, `stats`, `doctor`,
-  `preview`, `console`, shell completion) installs the sandbox, and the daemon
-  installs one for its own demand counting, through the same runner and
-  artifacts as its Launcher children. Quickstart can start no sandbox, so it
-  loads no Connector: its token scope audit and finish-line doctor are
-  deferred to `spindrift doctor`.
+  `connectorsandboxtest`. The Launcher and the daemon each build one
+  Connector runtime per process through the same constructor, which installs
+  the sandbox through the same runner and artifacts as the Launcher's
+  children; the daemon's serves its own demand counting. Sandboxes start on a
+  Connector's first load, so a command that loads none starts none. Closing
+  the runtime records each backend's sandbox totals, so the daemon too may
+  append one totals line to the github audit file, only when that file already
+  exists. Quickstart can start no sandbox, so it loads no Connector: its
+  token scope audit and finish-line doctor are deferred to `spindrift doctor`.
 - **Testing.** The `seamtest` podman and bwrap fakes check a sandbox's argv
   against the isolation above, refusing one that weakens it, then exec the real
   `connector-host`. The `RefuseSandbox` field of `PodmanConfig` and
