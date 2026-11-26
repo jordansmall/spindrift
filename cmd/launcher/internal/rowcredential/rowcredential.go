@@ -15,8 +15,9 @@ import (
 	"spindrift.dev/launcher/internal/secretcmd"
 )
 
-// ErrUnset marks a row this run reads whose credential stays unset. The Daemon
-// refuses it; the Launcher tolerates it, since doctor must run without one.
+// ErrUnset marks a row this run reads whose credential stays unset. Whether it
+// is fatal is connectorsetup's RequireCredential: the Daemon refuses it, the
+// Launcher tolerates it, since doctor must run without one.
 var ErrUnset = errors.New("credential is unset")
 
 // unsetError carries the message without an ErrUnset suffix.

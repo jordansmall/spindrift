@@ -140,6 +140,7 @@ var (
 var testOnlyPkgs = []string{
 	"internal/seamtest",
 	"internal/connectorsandbox/connectorsandboxtest",
+	"internal/connectorsetup/connectorsetuptest",
 	"internal/connectorforge/connectorforgetest",
 	"internal/driver/driverkit/conformance",
 	"internal/driver/drivertest",
