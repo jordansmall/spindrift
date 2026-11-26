@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend/backendrows"
+	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -45,9 +47,9 @@ func newProbeBackend(t *testing.T, status int) *probeBackend {
 // a real host reaches api.github.com.
 func useConnectorClient(t *testing.T, b *probeBackend) {
 	t.Helper()
-	old := connectorClient
-	connectorClient = b.Client()
-	t.Cleanup(func() { connectorClient = old })
+	old := connectorOptions
+	connectorOptions = backendrows.Options{Client: b.Client(), PublicForTest: connectorhost.LoopbackForTest}
+	t.Cleanup(func() { connectorOptions = old })
 }
 
 // With a github row the production Probe asks the Connector, with the host's

@@ -126,7 +126,7 @@ func newEnvWith(t *testing.T, wasmFile string, creds map[string]credsource.Row) 
 	e.spec = connectorruntime.TrackerSpec{
 		SessionSpec: connectorruntime.SessionSpec{
 			Target:  connectortracker.Target{API: srv.URL + apiPath, Repo: connectorforgetest.Repo},
-			Options: backendrows.Options{Client: srv.Client()},
+			Options: backendrows.Options{Client: srv.Client(), PublicForTest: connectorhost.LoopbackForTest},
 		},
 		Clock: retry.NoSleepClock(),
 	}

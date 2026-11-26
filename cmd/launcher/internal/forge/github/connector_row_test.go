@@ -397,9 +397,9 @@ func TestConnectorRow_TokenIntrospectionAuditsToTheConnectorRecord(t *testing.T)
 	t.Chdir(dir)
 	b := newTokenBackend(t, "ghp_abc")
 	useGithubRowAt(t, b.Listener.Addr().String())
-	old := connectorClient
-	connectorClient = b.Client()
-	t.Cleanup(func() { connectorClient = old })
+	old := connectorOptions
+	connectorOptions = backendrows.Options{Client: b.Client(), PublicForTest: connectorhost.LoopbackForTest}
+	t.Cleanup(func() { connectorOptions = old })
 	t.Setenv(tokenCredentialEnv, connectorToken)
 
 	if _, err := introspectToken(testRuntime(t), "ghp_abc", connectorRepo); err != nil {

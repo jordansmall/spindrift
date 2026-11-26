@@ -298,11 +298,12 @@ func load(t *testing.T, eng Engine, bare string, c Connector, token credsource.S
 		authorizer = backendrows.Row{CredentialEnv: "TOKEN"}.Authorizer(func(string) string { return token.Value() })
 	}
 	conn, err := eng(context.Background(), c.Wasm, connectorhost.Network{
-		Name:      "fixture-forge",
-		Routes:    c.BoundRoutes(b.Host),
-		Authorize: authorizer,
-		Client:    b.Client(),
-		Audit:     connectorhost.NewAuditLog(audit),
+		Name:          "fixture-forge",
+		Routes:        c.BoundRoutes(b.Host),
+		Authorize:     authorizer,
+		Client:        b.Client(),
+		PublicForTest: connectorhost.LoopbackForTest,
+		Audit:         connectorhost.NewAuditLog(audit),
 	})
 	if err != nil {
 		t.Fatal(err)

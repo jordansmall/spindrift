@@ -6606,7 +6606,9 @@ func TestMainRun_InputDocument_AppliesBackendRows(t *testing.T) {
 			}
 			return ""
 		},
-		Client: &http.Client{Transport: tr},
+		// Wrapped, so the host sends through tr's dial rather than swapping in
+		// the address check's: api.fixture.test resolves nowhere.
+		Client: &http.Client{Transport: struct{ http.RoundTripper }{tr}},
 	})
 	if err != nil {
 		t.Fatal(err)

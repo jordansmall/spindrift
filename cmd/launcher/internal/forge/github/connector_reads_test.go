@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectortracker"
@@ -27,9 +28,9 @@ func harnessWithRow(t *testing.T, useRow func(t *testing.T, host string)) (h *co
 	t.Helper()
 	h = newComposedHarness(t)
 	useRow(t, h.backend.host)
-	old := connectorClient
-	connectorClient = h.backend.Client()
-	t.Cleanup(func() { connectorClient = old })
+	old := connectorOptions
+	connectorOptions = backendrows.Options{Client: h.backend.Client(), PublicForTest: connectorhost.LoopbackForTest}
+	t.Cleanup(func() { connectorOptions = old })
 	t.Setenv(tokenCredentialEnv, connectorToken)
 	calls = countGH(t)
 	return h, newClient(t, connectorRepo, testLabels), calls

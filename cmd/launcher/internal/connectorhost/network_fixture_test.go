@@ -83,7 +83,7 @@ func TestNetworkFixtureReachesTheBackendWithTheHostCredential(t *testing.T) {
 	}
 	want := connectorhost.AuditEntry{
 		Connector: "fixture-network", Route: "GET " + b.host() + " /repos (reads X-Empty, X-Scripted)", Method: "GET",
-		Host: b.host(), Path: "/repos/x", Status: 200, Size: int64(len(out.Body)), Decision: connectorhost.DecisionSent, Headers: []string{"Authorization"}, BodySHA256: sha(""),
+		Host: b.host(), Path: "/repos/x", Status: 200, Size: int64(len(out.Body)), Decision: connectorhost.DecisionSent, Headers: []string{"Authorization"}, BodySHA256: sha(""), AddressCheck: connectorhost.AddressCheckPublic,
 	}
 	if !reflect.DeepEqual(lines[0], want) {
 		t.Errorf("audit = %+v, want %+v", lines[0], want)

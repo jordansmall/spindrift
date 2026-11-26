@@ -236,7 +236,7 @@ func TestLoadResolvesTheCredentialHostSideAndEnforcesTheRoutes(t *testing.T) {
 			}
 			return ""
 		},
-		Client: srv.Client(),
+		Client: srv.Client(), PublicForTest: connectorhost.LoopbackForTest,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -281,7 +281,7 @@ func TestLoadFailsClosedWithoutTheCredential(t *testing.T) {
 	}
 	c, err := backendrows.Load(context.Background(), r, backendrows.Options{
 		Sandbox: connectorsandboxtest.InProcess(),
-		Getenv:  func(string) string { return "" }, Client: srv.Client(),
+		Getenv:  func(string) string { return "" }, Client: srv.Client(), PublicForTest: connectorhost.LoopbackForTest,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -307,7 +307,7 @@ func loadBasic(t *testing.T, srv *httptest.Server, env map[string]string) *conne
 	}
 	c, err := backendrows.Load(context.Background(), r, backendrows.Options{
 		Sandbox: connectorsandboxtest.InProcess(),
-		Getenv:  func(k string) string { return env[k] }, Client: srv.Client(),
+		Getenv:  func(k string) string { return env[k] }, Client: srv.Client(), PublicForTest: connectorhost.LoopbackForTest,
 	})
 	if err != nil {
 		t.Fatal(err)

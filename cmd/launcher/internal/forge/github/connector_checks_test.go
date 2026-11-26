@@ -256,7 +256,8 @@ func loadTokenConnector(t *testing.T, b *tokenBackend, token string) *connectorh
 			}
 			return ""
 		},
-		Client: b.Client(),
+		Client:        b.Client(),
+		PublicForTest: connectorhost.LoopbackForTest,
 	})
 	if err != nil {
 		t.Fatal(err)

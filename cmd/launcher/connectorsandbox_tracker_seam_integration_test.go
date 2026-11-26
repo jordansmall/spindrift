@@ -15,6 +15,7 @@ import (
 	"sync"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/connectorhost"
 )
 
@@ -110,9 +111,15 @@ func startFakeGithub(t *testing.T) *fakeGithub {
 	return g
 }
 
-// compiledGithubRow is the compiled github Connector as a backend row whose Routes
-// point at host, skipping the test when nix/checks/go.nix exported none.
-func compiledGithubRow(t *testing.T, host string) map[string]any {
+// seamGithubBaseEnv is the knob naming the fake backend's base URL. The real
+// launcher admits a literal loopback Route host only through a knob the
+// Operator set, so the test names the fake that way rather than in the Routes.
+const seamGithubBaseEnv = "SPINDRIFT_SEAM_GITHUB_BASE"
+
+// compiledGithubRow is the compiled github Connector as a backend row whose
+// Routes take their host from seamGithubBaseEnv, skipping the test when
+// nix/checks/go.nix exported none.
+func compiledGithubRow(t *testing.T) map[string]any {
 	t.Helper()
 	wasm := os.Getenv(connectorWasmEnv)
 	if wasm == "" {
@@ -123,9 +130,9 @@ func compiledGithubRow(t *testing.T, host string) map[string]any {
 		t.Fatalf("%s: %v", connectorRoutesEnv, err)
 	}
 	for i := range routes {
-		routes[i].Host = host
+		routes[i].Host = backendrows.BaseHost
 	}
-	return map[string]any{"name": "github", "module": wasm, "credentialEnv": "GH_TOKEN", "routes": routes}
+	return map[string]any{"name": "github", "module": wasm, "credentialEnv": "GH_TOKEN", "baseEnv": seamGithubBaseEnv, "routes": routes}
 }
 
 // The compiled github Connector and its Route table, as nix/checks/go.nix
