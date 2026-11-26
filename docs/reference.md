@@ -3692,6 +3692,7 @@ The routes the cases run against:
 - `GET jira.example.com/rest/api/2`
 - `POST jira.example.com/rest/api/2/issue`
 - `GET other.example.com:8443/`
+- `POST api.example.com/graphql`; sends `X-Api-Version`; reads `X-OAuth-Scopes`; documents `viewer`
 
 | Rule | Request | Verdict |
 |---|---|---|
@@ -3719,6 +3720,20 @@ The routes the cases run against:
 |  | `POST https://jira.example.com/rest/api/2/issuefoo` | refused: `no route admits POST jira.example.com/rest/api/2/issuefoo` |
 | **`semicolon`**: A path containing a semicolon is not matched, so a path parameter or a `..;` segment cannot slip past a route. | `GET https://jira.example.com/rest/api/2/..;/x` | refused: `no route admits GET jira.example.com/rest/api/2/..;/x` |
 |  | `GET https://jira.example.com/rest/api/2/issue;x=1` | refused: `no route admits GET jira.example.com/rest/api/2/issue;x=1` |
+| **`requestHeaders`**: A request header is sent only if it is in the fixed set or the route declares it, so a credential header such as Authorization, which no route may declare, is refused. | `GET https://jira.example.com/rest/api/2` + header Accept | admitted |
+|  | `POST https://api.example.com/graphql` + header X-Api-Version + body `{"query":"query { viewer { login } }"}` | admitted |
+|  | `POST https://api.example.com/graphql` + header x-api-version + body `{"query":"query { viewer { login } }"}` | admitted |
+|  | `GET https://jira.example.com/rest/api/2` + header X-Api-Version | refused: `GET jira.example.com/rest/api/2: request header "X-Api-Version" is not declared by the route` |
+|  | `GET https://jira.example.com/rest/api/2` + header Authorization | refused: `GET jira.example.com/rest/api/2: request header "Authorization" is not declared by the route` |
+| **`responseHeaders`**: A response header reaches the guest only if it is in the fixed set or the route declares it, and Set-Cookie never does. | `POST https://api.example.com/graphql` + served ETag, Set-Cookie, X-OAuth-Scopes, X-Secret + body `{"query":"query { viewer { login } }"}` | admitted; guest reads ETag, X-OAuth-Scopes |
+|  | `GET https://jira.example.com/rest/api/2` + served Content-Length, Content-Range, Content-Type, Date, ETag, Last-Modified, Link, Location, Retry-After, Set-Cookie, X-OAuth-Scopes, X-Secret | admitted; guest reads Content-Type, Content-Length, Content-Range, Date, ETag, Last-Modified, Link, Location, Retry-After |
+| **`documents`**: A route that declares documents admits a request only if its body is a JSON object with a declared query, nothing else but variables and operationName, and no query string. | `POST https://api.example.com/graphql` + body `{"query":"query { viewer { login } }"}` | admitted |
+|  | `POST https://api.example.com/graphql` + body `{"operationName":"Viewer","query":"query { viewer { login } }","variables":{}}` | admitted |
+|  | `POST https://api.example.com/graphql` + body `{"query":"query { viewer { id } }"}` | refused: `POST api.example.com/graphql: query is not a document the route declares` |
+|  | `POST https://api.example.com/graphql?query=x` + body `{"query":"query { viewer { login } }"}` | refused: `POST api.example.com/graphql: a route that declares documents admits no query string` |
+|  | `POST https://api.example.com/graphql` + body `not json` | refused: `POST api.example.com/graphql: body is not a JSON object with a string "query"` |
+|  | `POST https://api.example.com/graphql` + body `{"variables":{}}` | refused: `POST api.example.com/graphql: body is not a JSON object with a string "query"` |
+|  | `POST https://api.example.com/graphql` + body `{"extra":1,"query":"query { viewer { login } }"}` | refused: `POST api.example.com/graphql: body key "extra" is not allowed` |
 <!-- END GENERATED CONNECTOR ADMIT CASES -->
 
 **The data.** `data.nix` is a function of `core` returning a flat attribute

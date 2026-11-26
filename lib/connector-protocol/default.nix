@@ -548,6 +548,9 @@ let
         ];
         methodList = builtins.concatStringsSep ", " methodSet;
         methodReason = "method is not one of ${methodList}";
+        gql = "https://api.example.com/graphql";
+        viewerQuery = "query { viewer { login } }";
+        gqlBody = query: builtins.toJSON { inherit query; };
         schemeRefused = req: "${req}: only https urls without userinfo or fragment are allowed";
         noRoute = req: "no route admits ${req}";
         rule = name: doc: cases: { inherit name doc cases; };
@@ -555,6 +558,14 @@ let
           inherit name method url;
           admit = true;
         };
+        withHeaders = headers: c: c // { inherit headers; };
+        withBody = body: c: c // { inherit body; };
+        # The host answers `served` and the guest may read only `readable`.
+        withServed =
+          served: readable: c:
+          c // { inherit served readable; };
+        headerRefused = req: name: "${req}: request header \"${name}\" is not declared by the route";
+        docRefused = reason: "POST api.example.com/graphql: ${reason}";
         refused = name: method: url: refuse: {
           inherit
             name
@@ -580,6 +591,14 @@ let
             method = "GET";
             host = "other.example.com:8443";
             path = "/";
+          }
+          {
+            method = "POST";
+            host = "api.example.com";
+            path = "/graphql";
+            requestHeaders = [ "X-Api-Version" ];
+            responseHeaders = [ "X-OAuth-Scopes" ];
+            documents.viewer = viewerQuery;
           }
         ];
         rules = [
@@ -664,6 +683,106 @@ let
               (refused "path parameter" "GET" "https://jira.example.com/rest/api/2/issue;x=1" (
                 noRoute "GET jira.example.com/rest/api/2/issue;x=1"
               ))
+            ]
+          )
+          (rule "requestHeaders"
+            "A request header is sent only if it is in the fixed set or the route declares it, so a credential header such as Authorization, which no route may declare, is refused."
+            [
+              (withHeaders { Accept = "application/json"; } (
+                admitted "fixed header needs no declaration" "GET" "https://jira.example.com/rest/api/2"
+              ))
+              (withBody (gqlBody viewerQuery) (
+                withHeaders { X-Api-Version = "1"; } (admitted "declared header" "POST" gql)
+              ))
+              (withBody (gqlBody viewerQuery) (
+                withHeaders { x-api-version = "1"; } (admitted "declared header in any case" "POST" gql)
+              ))
+              (withHeaders { X-Api-Version = "1"; } (
+                refused "undeclared header" "GET" "https://jira.example.com/rest/api/2" (
+                  headerRefused "GET jira.example.com/rest/api/2" "X-Api-Version"
+                )
+              ))
+              (withHeaders { Authorization = "Bearer x"; } (
+                refused "credential header" "GET" "https://jira.example.com/rest/api/2" (
+                  headerRefused "GET jira.example.com/rest/api/2" "Authorization"
+                )
+              ))
+            ]
+          )
+          (rule "responseHeaders"
+            "A response header reaches the guest only if it is in the fixed set or the route declares it, and Set-Cookie never does."
+            [
+              (withServed
+                {
+                  ETag = "\"v1\"";
+                  X-OAuth-Scopes = "repo";
+                  X-Secret = "s";
+                  Set-Cookie = "a=b";
+                }
+                [ "ETag" "X-OAuth-Scopes" ]
+                (withBody (gqlBody viewerQuery) (admitted "declared and fixed headers" "POST" gql))
+              )
+              (withServed
+                {
+                  Content-Type = "application/json";
+                  Content-Length = "0";
+                  Content-Range = "bytes 0-0/1";
+                  Date = "Thu, 01 Jan 1970 00:00:00 GMT";
+                  ETag = "\"v1\"";
+                  Last-Modified = "Thu, 01 Jan 1970 00:00:00 GMT";
+                  Link = "<https://jira.example.com/next>; rel=\"next\"";
+                  Location = "https://jira.example.com/rest/api/2";
+                  Retry-After = "1";
+                  X-OAuth-Scopes = "repo";
+                  X-Secret = "s";
+                  Set-Cookie = "a=b";
+                }
+                [
+                  "Content-Type"
+                  "Content-Length"
+                  "Content-Range"
+                  "Date"
+                  "ETag"
+                  "Last-Modified"
+                  "Link"
+                  "Location"
+                  "Retry-After"
+                ]
+                (admitted "fixed header only" "GET" "https://jira.example.com/rest/api/2")
+              )
+            ]
+          )
+          (rule "documents"
+            "A route that declares documents admits a request only if its body is a JSON object with a declared query, nothing else but variables and operationName, and no query string."
+            [
+              (withBody (gqlBody viewerQuery) (admitted "declared document" "POST" gql))
+              (withBody (builtins.toJSON {
+                query = viewerQuery;
+                variables = { };
+                operationName = "Viewer";
+              }) (admitted "variables and operationName" "POST" gql))
+              (withBody (gqlBody "query { viewer { id } }") (
+                refused "undeclared document" "POST" gql (docRefused "query is not a document the route declares")
+              ))
+              (withBody (gqlBody viewerQuery) (
+                refused "query string" "POST" "${gql}?query=x" (
+                  docRefused "a route that declares documents admits no query string"
+                )
+              ))
+              (withBody "not json" (
+                refused "body is not JSON" "POST" gql (
+                  docRefused ''body is not a JSON object with a string "query"''
+                )
+              ))
+              (withBody ''{"variables":{}}'' (
+                refused "body has no query" "POST" gql (
+                  docRefused ''body is not a JSON object with a string "query"''
+                )
+              ))
+              (withBody (builtins.toJSON {
+                query = viewerQuery;
+                extra = 1;
+              }) (refused "unknown body key" "POST" gql (docRefused ''body key "extra" is not allowed'')))
             ]
           )
         ];
