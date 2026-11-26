@@ -76,8 +76,9 @@ func loadForgejoConnector(t *testing.T, host string, client *http.Client, audit 
 			r.Header.Set("Authorization", "Bearer "+connectorToken)
 			return nil
 		},
-		Client: client,
-		Audit:  connectorhost.NewAuditLog(audit),
+		Client:        client,
+		PublicForTest: connectorhost.LoopbackForTest,
+		Audit:         connectorhost.NewAuditLog(audit),
 	})
 	if err != nil {
 		t.Fatal(err)

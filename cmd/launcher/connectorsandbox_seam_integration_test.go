@@ -177,7 +177,7 @@ func newSandboxRig(t *testing.T, runtime string, o sandboxRigOpts) sandboxRig {
 	var backend *fakeGithub
 	if o.mode == sandboxTracker {
 		backend = startFakeGithub(t)
-		row = compiledGithubRow(t, backend.srv.Listener.Addr().String())
+		row = compiledGithubRow(t)
 	}
 	docPath := sandboxDoc(t, seamtest.Path(t, fixture), row, o.mode, artifacts)
 
@@ -226,6 +226,7 @@ func newSandboxRig(t *testing.T, runtime string, o sandboxRigOpts) sandboxRig {
 		// fake's certificate; ghs_ makes the write gate skip token introspection.
 		env["SSL_CERT_FILE"] = backend.certFile
 		env["GH_TOKEN"] = "ghs_seam"
+		env[seamGithubBaseEnv] = "https://" + backend.srv.Listener.Addr().String()
 	}
 
 	args := []string{"--input", docPath, "--repo-slug", smokeRepo, "--box-signal-carrier", "log",

@@ -2,7 +2,6 @@ package github
 
 import (
 	"fmt"
-	"net/http"
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
@@ -13,10 +12,11 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// connectorClient is the transport the host-side Connector loads send with; nil
-// means the default client. It is a test seam, as a real host reaches the real
-// API host.
-var connectorClient *http.Client
+// connectorOptions carries the transport the host-side Connector loads send
+// with and its PublicForTest. It is a test seam, zero in production: a real
+// host reaches the real API host through the default client, and a literal
+// route host must resolve public.
+var connectorOptions backendrows.Options
 
 // introspectToken is the Strategy's IntrospectToken. The github backend row's
 // Connector answers, so the host needs no gh; without a routed row it fails
@@ -30,7 +30,7 @@ func introspectToken(rt *connectorruntime.Runtime, token, repoSlug string) (forg
 	if err != nil {
 		return forge.TokenIntrospection{}, err
 	}
-	got, err := introspect(rt.Sandbox(), row, backendrows.Options{Client: connectorClient}, token, repoSlug)
+	got, err := introspect(rt.Sandbox(), row, connectorOptions, token, repoSlug)
 	return got, noteRouted("introspect the token", err)
 }
 

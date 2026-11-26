@@ -280,8 +280,9 @@ func BenchmarkConnectorSandboxHostCall(b *testing.B) {
 			r.Header.Set("Authorization", "Bearer s3cret")
 			return nil
 		},
-		Client: srv.Client(),
-		Audit:  connectorhost.NewAuditLog(io.Discard),
+		Client:        srv.Client(),
+		PublicForTest: connectorhost.LoopbackForTest,
+		Audit:         connectorhost.NewAuditLog(io.Discard),
 	}
 	params := map[string]string{"url": srv.URL + "/repos/x", "method": "GET"}
 	for _, r := range benchRows() {

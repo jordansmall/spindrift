@@ -79,7 +79,7 @@ func (e *execClient) sessionSpec(row backendrows.Row) (backendrows.Row, connecto
 	return row, connectorruntime.SessionSpec{
 		Target:  target,
 		Record:  backend.GitHub.Name,
-		Options: backendrows.Options{Client: connectorClient},
+		Options: connectorOptions,
 		// connectorOp notes each failed operation by its own verb, and some guest
 		// failures are benign to it (an already-deleted branch).
 		NotesOperations: true,

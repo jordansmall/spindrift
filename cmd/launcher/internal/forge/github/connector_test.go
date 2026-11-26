@@ -662,11 +662,12 @@ func loadGithubConnectorAs(t *testing.T, host, repo string, client *http.Client,
 		t.Fatal(err)
 	}
 	conn, err := connectorhost.LoadNetwork(context.Background(), wasm, connectorhost.Network{
-		Name:      "github",
-		Routes:    routes,
-		Authorize: authorize,
-		Client:    client,
-		Audit:     connectorhost.NewAuditLog(audit),
+		Name:          "github",
+		Routes:        routes,
+		Authorize:     authorize,
+		Client:        client,
+		PublicForTest: connectorhost.LoopbackForTest,
+		Audit:         connectorhost.NewAuditLog(audit),
 	})
 	if err != nil {
 		t.Fatal(err)

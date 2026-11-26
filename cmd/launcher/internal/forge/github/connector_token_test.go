@@ -13,6 +13,7 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectorrecord"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/hostpaths"
@@ -54,7 +55,7 @@ func TestIntrospect_ReportsTheGrantAndAuditsTheRequests(t *testing.T) {
 	calls := countGH(t)
 	auditPath := chdirAuditPath(t)
 
-	got, err := introspect(testSandbox(), githubRow(t), backendrows.Options{Client: b.Client()}, "ghp_abc", connectorRepo)
+	got, err := introspect(testSandbox(), githubRow(t), backendrows.Options{Client: b.Client(), PublicForTest: connectorhost.LoopbackForTest}, "ghp_abc", connectorRepo)
 
 	want := forge.TokenIntrospection{Introspectable: true, WriteCapable: true, Scopes: []string{"read:org", "repo"}}
 	if err != nil || !reflect.DeepEqual(got, want) {
@@ -84,7 +85,7 @@ func TestIntrospect_IgnoresTheHostsCredential(t *testing.T) {
 	b := newTokenBackend(t, "ghp_abc")
 	useGithubRow(t, b)
 
-	if _, err := introspect(testSandbox(), githubRow(t), backendrows.Options{Client: b.Client()}, "ghp_abc", connectorRepo); err != nil {
+	if _, err := introspect(testSandbox(), githubRow(t), backendrows.Options{Client: b.Client(), PublicForTest: connectorhost.LoopbackForTest}, "ghp_abc", connectorRepo); err != nil {
 		t.Fatal(err)
 	}
 	for _, a := range b.seenAuth {
@@ -100,7 +101,7 @@ func TestIntrospect_RefusedReadIsAnError(t *testing.T) {
 	b := newTokenBackend(t, "ghp_abc")
 	b.userStatus = http.StatusUnauthorized
 	useGithubRow(t, b)
-	_, err := introspect(testSandbox(), githubRow(t), backendrows.Options{Client: b.Client()}, "ghp_abc", connectorRepo)
+	_, err := introspect(testSandbox(), githubRow(t), backendrows.Options{Client: b.Client(), PublicForTest: connectorhost.LoopbackForTest}, "ghp_abc", connectorRepo)
 	if err == nil || errors.Is(err, backendkit.ErrUnsupported) {
 		t.Fatalf("err = %v, want a non-unsupported error", err)
 	}
@@ -151,7 +152,7 @@ func TestIntrospect_UnopenableAuditFileFailsTheLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := introspect(testSandbox(), githubRow(t), backendrows.Options{Client: b.Client()}, "ghp_abc", connectorRepo)
+	_, err := introspect(testSandbox(), githubRow(t), backendrows.Options{Client: b.Client(), PublicForTest: connectorhost.LoopbackForTest}, "ghp_abc", connectorRepo)
 
 	if err == nil || !strings.Contains(err.Error(), auditPath) {
 		t.Fatalf("err = %v, want one naming %s", err, auditPath)

@@ -91,8 +91,9 @@ func newConnectorHarnessWith(t *testing.T, cloud bool, lc connectortracker.Lifec
 			r.SetBasicAuth(connectorIdentity(cloud), connectorToken)
 			return nil
 		},
-		Client: h.srv.Client(),
-		Audit:  connectorhost.NewAuditLog(h.audit),
+		Client:        h.srv.Client(),
+		PublicForTest: connectorhost.LoopbackForTest,
+		Audit:         connectorhost.NewAuditLog(h.audit),
 	})
 	if err != nil {
 		t.Fatal(err)

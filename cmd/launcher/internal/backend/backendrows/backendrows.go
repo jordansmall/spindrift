@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path"
@@ -460,6 +461,9 @@ type Options struct {
 	// Sandbox is where the module loads; nil means the installed one, which
 	// takes a network load only through an owned sandbox.
 	Sandbox connectorsandbox.Loader
+	// PublicForTest is connectorhost.Network.PublicForTest, for a test whose
+	// backend listens on a literal host; Load fails outside a test binary.
+	PublicForTest func(netip.Addr) bool
 }
 
 // Authorizer returns the function that attaches the row's credential to an
@@ -503,11 +507,12 @@ func Load(ctx context.Context, row Row, o Options) (*connectorhost.Connector, er
 		return nil, fmt.Errorf("backend %q: read module: %w", row.Name, err)
 	}
 	n := connectorhost.Network{
-		Name:      row.Name,
-		Routes:    row.Routes,
-		Authorize: row.Authorizer(getenv),
-		Client:    o.Client,
-		Audit:     connectorhost.NewAuditLog(audit),
+		Name:          row.Name,
+		Routes:        row.Routes,
+		Authorize:     row.Authorizer(getenv),
+		Client:        o.Client,
+		PublicForTest: o.PublicForTest,
+		Audit:         connectorhost.NewAuditLog(audit),
 	}
 	if o.Sandbox == nil {
 		return nil, fmt.Errorf("backend %q: %w", row.Name, connectorsandbox.ErrNoConnectorSandbox)

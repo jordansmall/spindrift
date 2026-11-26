@@ -254,8 +254,9 @@ func New(t *testing.T, c connectorforgetest.Connector) forgetest.Harness {
 			r.Header.Set("Authorization", "Bearer "+connectorforgetest.Token)
 			return nil
 		},
-		Client: b.Client(),
-		Audit:  connectorhost.NewAuditLog(h.Audit),
+		Client:        b.Client(),
+		PublicForTest: connectorhost.LoopbackForTest,
+		Audit:         connectorhost.NewAuditLog(h.Audit),
 	})
 	if err != nil {
 		t.Fatal(err)

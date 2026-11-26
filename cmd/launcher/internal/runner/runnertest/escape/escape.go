@@ -449,7 +449,7 @@ func Impersonation(t *testing.T, r sandbox.Starter) {
 	loadRow := func(name, module, credential string) *connectorhost.Connector {
 		t.Helper()
 		row := backendrows.Row{Name: name, Module: filepath.Join(dir, module), Routes: routes, CredentialEnv: credential}
-		c, err := backendrows.Load(ctx, row, backendrows.Options{Sandbox: pool.Own(name), Client: srv.Client()})
+		c, err := backendrows.Load(ctx, row, backendrows.Options{Sandbox: pool.Own(name), Client: srv.Client(), PublicForTest: connectorhost.LoopbackForTest})
 		if err != nil {
 			t.Fatalf("Load %s through its sandbox: %v", name, err)
 		}
