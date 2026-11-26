@@ -10,7 +10,8 @@ import (
 
 const (
 	// createMetaPageSize and maxCreateMetaPages bound the createmeta walk; the
-	// page cap stops a server that ignores startAt from looping forever.
+	// page cap stops a server that ignores startAt from looping forever, and a
+	// longer listing fails rather than truncates.
 	createMetaPageSize = 50
 	maxCreateMetaPages = 100
 )
@@ -79,17 +80,18 @@ func (p createMetaPage) rows() []createMetaRow {
 // createMetaRows walks every page of a createmeta endpoint.
 func createMetaRows(t tracker.Target, path string) ([]createMetaRow, error) {
 	var all []createMetaRow
-	for range maxCreateMetaPages {
+	err := pages("GET "+path, maxCreateMetaPages, 0, func(startAt int) (int, bool, error) {
 		var page createMetaPage
-		q := fmt.Sprintf("%s?startAt=%d&maxResults=%d", path, len(all), createMetaPageSize)
+		q := fmt.Sprintf("%s?startAt=%d&maxResults=%d", path, startAt, createMetaPageSize)
 		if err := get(t, q, &page); err != nil {
-			return nil, err
+			return 0, false, err
 		}
 		rows := page.rows()
 		all = append(all, rows...)
-		if len(rows) == 0 || page.IsLast || (page.Total > 0 && len(all) >= page.Total) {
-			break
-		}
+		return len(all), len(rows) > 0 && !page.IsLast && (page.Total == 0 || len(all) < page.Total), nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return all, nil
 }

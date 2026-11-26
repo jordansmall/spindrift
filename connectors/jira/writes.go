@@ -139,21 +139,23 @@ func editLabels(t tracker.Target, number string, add, remove []string) error {
 // total, which ends the walk after its first page.
 func listLabels(t tracker.Target) ([]string, error) {
 	all := []string{}
-	for range maxPages {
+	const path = "/rest/api/2/label"
+	err := pages("GET "+path, maxPages, 0, func(startAt int) (int, bool, error) {
 		var p struct {
 			Values []string `json:"values"`
 			Total  int      `json:"total"`
 			IsLast bool     `json:"isLast"`
 		}
-		if err := get(t, "/rest/api/2/label?startAt="+strconv.Itoa(len(all)), &p); err != nil {
-			return nil, err
+		if err := get(t, path+"?startAt="+strconv.Itoa(startAt), &p); err != nil {
+			return 0, false, err
 		}
 		all = append(all, p.Values...)
-		if p.IsLast || len(p.Values) == 0 || len(all) >= p.Total {
-			return all, nil
-		}
+		return len(all), !p.IsLast && len(p.Values) > 0 && len(all) < p.Total, nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	return nil, fmt.Errorf("GET /rest/api/2/label: more than %d pages", maxPages)
+	return all, nil
 }
 
 // comment posts r.Body as a wiki-markup comment on issue number. A research

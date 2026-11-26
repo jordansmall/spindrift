@@ -399,22 +399,22 @@ func search(t tracker.Target, jql string, limit int) ([]tracker.Issue, error) {
 // end, and it fails on a repeated token rather than spin.
 func searchCloud(t tracker.Target, jql string, limit int) ([]rawIssue, error) {
 	var all []rawIssue
-	token := ""
-	for range maxPages {
+	const path = "/rest/api/2/search/jql"
+	err := pages("GET "+path, maxPages, "", func(token string) (string, bool, error) {
 		var p searchPayload
-		if err := get(t, "/rest/api/2/search/jql?"+cloudQuery(jql, limit, token).Encode(), &p); err != nil {
-			return nil, err
+		if err := get(t, path+"?"+cloudQuery(jql, limit, token).Encode(), &p); err != nil {
+			return "", false, err
 		}
 		all = append(all, p.Issues...)
 		if !p.IsLast && p.NextPageToken != "" && p.NextPageToken == token {
-			return nil, fmt.Errorf("jira search/jql returned the same nextPageToken twice; refusing to loop")
+			return "", false, fmt.Errorf("jira search/jql returned the same nextPageToken twice; refusing to loop")
 		}
-		token = p.NextPageToken
-		if p.IsLast || token == "" || len(all) >= limit {
-			return all, nil
-		}
+		return p.NextPageToken, !p.IsLast && p.NextPageToken != "" && len(all) < limit, nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	return nil, fmt.Errorf("GET /rest/api/2/search/jql: more than %d pages", maxPages)
+	return all, nil
 }
 
 // searchServer walks v2 /search by startAt until total. It errors rather than
@@ -423,31 +423,47 @@ func searchCloud(t tracker.Target, jql string, limit int) ([]rawIssue, error) {
 func searchServer(t tracker.Target, jql string, limit int) ([]rawIssue, error) {
 	var all []rawIssue
 	var prevFirstKey string
-	for range maxPages {
-		// Advance by rows received, not a fixed stride: the server may cap the
-		// page below maxResults.
-		startAt := len(all)
+	const path = "/rest/api/2/search"
+	err := pages("GET "+path, maxPages, 0, func(startAt int) (int, bool, error) {
 		var p searchPayload
-		if err := get(t, "/rest/api/2/search?"+serverQuery(jql, limit, startAt).Encode(), &p); err != nil {
-			return nil, err
+		if err := get(t, path+"?"+serverQuery(jql, limit, startAt).Encode(), &p); err != nil {
+			return 0, false, err
 		}
 		if len(p.Issues) == 0 && startAt < p.Total {
-			return nil, fmt.Errorf("jira: search returned an empty page at startAt %d before total %d", startAt, p.Total)
+			return 0, false, fmt.Errorf("jira: search returned an empty page at startAt %d before total %d", startAt, p.Total)
 		}
 		// A server ignoring startAt replays the previous page; appending it
 		// would duplicate rows until total is reached.
 		if startAt > 0 && len(p.Issues) > 0 && p.Issues[0].Key == prevFirstKey {
-			return nil, fmt.Errorf("jira: search repeated the page starting at %s for startAt %d", prevFirstKey, startAt)
+			return 0, false, fmt.Errorf("jira: search repeated the page starting at %s for startAt %d", prevFirstKey, startAt)
 		}
 		all = append(all, p.Issues...)
 		if len(p.Issues) > 0 {
 			prevFirstKey = p.Issues[0].Key
 		}
-		if len(all) >= p.Total || len(all) >= limit {
-			return all, nil
-		}
+		// Advance by rows received, not a fixed stride: the server may cap the
+		// page below maxResults.
+		return len(all), len(all) < p.Total && len(all) < limit, nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	return nil, fmt.Errorf("GET /rest/api/2/search: more than %d pages", maxPages)
+	return all, nil
+}
+
+// pages is connector.Pages with endpoint named on its page-limit failure. The
+// +1 lets the walk ask for one page past limit, so this error fires instead of
+// Pages' generic one. A fetch error already carries its context, so it passes
+// through unprefixed.
+func pages[C any](endpoint string, limit int, first C, fetch func(cursor C) (C, bool, error)) error {
+	n := 0
+	return connector.Pages(limit+1, first, func(cursor C) (C, bool, error) {
+		if n++; n > limit {
+			var zero C
+			return zero, false, connector.Errorf(connector.Permanent, "%s: listing has more than %d pages", endpoint, limit)
+		}
+		return fetch(cursor)
+	})
 }
 
 // segment refuses s when it cannot stay one path segment, such as "." or "..",
