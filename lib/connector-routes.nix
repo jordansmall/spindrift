@@ -48,6 +48,8 @@ let
       ''not an absolute path already in canonical form (leading "/", no trailing "/", no "." or ".." segment)''
     else if p == "/" then
       ''"/" would blanket-authorize the whole host''
+    else if builtins.match "/\\*(/.*)?" p != null then
+      ''a leading "*" segment would blanket-authorize the whole host''
     else
       null;
 

@@ -53,6 +53,9 @@ var (
 	// breaks the registry-route rules, a method outside the fixed set,
 	// or a host that is not a bare host[:port].
 	ErrRouteTable = errors.New("connector route table invalid")
+	// ErrRouteWildcardRoot marks a Route path whose first segment is "*": it
+	// would admit every path on the host, the blanket root ADR 0047 bans.
+	ErrRouteWildcardRoot = errors.New(`a leading "*" segment would blanket-authorize the whole host`)
 	// ErrRouteRefused marks an http_request the host refused without sending: no
 	// route admits its method, host and path, or the request is malformed or
 	// would carry the credential somewhere a route cannot vouch for (plaintext,
@@ -162,7 +165,8 @@ func checkDeclaredDocuments(method string, docs map[string]string) error {
 
 // Route admits one slice of a network Connector's traffic: an exact uppercase
 // Method, an exact host[:port] (case-insensitive, the port significant), and a
-// Path subtree root in registryvocab.PathSet form. A route does not restrict the
+// Path subtree root in registryvocab.PathSet form, where a `*` segment matches
+// exactly one request segment (`/jobs/*/logs`). A route does not restrict the
 // query string: any query is forwarded to an admitted path, and the audit log
 // records it.
 //
@@ -254,8 +258,8 @@ func (r Route) sendable(name string) bool {
 }
 
 // ValidateRoutes checks every route, naming the first that fails; the error
-// matches ErrRouteTable, and the path reason (registryvocab.ErrPattern*) when
-// the path is at fault.
+// matches ErrRouteTable, and the path reason (registryvocab.ErrPattern* or
+// ErrRouteWildcardRoot) when the path is at fault.
 func ValidateRoutes(routes []Route) error {
 	for _, r := range routes {
 		if err := r.validate(); err != nil {
@@ -286,7 +290,20 @@ func (r Route) validate() error {
 	if err := checkDeclaredDocuments(r.Method, r.Documents); err != nil {
 		return err
 	}
-	return registryvocab.CheckPathPattern(r.Path)
+	if err := registryvocab.CheckPathPattern(r.Path); err != nil {
+		return err
+	}
+	return CheckWildcardRoot(r.Path)
+}
+
+// CheckWildcardRoot refuses a declared Route path whose first segment is "*".
+// A caller that prefixes the path (a {base} route) must ask before it does:
+// "/jira/*" no longer leads with the wildcard but admits the whole subtree.
+func CheckWildcardRoot(path string) error {
+	if path == "/*" || strings.HasPrefix(path, "/*/") {
+		return ErrRouteWildcardRoot
+	}
+	return nil
 }
 
 // Decision is what the host did with a request.
@@ -639,7 +656,7 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 	var matched *Route
 	if canonical {
 		for i, r := range n.Routes {
-			if r.Method == in.Method && strings.EqualFold(r.Host, u.Host) && (registryvocab.PathSet{r.Path}).Admits(u.Path) {
+			if r.Method == in.Method && strings.EqualFold(r.Host, u.Host) && routeAdmits(r.Path, u.Path) {
 				matched = &n.Routes[i]
 				break
 			}
@@ -837,4 +854,32 @@ func (r Route) readable(h http.Header) http.Header {
 		}
 	}
 	return out
+}
+
+// routeAdmits is registryvocab.PathSet's subtree test for one Route path, plus
+// the `*` segment: it matches exactly one non-empty request segment, and
+// whatever follows the pattern stays a subtree, so `/jobs/*/logs` admits
+// `/jobs/7/logs` and below but not `/jobs/7`. Twin: sdk/connector/fakehost.go.
+func routeAdmits(pattern, requestPath string) bool {
+	pat := strings.Split(strings.TrimPrefix(pattern, "/"), "/")
+	if !slices.Contains(pat, "*") {
+		return registryvocab.PathSet{pattern}.Admits(requestPath)
+	}
+	if strings.Contains(requestPath, ";") {
+		return false
+	}
+	cleaned := path.Clean(requestPath)
+	if !strings.HasPrefix(cleaned, "/") {
+		return false
+	}
+	segs := strings.Split(cleaned[1:], "/")
+	if len(segs) < len(pat) {
+		return false
+	}
+	for i, p := range pat {
+		if segs[i] == "" || (p != "*" && p != segs[i]) {
+			return false
+		}
+	}
+	return true
 }

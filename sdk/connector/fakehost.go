@@ -289,13 +289,32 @@ func matchDocument(docs map[string]string, query string) string {
 	return ""
 }
 
-// admitsPath is the host's subtree test for one root. ";" is refused because
-// servlet containers strip path parameters before normalizing.
+// admitsPath is the host's subtree test for one root, where a `*` segment
+// matches exactly one non-empty request segment. ";" is refused because
+// servlet containers strip path parameters before normalizing. Twin:
+// cmd/launcher/internal/connectorhost/network.go routeAdmits, pinned by the
+// shared admit cases (lib/connector-protocol/default.nix admitCases, rendered
+// into both admitcases_gen_test.go files and held in sync by the
+// connector-protocol-admit-cases-gen check). The fake host does not validate a
+// Route table, so a refused leading "*" is not a shared case.
 func admitsPath(root, p string) bool {
 	if strings.Contains(p, ";") {
 		return false
 	}
-	return root == "/" || p == root || strings.HasPrefix(p, root+"/")
+	pat := strings.Split(strings.TrimPrefix(root, "/"), "/")
+	if !slices.Contains(pat, "*") {
+		return root == "/" || p == root || strings.HasPrefix(p, root+"/")
+	}
+	segs := strings.Split(strings.TrimPrefix(p, "/"), "/")
+	if len(segs) < len(pat) {
+		return false
+	}
+	for i, s := range pat {
+		if segs[i] == "" || (s != "*" && s != segs[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 // Serve routes HTTPRequest through the fake for the rest of the test, restored

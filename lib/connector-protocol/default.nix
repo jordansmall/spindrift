@@ -589,6 +589,11 @@ let
           }
           {
             method = "GET";
+            host = "jira.example.com";
+            path = "/rest/api/3/issue/*/comment";
+          }
+          {
+            method = "GET";
             host = "other.example.com:8443";
             path = "/";
           }
@@ -671,6 +676,22 @@ let
               ))
               (refused "sibling prefix" "POST" "https://jira.example.com/rest/api/2/issuefoo" (
                 noRoute "POST jira.example.com/rest/api/2/issuefoo"
+              ))
+            ]
+          )
+          (rule "wildcardSegment"
+            "A `*` path segment matches exactly one non-empty request segment, and what follows it in the pattern stays a subtree."
+            [
+              (admitted "one segment" "GET" "https://jira.example.com/rest/api/3/issue/X-1/comment")
+              (admitted "under the pattern" "GET" "https://jira.example.com/rest/api/3/issue/X-1/comment/9")
+              (refused "segment missing" "GET" "https://jira.example.com/rest/api/3/issue/comment" (
+                noRoute "GET jira.example.com/rest/api/3/issue/comment"
+              ))
+              (refused "the wildcard alone" "GET" "https://jira.example.com/rest/api/3/issue/X-1" (
+                noRoute "GET jira.example.com/rest/api/3/issue/X-1"
+              ))
+              (refused "another leaf" "GET" "https://jira.example.com/rest/api/3/issue/X-1/other" (
+                noRoute "GET jira.example.com/rest/api/3/issue/X-1/other"
               ))
             ]
           )

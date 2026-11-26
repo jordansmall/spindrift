@@ -80,6 +80,18 @@ let
     }
     {
       route = goodRoute // {
+        path = "/*";
+      };
+      why = ''leading "*" segment'';
+    }
+    {
+      route = goodRoute // {
+        path = "/*/x";
+      };
+      why = ''leading "*" segment'';
+    }
+    {
+      route = goodRoute // {
         path = "/a/";
       };
       why = "canonical form";
@@ -335,6 +347,7 @@ let
     (goodRoute // { host = "[::1]:8080"; })
     (goodRoute // { host = "[::1]"; })
     (goodRoute // { host = "{base}"; })
+    (goodRoute // { path = "/a/*/c"; })
     (goodRoute // { followRedirect = true; })
     (goodRoute // { followRedirect = false; })
     (goodRoute // { requestHeaders = [ "X-Trace" ]; })

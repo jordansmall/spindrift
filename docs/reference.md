@@ -2410,8 +2410,9 @@ mean at runtime is issue #6751. The worked example is the fixture Connector in
   traffic its `http_request` Host call may send (see Network Connectors under [Connector
   protocol](#connector-protocol)). `method` is one of `GET`, `HEAD`, `POST`,
   `PUT`, `PATCH` or `DELETE`, `host` an exact `host[:port]`, and `path` a
-  subtree root. `{repo}` in a `path` stands
-  for the repository's `owner/name` slug, which `connectortracker.Routes` fills at
+  subtree root, where a `*` segment matches exactly one request segment (as in
+  `/jobs/*/logs`). `{repo}` in a `path` stands for the repository's
+  `owner/name` slug, which `connectortracker.Routes` fills at
   run time because the slug is config, not something the Connector's package
   can know. The option is a declaration only: the host validates the table when
   it loads the Connector, and no binary loads one from this option yet. A
@@ -3700,6 +3701,7 @@ The routes the cases run against:
 
 - `GET jira.example.com/rest/api/2`
 - `POST jira.example.com/rest/api/2/issue`
+- `GET jira.example.com/rest/api/3/issue/*/comment`
 - `GET other.example.com:8443/`
 - `POST api.example.com/graphql`; sends `X-Api-Version`; reads `X-OAuth-Scopes`; documents `viewer`
 
@@ -3727,6 +3729,11 @@ The routes the cases run against:
 |  | `GET https://jira.example.com/rest/api/2?x=1` | admitted |
 |  | `GET https://jira.example.com/rest/api/2issuefoo` | refused: `no route admits GET jira.example.com/rest/api/2issuefoo` |
 |  | `POST https://jira.example.com/rest/api/2/issuefoo` | refused: `no route admits POST jira.example.com/rest/api/2/issuefoo` |
+| **`wildcardSegment`**: A `*` path segment matches exactly one non-empty request segment, and what follows it in the pattern stays a subtree. | `GET https://jira.example.com/rest/api/3/issue/X-1/comment` | admitted |
+|  | `GET https://jira.example.com/rest/api/3/issue/X-1/comment/9` | admitted |
+|  | `GET https://jira.example.com/rest/api/3/issue/comment` | refused: `no route admits GET jira.example.com/rest/api/3/issue/comment` |
+|  | `GET https://jira.example.com/rest/api/3/issue/X-1` | refused: `no route admits GET jira.example.com/rest/api/3/issue/X-1` |
+|  | `GET https://jira.example.com/rest/api/3/issue/X-1/other` | refused: `no route admits GET jira.example.com/rest/api/3/issue/X-1/other` |
 | **`semicolon`**: A path containing a semicolon is not matched, so a path parameter or a `..;` segment cannot slip past a route. | `GET https://jira.example.com/rest/api/2/..;/x` | refused: `no route admits GET jira.example.com/rest/api/2/..;/x` |
 |  | `GET https://jira.example.com/rest/api/2/issue;x=1` | refused: `no route admits GET jira.example.com/rest/api/2/issue;x=1` |
 | **`requestHeaders`**: A request header is sent only if it is in the fixed set or the route declares it, so a credential header such as Authorization, which no route may declare, is refused. | `GET https://jira.example.com/rest/api/2` + header Accept | admitted |
