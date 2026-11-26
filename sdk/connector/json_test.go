@@ -10,7 +10,7 @@ import (
 
 var jsonRoutes = []Route{
 	{Method: "GET", Host: "api.example.com", Path: "/"},
-	{Method: "POST", Host: "api.example.com", Path: "/"},
+	{Method: "POST", Host: "api.example.com", Path: "/", RequestHeaders: []string{"X-Token"}},
 }
 
 func classOf(t *testing.T, err error) Class {
