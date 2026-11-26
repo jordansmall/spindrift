@@ -54,37 +54,16 @@ func get(t tracker.Target, path string, out any) error {
 }
 
 // do sends method to t.API+path, with body as JSON when non-nil, and decodes a
-// 2xx JSON response into out, when there is one.
+// 2xx JSON response into out, when there is one. A non-2xx answer keeps
+// SendJSON's class and gains Jira's own reason, which SendJSON cannot read.
+// A 2xx answer that fails to decode returns its Response beside the error, so
+// the status is checked, not just err.
 func do(t tracker.Target, method, path string, body, out any) error {
-	req := connector.Request{
-		Method:  method,
-		URL:     t.API + path,
-		Headers: map[string]string{"Accept": "application/json"},
+	resp, err := connector.SendJSON(connector.Request{Method: method, URL: t.API + path}, body, out)
+	if err != nil && resp.Status != 0 && (resp.Status < 200 || resp.Status > 299) {
+		return fmt.Errorf("%w%s", err, jiraReason(resp.Body))
 	}
-	if body != nil {
-		b, err := json.Marshal(body)
-		if err != nil {
-			return err
-		}
-		req.Headers["Content-Type"] = "application/json"
-		req.Body = string(b)
-	}
-	resp, err := connector.HTTPRequest(req)
-	if err != nil {
-		return connector.Errorf(connector.Transient, "%w", err)
-	}
-	if resp.Status < 200 || resp.Status > 299 {
-		return connector.Errorf(connector.ClassForStatus(resp.Status), "%s %s: status %d%s", method, path, resp.Status, jiraReason(resp.Body))
-	}
-	// A write answers 204 with no body and passes a nil out; a read that
-	// answers 200 empty must still fail to decode.
-	if out == nil {
-		return nil
-	}
-	if err := json.Unmarshal(resp.Body, out); err != nil {
-		return fmt.Errorf("%s %s: decode: %w", method, path, err)
-	}
-	return nil
+	return err
 }
 
 // maxReason caps the Jira text echoed into an error, which lands on one stderr
