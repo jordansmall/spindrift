@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -321,6 +323,16 @@ type AuditEntry struct {
 	// the transport adds (User-Agent, Accept-Encoding, Content-Length) and the
 	// redirect hop's Range. Empty when nothing was sent.
 	Headers []string `json:"headers,omitempty"`
+	// BodySHA256 is the hex SHA-256 of the request body the guest supplied,
+	// recorded for every request that decoded, sent or refused, so a refusal
+	// can be matched to the exact bytes. Empty whenever no body was decoded:
+	// a malformed request, and the lines from networkCalls.refuse,
+	// recordFailure and AuditRefusal, which are written without a decoded
+	// request.
+	BodySHA256 string `json:"body_sha256,omitempty"`
+	// Document names the declared GraphQL document the body matched, on a
+	// route that declares Documents.
+	Document string `json:"document,omitempty"`
 }
 
 // The wire values of AuditEntry.RateLimit; docs/reference.md documents them.
@@ -477,6 +489,76 @@ func contentRangeTotal(h string) (total int64, ok bool) {
 	return total, err == nil && total >= 0
 }
 
+// maxBodyKeyEcho bounds an unknown body key quoted in a refusal, so a hostile
+// body cannot bloat the audit line. Twin: sdk/connector/fakehost.go, pinned by
+// nix/checks/graphql-query-twin-parity.nix.
+const maxBodyKeyEcho = 256
+
+// graphQLQuery returns the "query" text of a GraphQL POST body, or says why
+// the body is not the plain {"query","variables","operationName"} object.
+// It is deliberately strict because the server's JSON parser is not Go's: Go
+// matches keys case-insensitively and keeps the last duplicate, so a lenient
+// decode could judge one query while the server runs another. Any key
+// spelling, duplicate or trailing data that could be read two ways is
+// refused. The text is compared as is; there is no GraphQL parser here.
+func graphQLQuery(body string) (string, error) {
+	errShape := errors.New(`body is not a JSON object with a string "query"`)
+	dec := json.NewDecoder(strings.NewReader(body))
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return "", errShape
+	}
+	var query string
+	seen := map[string]bool{}
+	for dec.More() {
+		tok, err := dec.Token()
+		key, ok := tok.(string)
+		if err != nil || !ok {
+			return "", errShape
+		}
+		if key != "query" && key != "variables" && key != "operationName" {
+			if len(key) > maxBodyKeyEcho {
+				key = key[:maxBodyKeyEcho] + "..."
+			}
+			return "", fmt.Errorf("body key %q is not allowed", key)
+		}
+		if seen[key] {
+			return "", fmt.Errorf("body key %q is duplicated", key)
+		}
+		seen[key] = true
+		if key == "query" {
+			err = dec.Decode(&query)
+		} else {
+			var skip json.RawMessage
+			err = dec.Decode(&skip)
+		}
+		if err != nil {
+			return "", errShape
+		}
+	}
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('}') {
+		return "", errShape
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return "", errors.New("body has trailing data after the JSON object")
+	}
+	if !seen["query"] {
+		return "", errShape
+	}
+	return query, nil
+}
+
+// matchDocument returns the first name, in sorted order, whose document is
+// query, or "" when none is. Twin: sdk/connector/fakehost.go, pinned by
+// nix/checks/graphql-query-twin-parity.nix.
+func matchDocument(docs map[string]string, query string) string {
+	for _, name := range slices.Sorted(maps.Keys(docs)) {
+		if docs[name] == query {
+			return name
+		}
+	}
+	return ""
+}
+
 // do runs one http_request: match, authorize, send, audit. One audit entry is
 // recorded whatever the outcome; if that write fails the answer is withheld.
 func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, body []byte, hdr http.Header, err error) {
@@ -512,6 +594,8 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 	if dec.More() {
 		return 0, nil, nil, refuse("malformed request: trailing data after the request object")
 	}
+	sum := sha256.Sum256([]byte(in.Body))
+	entry.BodySHA256 = hex.EncodeToString(sum[:])
 	if len(in.URL) > maxHTTPURL {
 		return 0, nil, nil, refuse("url is %d bytes, over the %d-byte limit", len(in.URL), maxHTTPURL)
 	}
@@ -543,6 +627,22 @@ func (n *Network) do(ctx context.Context, raw []byte, maxBody int) (status int, 
 		return 0, nil, nil, refuse("no route admits %s %s%s", in.Method, u.Host, u.Path)
 	}
 	entry.Route = matched.String()
+
+	if matched.Documents != nil {
+		// A GraphQL server may also read ?query= on a POST, and would run a
+		// document the host never matched.
+		if u.RawQuery != "" {
+			return 0, nil, nil, refuse("%s %s%s: a route that declares documents admits no query string", in.Method, u.Host, u.Path)
+		}
+		query, qerr := graphQLQuery(in.Body)
+		if qerr != nil {
+			return 0, nil, nil, refuse("%s %s%s: %v", in.Method, u.Host, u.Path, qerr)
+		}
+		entry.Document = matchDocument(matched.Documents, query)
+		if entry.Document == "" {
+			return 0, nil, nil, refuse("%s %s%s: query is not a document the route declares", in.Method, u.Host, u.Path)
+		}
+	}
 
 	// Sorted, so the refusal names the same header whatever the map order.
 	for _, k := range slices.Sorted(maps.Keys(in.Headers)) {
