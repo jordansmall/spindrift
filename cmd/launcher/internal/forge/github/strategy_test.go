@@ -24,6 +24,9 @@ func TestStrategyShape(t *testing.T) {
 		Strategy.NewLedger == nil {
 		t.Error("github must fill every constructor")
 	}
+	if Strategy.RecordSandboxTotals == nil {
+		t.Error("github records its routed sandbox totals (#7116)")
+	}
 }
 
 // With no routed row (none applied, or a GitHub Enterprise

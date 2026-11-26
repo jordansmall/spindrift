@@ -3,6 +3,7 @@ package connectorruntime_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -194,5 +195,33 @@ func TestReloadAfterCloseStartsNoSandbox(t *testing.T) {
 	}
 	if got := sbs.ownedBy("row-a"); len(got) != 1 || !got[0].closed || got[0].loads != 1 {
 		t.Errorf("row-a sandbox = %+v, want one, closed, loaded once", got)
+	}
+}
+
+func TestOnCloseRunsOnceInOrderAfterTheSandboxesStopped(t *testing.T) {
+	sbs := newSandboxes()
+	rt, a, _, spec := twoRows(t, sbs)
+	if _, err := rt.Connector(a, spec); err != nil {
+		t.Fatal(err)
+	}
+	var order []string
+	hookErr := errors.New("hook failed")
+	rt.OnClose(func() error {
+		if o := sbs.ownedBy("row-a"); len(o) != 1 || !o[0].closed {
+			t.Error("OnClose ran before the row's sandbox stopped")
+		}
+		order = append(order, "first")
+		return hookErr
+	})
+	rt.OnClose(func() error { order = append(order, "second"); return nil })
+
+	if err := rt.Close(); !errors.Is(err, hookErr) {
+		t.Errorf("Close = %v, want the hook's error joined", err)
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(order, ","); got != "first,second" {
+		t.Errorf("OnClose ran %q, want each once in registration order", got)
 	}
 }
