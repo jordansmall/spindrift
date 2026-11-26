@@ -630,7 +630,7 @@ in
                           routes = mkOption {
                             # Items stay raw: lib/connector-routes.nix words the errors.
                             type = types.listOf types.raw;
-                            description = "The Connector's Route table, a list of `{ method; host; path; }`, each with an optional GET-only boolean `followRedirect` and optional string lists `requestHeaders` and `responseHeaders`.";
+                            description = "The Connector's Route table, a list of `{ method; host; path; }`, each with an optional GET-only boolean `followRedirect` and optional POST-only attrset `documents` of GraphQL query texts and optional string lists `requestHeaders` and `responseHeaders`.";
                           };
                           credential = mkOption {
                             type = types.nullOr types.str;
@@ -757,6 +757,11 @@ in
                             default = null;
                             description = "Response headers a guest may read beyond the fixed set. Never Set-Cookie or Set-Cookie2.";
                           };
+                          documents = mkOption {
+                            type = types.nullOr (types.attrsOf types.str);
+                            default = null;
+                            description = "POST only: name to exact GraphQL query text. The request body's `query` must equal one of these texts (variables stay free); names match [A-Za-z][A-Za-z0-9_]*, texts are non-empty and distinct. Null leaves the Route unconstrained.";
+                          };
                         };
                       }
                     );
@@ -772,6 +777,7 @@ in
                       A GET Route may set `followRedirect = true` to follow one
                       redirect hop, and any Route may declare `requestHeaders` and
                       `responseHeaders` beyond the fixed sets.
+                      A POST Route may declare `documents`, the query texts its body may carry.
                       A backend row carries its own table in `backend.routes`.
                     '';
                   };

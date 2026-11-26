@@ -51,9 +51,11 @@ let
     else
       null;
 
-  # `followRedirect`, `requestHeaders` and `responseHeaders` are optional; the
-  # Go host allows `followRedirect` on GET only.
+  # `followRedirect`, `documents`, `requestHeaders` and `responseHeaders` are
+  # optional; the Go host allows `followRedirect` on GET only and `documents`
+  # on POST only.
   knownKeys = [
+    "documents"
     "followRedirect"
     "host"
     "method"
@@ -136,6 +138,34 @@ let
       headerProblem "responseHeaders" neverResponse (r.responseHeaders or [ ]);
 
   headerListOk = l: builtins.isList l && builtins.all builtins.isString l;
+  documentsShapeOk = d: builtins.isAttrs d && builtins.all builtins.isString (builtins.attrValues d);
+
+  # connectorhost.checkDeclaredDocuments: the first problem in a route's
+  # `documents`, in name order, or null. Texts compare byte for byte.
+  documentsProblem =
+    docs:
+    let
+      names = builtins.attrNames docs;
+      go =
+        seen: ns:
+        if ns == [ ] then
+          null
+        else
+          let
+            n = builtins.head ns;
+            t = docs.${n};
+            twin = builtins.filter (m: seen.${m} == t) (builtins.attrNames seen);
+          in
+          if builtins.match "[A-Za-z][A-Za-z0-9_]*" n == null then
+            ''documents: "${n}" is not a valid name''
+          else if t == "" then
+            ''documents: "${n}" has no text''
+          else if twin != [ ] then
+            ''documents: "${builtins.head twin}" and "${n}" declare the same text''
+          else
+            go (seen // { ${n} = t; }) (builtins.tail ns);
+    in
+    if names == [ ] then "documents: must declare at least one" else go { } names;
 
   routeProblem =
     r:
@@ -145,11 +175,12 @@ let
         && builtins.all (k: r ? ${k} && builtins.isString r.${k}) required
         && builtins.all (k: builtins.elem k knownKeys) (builtins.attrNames r)
         && (r ? followRedirect -> builtins.isBool r.followRedirect)
+        && (r ? documents -> documentsShapeOk r.documents)
         && (r ? requestHeaders -> headerListOk r.requestHeaders)
         && (r ? responseHeaders -> headerListOk r.responseHeaders)
       )
     then
-      "is not an attrset of exactly the strings `method`, `host` and `path`, an optional boolean `followRedirect` and optional string lists `requestHeaders` and `responseHeaders`"
+      "is not an attrset of exactly the strings `method`, `host` and `path`, an optional boolean `followRedirect`, an optional attrset of strings `documents` and optional string lists `requestHeaders` and `responseHeaders`"
     else if !(methodOk r.method) then
       "method is not one of ${builtins.concatStringsSep ", " httpMethods}"
     else if !(hostOk r.host) then
@@ -160,8 +191,20 @@ let
       (
         let
           h = headersProblem r;
+          d =
+            if !(r ? documents) then
+              null
+            else if r.method != "POST" then
+              "documents are allowed on POST only"
+            else
+              documentsProblem r.documents;
         in
-        if h != null then h else pathProblem r.path
+        if h != null then
+          h
+        else if d != null then
+          d
+        else
+          pathProblem r.path
       );
 
   describe =

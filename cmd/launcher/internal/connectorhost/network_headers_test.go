@@ -200,3 +200,42 @@ func TestNetworkFixtureReadsOnlyAllowedResponseHeaders(t *testing.T) {
 		})
 	}
 }
+
+func TestRouteValidationChecksDeclaredDocuments(t *testing.T) {
+	post := connectorhost.Route{Method: "POST", Host: "h.io", Path: "/graphql"}
+	ok := post
+	ok.Documents = map[string]string{"closeIssue": "mutation($id:ID!){x}", "Viewer_2": "query{viewer{login}}"}
+	if err := connectorhost.ValidateRoutes([]connectorhost.Route{ok}); err != nil {
+		t.Fatalf("declared documents refused: %v", err)
+	}
+	for name, c := range map[string]struct {
+		method string
+		docs   map[string]string
+		want   string
+	}{
+		"empty":          {docs: map[string]string{}, want: "documents: must declare at least one"},
+		"bad name":       {docs: map[string]string{"1bad": "query{a}"}, want: `documents: "1bad" is not a valid name`},
+		"name with dash": {docs: map[string]string{"a-b": "query{a}"}, want: `documents: "a-b" is not a valid name`},
+		"empty name":     {docs: map[string]string{"": "query{a}"}, want: "is not a valid name"},
+		"empty text":     {docs: map[string]string{"a": ""}, want: `documents: "a" has no text`},
+		"duplicate text": {docs: map[string]string{"a": "query{a}", "b": "query{a}"}, want: `documents: "a" and "b" declare the same text`},
+		"get":            {method: "GET", docs: map[string]string{"a": "query{a}"}, want: "documents are allowed on POST only"},
+	} {
+		r := post
+		if c.method != "" {
+			r.Method = c.method
+		}
+		r.Documents = c.docs
+		err := connectorhost.ValidateRoutes([]connectorhost.Route{r})
+		if !errors.Is(err, connectorhost.ErrRouteTable) || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: err = %v, want ErrRouteTable naming %s", name, err, c.want)
+		}
+	}
+}
+
+func TestRouteStringShowsDeclaredDocuments(t *testing.T) {
+	r := connectorhost.Route{Method: "POST", Host: "h.io", Path: "/graphql", RequestHeaders: []string{"X-A"}, Documents: map[string]string{"b": "query{b}", "a": "query{a}"}}
+	if got, want := r.String(), "POST h.io /graphql (sends X-A) (documents a@3b14b07a, b@0a25111c)"; got != want {
+		t.Errorf("String() = %q, want %q", got, want)
+	}
+}

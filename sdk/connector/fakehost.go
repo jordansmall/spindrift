@@ -19,13 +19,17 @@ import (
 //
 // RequestHeaders and ResponseHeaders declare the headers beyond the fixed sets
 // the Connector may send and read on this Route.
+//
+// Documents is the host's POST-only GraphQL query allowlist; the fake decodes
+// it but does not yet apply it.
 type Route struct {
-	Method          string   `json:"method"`
-	Host            string   `json:"host"`
-	Path            string   `json:"path"`
-	FollowRedirect  bool     `json:"followRedirect,omitempty"`
-	RequestHeaders  []string `json:"requestHeaders,omitempty"`
-	ResponseHeaders []string `json:"responseHeaders,omitempty"`
+	Method          string            `json:"method"`
+	Host            string            `json:"host"`
+	Path            string            `json:"path"`
+	FollowRedirect  bool              `json:"followRedirect,omitempty"`
+	RequestHeaders  []string          `json:"requestHeaders,omitempty"`
+	ResponseHeaders []string          `json:"responseHeaders,omitempty"`
+	Documents       map[string]string `json:"documents,omitempty"`
 }
 
 // RoutesEnv names the environment variable a Connector's checks export its
