@@ -20,12 +20,8 @@ import (
 // closed, so the totals are final. It writes nothing unless the audit file
 // already exists, since a pair for a process that never read through its
 // routed Connector would count as a dirty run, and never touches the .log.
-func RecordRoutedSandboxTotals() {
+func RecordRoutedSandboxTotals(st connectorsandbox.Stats) {
 	if _, ok := routedRow(); !ok {
-		return
-	}
-	st, ok := connectorsandbox.Report()
-	if !ok {
 		return
 	}
 	pwd, err := os.Getwd()

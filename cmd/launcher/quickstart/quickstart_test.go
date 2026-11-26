@@ -16,7 +16,9 @@ import (
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/connectorsandbox"
+	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
@@ -4021,7 +4023,6 @@ func TestRenderFlakeNix_KnobWithoutStanzaSetting_Errors(t *testing.T) {
 // finish-line doctor cannot load its Connector: the wizard says the check is
 // deferred to `spindrift doctor` and goes on to the build.
 func TestRunQuickstart_FinishLine_NoConnectorSandboxDefersDoctor(t *testing.T) {
-	defer connectorsandbox.Use(nil)()
 	dir := t.TempDir()
 	var out bytes.Buffer
 	stdin := strings.NewReader(strings.Join([]string{
@@ -4038,7 +4039,7 @@ func TestRunQuickstart_FinishLine_NoConnectorSandboxDefersDoctor(t *testing.T) {
 	f.ProbeErr = fmt.Errorf("probe: %w", connectorsandbox.ErrNoConnectorSandbox)
 	runner := &fakeCommandRunner{}
 
-	if err := runQuickstartT(t, dir, env, runner, fakeForgeBuilder(f), &out, stdin, true, false); err != nil {
+	if err := runQuickstartNoSandboxT(t, dir, env, runner, fakeForgeBuilder(f), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 	if !strings.Contains(out.String(), "finish-line checks need the Connector sandbox") || !strings.Contains(out.String(), "`spindrift doctor`") {
@@ -4058,7 +4059,6 @@ func TestRunQuickstart_FinishLine_NoConnectorSandboxDefersDoctor(t *testing.T) {
 // Forgejo's Code Forge loads its Connector eagerly, so without a sandbox the
 // wizard must not even call the forge builder, let alone fail on it.
 func TestRunQuickstart_FinishLine_NoConnectorSandboxDefersForgejoWithoutBuildingForge(t *testing.T) {
-	defer connectorsandbox.Use(nil)()
 	// The wizard defers the token check rather than pinging the instance.
 	prev := http.DefaultTransport
 	http.DefaultTransport = noRequestTransport{t}
@@ -4085,7 +4085,7 @@ func TestRunQuickstart_FinishLine_NoConnectorSandboxDefersForgejoWithoutBuilding
 		return nil, nil, connectorsandbox.ErrNoConnectorSandbox
 	}
 
-	if err := runQuickstartT(t, dir, env, runner, builder, &out, stdin, true, false); err != nil {
+	if err := runQuickstartNoSandboxT(t, dir, env, runner, builder, &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
 	if !strings.Contains(out.String(), "the token check needs the Connector sandbox") {
@@ -4393,13 +4393,30 @@ func TestRunQuickstart_SplitPairing_UnparseableTrackerRepoURLReprompts(t *testin
 
 // runQuickstartT drives runQuickstart with every backend's token env var
 // registered for restore, since the finish line exports each chosen token to
-// the process environment and a later test must not inherit it.
+// the process environment and a later test must not inherit it. Its Connector
+// runtime has the in-process engine as its sandbox.
 func runQuickstartT(t *testing.T, dir string, env Environment, cmdRunner CommandRunner, forgeBuilder ForgeBuilder, w io.Writer, stdin io.Reader, interactive, force bool) error {
+	t.Helper()
+	rt := connectorruntime.FromRegistries(nil, connectorsandboxtest.InProcess())
+	t.Cleanup(func() { _ = rt.Close() })
+	return runQuickstartOn(t, rt, dir, env, cmdRunner, forgeBuilder, w, stdin, interactive, force)
+}
+
+// runQuickstartNoSandboxT is runQuickstartT over a runtime with no Connector
+// sandbox, as the quickstart binary builds.
+func runQuickstartNoSandboxT(t *testing.T, dir string, env Environment, cmdRunner CommandRunner, forgeBuilder ForgeBuilder, w io.Writer, stdin io.Reader, interactive, force bool) error {
+	t.Helper()
+	rt := connectorruntime.FromRegistries(nil, nil)
+	t.Cleanup(func() { _ = rt.Close() })
+	return runQuickstartOn(t, rt, dir, env, cmdRunner, forgeBuilder, w, stdin, interactive, force)
+}
+
+func runQuickstartOn(t *testing.T, rt *connectorruntime.Runtime, dir string, env Environment, cmdRunner CommandRunner, forgeBuilder ForgeBuilder, w io.Writer, stdin io.Reader, interactive, force bool) error {
 	t.Helper()
 	for _, d := range backend.Registry {
 		if d.TokenEnvVar != "" {
 			t.Setenv(d.TokenEnvVar, os.Getenv(d.TokenEnvVar))
 		}
 	}
-	return runQuickstart(nil, dir, env, cmdRunner, forgeBuilder, w, stdin, interactive, force)
+	return runQuickstart(rt, dir, env, cmdRunner, forgeBuilder, w, stdin, interactive, force)
 }

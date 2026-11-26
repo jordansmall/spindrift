@@ -334,7 +334,7 @@ func (c *config) setRowKnob(env, value string) {
 // mainRun builds one, closed with the test.
 func connectorRuntime(t *testing.T) *connectorruntime.Runtime {
 	t.Helper()
-	rt := connectorruntime.FromRegistries(credsourcetest.Applied())
+	rt := connectorruntime.FromRegistries(credsourcetest.Applied(), connectorsandboxtest.InProcess())
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt
 }

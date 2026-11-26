@@ -8,6 +8,7 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorsandbox"
+	"spindrift.dev/launcher/internal/forge"
 )
 
 // acquireTokenWith builds the wizard's github token setup: acquire, then audit
@@ -18,7 +19,7 @@ func acquireTokenWith(introspect backendkit.TokenIntrospector) func(backendkit.S
 		if err != nil {
 			return "", err
 		}
-		if err := auditGHToken(token, s.RepoSlug, introspect, p); err != nil {
+		if err := auditGHToken(token, s.RepoSlug, func(t, slug string) (forge.TokenIntrospection, error) { return introspect(s.Connectors, t, slug) }, p); err != nil {
 			return "", err
 		}
 		return token, nil
@@ -63,7 +64,7 @@ const requiredGHPermissions = `  Issues: Read and write
 // prefix. A fine-grained PAT cannot be introspected, so it passes ungated; so
 // does a classic token on a host whose Connector cannot report its scopes,
 // after saying so.
-func auditGHToken(token, repoSlug string, introspect backendkit.TokenIntrospector, p backendkit.TokenPrompt) error {
+func auditGHToken(token, repoSlug string, introspect func(token, repoSlug string) (forge.TokenIntrospection, error), p backendkit.TokenPrompt) error {
 	w := p.Out
 	if strings.HasPrefix(token, "github_pat_") {
 		fmt.Fprintln(w, "fine-grained PAT detected — GitHub exposes no endpoint to introspect it.")

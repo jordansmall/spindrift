@@ -11,6 +11,7 @@ import (
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/connectorsandbox"
+	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
 	"spindrift.dev/launcher/internal/credsource/credsourcetest"
 	"spindrift.dev/launcher/internal/forge"
 )
@@ -58,7 +59,7 @@ func newClient(t *testing.T, repo string, labels forge.DispatchLabels, opts ...E
 // sandbox, closed with the test.
 func testRuntime(t *testing.T) *connectorruntime.Runtime {
 	t.Helper()
-	rt := connectorruntime.FromRegistries(credsourcetest.Applied())
+	rt := connectorruntime.FromRegistries(credsourcetest.Applied(), testSandbox())
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt
 }
@@ -90,3 +91,8 @@ func hookLoads(t *testing.T, hook func(load func() (*connectorhost.Connector, er
 		return hook(func() (*connectorhost.Connector, error) { return prev(load) })
 	}
 }
+
+// testSandbox is the in-process engine behind the hook hookLoads installs, the
+// sandbox every test runtime loads into: a test binary has no runner to start
+// one on.
+func testSandbox() connectorsandbox.Loader { return hookedSandbox{connectorsandboxtest.InProcess()} }

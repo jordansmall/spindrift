@@ -120,7 +120,7 @@ func checkConnectorWriteGate(c config, w io.Writer) error {
 		warnConnectorWriteUndetermined(w, c, env, "no IntrospectToken hook")
 		return nil
 	}
-	result, err := strategy.IntrospectToken(token, c.RepoSlug)
+	result, err := strategy.IntrospectToken(c.connectors, token, c.RepoSlug)
 	if errors.Is(err, backendkit.ErrUnsupported) {
 		warnConnectorWriteUndetermined(w, c, env, doctor.UnsupportedReason(err))
 		return nil

@@ -456,7 +456,7 @@ func TestQuickstartDoctorPass_RunsNoGh(t *testing.T) {
 // test.
 func testRuntime(t *testing.T) *connectorruntime.Runtime {
 	t.Helper()
-	rt := connectorruntime.FromRegistries(credsourcetest.Applied())
+	rt := connectorruntime.FromRegistries(credsourcetest.Applied(), nil)
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt
 }

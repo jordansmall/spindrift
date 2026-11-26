@@ -37,7 +37,7 @@ func init() {
 // loadViaRow loads a backend row through a Connector runtime, as production
 // does, over a module that no engine can compile, so a load that reached an
 // engine fails with a compile error, and a sandboxed one with the sandbox's.
-func loadViaRow(t *testing.T) error {
+func loadViaRow(t *testing.T, sb connectorsandbox.Loader) error {
 	t.Helper()
 	t.Chdir(t.TempDir()) // the audit file opens under the working directory
 	module := filepath.Join(t.TempDir(), "x.wasm")
@@ -45,7 +45,7 @@ func loadViaRow(t *testing.T) error {
 		t.Fatal(err)
 	}
 	row := backendrows.Row{Name: "x", Module: module}
-	rt := connectorruntime.New([]backendrows.Row{row}, nil, nil)
+	rt := connectorruntime.New([]backendrows.Row{row}, nil, sb)
 	defer rt.Close()
 	_, err := rt.Connector(row, connectorruntime.SessionSpec{})
 	return err
@@ -172,7 +172,7 @@ func TestMainRun_NoConnectorLoadStartsNoSandbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = rt.Close() }()
-	_ = loadViaRow(t)
+	_ = loadViaRow(t, rt.Sandbox())
 	if got := countedBuilt.Load(); got != 1 {
 		t.Fatalf("%d runners built after a load, want 1", got)
 	}
@@ -183,14 +183,14 @@ func TestMainRun_NoConnectorLoadStartsNoSandbox(t *testing.T) {
 func TestConnectorRuntimeClose_RecordsSandboxTotals(t *testing.T) {
 	calls := 0
 	t.Cleanup(backendkit.ReplaceRegistryForTest([]backendkit.Strategy{
-		{RecordSandboxTotals: func() { calls++ }},
+		{RecordSandboxTotals: func(connectorsandbox.Stats) { calls++ }},
 	}))
 	t.Cleanup(connectorsandbox.Use(nil))
 	in, err := connectorInput()
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt, err := newConnectorRuntime(in, connectorsetup.Options{})
+	rt, err := newConnectorRuntime(in, connectorsetup.Options{Sandbox: servedSandbox{connectorsandboxtest.InProcess()}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +218,7 @@ func TestConnectorRuntime_StartFailureFailsTheRun(t *testing.T) {
 
 	// The load site may swallow this error, so the verdict must not depend on
 	// it reaching the run.
-	err = loadViaRow(t)
+	err = loadViaRow(t, rt.Sandbox())
 	if !errors.Is(err, connectorsandbox.ErrConnectorSandboxStart) || !strings.Contains(err.Error(), runner.ErrFakeNoSandbox.Error()) {
 		t.Fatalf("load = %v, want ErrConnectorSandboxStart carrying the runner's refusal, not an in-process compile error", err)
 	}
@@ -227,18 +227,18 @@ func TestConnectorRuntime_StartFailureFailsTheRun(t *testing.T) {
 		t.Errorf("load = %v, want it to name runner %s", err, refusingKind)
 	}
 	var stderr bytes.Buffer
-	if got := sandboxVerdict(int(exitcode.Dispatched), &stderr); got != int(exitcode.Failed) {
+	if got := sandboxVerdict(int(exitcode.Dispatched), rt, &stderr); got != int(exitcode.Failed) {
 		t.Fatalf("verdict = %d, want Failed", got)
 	}
 	if !strings.Contains(stderr.String(), connectorsandbox.ErrConnectorSandboxStart.Error()) {
 		t.Errorf("stderr = %q, want the named error", stderr.String())
 	}
-	if got := sandboxVerdict(int(exitcode.SignalledStop), &bytes.Buffer{}); got != int(exitcode.SignalledStop) {
+	if got := sandboxVerdict(int(exitcode.SignalledStop), rt, &bytes.Buffer{}); got != int(exitcode.SignalledStop) {
 		t.Errorf("verdict = %d, want a stop left as it was", got)
 	}
 	for _, clean := range []exitcode.Dispatch{exitcode.QueueEmpty, exitcode.NoneDispatchable} {
 		stderr.Reset()
-		if got := sandboxVerdict(int(clean), &stderr); got != int(exitcode.Failed) {
+		if got := sandboxVerdict(int(clean), rt, &stderr); got != int(exitcode.Failed) {
 			t.Errorf("verdict for exit %d = %d, want Failed", clean, got)
 		}
 		if !strings.Contains(stderr.String(), connectorsandbox.ErrConnectorSandboxStart.Error()) {
@@ -252,8 +252,14 @@ func TestConnectorRuntime_StartFailureFailsTheRun(t *testing.T) {
 func TestMainRun_ClosesTheRuntimeItBuilt(t *testing.T) {
 	calls := 0
 	t.Cleanup(backendkit.ReplaceRegistryForTest([]backendkit.Strategy{
-		{RecordSandboxTotals: func() { calls++ }},
+		{RecordSandboxTotals: func(connectorsandbox.Stats) { calls++ }},
 	}))
+	prev := newConnectorRuntime
+	t.Cleanup(func() { newConnectorRuntime = prev })
+	newConnectorRuntime = func(in connectorsetup.Input, opts connectorsetup.Options) (*connectorruntime.Runtime, error) {
+		opts.Sandbox = servedSandbox{connectorsandboxtest.InProcess()}
+		return prev(in, opts)
+	}
 	t.Cleanup(connectorsandbox.Use(nil))
 	t.Chdir(t.TempDir())
 
@@ -262,4 +268,12 @@ func TestMainRun_ClosesTheRuntimeItBuilt(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("totals recorded %d times after mainRun returned, want 1; stderr=%q", calls, stderr.String())
 	}
+}
+
+// servedSandbox is the in-process engine reporting that it served the run, so
+// the runtime's close records its totals.
+type servedSandbox struct{ connectorsandbox.Loader }
+
+func (servedSandbox) Stats() (connectorsandbox.Stats, bool) {
+	return connectorsandbox.Stats{Start: 1}, true
 }
