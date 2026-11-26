@@ -15,6 +15,11 @@ var ErrNoHost = errors.New("connector: no host to serve http_request outside was
 type Response struct {
 	Status int
 	Body   []byte
+	// Header is what a FakeHost answer serves to ResponseHeader, before the
+	// Route's allowlist withholds the rest. HTTPRequest never sets it: a
+	// Connector reads a header with ResponseHeader. A repeated header is one
+	// value joined with ", ", as the real host serves it.
+	Header map[string]string
 }
 
 // respBuf is the one buffer the host writes responses into. The SDK collects

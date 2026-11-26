@@ -98,6 +98,62 @@ func TestServeAnswerErrorBecomesTheHTTPRequestError(t *testing.T) {
 	}
 }
 
+func TestServeResponseHeadersFollowTheRouteAllowlist(t *testing.T) {
+	h := NewFakeHost([]Route{{Method: "GET", Host: "h.example.com", Path: "/", ResponseHeaders: []string{"x-ratelimit-remaining", "Set-Cookie"}}})
+	h.Serve(t, func(Request) (Response, error) {
+		return Response{Status: 200, Header: map[string]string{
+			"X-RateLimit-Remaining": "7", "X-Secret": "s", "ETag": `"v1"`, "Set-Cookie": "a=b",
+		}}, nil
+	})
+	if _, err := HTTPRequest(Request{Method: "GET", URL: "https://h.example.com/x"}); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name, header, want string
+		ok                 bool
+	}{
+		{"declared extra", "X-RateLimit-Remaining", "7", true},
+		{"case-insensitive lookup", "x-ratelimit-REMAINING", "7", true},
+		{"fixed without declaration", "etag", `"v1"`, true},
+		{"undeclared non-fixed is withheld", "X-Secret", "", false},
+		{"Set-Cookie withheld even if declared", "Set-Cookie", "", false},
+		{"absent", "Link", "", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := ResponseHeader(tc.header)
+			if got != tc.want || ok != tc.ok {
+				t.Errorf("ResponseHeader(%q) = %q, %v; want %q, %v", tc.header, got, ok, tc.want, tc.ok)
+			}
+		})
+	}
+}
+
+func TestServeAnswerErrorHoldsNoResponseHeaders(t *testing.T) {
+	h := NewFakeHost([]Route{{Method: "GET", Host: "h.example.com", Path: "/"}})
+	fail := false
+	h.Serve(t, func(Request) (Response, error) {
+		if fail {
+			return Response{}, errors.New("dial refused")
+		}
+		return Response{Status: 200, Header: map[string]string{"ETag": "x"}}, nil
+	})
+	req := Request{Method: "GET", URL: "https://h.example.com/x"}
+	if _, err := HTTPRequest(req); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := ResponseHeader("ETag"); !ok {
+		t.Fatal("ETag not readable after a good answer")
+	}
+	fail = true
+	if _, err := HTTPRequest(req); err == nil {
+		t.Fatal("want the answer's error")
+	}
+	if v, ok := ResponseHeader("ETag"); ok {
+		t.Errorf("ResponseHeader after a failed request = %q, true; want none", v)
+	}
+}
+
 func TestServeRefusedRequestFailsTheTestAndIsNotAnswered(t *testing.T) {
 	h := NewFakeHost(testRoutes)
 	tb := &stubTB{}
@@ -222,7 +278,7 @@ func TestAdmitRequestHeaders(t *testing.T) {
 		{"declared, other case", "/a", map[string]string{"X-Trace-Id": "1"}, ""},
 		{"declared elsewhere", "/b", map[string]string{"X-Trace-Id": "1"}, `GET h.example.com/b: request header "X-Trace-Id" is not declared by the route`},
 		{"undeclared names the first sorted", "/a", map[string]string{"Zeta": "1", "Alpha": "1", "Accept": "x"}, `GET h.example.com/a: request header "Alpha" is not declared by the route`},
-		{"never declarable", "/b", map[string]string{"Authorization": "x"}, `GET h.example.com/b: request header "Authorization" can never be declared`},
+		{"undeclared never-declarable is just undeclared", "/b", map[string]string{"Authorization": "x"}, `GET h.example.com/b: request header "Authorization" is not declared by the route`},
 		{"never declarable even if declared", "/c", map[string]string{"Cookie": "x"}, `GET h.example.com/c: request header "Cookie" can never be declared`},
 		{"overlong name is bounded", "/b", map[string]string{strings.Repeat("a", 300): "x"}, `GET h.example.com/b: request header "` + strings.Repeat("a", 256) + `..." is not declared by the route`},
 	}
