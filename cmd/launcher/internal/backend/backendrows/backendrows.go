@@ -301,6 +301,7 @@ func resolveBase(row Row, lookup func(string) string) (_ Row, unusable, _ error)
 		for i := range out {
 			if out[i].Host == BaseHost {
 				out[i].Host = host
+				out[i].NamedByKnob = true
 				// "/" is the base's own subtree root: prefix+"/" is not canonical.
 				if out[i].Path == "/" && prefix != "" {
 					out[i].Path = prefix
