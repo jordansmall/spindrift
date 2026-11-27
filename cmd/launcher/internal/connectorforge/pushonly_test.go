@@ -8,6 +8,7 @@ import (
 	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorforge/connectorforgetest"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectortest"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/gitexec"
@@ -175,8 +176,8 @@ func TestProbeReachesTheBackend(t *testing.T) {
 	h := connectorforgetest.New(t)
 	before, branches := h.Backend.Requests(), h.Backend.BranchRequests()
 	repo, err := h.Forge().Probe()
-	if err != nil || repo != connectorforgetest.Repo {
-		t.Fatalf("Probe = (%q, %v), want (%q, nil)", repo, err, connectorforgetest.Repo)
+	if err != nil || repo != connectortest.Repo {
+		t.Fatalf("Probe = (%q, %v), want (%q, nil)", repo, err, connectortest.Repo)
 	}
 	if n := h.Backend.Requests() - before; n != 1 {
 		t.Errorf("Probe sent %d backend requests, want 1", n)
@@ -211,7 +212,7 @@ func TestComposePinsPRURLsToTheDerivedHostNotTheBackendHost(t *testing.T) {
 		t.Fatalf("OpenPRForBranch = %+v, %v, want an answer on %s refused", pr, ok, h.Backend.Host)
 	}
 
-	h.Backend.SetWeb("https://" + derived + "/" + connectorforgetest.Repo)
+	h.Backend.SetWeb("https://" + derived + "/" + connectortest.Repo)
 	pr, ok, err := caps.PRForge.OpenPRForBranch(branch)
 	if err != nil || !ok || pr.URL != h.Backend.PRURL(7) {
 		t.Errorf("OpenPRForBranch = %+v, %v, %v, want the PR on %s accepted", pr, ok, err, derived)

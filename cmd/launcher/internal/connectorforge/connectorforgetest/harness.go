@@ -11,10 +11,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"os/exec"
 	"path"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -23,9 +21,8 @@ import (
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorhost"
-	"spindrift.dev/launcher/internal/connectortracker"
+	"spindrift.dev/launcher/internal/connectortest"
 	"spindrift.dev/launcher/internal/credsource"
-	"spindrift.dev/launcher/internal/fixturebuild"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/forge/git"
@@ -35,85 +32,19 @@ import (
 )
 
 const (
-	// Repo is the repository the scripted backend serves.
-	Repo = "o/r"
-	// Token is the bearer token the host attaches to every Connector request.
-	Token = "s3cr3t-token"
-
 	apiPath    = "/api/v1"
-	branchPath = apiPath + "/repos/" + Repo + "/branches/"
+	branchPath = apiPath + "/repos/" + connectortest.Repo + "/branches/"
 	prefix     = "agent/issue-"
 )
 
-// Scripted is one canned answer the backend serves to a request whose method
-// and URL path match, ahead of its own model, for a dialect the model does not
-// speak. Body may carry "{host}", answered as the request's Host, for a URL
-// back to the backend.
-type Scripted struct {
-	Method string `json:"method"`
-	Path   string `json:"path"`
-	Status int    `json:"status"`
-	Body   string `json:"body"`
-}
-
-// Connector is a Connector as the harness loads it: its wasm and its declared
-// Route table, whatever its name.
-type Connector struct {
-	Wasm []byte
-	// Routes is the declared table: any host, and "{repo}" for the repository.
-	// The harness rebinds every host to the backend's and substitutes Repo.
-	Routes []connectorhost.Route
-	// Script is served ahead of the backend's model.
-	Script []Scripted
-}
-
-// ServeScript answers r from the first scripted entry matching its method and
-// path, and reports whether it did.
-func ServeScript(w http.ResponseWriter, r *http.Request, script []Scripted) bool {
-	for _, s := range script {
-		if s.Method == r.Method && s.Path == r.URL.Path {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(s.Status)
-			_, _ = w.Write([]byte(strings.ReplaceAll(s.Body, "{host}", r.Host)))
-			return true
-		}
-	}
-	return false
-}
-
-// BoundRoutes is c's declared Routes with Repo substituted and every host
-// rebound to the backend's.
-func (c Connector) BoundRoutes(host string) []connectorhost.Route {
-	routes := connectortracker.Routes(c.Routes, Repo)
-	for i := range routes {
-		routes[i].Host = host
-	}
-	return routes
-}
-
-// FixtureWasm reads the named fixture Connector wasm file.
-func FixtureWasm(t *testing.T, wasmFile string) []byte {
-	t.Helper()
-	dir, err := fixturebuild.ConnectorDir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	wasm, err := os.ReadFile(filepath.Join(dir, wasmFile))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return wasm
-}
-
 // fixtureConnector is the named fixture wasm file with one Route per method over
 // the repository's subtree.
-func fixtureConnector(t *testing.T, wasmFile string, methods []string) Connector {
+func fixtureConnector(t *testing.T, wasmFile string, methods []string) connectortest.Connector {
 	t.Helper()
-	c := Connector{Wasm: FixtureWasm(t, wasmFile)}
-	for _, m := range methods {
-		c.Routes = append(c.Routes, connectorhost.Route{Method: m, Host: "forge.example", Path: apiPath + "/repos/{repo}"})
+	return connectortest.Connector{
+		Wasm:   connectortest.FixtureWasm(t, wasmFile),
+		Routes: connectortest.RoutePerMethod("forge.example", methods...),
 	}
-	return c
 }
 
 // Backend is the scripted forgejo-shaped REST backend. Branch requests are
@@ -124,7 +55,7 @@ type Backend struct {
 	Host string
 
 	bare   string
-	script []Scripted
+	script []connectortest.Scripted
 
 	mu       sync.Mutex
 	web      string
@@ -145,7 +76,7 @@ func newBackend(t *testing.T, bare string) *Backend {
 	b.Server = httptest.NewTLSServer(http.HandlerFunc(b.serve))
 	t.Cleanup(b.Close)
 	b.Host = b.Listener.Addr().String()
-	b.web = "https://" + b.Host + "/" + Repo
+	b.web = "https://" + b.Host + "/" + connectortest.Repo
 	return b
 }
 
@@ -154,7 +85,7 @@ func (b *Backend) underWebPath(webPath string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.webPath = webPath
-	b.web = "https://" + b.Host + webPath + "/" + Repo
+	b.web = "https://" + b.Host + webPath + "/" + connectortest.Repo
 }
 
 // SetWeb scripts the web URL the backend serves for the repository and its PRs.
@@ -199,7 +130,7 @@ func (b *Backend) serve(w http.ResponseWriter, r *http.Request) {
 	webPath := b.webPath
 	token := b.token
 	b.mu.Unlock()
-	isGit := gitHandler != nil && strings.HasPrefix(r.URL.Path, webPath+"/"+path.Dir(Repo)+"/")
+	isGit := gitHandler != nil && strings.HasPrefix(r.URL.Path, webPath+"/"+path.Dir(connectortest.Repo)+"/")
 	if token != "" && !isGit && r.Header.Get("Authorization") != "Bearer "+token {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -208,7 +139,7 @@ func (b *Backend) serve(w http.ResponseWriter, r *http.Request) {
 		gitHandler.ServeHTTP(w, r)
 		return
 	}
-	if ServeScript(w, r, b.script) {
+	if connectortest.ServeScript(w, r, b.script) {
 		return
 	}
 	if strings.HasSuffix(r.URL.Path, "/merge") {
@@ -217,13 +148,13 @@ func (b *Backend) serve(w http.ResponseWriter, r *http.Request) {
 		b.mu.Unlock()
 	}
 	switch {
-	case r.URL.Path == apiPath+"/repos/"+Repo && r.Method == http.MethodGet:
+	case r.URL.Path == apiPath+"/repos/"+connectortest.Repo && r.Method == http.MethodGet:
 		b.mu.Lock()
 		web, allowRebase := b.web, b.prs.allowRebase
 		b.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"html_url": web, "full_name": Repo, "allow_rebase": allowRebase,
+			"html_url": web, "full_name": connectortest.Repo, "allow_rebase": allowRebase,
 		})
 	case strings.HasPrefix(r.URL.Path, branchPath):
 		b.mu.Lock()
@@ -238,8 +169,8 @@ func (b *Backend) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		b.branchAnswer(w, r, strings.TrimPrefix(r.URL.Path, branchPath))
-	case strings.HasPrefix(r.URL.Path, apiPath+"/repos/"+Repo+"/"):
-		b.servePR(w, r, strings.TrimPrefix(r.URL.Path, apiPath+"/repos/"+Repo))
+	case strings.HasPrefix(r.URL.Path, apiPath+"/repos/"+connectortest.Repo+"/"):
+		b.servePR(w, r, strings.TrimPrefix(r.URL.Path, apiPath+"/repos/"+connectortest.Repo))
 	default:
 		http.NotFound(w, r)
 	}
@@ -283,13 +214,13 @@ var (
 
 // load starts a backend and loads the Connector against it, its declared routes
 // rebound to the backend's host.
-func load(t *testing.T, eng Engine, bare string, c Connector, token credsource.Source) *stack {
+func load(t *testing.T, eng Engine, bare string, c connectortest.Connector, token credsource.Source) *stack {
 	t.Helper()
 	b := newBackend(t, bare)
 	b.script = c.Script
 	audit := &bytes.Buffer{}
 	authorizer := func(r *http.Request) error {
-		r.Header.Set("Authorization", "Bearer "+Token)
+		r.Header.Set("Authorization", "Bearer "+connectortest.Token)
 		return nil
 	}
 	if token != nil {
@@ -309,7 +240,7 @@ func load(t *testing.T, eng Engine, bare string, c Connector, token credsource.S
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = conn.Close(context.Background()) })
-	return &stack{b, conn, audit, connectorforge.Target{API: b.URL + apiPath, Repo: Repo}}
+	return &stack{b, conn, audit, connectorforge.Target{API: b.URL + apiPath, Repo: connectortest.Repo}}
 }
 
 // base is what the push-only and PR harnesses share: one backend, one loaded
@@ -333,7 +264,7 @@ type base struct {
 	// Note is Git.Note as Compose gets it; nil records nothing.
 	Note func(method string, err error)
 
-	connector Connector
+	connector connectortest.Connector
 	cloneURL  string // the https URL git rewrites to Repo; empty under WithGitOverHTTPS
 	eng       Engine
 	target    connectorforge.Target
@@ -352,7 +283,7 @@ type PlumbingCall struct {
 
 // newBase starts the backend, loads the Connector and composes the forge with
 // the default, valid remote.
-func newBase(t *testing.T, eng Engine, c Connector, opts ...Option) *base {
+func newBase(t *testing.T, eng Engine, c connectortest.Connector, opts ...Option) *base {
 	t.Helper()
 	var o options
 	for _, opt := range opts {
@@ -375,12 +306,12 @@ func newBase(t *testing.T, eng Engine, c Connector, opts ...Option) *base {
 	}
 	if o.gitOverHTTPS {
 		t.Setenv("GIT_CONFIG_COUNT", "0")
-		g := gitexectest.ServeTLS(t, s.backend.Server, strings.TrimPrefix(o.webPath+"/", "/")+Repo+".git", repo.Bare, user, pass)
+		g := gitexectest.ServeTLS(t, s.backend.Server, strings.TrimPrefix(o.webPath+"/", "/")+connectortest.Repo+".git", repo.Bare, user, pass)
 		s.backend.mu.Lock()
 		s.backend.gitHandler = g
 		s.backend.mu.Unlock()
 	} else {
-		h.cloneURL = "https://" + s.backend.Host + o.webPath + "/" + Repo + ".git"
+		h.cloneURL = "https://" + s.backend.Host + o.webPath + "/" + connectortest.Repo + ".git"
 		setGitRewrite(t, h.cloneURL, repo.Bare)
 	}
 
@@ -469,7 +400,7 @@ func New(t *testing.T, opts ...Option) *Harness {
 }
 
 // NewFor is New over a Connector's own wasm and declared Route table.
-func NewFor(t *testing.T, c Connector, opts ...Option) *Harness {
+func NewFor(t *testing.T, c connectortest.Connector, opts ...Option) *Harness {
 	t.Helper()
 	return &Harness{newBase(t, inProcess, c, opts...)}
 }

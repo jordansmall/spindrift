@@ -6,6 +6,9 @@
 { core }:
 let
   checkRoutes = (import ../../lib/connector-routes.nix).check;
+  # Mirrors connectortest.RoutePerMethod (cmd/launcher/internal/connectortest),
+  # which the Go tests build; Nix cannot import Go, so the table is kept in step
+  # by hand.
   # The fixture wasm calls {Target.API}/repos/{repo}/..., and the scripted
   # backend serves under /api/v1.
   routes =

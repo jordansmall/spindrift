@@ -23,8 +23,8 @@ import (
 	"sync"
 	"testing"
 
-	"spindrift.dev/launcher/internal/connectorforge/connectorforgetest"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectortest"
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
@@ -33,7 +33,7 @@ import (
 
 const (
 	// Repo is the repository the scripted backend serves.
-	Repo = connectorforgetest.Repo
+	Repo = connectortest.Repo
 
 	apiPath    = "/api/v1"
 	issuesPath = apiPath + "/repos/" + Repo + "/issues"
@@ -63,7 +63,7 @@ type Backend struct {
 	// Host is the backend's host:port, the one host its Route table declares.
 	Host string
 
-	script []connectorforgetest.Scripted
+	script []connectortest.Scripted
 
 	reqMu sync.Mutex
 	reqs  map[string]int
@@ -72,7 +72,7 @@ type Backend struct {
 	issues map[int]*issue
 }
 
-func newBackend(t *testing.T, script []connectorforgetest.Scripted) *Backend {
+func newBackend(t *testing.T, script []connectortest.Scripted) *Backend {
 	t.Helper()
 	b := &Backend{script: script, issues: map[int]*issue{}, reqs: map[string]int{}}
 	b.Server = httptest.NewTLSServer(http.HandlerFunc(b.serve))
@@ -85,7 +85,7 @@ func (b *Backend) serve(w http.ResponseWriter, r *http.Request) {
 	b.reqMu.Lock()
 	b.reqs[r.Method+" "+r.URL.Path]++
 	b.reqMu.Unlock()
-	if connectorforgetest.ServeScript(w, r, b.script) {
+	if connectortest.ServeScript(w, r, b.script) {
 		return
 	}
 	if !strings.HasPrefix(r.URL.Path, issuesPath) {
@@ -243,7 +243,7 @@ type Harness struct {
 // forgetest.NativeCapable (with forgetest.NativeFailureIsolatable) exactly when
 // c advertises tracker.comments and tracker.nativeDeps, and
 // forgetest.PriorityCapable always: core resolves priority from the labels.
-func New(t *testing.T, c connectorforgetest.Connector) forgetest.Harness {
+func New(t *testing.T, c connectortest.Connector) forgetest.Harness {
 	t.Helper()
 	b := newBackend(t, c.Script)
 	h := &Harness{t: t, Backend: b, Audit: &bytes.Buffer{}}
@@ -251,7 +251,7 @@ func New(t *testing.T, c connectorforgetest.Connector) forgetest.Harness {
 		Name:   "fixture-tracker",
 		Routes: c.BoundRoutes(b.Host),
 		Authorize: func(r *http.Request) error {
-			r.Header.Set("Authorization", "Bearer "+connectorforgetest.Token)
+			r.Header.Set("Authorization", "Bearer "+connectortest.Token)
 			return nil
 		},
 		Client:        b.Client(),

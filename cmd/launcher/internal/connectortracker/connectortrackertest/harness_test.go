@@ -5,8 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"spindrift.dev/launcher/internal/connectorforge/connectorforgetest"
-	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectortest"
 	"spindrift.dev/launcher/internal/connectortracker/connectortrackertest"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
@@ -14,11 +13,11 @@ import (
 
 // fixtureConnector is the fixture tracker Connector with a hand-written Route
 // table, as a Connector's own package declares one.
-func fixtureConnector(t *testing.T, wasmFile string) connectorforgetest.Connector {
+func fixtureConnector(t *testing.T, wasmFile string) connectortest.Connector {
 	t.Helper()
-	return connectorforgetest.Connector{
-		Wasm:   connectorforgetest.FixtureWasm(t, wasmFile),
-		Routes: []connectorhost.Route{{Method: http.MethodGet, Host: "tracker.example", Path: "/api/v1/repos/{repo}"}},
+	return connectortest.Connector{
+		Wasm:   connectortest.FixtureWasm(t, wasmFile),
+		Routes: connectortest.RoutePerMethod("tracker.example", http.MethodGet),
 	}
 }
 
@@ -46,12 +45,10 @@ func TestViolatingTracker_IsLoadable(t *testing.T) {
 	}
 }
 
-func writeFixtureConnector(t *testing.T, wasmFile string) connectorforgetest.Connector {
+func writeFixtureConnector(t *testing.T, wasmFile string) connectortest.Connector {
 	t.Helper()
 	c := fixtureConnector(t, wasmFile)
-	c.Routes = append(c.Routes,
-		connectorhost.Route{Method: http.MethodPost, Host: "tracker.example", Path: "/api/v1/repos/{repo}"},
-		connectorhost.Route{Method: http.MethodDelete, Host: "tracker.example", Path: "/api/v1/repos/{repo}"})
+	c.Routes = connectortest.RoutePerMethod("tracker.example", http.MethodGet, http.MethodPost, http.MethodDelete)
 	return c
 }
 

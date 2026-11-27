@@ -21,6 +21,7 @@ import (
 	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
+	"spindrift.dev/launcher/internal/connectortest"
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/credsource"
 	"spindrift.dev/launcher/internal/fixturebuild"
@@ -106,9 +107,9 @@ func newEnvWith(t *testing.T, wasmFile string, creds map[string]credsource.Row) 
 			return
 		}
 		switch r.URL.Path {
-		case apiPath + "/repos/" + connectorforgetest.Repo + "/issues/1":
+		case apiPath + "/repos/" + connectortest.Repo + "/issues/1":
 			_, _ = w.Write([]byte(`{"number":1,"title":"first","body":"","state":"open","labels":[]}`))
-		case apiPath + "/repos/" + connectorforgetest.Repo + "/branches/main":
+		case apiPath + "/repos/" + connectortest.Repo + "/branches/main":
 			_, _ = w.Write([]byte(`{}`))
 		default:
 			http.NotFound(w, r)
@@ -119,13 +120,13 @@ func newEnvWith(t *testing.T, wasmFile string, creds map[string]credsource.Row) 
 	e.row = backendrows.Row{
 		Name:          "fixture",
 		Module:        filepath.Join(dir, wasmFile),
-		Routes:        []connectorhost.Route{{Method: http.MethodGet, Host: srv.Listener.Addr().String(), Path: apiPath + "/repos/" + connectorforgetest.Repo}},
+		Routes:        []connectorhost.Route{{Method: http.MethodGet, Host: srv.Listener.Addr().String(), Path: apiPath + "/repos/" + connectortest.Repo}},
 		CredentialEnv: "FIXTURE_TOKEN",
 	}
 	e.now = time.Unix(1000, 0)
 	e.spec = connectorruntime.TrackerSpec{
 		SessionSpec: connectorruntime.SessionSpec{
-			Target:  connectortracker.Target{API: srv.URL + apiPath, Repo: connectorforgetest.Repo},
+			Target:  connectortracker.Target{API: srv.URL + apiPath, Repo: connectortest.Repo},
 			Options: backendrows.Options{Client: srv.Client(), PublicForTest: connectorhost.LoopbackForTest},
 		},
 		Clock: retry.NoSleepClock(),

@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/connectorforge/connectorforgetest"
-	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectortest"
 	"spindrift.dev/launcher/internal/fixturebuild"
 )
 
@@ -20,17 +20,9 @@ func TestConnectorConformance(t *testing.T) {
 	Run(t, FromEnv(t))
 }
 
-func declared(host string, methods ...string) []connectorhost.Route {
-	var routes []connectorhost.Route
-	for _, m := range methods {
-		routes = append(routes, connectorhost.Route{Method: m, Host: host, Path: "/api/v1/repos/{repo}"})
-	}
-	return routes
-}
-
-func fixture(t *testing.T, wasm, host string, methods ...string) connectorforgetest.Connector {
+func fixture(t *testing.T, wasm, host string, methods ...string) connectortest.Connector {
 	t.Helper()
-	return connectorforgetest.Connector{Wasm: connectorforgetest.FixtureWasm(t, wasm), Routes: declared(host, methods...)}
+	return connectortest.Connector{Wasm: connectortest.FixtureWasm(t, wasm), Routes: connectortest.RoutePerMethod(host, methods...)}
 }
 
 func TestRun_FixtureTrackerPasses(t *testing.T) {
@@ -59,7 +51,7 @@ func conformanceChild(t *testing.T, extraEnv []string, wasmFile, host string, me
 	if err != nil {
 		t.Fatal(err)
 	}
-	routes, err := json.Marshal(declared(host, methods...))
+	routes, err := json.Marshal(connectortest.RoutePerMethod(host, methods...))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +110,7 @@ func TestRun_NoCapabilityFails(t *testing.T) {
 // same wasm fails without ScriptEnv and passes with it: that proves FromEnv
 // parses the script and the tracker backend serves it.
 func TestRun_ScriptedDialectConnectorPassesOnlyWithItsScript(t *testing.T) {
-	script, err := json.Marshal([]connectorforgetest.Scripted{
+	script, err := json.Marshal([]connectortest.Scripted{
 		{Method: http.MethodGet, Path: "/api/v1/repos/o/r/dialect", Status: http.StatusOK, Body: "{}"},
 	})
 	if err != nil {
