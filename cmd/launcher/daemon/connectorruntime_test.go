@@ -42,7 +42,6 @@ func refusingDocT(t *testing.T, settings map[string]string) *inputdoc.Document {
 // load must go to the runtime's sandbox, never to an engine it hosts itself.
 func TestConnectorRuntime_DemandTrackerLoadGoesToTheSandbox(t *testing.T) {
 	clearKnobEnvT(t)
-	t.Cleanup(backendrows.Snapshot())
 
 	module := filepath.Join(t.TempDir(), "x.wasm")
 	if err := os.WriteFile(module, []byte("not wasm"), 0o600); err != nil {
@@ -55,13 +54,11 @@ func TestConnectorRuntime_DemandTrackerLoadGoesToTheSandbox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := backendrows.Use(raw, func(string) string { return "" }); err != nil {
-		t.Fatal(err)
-	}
+	useRows(t, raw, func(string) string { return "" })
 	doc := refusingDocT(t, map[string]string{"ISSUE_TRACKER": "github", "REPO_SLUG": "o/r", "LABEL": "ready-for-agent"})
 	t.Setenv(ghTokenEnv, "tok")
 
-	rt, err := connectorsetup.New(connectorInput(doc, workKinds, t.TempDir()), connectorsetup.Options{RequireCredential: true})
+	rt, err := connectorsetup.New(connectorInputT(doc, workKinds, t.TempDir()), connectorsetup.Options{RequireCredential: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +78,7 @@ func TestConnectorRuntime_DemandTrackerLoadGoesToTheSandbox(t *testing.T) {
 }
 
 func TestConnectorRuntime_CloseStopsTheSandbox(t *testing.T) {
-	rt, err := connectorsetup.New(connectorInput(refusingDocT(t, nil), nil, t.TempDir()), connectorsetup.Options{RequireCredential: true})
+	rt, err := connectorsetup.New(connectorInputT(refusingDocT(t, nil), nil, t.TempDir()), connectorsetup.Options{RequireCredential: true})
 	if err != nil {
 		t.Fatal(err)
 	}

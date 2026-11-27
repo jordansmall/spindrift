@@ -100,12 +100,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := useBakedGithubRow(os.Getenv); err != nil {
+	baked, err := decodeBakedGithubRow(os.Getenv)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "quickstart: %s\n", err)
 		os.Exit(1)
 	}
 
-	connectors := connectorruntime.FromRegistries(hostExportedCredentials(), nil)
+	connectors := connectorruntime.New(baked, hostExportedCredentials(baked), nil)
 	// Quickstart reads no input document, so it offers the bundled Drivers and
 	// their generated Descriptors alone.
 	rows, err := driverrows.Parse(nil, bundle.Drivers())
@@ -124,12 +125,12 @@ func main() {
 	}
 }
 
-// hostExportedCredentials is each applied row's credential read from the
+// hostExportedCredentials is the credential of each row in rows, read from the
 // process environment at each use: the wizard exports every token it collects
 // (the gh CLI reads it there too) after the runtime is built.
-func hostExportedCredentials() map[string]credsource.Row {
+func hostExportedCredentials(rows backendrows.Set) map[string]credsource.Row {
 	creds := map[string]credsource.Row{}
-	for _, row := range backendrows.All() {
+	for _, row := range rows.All() {
 		creds[row.Name] = credsource.EnvRow(row.CredentialEnv, row.IdentityEnv)
 	}
 	return creds

@@ -442,6 +442,7 @@ func connectorInput() (connectorsetup.Input, error) {
 		Setting:   backendRowSetting(launcherInput, processEnv()),
 		Applied:   isCoreSecretKnob,
 		Drivers:   launcherDriverRows,
+		Rows:      launcherBackendRows,
 	}, nil
 }
 

@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
@@ -20,29 +19,25 @@ const (
 	connectorRoutesEnv = "SPINDRIFT_BACKEND_CONNECTOR_ROUTES"
 )
 
-// useBakedGithubRow applies the github backend row the build baked in, so the
+// decodeBakedGithubRow decodes the github backend row the build baked in, so the
 // wizard's identity probe and token scope audit go through the Connector and
 // never reach gh. With neither var set (a plain `go run`), or under a GH_HOST
-// other than the api.github.com the baked routes pin, it applies none and the
+// other than the api.github.com the baked routes pin, it returns no row and the
 // probe and audit fail with ErrNoRoute. The wizard's token is the row's
 // credential: runQuickstart exports it as GH_TOKEN before the probe.
-func useBakedGithubRow(getenv func(string) string) error {
+func decodeBakedGithubRow(getenv func(string) string) (backendrows.Set, error) {
 	wasm, routes := getenv(connectorWasmEnv), getenv(connectorRoutesEnv)
 	if wasm == "" && routes == "" {
-		return nil
+		return backendrows.Set{}, nil
 	}
 	for _, v := range []struct{ name, val string }{{connectorWasmEnv, wasm}, {connectorRoutesEnv, routes}} {
 		if v.val == "" {
-			return fmt.Errorf("%s is unset while the other baked-in Connector var is set", v.name)
+			return backendrows.Set{}, fmt.Errorf("%s is unset while the other baked-in Connector var is set", v.name)
 		}
 	}
 	var table []connectorhost.Route
 	if err := json.Unmarshal([]byte(routes), &table); err != nil {
-		return fmt.Errorf("%s: %w", connectorRoutesEnv, err)
-	}
-	// After the wiring checks, so a broken bake errors on every host.
-	if !strings.EqualFold(github.HostFrom(getenv), github.DefaultHost) {
-		return nil
+		return backendrows.Set{}, fmt.Errorf("%s: %w", connectorRoutesEnv, err)
 	}
 	doc, err := json.Marshal([]backendrows.Row{{
 		Name:          backend.GitHub.Name,
@@ -51,7 +46,9 @@ func useBakedGithubRow(getenv func(string) string) error {
 		CredentialEnv: backend.GitHub.TokenEnvVar,
 	}})
 	if err != nil {
-		return err
+		return backendrows.Set{}, err
 	}
-	return backendrows.Use(doc, getenv)
+	// The github gate drops the row under a non-default GH_HOST; the wiring
+	// checks above run first, so a broken bake errors on every host.
+	return backendrows.Decode(doc, getenv, map[string]backendrows.Gate{backend.GitHub.Name: github.Strategy.RowGate})
 }

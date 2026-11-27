@@ -3,9 +3,6 @@ package github
 import (
 	"os"
 	"strings"
-
-	"spindrift.dev/launcher/internal/backend"
-	"spindrift.dev/launcher/internal/backend/backendrows"
 )
 
 // DefaultHost is the host Host returns when GH_HOST is unset.
@@ -30,8 +27,4 @@ func HostFrom(getenv func(string) string) string {
 // fetched nor sent to a host it never targeted.
 func onDefaultHost(lookup func(string) string) bool {
 	return strings.EqualFold(HostFrom(lookup), DefaultHost)
-}
-
-func init() {
-	backendrows.RegisterGate(backend.GitHub.Name, onDefaultHost)
 }

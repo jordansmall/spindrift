@@ -27,6 +27,7 @@ import (
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/connectorsetup"
 	"spindrift.dev/launcher/internal/daemon"
@@ -714,7 +715,8 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return refuse(err)
 	}
-	if err := backendrows.Use(doc.Backends, func(k string) string { return backendRowSetting(doc, stderr, k) }); err != nil {
+	backends, err := backendrows.Decode(doc.Backends, func(k string) string { return backendRowSetting(doc, stderr, k) }, backendkit.RowGates())
+	if err != nil {
 		return refuse(err)
 	}
 
@@ -833,6 +835,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	}
 	connIn := connectorInput(doc, args.Kinds, pwd)
 	connIn.Drivers = driverRows
+	connIn.Rows = backends
 	connectors, err := newConnectorRuntime(connIn, connectorsetup.Options{
 		RequireCredential: true, RefreshEvery: connectorCredentialRefresh,
 		OnRefreshError: func(env string, err error) {

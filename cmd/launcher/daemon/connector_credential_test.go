@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/connectorsetup"
@@ -26,15 +27,37 @@ import (
 // ghTokenEnv is the github row's one credential: core's own GH_TOKEN.
 const ghTokenEnv = "GH_TOKEN"
 
-// useGithubConnectorRow applies a github backend row.
-func useGithubConnectorRow(t *testing.T) {
+// testRows are the backend rows the test's last useRows decoded, the rows
+// connectorInputT hands the runtime.
+var testRows backendrows.Set
+
+// useRows decodes raw under the registered row gates and lookup, as mainRun
+// does, and keeps the Set for connectorInputT until the test ends.
+func useRows(t *testing.T, raw []byte, lookup func(string) string) backendrows.Set {
 	t.Helper()
-	t.Cleanup(backendrows.Snapshot())
-	raw := `[{"name":"github","module":"/nonexistent.wasm","credentialEnv":"` + ghTokenEnv + `",
-"routes":[{"method":"GET","host":"api.github.com","path":"/repos/{repo}/issues"}]}]`
-	if err := backendrows.Use([]byte(raw), func(string) string { return "" }); err != nil {
+	set, err := backendrows.Decode(raw, lookup, backendkit.RowGates())
+	if err != nil {
 		t.Fatal(err)
 	}
+	prev := testRows
+	testRows = set
+	t.Cleanup(func() { testRows = prev })
+	return set
+}
+
+// connectorInputT is connectorInput over the rows useRows decoded.
+func connectorInputT(doc *inputdoc.Document, kinds []daemon.Kind, pwd string) connectorsetup.Input {
+	in := connectorInput(doc, kinds, pwd)
+	in.Rows = testRows
+	return in
+}
+
+// useGithubConnectorRow decodes a github backend row.
+func useGithubConnectorRow(t *testing.T) {
+	t.Helper()
+	raw := `[{"name":"github","module":"/nonexistent.wasm","credentialEnv":"` + ghTokenEnv + `",
+"routes":[{"method":"GET","host":"api.github.com","path":"/repos/{repo}/issues"}]}]`
+	useRows(t, []byte(raw), func(string) string { return "" })
 }
 
 // stubSecretCmd runs every credential `_CMD` the runtime resolves through run.
@@ -52,7 +75,7 @@ func stubSecretCmd(t *testing.T, run func(string) (string, error)) {
 // it with the test.
 func connectorRuntimeT(t *testing.T, doc *inputdoc.Document, kinds []daemon.Kind) (*connectorruntime.Runtime, error) {
 	t.Helper()
-	rt, err := newConnectorRuntime(connectorInput(doc, kinds, t.TempDir()), connectorsetup.Options{RequireCredential: true})
+	rt, err := newConnectorRuntime(connectorInputT(doc, kinds, t.TempDir()), connectorsetup.Options{RequireCredential: true})
 	if err == nil {
 		t.Cleanup(func() { _ = rt.Close() })
 	}
@@ -202,12 +225,9 @@ const jiraTokenEnv = "JIRA_TOKEN"
 
 func useJiraConnectorRow(t *testing.T) {
 	t.Helper()
-	t.Cleanup(backendrows.Snapshot())
 	raw := `[{"name":"jira","module":"/nonexistent.wasm","credentialEnv":"` + jiraTokenEnv + `",
 "routes":[{"method":"GET","host":"jira.example","path":"/x"}]}]`
-	if err := backendrows.Use([]byte(raw), func(string) string { return "" }); err != nil {
-		t.Fatal(err)
-	}
+	useRows(t, []byte(raw), func(string) string { return "" })
 	t.Setenv(jiraTokenEnv, "")
 	t.Setenv(jiraTokenEnv+"_CMD", "")
 }
@@ -281,7 +301,6 @@ func TestMainRun_ConnectorRowWithoutCredentialRefusesStart(t *testing.T) {
 	for _, flags := range [][]string{{"dispatch"}, {"--check-only", "dispatch"}} {
 		t.Run(strings.Join(flags, " "), func(t *testing.T) {
 			clearKnobEnvT(t)
-			t.Cleanup(backendrows.Snapshot())
 			stubSecretCmd(t, failIfRun(t))
 			docPath := writeConnectorDocT(t, `,"credentialKnob":"ghToken"`, map[string]string{"ISSUE_TRACKER": "github"})
 
@@ -300,7 +319,6 @@ func TestMainRun_ConnectorRowWithoutCredentialRefusesStart(t *testing.T) {
 
 func TestMainRun_CheckOnlyRefusesAFailingCredentialCommand(t *testing.T) {
 	clearKnobEnvT(t)
-	t.Cleanup(backendrows.Snapshot())
 	t.Setenv(ghTokenEnv+"_CMD", "fetch-token")
 	stubSecretCmd(t, func(string) (string, error) { return "", errors.New("vault locked") })
 	docPath := writeConnectorDocT(t, "", map[string]string{"ISSUE_TRACKER": "github"})
@@ -321,7 +339,6 @@ func TestMainRun_UnreadConnectorRowsNeitherRunCmdNorRefuseStart(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			clearKnobEnvT(t)
 			checkOnlyNoNetworkT(t)
-			t.Cleanup(backendrows.Snapshot())
 			t.Setenv("SECRET_CMD", "rbw get spindrift-{name}")
 			stubSecretCmd(t, failIfRun(t))
 			docPath := writeConnectorDocT(t, "", map[string]string{"ISSUE_TRACKER": tc.tracker, "CODE_FORGE": "local"})
@@ -362,10 +379,7 @@ func useCompiledGithubRow(t *testing.T, host string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(backendrows.Snapshot())
-	if err := backendrows.Use(raw, func(string) string { return "" }); err != nil {
-		t.Fatal(err)
-	}
+	useRows(t, raw, func(string) string { return "" })
 }
 
 // With only the credential's `_CMD` form set, the Daemon's Demand probe counts
@@ -434,7 +448,6 @@ func TestMainRun_BuildsTheRuntimeRefreshingCmdCredentials(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			clearKnobEnvT(t)
-			t.Cleanup(backendrows.Snapshot())
 			t.Setenv(ghTokenEnv+"_CMD", "fetch-token")
 			stubSecretCmd(t, func(string) (string, error) { return "tok", nil })
 			var built []connectorsetup.Options
@@ -472,12 +485,9 @@ func TestConnectorRuntime_ForgejoRowResolvesAsForgeOrTracker(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			clearKnobEnvT(t)
-			t.Cleanup(backendrows.Snapshot())
 			raw := `[{"name":"forgejo","module":"/nonexistent.wasm","credentialEnv":"` + forgejoTokenEnv + `",
 "routes":[{"method":"GET","host":"codeberg.org","path":"/api/v1/x"}]}]`
-			if err := backendrows.Use([]byte(raw), func(string) string { return "" }); err != nil {
-				t.Fatal(err)
-			}
+			useRows(t, []byte(raw), func(string) string { return "" })
 			t.Setenv(forgejoTokenEnv, "")
 			t.Setenv(forgejoTokenEnv+"_CMD", "")
 			t.Setenv("SECRET_CMD", tc.template)
@@ -507,12 +517,9 @@ func TestConnectorRuntime_ForgejoRowResolvesAsForgeOrTracker(t *testing.T) {
 // forgejo row, so its `_CMD` form fills it as a Connector credential does.
 func TestConnectorRuntime_ForgejoTokenCmdFillsFORGEJO_TOKEN(t *testing.T) {
 	clearKnobEnvT(t)
-	t.Cleanup(backendrows.Snapshot())
 	raw := `[{"name":"forgejo","module":"/nonexistent.wasm","credentialEnv":"FORGEJO_TOKEN",
 "routes":[{"method":"GET","host":"codeberg.org","path":"/api/v1/x"}]}]`
-	if err := backendrows.Use([]byte(raw), func(string) string { return "" }); err != nil {
-		t.Fatal(err)
-	}
+	useRows(t, []byte(raw), func(string) string { return "" })
 	t.Setenv("FORGEJO_TOKEN", "")
 	t.Setenv("FORGEJO_TOKEN_CMD", "fetch-forgejo-token")
 	t.Setenv("SECRET_CMD", "")
@@ -558,7 +565,6 @@ func TestConnectorRuntime_GithubForgeRowResolves(t *testing.T) {
 // Connector credential for it.
 func TestConnectorRuntime_GithubRowGatedOffUnderGHEHostRunsNoCmd(t *testing.T) {
 	clearKnobEnvT(t)
-	t.Cleanup(backendrows.Snapshot())
 	raw := `[{"name":"github","module":"/nonexistent.wasm","credentialEnv":"` + ghTokenEnv + `",
 "routes":[{"method":"GET","host":"api.github.com","path":"/repos/{repo}/issues"}]}]`
 	ghe := func(k string) string {
@@ -567,9 +573,7 @@ func TestConnectorRuntime_GithubRowGatedOffUnderGHEHostRunsNoCmd(t *testing.T) {
 		}
 		return ""
 	}
-	if err := backendrows.Use([]byte(raw), ghe); err != nil {
-		t.Fatal(err)
-	}
+	useRows(t, []byte(raw), ghe)
 	t.Setenv(ghTokenEnv, "")
 	t.Setenv(ghTokenEnv+"_CMD", "fetch-token")
 	stubSecretCmd(t, failIfRun(t))

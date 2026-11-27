@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/dispatchkind"
@@ -78,6 +79,12 @@ type Strategy struct {
 	// ConnectorRouted marks an adapter that reads through its backend row's
 	// Connector. Without it a row stays registered but unused.
 	ConnectorRouted bool
+	// RowGate drops the backend's row at decode, after validating it, when its
+	// Routes cannot serve the run's settings, so no later reader sees a row it
+	// would send a credential to a host it never targeted. Nil keeps the row. It
+	// is a pure function of the lookup, fixed in the strategy table, so the gate
+	// is immutable package data and no process-wide row state is held.
+	RowGate backendrows.Gate
 	// LandedBanner is the clause the all-delivered banner puts after "==> all
 	// agents finished — ", for a backend that is a Code Forge. Nil on a
 	// tracker-only backend.
@@ -226,6 +233,18 @@ func ByName(name string) (Strategy, bool) {
 // Strategies returns every registered Strategy in registration order.
 func Strategies() []Strategy {
 	return append([]Strategy(nil), registry...)
+}
+
+// RowGates is every registered Strategy's RowGate keyed by backend name, the
+// gates backendrows.Decode reads.
+func RowGates() map[string]backendrows.Gate {
+	gates := map[string]backendrows.Gate{}
+	for _, s := range registry {
+		if s.RowGate != nil {
+			gates[s.Name] = s.RowGate
+		}
+	}
+	return gates
 }
 
 // ErrUnsupported marks a probe error that names a capability the backend's

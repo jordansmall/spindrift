@@ -16,6 +16,7 @@ import (
 var Strategy = backendkit.Strategy{
 	Descriptor:        backend.GitHub,
 	ConnectorRouted:   true,
+	RowGate:           onDefaultHost,
 	HostAnswersOpenPR: true,
 	ValidateTracker: func(s backendkit.Shared, _ backendkit.Lookup) error {
 		return backendkit.RequireRepoSlug(s, backend.GitHub.Name)

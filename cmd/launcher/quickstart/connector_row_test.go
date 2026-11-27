@@ -95,7 +95,7 @@ func (a *githubAPI) set(t *testing.T, mutate func(*githubAPI)) {
 	})
 }
 
-// rowEnvAt returns the env useBakedGithubRow reads, with the compiled
+// rowEnvAt returns the env decodeBakedGithubRow reads, with the compiled
 // Connector's Route table pointed at host, as a real host reaches
 // api.github.com. ok is false when no compiled Connector is configured.
 func rowEnvAt(host string) (getenv func(string) string, ok bool, err error) {
@@ -134,7 +134,9 @@ func rowEnvAt(host string) (getenv func(string) string, ok bool, err error) {
 // holds a gh that records its calls and fails.
 var (
 	defaultAPI *githubAPI
-	ghStubDir  string
+	// bakedRows is the row runMain decoded from the build's baked env.
+	bakedRows backendrows.Set
+	ghStubDir string
 )
 
 func TestMain(m *testing.M) {
@@ -160,7 +162,8 @@ func runMain(m *testing.M) int {
 	script := "#!/bin/sh\necho call >> '" + filepath.Join(ghStubDir, "calls") + "'\nexit 99\n"
 	if ok {
 		defaultAPI = api
-		if err := useBakedGithubRow(getenv); err != nil {
+		var err error
+		if bakedRows, err = decodeBakedGithubRow(getenv); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}
@@ -203,55 +206,63 @@ func ghFailing(t *testing.T) {
 	requireConnector(t).set(t, func(a *githubAPI) { a.viewerCode = http.StatusUnauthorized })
 }
 
-// A build with nothing baked in applies no row.
-func TestUseBakedGithubRow_NothingBakedAppliesNoRow(t *testing.T) {
-	t.Cleanup(backendrows.Snapshot())
-	if err := backendrows.Use(nil, nil); err != nil {
+// A build with nothing baked in decodes no row.
+func TestDecodeBakedGithubRow_NothingBakedDecodesNoRow(t *testing.T) {
+	t.Parallel()
+	set, err := decodeBakedGithubRow(func(string) string { return "" })
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := useBakedGithubRow(func(string) string { return "" }); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := backendrows.Lookup("github"); ok {
-		t.Error("a github row is applied with no Connector baked in")
+	if _, ok := set.Lookup("github"); ok {
+		t.Error("a github row is decoded with no Connector baked in")
 	}
 }
 
-// A wiring error fires on every host, including one that applies no row.
-func TestUseBakedGithubRow_RefusesMalformedRoutes(t *testing.T) {
+// A wiring error fires on every host, including one that decodes no row.
+func TestDecodeBakedGithubRow_RefusesMalformedRoutes(t *testing.T) {
+	t.Parallel()
 	for _, host := range []string{"", "ghe.corp"} {
 		t.Run("GH_HOST="+host, func(t *testing.T) {
-			t.Cleanup(backendrows.Snapshot())
+			t.Parallel()
 			env := map[string]string{connectorWasmEnv: "/x/github.wasm", connectorRoutesEnv: "not json", "GH_HOST": host}
-			err := useBakedGithubRow(func(k string) string { return env[k] })
+			_, err := decodeBakedGithubRow(func(k string) string { return env[k] })
 			if err == nil || !strings.Contains(err.Error(), connectorRoutesEnv) {
-				t.Fatalf("useBakedGithubRow = %v, want an error naming %s", err, connectorRoutesEnv)
+				t.Fatalf("decodeBakedGithubRow = %v, want an error naming %s", err, connectorRoutesEnv)
 			}
 		})
 	}
 }
 
+// Routes that are valid JSON but fail validation (an empty table) error under a
+// non-default GH_HOST too: the gate drops a valid row, never a broken bake.
+func TestDecodeBakedGithubRow_RefusesEmptyRoutesUnderGHE(t *testing.T) {
+	t.Parallel()
+	env := map[string]string{connectorWasmEnv: "/x/github.wasm", connectorRoutesEnv: "[]", "GH_HOST": "ghe.corp"}
+	_, err := decodeBakedGithubRow(func(k string) string { return env[k] })
+	if err == nil || !strings.Contains(err.Error(), "empty route table") {
+		t.Fatalf("decodeBakedGithubRow = %v, want an empty-route-table error", err)
+	}
+}
+
 // A half-baked build (one var without the other) is a wiring bug: it names the
-// missing variable rather than applying a row with no module or no routes, on
+// missing variable rather than decoding a row with no module or no routes, on
 // every host.
-func TestUseBakedGithubRow_RefusesOneVarWithoutTheOther(t *testing.T) {
+func TestDecodeBakedGithubRow_RefusesOneVarWithoutTheOther(t *testing.T) {
+	t.Parallel()
 	for _, host := range []string{"", "ghe.corp"} {
 		for _, tc := range []struct{ set, missing string }{
 			{connectorRoutesEnv, connectorWasmEnv},
 			{connectorWasmEnv, connectorRoutesEnv},
 		} {
 			t.Run(tc.missing+"/GH_HOST="+host, func(t *testing.T) {
-				t.Cleanup(backendrows.Snapshot())
-				if err := backendrows.Use(nil, nil); err != nil {
-					t.Fatal(err)
-				}
+				t.Parallel()
 				env := map[string]string{tc.set: "[]", "GH_HOST": host}
-				err := useBakedGithubRow(func(k string) string { return env[k] })
+				set, err := decodeBakedGithubRow(func(k string) string { return env[k] })
 				if err == nil || !strings.Contains(err.Error(), tc.missing) {
-					t.Fatalf("useBakedGithubRow = %v, want an error naming %s", err, tc.missing)
+					t.Fatalf("decodeBakedGithubRow = %v, want an error naming %s", err, tc.missing)
 				}
-				if _, ok := backendrows.Lookup("github"); ok {
-					t.Error("a github row is applied from half a bake")
+				if _, ok := set.Lookup("github"); ok {
+					t.Error("a github row is decoded from half a bake")
 				}
 			})
 		}
@@ -267,41 +278,41 @@ func bakedEnv(host string) map[string]string {
 }
 
 // The baked row names the wizard's token as the Connector's credential.
-func TestUseBakedGithubRow_AppliesTheGithubRow(t *testing.T) {
-	t.Cleanup(backendrows.Snapshot())
+func TestDecodeBakedGithubRow_DecodesTheGithubRow(t *testing.T) {
+	t.Parallel()
 	env := bakedEnv("")
-	if err := useBakedGithubRow(func(k string) string { return env[k] }); err != nil {
+	set, err := decodeBakedGithubRow(func(k string) string { return env[k] })
+	if err != nil {
 		t.Fatal(err)
 	}
-	row, ok := backendrows.Lookup("github")
+	row, ok := set.Lookup("github")
 	if !ok || row.Module != "/x/github.wasm" || row.CredentialEnv != "GH_TOKEN" || len(row.Routes) != 1 {
 		t.Errorf("row = %+v, %v; want the baked module, GH_TOKEN and the one route", row, ok)
 	}
 }
 
-// The baked routes pin api.github.com, so a GH_HOST naming another host applies
-// no row; github.com, in any letter case,
-// applies the row, as does no GH_HOST at all (TestUseBakedGithubRow_AppliesTheGithubRow).
-func TestUseBakedGithubRow_AppliesOnlyForGithubDotCom(t *testing.T) {
+// The baked routes pin api.github.com, so a GH_HOST naming another host decodes
+// no row; github.com, in any letter case, decodes the row, as does no GH_HOST at
+// all (TestDecodeBakedGithubRow_DecodesTheGithubRow).
+func TestDecodeBakedGithubRow_DecodesOnlyForGithubDotCom(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		host    string
-		applied bool
+		decoded bool
 	}{
 		{"github.com", true},
 		{"GitHub.com", true},
 		{"ghe.corp", false},
 	} {
 		t.Run(tc.host, func(t *testing.T) {
-			t.Cleanup(backendrows.Snapshot())
-			if err := backendrows.Use(nil, nil); err != nil {
-				t.Fatal(err)
-			}
+			t.Parallel()
 			env := bakedEnv(tc.host)
-			if err := useBakedGithubRow(func(k string) string { return env[k] }); err != nil {
+			set, err := decodeBakedGithubRow(func(k string) string { return env[k] })
+			if err != nil {
 				t.Fatal(err)
 			}
-			if _, ok := backendrows.Lookup("github"); ok != tc.applied {
-				t.Errorf("row applied = %v under GH_HOST=%q, want %v", ok, tc.host, tc.applied)
+			if _, ok := set.Lookup("github"); ok != tc.decoded {
+				t.Errorf("row decoded = %v under GH_HOST=%q, want %v", ok, tc.host, tc.decoded)
 			}
 		})
 	}
@@ -448,11 +459,11 @@ func TestQuickstartDoctorPass_RunsNoGh(t *testing.T) {
 	}
 }
 
-// testRuntime is a Connector runtime over the applied rows and the in-process
+// testRuntime is a Connector runtime over bakedRows and the in-process
 // engine, closed with the test.
 func testRuntime(t *testing.T) *connectorruntime.Runtime {
 	t.Helper()
-	rt := connectorruntime.FromRegistries(credsourcetest.Applied(), connectorsandboxtest.InProcess())
+	rt := connectorruntime.New(bakedRows, credsourcetest.EnvRows(bakedRows.All()...), connectorsandboxtest.InProcess())
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt
 }

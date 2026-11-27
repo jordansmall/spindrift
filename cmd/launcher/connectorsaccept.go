@@ -15,8 +15,8 @@ const defaultBaselineFile = "spindrift-connector-routes.json"
 // cmdConnectorsAccept is `connectors accept [<baseline-file>]`: write every
 // Connector's current declaration into the baseline file, so accepting a grant
 // is a reviewed diff of a generated file rather than hand-typed JSON. rows is
-// the input document's raw backend rows, never backendrows.All: Use has
-// rewritten the stored rows' {base} hosts to resolved ones.
+// the input document's raw backend rows, never the runtime's: Decode has
+// rewritten the decoded rows' {base} hosts to resolved ones.
 func cmdConnectorsAccept(rows json.RawMessage, args []string, stdout, stderr io.Writer) int {
 	path := defaultBaselineFile
 	switch {

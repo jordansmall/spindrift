@@ -16,7 +16,6 @@ import (
 	"github.com/charmbracelet/x/term"
 
 	"spindrift.dev/launcher/internal/backend"
-	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
@@ -2738,10 +2737,7 @@ func rowToken(t *testing.T, rt *connectorruntime.Runtime, name string) string {
 // stubs secretCmdRunner with run.
 func useCredentialRows(t *testing.T, doc, template string, run func(cmd string) (string, error)) func() []string {
 	t.Helper()
-	t.Cleanup(backendrows.Snapshot())
-	if err := backendrows.Use([]byte(doc), func(string) string { return "" }); err != nil {
-		t.Fatal(err)
-	}
+	useLauncherRows(t, doc)
 	return unsetCredential(t, template, run)
 }
 
@@ -2852,12 +2848,9 @@ func TestParseFlags_IssueRouteIsNotAFlag(t *testing.T) {
 // secret knob, with github the active backend and every GH_TOKEN form unset.
 func useGithubGHTokenRow(t *testing.T, run func(string) (string, error)) func() []string {
 	t.Helper()
-	t.Cleanup(backendrows.Snapshot())
 	doc := `[{"name":"github","module":"/nonexistent.wasm","credentialEnv":"GH_TOKEN",
 "routes":[{"method":"GET","host":"github.example","path":"/x"}]}]`
-	if err := backendrows.Use([]byte(doc), func(string) string { return "" }); err != nil {
-		t.Fatal(err)
-	}
+	useLauncherRows(t, doc)
 	t.Setenv("GH_TOKEN", "")
 	t.Setenv("GH_TOKEN_CMD", "")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "existing-value")
@@ -2915,12 +2908,9 @@ func TestSecretCmdTemplate_GithubRunSuppliesGHTokenOnce(t *testing.T) {
 // issue #7500). parseFlags already ran that knob's `_CMD`, so this pass must
 // not run the vault a second time.
 func TestConnectorRuntime_RowCredentials_SkipsRowCredentialACoreSecretResolved(t *testing.T) {
-	t.Cleanup(backendrows.Snapshot())
 	doc := `[{"name":"forgejo","module":"/nonexistent.wasm","credentialEnv":"FORGEJO_TOKEN",
 "routes":[{"method":"GET","host":"forgejo.example","path":"/x"}]}]`
-	if err := backendrows.Use([]byte(doc), func(string) string { return "" }); err != nil {
-		t.Fatal(err)
-	}
+	useLauncherRows(t, doc)
 	setKnob(t, "CODE_FORGE", "forgejo")
 	setKnob(t, "ISSUE_TRACKER", "forgejo")
 	t.Setenv("FORGEJO_TOKEN", "already-resolved")
@@ -2964,10 +2954,7 @@ func TestRowCredentials_ResolveOnceThroughLauncherSequence(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Cleanup(backendrows.Snapshot())
-			if err := backendrows.Use([]byte(rows), func(string) string { return "" }); err != nil {
-				t.Fatal(err)
-			}
+			useLauncherRows(t, rows)
 			for _, env := range []string{"GH_TOKEN", "FORGEJO_TOKEN", "JIRA_TOKEN", "JIRA_EMAIL", "SECRET_CMD"} {
 				t.Setenv(env, "")
 				t.Setenv(env+"_CMD", "")
