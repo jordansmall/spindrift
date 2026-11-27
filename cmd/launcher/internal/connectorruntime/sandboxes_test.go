@@ -109,7 +109,7 @@ func twoRows(t *testing.T, sbs *sandboxes) (rt *connectorruntime.Runtime, a, b b
 	e := newEnv(t, "tracker.wasm")
 	a, b = e.row, e.row
 	a.Name, b.Name = "row-a", "row-b"
-	rt = connectorruntime.New([]backendrows.Row{a, b}, map[string]credsource.Row{a.Name: {Secret: credsource.Static("tok")}, b.Name: {Secret: credsource.Static("tok")}}, sbs)
+	rt = connectorruntime.New(backendrows.NewSet(a, b), map[string]credsource.Row{a.Name: {Secret: credsource.Static("tok")}, b.Name: {Secret: credsource.Static("tok")}}, sbs)
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt, a, b, e.spec.SessionSpec
 }
@@ -234,7 +234,7 @@ func TestOnCloseRunsOnceInOrderAfterTheSandboxesStopped(t *testing.T) {
 // ErrNoConnectorSandbox, never loading in-process.
 func TestNilSandboxFailsBackendAndDriverLoads(t *testing.T) {
 	e := newEnv(t, "tracker.wasm")
-	rt := connectorruntime.New([]backendrows.Row{e.row}, nil, nil)
+	rt := connectorruntime.New(backendrows.NewSet(e.row), nil, nil)
 	t.Cleanup(func() { _ = rt.Close() })
 	rt.UseDriverRows(hostedDriverRows(t))
 

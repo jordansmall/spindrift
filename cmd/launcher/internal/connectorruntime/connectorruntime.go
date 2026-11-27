@@ -57,7 +57,7 @@ const (
 // sessions, with one Close. A Connector request and core's own git both read a
 // row's credential from its source at the moment of use.
 type Runtime struct {
-	lookup func(string) (backendrows.Row, bool)
+	rows backendrows.Set
 	// creds is each row's credential source by row name; a row without one has
 	// an unset credential, never an environment fallback.
 	creds   map[string]credsource.Row
@@ -86,18 +86,15 @@ type sessionKey struct {
 // connectorsandbox.ErrNoConnectorSandbox. A sandbox that starts sandboxes of
 // its own (connectorsandbox.OwningLoader) hosts each row in one of its own,
 // started by the row's first load; any other Loader is shared by every row.
-func New(rows []backendrows.Row, creds map[string]credsource.Row, sandbox connectorsandbox.Loader) *Runtime {
-	byName := make(map[string]backendrows.Row, len(rows))
-	for _, row := range rows {
-		byName[row.Name] = row
-	}
-	return newRuntime(func(name string) (backendrows.Row, bool) { row, ok := byName[name]; return row, ok }, creds, sandbox)
+func New(rows backendrows.Set, creds map[string]credsource.Row, sandbox connectorsandbox.Loader) *Runtime {
+	return &Runtime{rows: rows, creds: creds, sandbox: sandbox, now: time.Now, sessions: map[sessionKey]*session{}, owned: map[string]connectorsandbox.Sandbox{}}
 }
 
 // FromRegistries is a runtime over the applied backend rows, their credential
-// sources and sandbox, which New describes; nil is none.
+// sources and sandbox, which New describes; nil is none. It is transitional,
+// with backendrows.Applied.
 func FromRegistries(creds map[string]credsource.Row, sandbox connectorsandbox.Loader) *Runtime {
-	return newRuntime(backendrows.Lookup, creds, sandbox)
+	return New(backendrows.Applied(), creds, sandbox)
 }
 
 // InProcess is the Box's runtime: no backend rows, no credentials and no
@@ -105,7 +102,7 @@ func FromRegistries(creds map[string]credsource.Row, sandbox connectorsandbox.Lo
 // Connectors only (driverrows.Rows.InProcess). Any load through Load fails with
 // connectorsandbox.ErrNoConnectorSandbox.
 func InProcess(rows driverrows.Rows) *Runtime {
-	r := New(nil, nil, nil)
+	r := New(backendrows.Set{}, nil, nil)
 	r.drivers = rows.InProcess()
 	return r
 }
@@ -162,10 +159,6 @@ func (r *Runtime) Drivers() *driver.Set {
 	return r.drivers
 }
 
-func newRuntime(lookup func(string) (backendrows.Row, bool), creds map[string]credsource.Row, sandbox connectorsandbox.Loader) *Runtime {
-	return &Runtime{lookup: lookup, creds: creds, sandbox: sandbox, now: time.Now, sessions: map[sessionKey]*session{}, owned: map[string]connectorsandbox.Sandbox{}}
-}
-
 // gitUsername is the username core's git presents with a row's token: GitHub
 // and Forgejo/Gitea both authenticate on the token as password and ignore it.
 const gitUsername = "x-access-token"
@@ -211,8 +204,30 @@ func (r *Runtime) GitCredential(row backendrows.Row) gitexec.CredentialSource {
 	}
 }
 
-// Row is the named backend row.
-func (r *Runtime) Row(name string) (backendrows.Row, bool) { return r.lookup(name) }
+// Row is the named backend row; a nil runtime has none.
+func (r *Runtime) Row(name string) (backendrows.Row, bool) {
+	if r == nil {
+		return backendrows.Row{}, false
+	}
+	return r.rows.Lookup(name)
+}
+
+// Rows is every backend row, sorted by name; a nil runtime has none.
+func (r *Runtime) Rows() []backendrows.Row {
+	if r == nil {
+		return nil
+	}
+	return r.rows.All()
+}
+
+// BaseError is why the named row was dropped for an unusable base, nil when it
+// was not; see backendrows.Set.BaseError.
+func (r *Runtime) BaseError(name string) error {
+	if r == nil {
+		return nil
+	}
+	return r.rows.BaseError(name)
+}
 
 // OnClose registers f to run at the end of Close, after the sessions and the
 // row sandboxes closed, in registration order; its error joins Close's. A

@@ -45,7 +45,7 @@ func introspect(sandbox connectorsandbox.Loader, row backendrows.Row, o backendr
 	if err != nil {
 		return got, err
 	}
-	rt := connectorruntime.New([]backendrows.Row{row}, map[string]credsource.Row{row.Name: {Secret: credsource.Static(token)}}, sandbox)
+	rt := connectorruntime.New(backendrows.NewSet(row), map[string]credsource.Row{row.Name: {Secret: credsource.Static(token)}}, sandbox)
 	defer func() { _ = rt.Close() }()
 	// introspectToken notes a failure once, under its own verb.
 	conn, err := rt.Connector(row, connectorruntime.SessionSpec{Target: target, Record: backend.GitHub.Name, Options: o, NotesOperations: true})

@@ -130,7 +130,7 @@ func newEnvWith(t *testing.T, wasmFile string, creds map[string]credsource.Row) 
 		},
 		Clock: retry.NoSleepClock(),
 	}
-	e.rt = connectorruntime.New([]backendrows.Row{e.row}, creds, e.sb)
+	e.rt = connectorruntime.New(backendrows.NewSet(e.row), creds, e.sb)
 	e.rt.SetClock(func() time.Time { return e.now })
 	t.Cleanup(func() { _ = e.rt.Close() })
 	return e
