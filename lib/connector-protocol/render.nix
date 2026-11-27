@@ -965,6 +965,7 @@ let
             )
             ++ [ "ResultCheck: Check${goIdent m.resultCheck}" ]
             ++ (if m.raw then [ "Raw: true" ] else [ ])
+            ++ (if m.optional or false then [ "Optional: true" ] else [ ])
           );
         in
         "${id}: {${fields}},\n";
@@ -1083,9 +1084,10 @@ let
     + "// transient failure is harmless; DoneOn lists the classes that, answered on a\n"
     + "// retry, mean the earlier attempt succeeded.\n"
     + "type Retry struct {\n\tSafe   bool\n\tDoneOn []string\n}\n\n"
-    + "// Method is one protocol method. Capability is \"\" for a method with none, and\n"
-    + "// Raw marks a method whose request is raw bytes rather than JSON params.\n"
-    + "type Method struct {\n\tName        string\n\tAxis        Axis\n\tCapability  string\n\tRetry       Retry\n\tResultCheck string\n\tRaw         bool\n}\n\n"
+    + "// Method is one protocol method. Capability is \"\" for a method with none,\n"
+    + "// Raw marks a method whose request is raw bytes rather than JSON params, and\n"
+    + "// Optional one a Connector may omit while declaring its capability.\n"
+    + "type Method struct {\n\tName        string\n\tAxis        Axis\n\tCapability  string\n\tRetry       Retry\n\tResultCheck string\n\tRaw         bool\n\tOptional    bool\n}\n\n"
     + "// Methods maps every method name to its row.\n"
     + "var Methods = map[string]Method{\n"
     + concat (map methodEntry desc.methods)

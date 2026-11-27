@@ -366,3 +366,7 @@ func (h *Harness) Requests(method, path string) int {
 	defer h.Backend.reqMu.Unlock()
 	return h.Backend.reqs[method+" "+path]
 }
+
+// Loaded is the Connector under test and the backend's base API URL, for a
+// caller that calls the Connector's methods directly.
+func (h *Harness) Loaded() (*connectorhost.Connector, string) { return h.Conn, h.Backend.URL + apiPath }
