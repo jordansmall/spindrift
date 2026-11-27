@@ -36,6 +36,41 @@ const (
 	MaxHTTPURL = 8192
 )
 
+// capabilityMethods maps each tracker and forge capability to the methods a
+// Connector declaring it must serve, sorted; a method the protocol marks
+// optional is not listed.
+var capabilityMethods = map[string][]string{
+	"tracker":                {"tracker.issue", "tracker.listIssues"},
+	"tracker.comments":       {"tracker.comments"},
+	"tracker.nativeDeps":     {"tracker.nativeDeps"},
+	"tracker.blocks":         {"tracker.blocks"},
+	"tracker.probe":          {"tracker.probe"},
+	"tracker.statuses":       {"tracker.statuses"},
+	"tracker.createMeta":     {"tracker.createMeta"},
+	"tracker.count":          {"tracker.count", "tracker.countInterval"},
+	"tracker.removedLabels":  {"tracker.removedLabels"},
+	"tracker.searchIssues":   {"tracker.searchIssues"},
+	"tracker.labeled":        {"tracker.labeled"},
+	"tracker.transition":     {"tracker.transition"},
+	"tracker.editLabels":     {"tracker.editLabels"},
+	"tracker.comment":        {"tracker.comment"},
+	"tracker.fileIssue":      {"tracker.fileIssue"},
+	"tracker.closeIssue":     {"tracker.closeIssue"},
+	"tracker.route":          {"tracker.matchesRoute"},
+	"tracker.labels":         {"tracker.createLabel", "tracker.listLabels"},
+	"tracker.ids.projectKey": {},
+	"forge":                  {"forge.checks", "forge.pr", "forge.prsForBranch"},
+	"forge.branches":         {"forge.branchExists", "forge.deleteBranch"},
+	"forge.pushOnly":         {},
+	"forge.prs":              {"forge.behind", "forge.comment", "forge.merge", "forge.prFiles", "forge.setDraft"},
+	"forge.autoMerge":        {"forge.autoMergeAllowed", "forge.enqueueAutoMerge"},
+	"forge.ciRun":            {"forge.ciRun"},
+	"forge.branchProtection": {"forge.branchProtected"},
+	"forge.probe":            {"forge.probe"},
+	"forge.draftPRs":         {"forge.openPR"},
+	"forge.tokenGrant":       {"forge.tokenGrant"},
+}
+
 // Request is one outbound HTTP request. The host admits it only if a declared
 // route matches, and attaches the credential itself; the Connector never holds
 // it, and a header the Connector sets cannot override it. It is the host's
