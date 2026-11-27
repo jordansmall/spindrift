@@ -32,6 +32,7 @@ import (
 // The lifecycle-label set mirrored from lib/env-schema.nix and pinned against
 // the agent workflows by nix/checks/dispatch-labels.nix (issue #460), shared
 // because forge.NewFake takes labels as an explicit constructor argument.
+// dispatchlabels_schema_test.go pins it to the env-schema defaults.
 var testDispatchLabels = forge.DispatchLabels{
 	Dispatchable: "ready-for-agent",
 	InProgress:   "agent-in-progress",
