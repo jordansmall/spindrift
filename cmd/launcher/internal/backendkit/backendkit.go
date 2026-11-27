@@ -94,7 +94,7 @@ type Strategy struct {
 	// the backend keeps it. The Connector runtime's setup calls it once when
 	// the runtime closes, after its sandboxes stopped, so the totals are final.
 	// It receives the sandbox's Stats and is called only when one served.
-	RecordSandboxTotals func(connectorsandbox.Stats)
+	RecordSandboxTotals func(*connectorruntime.Runtime, connectorsandbox.Stats)
 	// AutoMergeRemedy is the fix to name when the repo does not allow
 	// auto-merge. Nil means the backend has no native auto-merge, so the
 	// preflight leaves it out of its "CODE_FORGE=..." list.

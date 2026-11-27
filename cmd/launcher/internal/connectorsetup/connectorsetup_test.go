@@ -16,6 +16,7 @@ import (
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
 	"spindrift.dev/launcher/internal/connectorsetup"
@@ -32,7 +33,7 @@ const (
 
 // useRow registers a Connector-routed backend and its row, restoring the
 // registries when the test ends.
-func useRow(t *testing.T, totals func(connectorsandbox.Stats)) {
+func useRow(t *testing.T, totals func(*connectorruntime.Runtime, connectorsandbox.Stats)) {
 	t.Helper()
 	t.Cleanup(backendrows.Snapshot())
 	t.Cleanup(backendkit.ReplaceRegistryForTest([]backendkit.Strategy{{
@@ -108,7 +109,7 @@ func TestCommandErrorReturnsNoRuntime(t *testing.T) {
 
 func TestCloseStopsTheSandboxBeforeRecordingTotals(t *testing.T) {
 	var events []string
-	useRow(t, func(connectorsandbox.Stats) { events = append(events, "totals") })
+	useRow(t, func(*connectorruntime.Runtime, connectorsandbox.Stats) { events = append(events, "totals") })
 	l := newRecordingLoader(&events)
 	rt, err := connectorsetup.New(input(map[string]string{credEnv: "tok"}), connectorsetup.Options{Sandbox: l})
 	if err != nil {
@@ -168,7 +169,7 @@ func TestRefreshReRunsCommandSourcesUntilClose(t *testing.T) {
 // Close, and with it the sandbox close and the totals behind it.
 func TestCloseDoesNotWaitForARefreshInFlight(t *testing.T) {
 	var events []string
-	useRow(t, func(connectorsandbox.Stats) { events = append(events, "totals") })
+	useRow(t, func(*connectorruntime.Runtime, connectorsandbox.Stats) { events = append(events, "totals") })
 	release, started := make(chan struct{}), make(chan struct{})
 	var once atomic.Bool
 	rt, err := connectorsetup.New(input(map[string]string{credEnv + "_CMD": "mint"}), connectorsetup.Options{
@@ -250,7 +251,7 @@ func TestRefreshWithoutAnErrorHandlerIsRefused(t *testing.T) {
 
 func TestCloseReturnsTheSharedSandboxCloseError(t *testing.T) {
 	var totals []string
-	useRow(t, func(connectorsandbox.Stats) { totals = append(totals, "totals") })
+	useRow(t, func(*connectorruntime.Runtime, connectorsandbox.Stats) { totals = append(totals, "totals") })
 	boom := errors.New("sandbox close failed")
 	rt, err := connectorsetup.New(input(map[string]string{credEnv: "tok"}), connectorsetup.Options{
 		Sandbox: failingCloseLoader{servedLoader{connectorsandboxtest.InProcess()}, boom},
@@ -283,7 +284,7 @@ func (servedLoader) Stats() (connectorsandbox.Stats, bool) {
 // A sandbox that never served has no cost to record.
 func TestCloseRecordsNoTotalsWhenTheSandboxNeverServed(t *testing.T) {
 	var totals int
-	useRow(t, func(connectorsandbox.Stats) { totals++ })
+	useRow(t, func(*connectorruntime.Runtime, connectorsandbox.Stats) { totals++ })
 	rt, err := connectorsetup.New(input(map[string]string{credEnv: "tok"}), connectorsetup.Options{
 		Sandbox: unservedLoader{connectorsandboxtest.InProcess()},
 	})

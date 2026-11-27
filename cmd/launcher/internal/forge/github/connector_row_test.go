@@ -16,6 +16,7 @@ import (
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectorrecord"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/hostop"
@@ -492,7 +493,7 @@ var knownStats = connectorsandbox.Stats{
 func TestRecordRoutedSandboxTotals_AppendsOneLineToTheAuditFile(t *testing.T) {
 	audit := routedSandboxHarness(t, useGithubRowAt, []byte(seededAudit))
 
-	RecordRoutedSandboxTotals(knownStats)
+	RecordRoutedSandboxTotals(testRuntime(t), knownStats)
 
 	b, err := os.ReadFile(audit)
 	if err != nil {
@@ -534,7 +535,7 @@ func TestRecordRoutedSandboxTotals_AppendsOneLineToTheAuditFile(t *testing.T) {
 func TestRecordRoutedSandboxTotals_CreatesNoRecordPair(t *testing.T) {
 	audit := routedSandboxHarness(t, useGithubRowAt, nil)
 
-	RecordRoutedSandboxTotals(knownStats)
+	RecordRoutedSandboxTotals(testRuntime(t), knownStats)
 
 	if got := connectorFiles(t, filepath.Dir(audit), ""); len(got) != 0 {
 		t.Errorf("recording totals created %v, want no files", got)
@@ -544,9 +545,22 @@ func TestRecordRoutedSandboxTotals_CreatesNoRecordPair(t *testing.T) {
 func TestRecordRoutedSandboxTotals_AppendsUnderAPlainRow(t *testing.T) {
 	audit := routedSandboxHarness(t, useGithubRowAt, []byte(seededAudit))
 
-	RecordRoutedSandboxTotals(knownStats)
+	RecordRoutedSandboxTotals(testRuntime(t), knownStats)
 
 	if b, _ := os.ReadFile(audit); len(strings.Split(strings.TrimSuffix(string(b), "\n"), "\n")) != 2 {
 		t.Errorf("audit file = %q, want the existing line and one totals line", b)
+	}
+}
+
+// The runtime decides whether the row is routed: one holding no github row
+// writes nothing, even where an audit file already exists.
+func TestRecordRoutedSandboxTotals_WritesNothingWithoutARowOnTheRuntime(t *testing.T) {
+	audit := routedSandboxHarness(t, useGithubRowAt, []byte(seededAudit))
+
+	RecordRoutedSandboxTotals(nil, knownStats)
+	RecordRoutedSandboxTotals(connectorruntime.New(backendrows.Set{}, nil, testSandbox()), knownStats)
+
+	if b, _ := os.ReadFile(audit); string(b) != seededAudit {
+		t.Errorf("audit file = %q, want it untouched", b)
 	}
 }

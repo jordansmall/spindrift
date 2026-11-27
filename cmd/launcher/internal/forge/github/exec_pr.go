@@ -20,7 +20,7 @@ import (
 const rebaseForcePushTimeout = 5 * time.Minute
 
 func (e *execClient) OpenPRForBranch(branch string) (forge.PR, bool, error) {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return forge.PR{}, false, err
 	}
@@ -35,7 +35,7 @@ func (e *execClient) BranchExists(branch string) (bool, error) {
 	if branch == "" {
 		return false, fmt.Errorf("branch must not be empty")
 	}
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return false, err
 	}
@@ -51,7 +51,7 @@ func (e *execClient) BranchProtected(branch string) (bool, error) {
 	if branch == "" {
 		return false, fmt.Errorf("branch must not be empty")
 	}
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return false, err
 	}
@@ -59,7 +59,7 @@ func (e *execClient) BranchProtected(branch string) (bool, error) {
 }
 
 func (e *execClient) PRForBranch(branch string) (string, bool, error) {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return "", false, err
 	}
@@ -67,7 +67,7 @@ func (e *execClient) PRForBranch(branch string) (string, bool, error) {
 }
 
 func (e *execClient) PRState(url string) (forge.PRState, error) {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return "", err
 	}
@@ -77,7 +77,7 @@ func (e *execClient) PRState(url string) (forge.PRState, error) {
 // MergeCommit returns the oid of the commit the merged PR at url landed as, ""
 // when GitHub reports none (an unmerged PR).
 func (e *execClient) MergeCommit(url string) (string, error) {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return "", err
 	}
@@ -87,7 +87,7 @@ func (e *execClient) MergeCommit(url string) (string, error) {
 // CheckState returns the aggregate statusCheckRollup state of the PR's head
 // commit, or StateNone when no checks are registered.
 func (e *execClient) CheckState(url string) (forge.RollupState, error) {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return forge.StateNone, err
 	}
@@ -99,7 +99,7 @@ func (e *execClient) CheckState(url string) (forge.RollupState, error) {
 // live work rather than a finished sibling workflow. Only runs under the PR's
 // own host, owner and repo count.
 func (e *execClient) CheckRun(url string) (forge.RollupState, string, error) {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return forge.StateNone, "", err
 	}
@@ -108,7 +108,7 @@ func (e *execClient) CheckRun(url string) (forge.RollupState, string, error) {
 
 // HeadCommitSHA returns the PR's current head commit SHA.
 func (e *execClient) HeadCommitSHA(url string) (string, error) {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return "", err
 	}
@@ -120,7 +120,7 @@ func (e *execClient) HeadCommitSHA(url string) (string, error) {
 // Merge can tell a genuine conflict (CONFLICTING) apart from a PR merely
 // blocked by pending or failing checks (MERGEABLE).
 func (e *execClient) Mergeable(url string) (forge.MergeableState, error) {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return forge.MergeableUnknown, err
 	}
@@ -133,7 +133,7 @@ func (e *execClient) Mergeable(url string) (forge.MergeableState, error) {
 // to be up to date, which this project's PAT cannot even read (issue #936).
 // A fork-sourced head 404s here; the caller logs and swallows that error.
 func (e *execClient) NeedsUpdate(prURL string) (bool, error) {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return false, err
 	}
@@ -145,7 +145,7 @@ func (e *execClient) NeedsUpdate(prURL string) (bool, error) {
 // endpoint works under a fine-grained PAT scoped to Pull requests RW; the
 // check-runs endpoint does not.
 func (e *execClient) ListPRFiles(url string) ([]string, error) {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +153,7 @@ func (e *execClient) ListPRFiles(url string) ([]string, error) {
 }
 
 func (e *execClient) Merge(url string) error {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return err
 	}
@@ -162,7 +162,7 @@ func (e *execClient) Merge(url string) error {
 
 // CanAutoMerge reports whether the repo allows GitHub's native auto-merge.
 func (e *execClient) CanAutoMerge() (bool, error) {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return false, err
 	}
@@ -172,7 +172,7 @@ func (e *execClient) CanAutoMerge() (bool, error) {
 // EnqueueAutoMerge enqueues GitHub's native auto-merge for the PR, which merges
 // once every branch-protection requirement is met.
 func (e *execClient) EnqueueAutoMerge(prURL string) error {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return err
 	}
@@ -182,7 +182,7 @@ func (e *execClient) EnqueueAutoMerge(prURL string) error {
 // MarkReady flips the PR out of draft. The caller may call this
 // unconditionally on every green PR.
 func (e *execClient) MarkReady(prURL string) error {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return err
 	}
@@ -191,7 +191,7 @@ func (e *execClient) MarkReady(prURL string) error {
 
 // CommentPR posts a comment on the PR itself.
 func (e *execClient) CommentPR(prURL, body string) error {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return err
 	}
@@ -200,7 +200,7 @@ func (e *execClient) CommentPR(prURL, body string) error {
 
 // MarkDraft flips the PR back to draft. Idempotent the same way MarkReady is.
 func (e *execClient) MarkDraft(prURL string) error {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return err
 	}
@@ -213,7 +213,7 @@ func (e *execClient) MarkDraft(prURL string) error {
 // the other two, so a caller checking those first does not misreport a
 // throttled operator's real cause.
 func (e *execClient) Probe() (string, error) {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return "", err
 	}
@@ -223,7 +223,7 @@ func (e *execClient) Probe() (string, error) {
 // ListLabels returns the names of all labels defined in the repository, read
 // through the routed Connector row.
 func (e *execClient) ListLabels() ([]string, error) {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +233,7 @@ func (e *execClient) ListLabels() ([]string, error) {
 // CreateLabel creates a label in the repository. color is hex without the
 // leading #.
 func (e *execClient) CreateLabel(name, description, color string) error {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return err
 	}
@@ -248,7 +248,7 @@ func (e *execClient) CreateLabel(name, description, color string) error {
 // ErrTransientPushFailure. The head comes from a guest Connector, so an
 // unpinned Rebase is refused; RebasePRHead is the way in.
 func (e *execClient) Rebase(prURL string) error {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return err
 	}
@@ -261,7 +261,7 @@ func (e *execClient) Rebase(prURL string) error {
 // Connector core does not trust, so the composed forge refuses a head other
 // than the one the caller expects.
 func (e *execClient) RebasePRHead(prURL, head string) error {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return err
 	}
@@ -345,7 +345,7 @@ func hasUnmergedPaths(gitIn func(args ...string) *exec.Cmd) bool {
 // SeedMirror clones the target repo bare into dir, so the credential-less Box
 // clones dir instead of the forge.
 func (e *execClient) SeedMirror(dir string) error {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return err
 	}
@@ -356,7 +356,7 @@ func (e *execClient) SeedMirror(dir string) error {
 // at srcDir (issue #4071, ADR 0057); refuses if branch already exists, or is
 // base (issue #4104).
 func (e *execClient) PushBranch(srcDir, localRef, branch, base string) error {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return err
 	}
@@ -368,7 +368,7 @@ func (e *execClient) DeleteBranch(branch, base string) error {
 	if err := forge.ValidateBranchDelete("github", branch, base); err != nil {
 		return err
 	}
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return err
 	}
@@ -378,7 +378,7 @@ func (e *execClient) DeleteBranch(branch, base string) error {
 // CreateDraftPR opens a draft PR from head onto base. head and base are
 // branch names in e.repo, never a fork's owner:branch form.
 func (e *execClient) CreateDraftPR(title, body, base, head string) (string, bool, error) {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return "", false, err
 	}

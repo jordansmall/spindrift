@@ -10,7 +10,7 @@ import (
 // or fails `git bundle verify` returns an error so a broken hand-off blocks
 // the seam (issue #2096).
 func (c *execClient) RelayBundle(outboxDir, ref string) error {
-	row, err := routeRow()
+	row, err := routeRow(c.connectors)
 	if err != nil {
 		return err
 	}
@@ -22,7 +22,7 @@ func (c *execClient) RelayBundle(outboxDir, ref string) error {
 // (issue #2447). It never checks anything out or pushes, so it cannot mutate
 // the remote.
 func (c *execClient) CommitSubjects(outboxDir, base, ref string) ([]string, error) {
-	row, err := routeRow()
+	row, err := routeRow(c.connectors)
 	if err != nil {
 		return nil, err
 	}

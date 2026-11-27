@@ -41,6 +41,7 @@ func scopesOf(scopes []string, err error) backendkit.TokenIntrospector {
 }
 
 func TestAcquireToken_AmbientTokenSkipsPromptAndPrintsAuditNote(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	token, err := acquire(t, backendkit.TokenPrompt{
 		Out:          &out,
@@ -56,6 +57,7 @@ func TestAcquireToken_AmbientTokenSkipsPromptAndPrintsAuditNote(t *testing.T) {
 }
 
 func TestAcquireToken_PastedToken(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	token, err := acquire(t, backendkit.TokenPrompt{
 		Out:          &out,
@@ -73,6 +75,7 @@ func TestAcquireToken_PastedToken(t *testing.T) {
 }
 
 func TestAcquireToken_BlankFallsBackToAmbientGhToken(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		token   string
@@ -110,6 +113,7 @@ func TestAcquireToken_BlankFallsBackToAmbientGhToken(t *testing.T) {
 }
 
 func TestAcquireToken_ClassicTokenAudit(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name       string
 		scopes     []string
@@ -148,6 +152,7 @@ func TestAcquireToken_ClassicTokenAudit(t *testing.T) {
 }
 
 func TestAcquireToken_OtherPrefixIsNotAudited(t *testing.T) {
+	t.Parallel()
 	token, err := acquire(t, backendkit.TokenPrompt{
 		Out: new(bytes.Buffer),
 
@@ -159,6 +164,7 @@ func TestAcquireToken_OtherPrefixIsNotAudited(t *testing.T) {
 }
 
 func TestStrategyHasNoKnobsFromRemote(t *testing.T) {
+	t.Parallel()
 	if github.Strategy.KnobsFromRemote != nil {
 		t.Error("github implies no knobs from a remote")
 	}
@@ -185,6 +191,7 @@ func TestAcquireToken_AmbientLookupFollowsDescriptorTokenEnvVar(t *testing.T) {
 // A host with no github Connector cannot read the scopes, which is not a reason
 // to refuse the token: the operator is told and the wizard carries on.
 func TestAcquireToken_UnsupportedIntrospectionWarnsAndContinues(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	unsupported := func(*connectorruntime.Runtime, string, string) (forge.TokenIntrospection, error) {
 		return forge.TokenIntrospection{}, fmt.Errorf("no github connector is configured: %w", backendkit.ErrUnsupported)
@@ -203,6 +210,7 @@ func TestAcquireToken_UnsupportedIntrospectionWarnsAndContinues(t *testing.T) {
 
 // The wizard audits the pasted token itself, scoped to the target repo.
 func TestAcquireToken_AuditsThePastedTokenForTheTargetRepo(t *testing.T) {
+	t.Parallel()
 	var gotToken, gotRepo string
 	introspect := func(_ *connectorruntime.Runtime, token, repo string) (forge.TokenIntrospection, error) {
 		gotToken, gotRepo = token, repo
@@ -224,6 +232,7 @@ func TestAcquireToken_AuditsThePastedTokenForTheTargetRepo(t *testing.T) {
 // cannot run there; that defers to `spindrift doctor` rather than failing the
 // wizard or printing the raw error.
 func TestAcquireToken_NoConnectorSandboxDefersTheAuditAndContinues(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	noSandbox := func(*connectorruntime.Runtime, string, string) (forge.TokenIntrospection, error) {
 		return forge.TokenIntrospection{}, fmt.Errorf("introspect the token: %w", connectorsandbox.ErrNoConnectorSandbox)

@@ -183,7 +183,7 @@ func TestMainRun_NoConnectorLoadStartsNoSandbox(t *testing.T) {
 func TestConnectorRuntimeClose_RecordsSandboxTotals(t *testing.T) {
 	calls := 0
 	t.Cleanup(backendkit.ReplaceRegistryForTest([]backendkit.Strategy{
-		{RecordSandboxTotals: func(connectorsandbox.Stats) { calls++ }},
+		{RecordSandboxTotals: func(*connectorruntime.Runtime, connectorsandbox.Stats) { calls++ }},
 	}))
 	in, err := connectorInput()
 	if err != nil {
@@ -250,7 +250,7 @@ func TestConnectorRuntime_StartFailureFailsTheRun(t *testing.T) {
 func TestMainRun_ClosesTheRuntimeItBuilt(t *testing.T) {
 	calls := 0
 	t.Cleanup(backendkit.ReplaceRegistryForTest([]backendkit.Strategy{
-		{RecordSandboxTotals: func(connectorsandbox.Stats) { calls++ }},
+		{RecordSandboxTotals: func(*connectorruntime.Runtime, connectorsandbox.Stats) { calls++ }},
 	}))
 	prev := newConnectorRuntime
 	t.Cleanup(func() { newConnectorRuntime = prev })

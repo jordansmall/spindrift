@@ -22,9 +22,9 @@ import (
 // needs.
 var errNoCapability = errors.New("connector does not declare the capability")
 
-// routedRow is the github backend row when one is configured.
-func routedRow() (backendrows.Row, bool) {
-	return backendrows.Lookup(backend.GitHub.Name)
+// routedRow is the github backend row of rt, when it holds one.
+func routedRow(rt *connectorruntime.Runtime) (backendrows.Row, bool) {
+	return rt.Row(backend.GitHub.Name)
 }
 
 // ErrNoRoute is wrapped by every call that has no Connector row to go through,
@@ -35,8 +35,8 @@ var ErrNoRoute = errors.New("github has no Connector route")
 
 // routeRow is routedRow for a call that needs one: the routed row, or
 // ErrNoRoute naming which of the two causes left none.
-func routeRow() (backendrows.Row, error) {
-	if row, ok := routedRow(); ok {
+func routeRow(rt *connectorruntime.Runtime) (backendrows.Row, error) {
+	if row, ok := routedRow(rt); ok {
 		return row, nil
 	}
 	if host := Host(); !strings.EqualFold(host, DefaultHost) {
