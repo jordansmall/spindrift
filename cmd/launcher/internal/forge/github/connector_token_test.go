@@ -29,6 +29,11 @@ func useGithubRow(t *testing.T, b *tokenBackend) {
 // useGithubRowAt is useGithubRow for a backend at host.
 func useGithubRowAt(t *testing.T, host string) { applyGithubRow(t, host, func(*backendrows.Row) {}) }
 
+// appliedRows is the backend rows the running test applied through
+// applyGithubRow; the harness helpers build their runtimes over it. Tests that
+// set it also change directory or environment, so none run in parallel.
+var appliedRows backendrows.Set
+
 func applyGithubRow(t *testing.T, host string, adjust func(*backendrows.Row)) {
 	t.Helper()
 	path, routes := githubConnectorRoutes(t, host, connectorRepo)
@@ -38,10 +43,13 @@ func applyGithubRow(t *testing.T, host string, adjust func(*backendrows.Row)) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(backendrows.Snapshot())
-	if err := backendrows.Use(doc, func(string) string { return "" }); err != nil {
+	set, err := backendrows.Decode(doc, func(string) string { return "" }, backendkit.RowGates())
+	if err != nil {
 		t.Fatal(err)
 	}
+	prev := appliedRows
+	t.Cleanup(func() { appliedRows = prev })
+	appliedRows = set
 }
 
 // The Strategy's introspection loads the backend row's Connector with the
@@ -110,7 +118,7 @@ func TestIntrospect_RefusedReadIsAnError(t *testing.T) {
 // githubRow is the github row useGithubRow applied.
 func githubRow(t *testing.T) backendrows.Row {
 	t.Helper()
-	row, ok := backendrows.Lookup("github")
+	row, ok := appliedRows.Lookup("github")
 	if !ok {
 		t.Fatal("no github backend row applied")
 	}

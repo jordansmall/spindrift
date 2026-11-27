@@ -16,6 +16,3 @@ func EnvRows(rows ...backendrows.Row) map[string]credsource.Row {
 	}
 	return out
 }
-
-// Applied is EnvRows over the applied backend rows.
-func Applied() map[string]credsource.Row { return EnvRows(backendrows.All()...) }

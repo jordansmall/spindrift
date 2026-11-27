@@ -1046,10 +1046,7 @@ func TestHostRepoDir_CodeForgeLocal_DefaultsAbsoluteAndFeedsLanding(t *testing.T
 // ISSUE_TRACKER=jira builds the tracker from the jira Connector only: with no
 // jira row loaded it is an actionable error, never a native client.
 func TestNewIssueTracker_JiraNeedsTheConnectorRow(t *testing.T) {
-	t.Cleanup(backendrows.Snapshot())
-	if err := backendrows.Use(nil, func(string) string { return "" }); err != nil {
-		t.Fatal(err)
-	}
+	useLauncherRows(t, "[]")
 	c := minimalValidConfig()
 	c.connectors = connectorRuntime(t)
 	c.IssueTracker = "jira"
@@ -6559,7 +6556,6 @@ func TestMainRun_InputDocument_AppliesDriverRows(t *testing.T) {
 // table in force is the one Nix rendered from a Consumer importing the fixture
 // network Connector. Only the `backends` section is taken, as above.
 func TestMainRun_InputDocument_AppliesBackendRows(t *testing.T) {
-	t.Cleanup(backendrows.Snapshot())
 	realDoc := os.Getenv("SPINDRIFT_FIXTURE_CONNECTOR_DOC")
 	if realDoc == "" {
 		t.Skip("SPINDRIFT_FIXTURE_CONNECTOR_DOC is unset")
@@ -6580,9 +6576,9 @@ func TestMainRun_InputDocument_AppliesBackendRows(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	mainRunT(t, []string{"--input", docPath, "research"}, &stdout, &stderr)
-	row, ok := backendrows.Lookup("fixture")
+	row, ok := launcherBackendRows.Lookup("fixture")
 	if !ok {
-		t.Fatalf("backendrows.Lookup(fixture) = false after the document's rows applied; stderr=%s", stderr.String())
+		t.Fatalf("launcherBackendRows.Lookup(fixture) = false after the document's rows applied; stderr=%s", stderr.String())
 	}
 
 	var seen []*http.Request
@@ -6736,11 +6732,10 @@ func writeProbeJiraDoc(t *testing.T) string {
 }
 
 // A backend row's credential env resolves through <ENV>_CMD in the runtime
-// connectorsetup.New builds, which can only happen after backendrows.Use has
-// installed the document's rows. The row must be one this run reads (the
+// connectorsetup.New builds, which can only happen after mainRun has
+// decoded the document's rows. The row must be one this run reads (the
 // active jira tracker): an unread row's _CMD never runs.
 func TestMainRun_InputDocument_BackendRowCredentialFromCmd(t *testing.T) {
-	t.Cleanup(backendrows.Snapshot())
 	var ran []string
 	stubRuntimeBuild(t, func(cmd string) (string, error) {
 		ran = append(ran, cmd)
@@ -6764,7 +6759,6 @@ func TestMainRun_InputDocument_BackendRowCredentialFromCmd(t *testing.T) {
 func TestMainRun_RuntimeBuiltWithInteractiveTTY(t *testing.T) {
 	for _, interactive := range []bool{true, false} {
 		t.Run(fmt.Sprintf("interactive=%v", interactive), func(t *testing.T) {
-			t.Cleanup(backendrows.Snapshot())
 			orig := isInteractiveTTY
 			isInteractiveTTY = func() bool { return interactive }
 			t.Cleanup(func() { isInteractiveTTY = orig })

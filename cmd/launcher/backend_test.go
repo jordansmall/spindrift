@@ -166,12 +166,8 @@ func TestJiraNewIssueTrackerMalformedStatusMapping(t *testing.T) {
 	if !ok {
 		t.Fatal("backendkit.ByName(\"jira\") ok=false")
 	}
-	t.Cleanup(backendrows.Snapshot())
-	doc := `[{"name":"jira","module":"/nonexistent.wasm","credentialEnv":"JIRA_TOKEN",
-"routes":[{"method":"GET","host":"jira.example","path":"/x"}]}]`
-	if err := backendrows.Use([]byte(doc), func(string) string { return "" }); err != nil {
-		t.Fatal(err)
-	}
+	useLauncherRows(t, `[{"name":"jira","module":"/nonexistent.wasm","credentialEnv":"JIRA_TOKEN",
+"routes":[{"method":"GET","host":"jira.example","path":"/x"}]}]`)
 	c := config{Knobs: inputdoc.Knobs{
 		RowKnobs: map[string]string{
 			"JIRA_BASE_URL":       "https://example.atlassian.net",
@@ -330,11 +326,11 @@ func (c *config) setRowKnob(env, value string) {
 	c.RowKnobs = m
 }
 
-// connectorRuntime is a Connector runtime over the rows the test applied, as
-// mainRun builds one, closed with the test.
+// connectorRuntime is a Connector runtime over the launcher rows the test
+// applied, as mainRun builds one, closed with the test.
 func connectorRuntime(t *testing.T) *connectorruntime.Runtime {
 	t.Helper()
-	rt := connectorruntime.FromRegistries(credsourcetest.Applied(), connectorsandboxtest.InProcess())
+	rt := connectorruntime.New(launcherBackendRows, credsourcetest.EnvRows(launcherBackendRows.All()...), connectorsandboxtest.InProcess())
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt
 }
@@ -362,7 +358,7 @@ func (s capPadSandbox) LoadNetwork(ctx context.Context, wasm []byte, n connector
 func forgejoFixtureRuntime(t *testing.T) *connectorruntime.Runtime {
 	t.Helper()
 	var rows []backendrows.Row
-	if row, ok := backendrows.Lookup("forgejo"); ok {
+	if row, ok := launcherBackendRows.Lookup("forgejo"); ok {
 		rows = append(rows, row)
 	}
 	rt := connectorruntime.New(backendrows.NewSet(rows...), credsourcetest.EnvRows(rows...), capPadSandbox{connectorsandboxtest.InProcess()})

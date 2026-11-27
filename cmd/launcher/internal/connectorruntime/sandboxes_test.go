@@ -288,7 +288,7 @@ func hostedDriverRows(t *testing.T) driverrows.Rows {
 func TestDriverConnectorLoadFailsClosedWhenTheSandboxCannotStart(t *testing.T) {
 	t.Parallel()
 	sb := startFailingSandbox{connectorsandboxtest.InProcess()}
-	rt := connectorruntime.FromRegistries(nil, sb)
+	rt := connectorruntime.New(backendrows.NewSet(), nil, sb)
 	t.Cleanup(func() { _ = rt.Close() })
 	rt.UseDriverRows(hostedDriverRows(t))
 
@@ -313,7 +313,7 @@ func TestSandboxFailureIsTheRuntimesSandboxStartFailure(t *testing.T) {
 	t.Parallel()
 	startErr := errors.New("runner did not start")
 	sb := failingSandbox{Loader: connectorsandboxtest.InProcess(), err: startErr}
-	rt := connectorruntime.FromRegistries(nil, sb)
+	rt := connectorruntime.New(backendrows.NewSet(), nil, sb)
 	t.Cleanup(func() { _ = rt.Close() })
 
 	if !rt.HasSandbox() {

@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
-	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 )
@@ -230,11 +229,7 @@ func TestNewReadContext_ForgejoLoadFailure_ReturnsError(t *testing.T) {
 	setFullyLocalEnv(t)
 	setKnob(t, "CODE_FORGE", "forgejo")
 	t.Setenv("FORGEJO_TOKEN", "tok")
-	t.Cleanup(backendrows.Snapshot())
-	doc := credentialRowDoc("forgejo", "")
-	if err := backendrows.Use([]byte(doc), func(string) string { return "" }); err != nil {
-		t.Fatal(err)
-	}
+	useLauncherRows(t, credentialRowDoc("forgejo", ""))
 	t.Chdir(t.TempDir())
 
 	rc, err := newReadContext(connectorRuntime(t), dispatchkind.Work, false)

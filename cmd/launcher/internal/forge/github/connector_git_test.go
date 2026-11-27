@@ -416,7 +416,7 @@ func TestConnectorRow_LedgerPushReadsTheRefreshFileAtEachPush(t *testing.T) {
 		}
 	}
 	write(connectorToken)
-	rt := connectorruntime.FromRegistries(map[string]credsource.Row{"github": {Secret: credsource.File(path, nil)}}, testSandbox())
+	rt := connectorruntime.New(appliedRows, map[string]credsource.Row{"github": {Secret: credsource.File(path, nil)}}, testSandbox())
 	t.Cleanup(func() { _ = rt.Close() })
 	requireLedgerPushReadsRotatedToken(t, rt, func() { write("rotated-token") })
 }

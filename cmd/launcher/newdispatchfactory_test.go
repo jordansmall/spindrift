@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/connectorsandbox"
@@ -61,7 +62,7 @@ func primaryRows(t *testing.T, wasm string) driverrows.Rows {
 func TestNewDispatchFactoryPrimaryLoadFailureFailsRun(t *testing.T) {
 	errBoom := errors.New("boom")
 	sb := &loadRecorder{Loader: connectorsandboxtest.InProcess(), err: errBoom}
-	rt := connectorruntime.FromRegistries(nil, sb)
+	rt := connectorruntime.New(backendrows.NewSet(), nil, sb)
 	rt.UseDriverRows(primaryRows(t, "primary-wasm"))
 	f, err := newDispatchFactory(config{driver: "opencode", connectors: rt}, "", nil, nil, nil, nil, forge.Capabilities{})
 	if f != nil || err == nil {
@@ -78,7 +79,7 @@ func TestNewDispatchFactoryPrimaryLoadFailureFailsRun(t *testing.T) {
 // The Launcher's Drivers are the runtime's: a runtime whose rows supply no
 // claude Connector offers none.
 func TestNewDispatchFactoryTakesItsDriverFromTheRuntime(t *testing.T) {
-	rt := connectorruntime.FromRegistries(nil, connectorsandboxtest.InProcess())
+	rt := connectorruntime.New(backendrows.NewSet(), nil, connectorsandboxtest.InProcess())
 	rt.UseDriverRows(primaryRows(t, "unused"))
 	f, err := newDispatchFactory(config{driver: "claude", connectors: rt}, "", nil, nil, nil, nil, forge.Capabilities{})
 	if f != nil || err == nil || !strings.Contains(err.Error(), "no Driver row supplies its Connector module") {
