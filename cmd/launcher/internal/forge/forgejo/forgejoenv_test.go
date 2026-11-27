@@ -10,6 +10,7 @@ import (
 // TestValidateForgejoEnv_RequiresBaseURL verifies ValidateForgejoEnv
 // fails fast on an empty field, naming the knob that required it.
 func TestValidateForgejoEnv_RequiresBaseURL(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ knob, other string }{
 		{"ISSUE_TRACKER", "CODE_FORGE"},
 		{"CODE_FORGE", "ISSUE_TRACKER"},

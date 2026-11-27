@@ -22,7 +22,7 @@ func TestConnectorRow_MergeMethodOtherThanRebaseIsRefused(t *testing.T) {
 			{"EnqueueAutoMerge", func(c *execClient, u string) error { return c.EnqueueAutoMerge(u) }},
 		} {
 			t.Run(op.name+"/"+method, func(t *testing.T) {
-				h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
+				h, _, calls, _ := routedLogHarness(t, withGithubRowAt)
 				url := h.SeedLandablePR("9")
 				before := h.backend.hitCount()
 				c := newClient(t, connectorRepo, testLabels, WithMergeMethod(method))
@@ -53,7 +53,7 @@ func TestStrategy_RoutedRowRefusesMergeMethodAtBuild(t *testing.T) {
 		{"", false},
 	} {
 		t.Run(tc.method, func(t *testing.T) {
-			useGithubRowAt(t, "127.0.0.1:1")
+			withGithubRowAt(t, "127.0.0.1:1")
 
 			_, err := Strategy.NewCodeForge(backendkit.Shared{RepoSlug: connectorRepo, MergeMethod: tc.method, Connectors: testRuntime(t)}, nil, forge.SanitizedParent{}, nil)
 
@@ -66,7 +66,7 @@ func TestStrategy_RoutedRowRefusesMergeMethodAtBuild(t *testing.T) {
 
 // An explicit rebase is the Connector's own method and passes.
 func TestConnectorRow_MergeMethodRebasePasses(t *testing.T) {
-	h, _, _, _ := routedLogHarness(t, useGithubRowAt)
+	h, _, _, _ := routedLogHarness(t, withGithubRowAt)
 	url := h.SeedLandablePR("9")
 	c := newClient(t, connectorRepo, testLabels, WithMergeMethod("rebase"))
 

@@ -9,6 +9,7 @@ import (
 
 // A missing connection field fails at startup, not at the first Jira API call.
 func TestValidateJiraEnv_RequiresBaseURLAndProjectKey(t *testing.T) {
+	t.Parallel()
 	if err := jira.ValidateJiraEnv("https://example.atlassian.net", "PROJ", "", "hybrid"); err != nil {
 		t.Fatalf("fully configured jira env should validate: %v", err)
 	}
@@ -23,6 +24,7 @@ func TestValidateJiraEnv_RequiresBaseURLAndProjectKey(t *testing.T) {
 // A status-mapping share other than failed+ambiguous fails startup, naming both
 // keys; failed and ambiguous may share one status.
 func TestValidateJiraEnv_StatusMappingSharing(t *testing.T) {
+	t.Parallel()
 	const url, proj = "https://example.atlassian.net", "PROJ"
 	err := jira.ValidateJiraEnv(url, proj, `{"dispatchable":"To Do","inProgress":"to do"}`, "hybrid")
 	if err == nil || !strings.Contains(err.Error(), "dispatchable") || !strings.Contains(err.Error(), "inProgress") {
@@ -35,6 +37,7 @@ func TestValidateJiraEnv_StatusMappingSharing(t *testing.T) {
 
 // status mode requires every work state mapped; an unknown mode is rejected.
 func TestValidateJiraEnv_Lifecycle(t *testing.T) {
+	t.Parallel()
 	const url, proj = "https://example.atlassian.net", "PROJ"
 	err := jira.ValidateJiraEnv(url, proj, `{"dispatchable":"To Do"}`, "status")
 	if err == nil || !strings.Contains(err.Error(), "unmapped: ambiguous, complete, failed, inProgress") {

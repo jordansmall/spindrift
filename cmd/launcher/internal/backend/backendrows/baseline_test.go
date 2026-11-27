@@ -20,6 +20,7 @@ func readTestdata(t *testing.T, name string) []byte {
 }
 
 func TestBaselineMatchesGolden(t *testing.T) {
+	t.Parallel()
 	got, err := backendrows.Baseline(readTestdata(t, "baseline-rows.json"))
 	if err != nil {
 		t.Fatalf("Baseline: %v", err)
@@ -30,6 +31,7 @@ func TestBaselineMatchesGolden(t *testing.T) {
 }
 
 func TestBaselineRefusesAnEmptyDocument(t *testing.T) {
+	t.Parallel()
 	for _, raw := range []string{"", "[]", "null"} {
 		if got, err := backendrows.Baseline(json.RawMessage(raw)); err == nil {
 			t.Errorf("Baseline(%q) = %s, want an error", raw, got)
@@ -40,6 +42,7 @@ func TestBaselineRefusesAnEmptyDocument(t *testing.T) {
 // What Baseline writes must read back as an accepted baseline that diffs clean
 // against the rows it came from, in the shape lib's Nix reader decodes.
 func TestBaselineRoundTripsToNoChangeAndNoWidening(t *testing.T) {
+	t.Parallel()
 	raw := readTestdata(t, "baseline-rows.json")
 	out, err := backendrows.Baseline(raw)
 	if err != nil {

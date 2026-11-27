@@ -19,6 +19,7 @@ func mapLookup(m map[string]string) backendkit.Lookup {
 }
 
 func TestStrategyShape(t *testing.T) {
+	t.Parallel()
 	s := forgejo.Strategy
 	if !reflect.DeepEqual(s.Descriptor, backend.Forgejo) {
 		t.Errorf("Descriptor = %+v, want backend.Forgejo", s.Descriptor)
@@ -30,6 +31,7 @@ func TestStrategyShape(t *testing.T) {
 }
 
 func TestStrategyValidateTrackerNamesBlankBaseURL(t *testing.T) {
+	t.Parallel()
 	err := forgejo.Strategy.ValidateTracker(backendkit.Shared{}, mapLookup(map[string]string{"FORGEJO_BASE_URL": ""}))
 	if err == nil || !strings.Contains(err.Error(), "FORGEJO_BASE_URL") ||
 		!strings.Contains(err.Error(), "ISSUE_TRACKER=forgejo") {
@@ -38,6 +40,7 @@ func TestStrategyValidateTrackerNamesBlankBaseURL(t *testing.T) {
 }
 
 func TestStrategyLedgerURLUsesLookupBaseURL(t *testing.T) {
+	t.Parallel()
 	l := mapLookup(map[string]string{"FORGEJO_BASE_URL": "https://forge.example/forgejo/", "FORGEJO_TOKEN": "tok"})
 	rt := useForgejoRow(t, "https://forge.example/forgejo/", func(*backendrows.Row) {})
 	site, err := forgejo.Strategy.NewLedger(backendkit.Shared{RepoSlug: "o/r", Connectors: rt}, l)
@@ -50,6 +53,7 @@ func TestStrategyLedgerURLUsesLookupBaseURL(t *testing.T) {
 }
 
 func TestStrategyValidateTrackerRequiresSlug(t *testing.T) {
+	t.Parallel()
 	l := mapLookup(map[string]string{"FORGEJO_BASE_URL": "https://forge.example", "FORGEJO_TOKEN": "tok"})
 	err := forgejo.Strategy.ValidateTracker(backendkit.Shared{}, l)
 	if err == nil || err.Error() != "pass --repo-slug owner/repo or set forge.repoSlug when ISSUE_TRACKER=forgejo" {
@@ -61,6 +65,7 @@ func TestStrategyValidateTrackerRequiresSlug(t *testing.T) {
 }
 
 func TestStrategyValidateCodeForgeIgnoresSlug(t *testing.T) {
+	t.Parallel()
 	l := mapLookup(map[string]string{"FORGEJO_BASE_URL": "https://forge.example", "FORGEJO_TOKEN": "tok"})
 	if err := forgejo.Strategy.ValidateCodeForge(backendkit.Shared{}, l); err != nil {
 		t.Errorf("err = %v, want nil: the slug is a tracker-axis requirement", err)
@@ -68,6 +73,7 @@ func TestStrategyValidateCodeForgeIgnoresSlug(t *testing.T) {
 }
 
 func TestStrategyWebURL(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, slug, want string
 		env              map[string]string
@@ -88,6 +94,7 @@ func TestStrategyWebURL(t *testing.T) {
 }
 
 func TestStrategyRemoteMatch(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, slug, remote string
 		env                map[string]string
@@ -115,6 +122,7 @@ func TestStrategyRemoteMatch(t *testing.T) {
 // a self-hosted FORGEJO_TOKEN there; validation reads the raw lookup value and
 // fails closed instead, on both axes.
 func TestStrategyValidateRejectsBlankBaseURL(t *testing.T) {
+	t.Parallel()
 	l := mapLookup(map[string]string{"FORGEJO_BASE_URL": "", "FORGEJO_TOKEN": "tok"})
 	for axis, validate := range map[string]func(backendkit.Shared, backendkit.Lookup) error{
 		"ISSUE_TRACKER": forgejo.Strategy.ValidateTracker,
@@ -145,6 +153,7 @@ func TestStrategyLedgerSiteCarriesCredentialNotUserinfo(t *testing.T) {
 }
 
 func TestStrategyNewCodeForgeWithoutARuntimeIsErrNoRuntime(t *testing.T) {
+	t.Parallel()
 	l := mapLookup(map[string]string{"FORGEJO_BASE_URL": "https://forgejo.example"})
 	_, err := forgejo.Strategy.NewCodeForge(backendkit.Shared{}, l, forge.SanitizedParent{}, nil)
 	if !errors.Is(err, connectorruntime.ErrNoRuntime) {

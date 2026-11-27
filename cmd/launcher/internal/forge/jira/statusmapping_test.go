@@ -13,6 +13,7 @@ import (
 
 // An empty mapping is valid, not an error: every state falls back to its label.
 func TestParseStatusMapping_Empty(t *testing.T) {
+	t.Parallel()
 	m, err := jira.ParseStatusMapping("")
 	if err != nil {
 		t.Fatalf("ParseStatusMapping(\"\"): %v", err)
@@ -23,6 +24,7 @@ func TestParseStatusMapping_Empty(t *testing.T) {
 }
 
 func TestParseStatusMapping_AllStates(t *testing.T) {
+	t.Parallel()
 	m, err := jira.ParseStatusMapping(`{"dispatchable":"To Do","inProgress":"In Progress","complete":"Done","failed":"Blocked"}`)
 	if err != nil {
 		t.Fatalf("ParseStatusMapping: %v", err)
@@ -40,12 +42,14 @@ func TestParseStatusMapping_AllStates(t *testing.T) {
 
 // A typo'd key must fail fast at startup, not be silently dropped.
 func TestParseStatusMapping_UnknownKey(t *testing.T) {
+	t.Parallel()
 	if _, err := jira.ParseStatusMapping(`{"disptchable":"To Do"}`); err == nil {
 		t.Fatal("want error for unknown key, got nil")
 	}
 }
 
 func TestParseStatusMapping_AmbiguousKey(t *testing.T) {
+	t.Parallel()
 	m, err := jira.ParseStatusMapping(`{"ambiguous":"Needs Spec"}`)
 	if err != nil {
 		t.Fatalf("ParseStatusMapping: %v", err)
@@ -56,6 +60,7 @@ func TestParseStatusMapping_AmbiguousKey(t *testing.T) {
 }
 
 func TestParseStatusMapping_UnknownKeyListsAmbiguous(t *testing.T) {
+	t.Parallel()
 	_, err := jira.ParseStatusMapping(`{"disptchable":"To Do"}`)
 	if err == nil || !strings.Contains(err.Error(), "(want one of dispatchable, inProgress, complete, failed, ambiguous)") {
 		t.Fatalf("err = %v, want the key list ending in ambiguous", err)
@@ -65,6 +70,7 @@ func TestParseStatusMapping_UnknownKeyListsAmbiguous(t *testing.T) {
 // failed and ambiguous both mean a human must act, so they may share one
 // column, case-insensitively.
 func TestParseStatusMapping_FailedAndAmbiguousMayShare(t *testing.T) {
+	t.Parallel()
 	for _, s := range []string{
 		`{"failed":"Blocked","ambiguous":"Blocked"}`,
 		`{"failed":"Blocked","ambiguous":"blocked"}`,
@@ -80,6 +86,7 @@ func TestParseStatusMapping_FailedAndAmbiguousMayShare(t *testing.T) {
 }
 
 func TestParseStatusMapping_OtherSharesRejected(t *testing.T) {
+	t.Parallel()
 	cases := []struct{ name, in, want string }{
 		{
 			"case-differing dispatchable and inProgress",
@@ -114,6 +121,7 @@ func TestParseStatusMapping_OtherSharesRejected(t *testing.T) {
 
 // An empty (or null) status is unmapped, so two of them never collide.
 func TestParseStatusMapping_EmptyStatusesDoNotCollide(t *testing.T) {
+	t.Parallel()
 	for _, s := range []string{
 		`{"dispatchable":"","inProgress":""}`,
 		`{"dispatchable":null,"complete":null}`,
@@ -125,6 +133,7 @@ func TestParseStatusMapping_EmptyStatusesDoNotCollide(t *testing.T) {
 }
 
 func TestParseStatusMapping_InvalidJSON(t *testing.T) {
+	t.Parallel()
 	if _, err := jira.ParseStatusMapping(`{not json`); err == nil {
 		t.Fatal("want error for invalid JSON, got nil")
 	}
@@ -133,6 +142,7 @@ func TestParseStatusMapping_InvalidJSON(t *testing.T) {
 // The corpus is shared with the Nix mirror of ParseStatusMapping, so both
 // parsers are held to the same accept/reject decisions and error text.
 func TestParseStatusMapping_Corpus(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile("testdata/status-mapping-cases.json")
 	if err != nil {
 		t.Fatal(err)
@@ -176,6 +186,7 @@ func TestParseStatusMapping_Corpus(t *testing.T) {
 // The lifecycle corpus is shared with lib/jira-status-mapping.nix's
 // lifecycleError, so eval and launcher startup word the same errors.
 func TestCheckLifecycle_Corpus(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile("testdata/lifecycle-cases.json")
 	if err != nil {
 		t.Fatal(err)
@@ -210,6 +221,7 @@ func TestCheckLifecycle_Corpus(t *testing.T) {
 }
 
 func TestParseStatusMapping_InvalidJSONMessage(t *testing.T) {
+	t.Parallel()
 	_, err := jira.ParseStatusMapping("{not json")
 	if err == nil || !strings.HasPrefix(err.Error(), "parse JIRA_STATUS_MAPPING: ") {
 		t.Fatalf("error = %v, want a parse JIRA_STATUS_MAPPING: prefix", err)

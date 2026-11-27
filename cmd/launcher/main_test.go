@@ -6545,17 +6545,17 @@ func TestMainRun_InputDocument_AppliesDriverRows(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	mainRunT(t, []string{"--input", docPath, "research"}, &stdout, &stderr)
 	if _, ok := built.Drivers().CredentialRules("fixture"); !ok {
-		t.Errorf("Drivers().CredentialRules(fixture) not offered by the runtime after the document's rows applied; stderr=%s", stderr.String())
+		t.Errorf("Drivers().CredentialRules(fixture) not offered by the runtime after the document's rows decoded; stderr=%s", stderr.String())
 	}
 	if _, err := built.Drivers().New("fixture"); err != nil {
 		t.Errorf("Drivers().New(fixture): %v", err)
 	}
 }
 
-// A document's backend rows are applied before any verb runs, and the Route
+// A document's backend rows are decoded before any verb runs, and the Route
 // table in force is the one Nix rendered from a Consumer importing the fixture
 // network Connector. Only the `backends` section is taken, as above.
-func TestMainRun_InputDocument_AppliesBackendRows(t *testing.T) {
+func TestMainRun_InputDocument_HandsBackendRowsToTheRuntime(t *testing.T) {
 	realDoc := os.Getenv("SPINDRIFT_FIXTURE_CONNECTOR_DOC")
 	if realDoc == "" {
 		t.Skip("SPINDRIFT_FIXTURE_CONNECTOR_DOC is unset")
@@ -6578,7 +6578,7 @@ func TestMainRun_InputDocument_AppliesBackendRows(t *testing.T) {
 	mainRunT(t, []string{"--input", docPath, "research"}, &stdout, &stderr)
 	row, ok := launcherBackendRows.Lookup("fixture")
 	if !ok {
-		t.Fatalf("launcherBackendRows.Lookup(fixture) = false after the document's rows applied; stderr=%s", stderr.String())
+		t.Fatalf("launcherBackendRows.Lookup(fixture) = false after the document's rows decoded; stderr=%s", stderr.String())
 	}
 
 	var seen []*http.Request

@@ -61,7 +61,7 @@ func connectorWriteClient(t *testing.T) *execClient {
 func TestConnectorRow_TrackerWritesGoThroughTheConnector(t *testing.T) {
 	for _, tc := range routedWrites {
 		t.Run(tc.name, func(t *testing.T) {
-			h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
+			h, _, calls, _ := routedLogHarness(t, withGithubRowAt)
 			h.SeedIssue(tc.seed)
 
 			if err := tc.write(connectorWriteClient(t)); err != nil {
@@ -89,7 +89,7 @@ func TestConnectorRow_TrackerWritesGoThroughTheConnector(t *testing.T) {
 // settle's own sweep is not driven here: the backend go-test fileset leaves
 // settle out (nix/checks/go.nix backendGoTestShared).
 func TestConnectorRow_PostedIssueKeepsItsMarkerAndLabels(t *testing.T) {
-	h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
+	h, _, calls, _ := routedLogHarness(t, withGithubRowAt)
 	c := connectorWriteClient(t)
 	marker := dedupmarker.Build([]string{"pkg/a.go"})
 	labels := []string{"agent-butler-finding", "ready-for-agent"}
@@ -127,7 +127,7 @@ func TestConnectorRow_PostedIssueKeepsItsMarkerAndLabels(t *testing.T) {
 // A claim on an issue already in progress is refused by the Connector path
 // with forge.ErrAlreadyClaimed, and without gh.
 func TestConnectorRow_ClaimOfAClaimedIssueIsRefused(t *testing.T) {
-	h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
+	h, _, calls, _ := routedLogHarness(t, withGithubRowAt)
 	h.SeedIssue(forge.Issue{Number: "7", Labels: []string{testLabels.InProgress}})
 
 	err := connectorWriteClient(t).TransitionState("7", forge.Dispatchable, forge.InProgress)
@@ -144,7 +144,7 @@ func TestConnectorRow_ClaimOfAClaimedIssueIsRefused(t *testing.T) {
 func TestTrackerWrites_PlainRowRoutesWrites(t *testing.T) {
 	for _, tc := range routedWrites {
 		t.Run(tc.name, func(t *testing.T) {
-			h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
+			h, _, calls, _ := routedLogHarness(t, withGithubRowAt)
 			h.SeedIssue(tc.seed)
 
 			_ = tc.write(connectorWriteClient(t))
@@ -161,7 +161,7 @@ func TestTrackerWrites_PlainRowRoutesWrites(t *testing.T) {
 func TestPlainRow_LoadFailureFailsTheWrite(t *testing.T) {
 	for _, tc := range routedWrites {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, calls, _ := routedLogHarness(t, useGithubRowAt)
+			_, _, calls, _ := routedLogHarness(t, withGithubRowAt)
 			boom := errors.New("github connector failed to load")
 			hookLoads(t, func(func() (*connectorhost.Connector, error)) (*connectorhost.Connector, error) { return nil, boom })
 
@@ -181,7 +181,7 @@ func TestPlainRow_RefusedRouteFailsTheWrite(t *testing.T) {
 	for _, tc := range routedWrites {
 		t.Run(tc.name, func(t *testing.T) {
 			h, _, calls, _ := routedLogHarness(t, func(t *testing.T, host string) {
-				applyGithubRow(t, host, func(r *backendrows.Row) {
+				decodeGithubRow(t, host, func(r *backendrows.Row) {
 					r.Routes = r.Routes[:0:0]
 					for _, rt := range allRoutes(t, host) {
 						if !strings.Contains(rt.Path, "/issues") && !strings.Contains(rt.Path, "/labels") {
@@ -217,7 +217,7 @@ func TestConnectorRow_MissingCapabilityFailsTheWrite(t *testing.T) {
 		{"CloseMergedIssue", "tracker.closeIssue"},
 	} {
 		t.Run(tc.write+"/"+tc.capName, func(t *testing.T) {
-			h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
+			h, _, calls, _ := routedLogHarness(t, withGithubRowAt)
 			withoutCapability(t, tc.capName)
 			matched := false
 			for _, w := range routedWrites {
@@ -243,7 +243,7 @@ func TestConnectorRow_MissingCapabilityFailsTheWrite(t *testing.T) {
 // A lost claim race is core policy, not a Connector fault, so it leaves the
 // Connector record empty; any other failed write is recorded.
 func TestNoteRouted_SkipsALostClaimRace(t *testing.T) {
-	_, _, _, logDir := routedLogHarness(t, useGithubRowAt)
+	_, _, _, logDir := routedLogHarness(t, withGithubRowAt)
 
 	claimed := fmt.Errorf("tracker: issue 7: %w", forge.ErrAlreadyClaimed)
 	if got := noteRouted("transition an issue", claimed); got != claimed {

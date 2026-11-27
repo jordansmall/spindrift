@@ -30,6 +30,7 @@ func acquire(pasted string, probe func(string) error) (token, output string, err
 }
 
 func TestAcquireToken_ValidTokenIsProbed(t *testing.T) {
+	t.Parallel()
 	var probed string
 	token, out, err := acquire("tok", func(tok string) error { probed = tok; return nil })
 	if err != nil || token != "tok" || probed != "tok" {
@@ -43,6 +44,7 @@ func TestAcquireToken_ValidTokenIsProbed(t *testing.T) {
 // Quickstart builds its runtime with no Connector sandbox, so the live check cannot run: the
 // token is accepted and the check is deferred to doctor.
 func TestAcquireToken_NoConnectorSandboxDefersToDoctor(t *testing.T) {
+	t.Parallel()
 	token, out, err := acquire("tok", func(string) error {
 		return fmt.Errorf("build tracker: %w", connectorsandbox.ErrNoConnectorSandbox)
 	})
@@ -55,6 +57,7 @@ func TestAcquireToken_NoConnectorSandboxDefersToDoctor(t *testing.T) {
 }
 
 func TestAcquireToken_Failures(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		paste string
@@ -86,6 +89,7 @@ func TestAcquireToken_Failures(t *testing.T) {
 }
 
 func TestKnobsFromRemote(t *testing.T) {
+	t.Parallel()
 	for remote, want := range map[string]string{
 		"https://codeberg.org/o/r.git": "https://codeberg.org",
 		"git@forge.example:o/r.git":    "https://forge.example",

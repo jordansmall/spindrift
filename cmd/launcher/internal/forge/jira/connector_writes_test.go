@@ -155,6 +155,7 @@ func TestConnector_TrackerContract(t *testing.T) {
 }
 
 func TestConnector_ListLabelsServesTheSiteList(t *testing.T) {
+	t.Parallel()
 	for _, fl := range connectorFlavours {
 		t.Run(fl.name, func(t *testing.T) {
 			h := newConnectorHarnessWith(t, fl.cloud, connectortracker.Lifecycle{Labels: testLabels})
@@ -174,6 +175,7 @@ func TestConnector_ListLabelsServesTheSiteList(t *testing.T) {
 // In status mode a transition the workflow does not offer is refused, naming
 // what it does offer, rather than swapped for a label.
 func TestConnector_StatusOnlyRefusesAnUnofferedTransition(t *testing.T) {
+	t.Parallel()
 	for _, fl := range connectorFlavours {
 		t.Run(fl.name, func(t *testing.T) {
 			lc, err := connectorLifecycle(dispatchkind.TrackerWork, testLabels, forge.ResearchVerdictLabels(),
@@ -199,6 +201,7 @@ func TestConnector_StatusOnlyRefusesAnUnofferedTransition(t *testing.T) {
 // In hybrid mode a mapped transition the workflow does not offer falls back to
 // the state's label; the issue's native status is left where it was.
 func TestConnector_HybridFallsBackToLabelWhenTransitionUnoffered(t *testing.T) {
+	t.Parallel()
 	for _, fl := range connectorFlavours {
 		t.Run(fl.name, func(t *testing.T) {
 			lc, err := connectorLifecycle(dispatchkind.TrackerWork, testLabels, forge.ResearchVerdictLabels(),
@@ -373,6 +376,7 @@ func transitionCases() []transitionCase {
 // The status-only and transition cases, run against the Connector: every
 // decision is core's, so each outcome must match.
 func TestConnector_TransitionCases(t *testing.T) {
+	t.Parallel()
 	for _, fl := range connectorFlavours {
 		for _, tc := range transitionCases() {
 			t.Run(fl.name+"/"+tc.name, func(t *testing.T) {
@@ -443,6 +447,7 @@ func TestConnector_TransitionCases(t *testing.T) {
 // A transition whose mapping is unavailable on the issue's workflow: hybrid
 // falls back to the label, status refuses with what the workflow offers.
 func TestConnector_UnavailableTransition(t *testing.T) {
+	t.Parallel()
 	const mapping = `{"dispatchable":"To Do","complete":"Done"}`
 	for _, fl := range connectorFlavours {
 		for _, lifecycle := range []string{jira.LifecycleHybrid, jira.LifecycleStatus} {
@@ -488,6 +493,7 @@ func TestConnector_UnavailableTransition(t *testing.T) {
 
 // A throttled write must reach core as RateLimited, not as a generic failure.
 func TestConnector_ThrottledCommentReportsRateLimited(t *testing.T) {
+	t.Parallel()
 	for _, fl := range connectorFlavours {
 		t.Run(fl.name, func(t *testing.T) {
 			h := newConnectorHarness(t, fl.cloud)

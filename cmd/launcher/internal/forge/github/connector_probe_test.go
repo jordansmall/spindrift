@@ -67,7 +67,7 @@ func TestExecClientProbe_ConfiguredRowGoesThroughTheConnector(t *testing.T) {
 	} {
 		t.Run(strconv.Itoa(tc.status), func(t *testing.T) {
 			b := newProbeBackend(t, tc.status)
-			useGithubRowAt(t, b.Listener.Addr().String())
+			withGithubRowAt(t, b.Listener.Addr().String())
 			useConnectorClient(t, b)
 			t.Setenv(tokenCredentialEnv, "ghp_host")
 			calls := countGH(t)

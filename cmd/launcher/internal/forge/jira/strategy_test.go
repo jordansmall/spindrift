@@ -12,6 +12,7 @@ import (
 )
 
 func TestStrategyShape(t *testing.T) {
+	t.Parallel()
 	s := jira.Strategy
 	if !reflect.DeepEqual(s.Descriptor, backend.Jira) {
 		t.Errorf("Descriptor = %+v, want backend.Jira", s.Descriptor)
@@ -67,6 +68,7 @@ func connectorLifecycle(t dispatchkind.Tracker, labels forge.DispatchLabels, ver
 }
 
 func TestConnectorLifecycle(t *testing.T) {
+	t.Parallel()
 	const mapping = `{"dispatchable":"To Do","inProgress":"In Progress","complete":{"status":"Done","resolution":"Fixed"}}`
 	labels := forge.DispatchLabels{Dispatchable: "d", InProgress: "p"}
 	verdicts := forge.ResearchVerdictLabels()

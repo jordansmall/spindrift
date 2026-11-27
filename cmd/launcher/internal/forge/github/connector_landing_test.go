@@ -84,7 +84,7 @@ var routedLandingWrites = []struct {
 func TestConnectorRow_LandingWritesGoThroughTheConnector(t *testing.T) {
 	for _, tc := range routedLandingWrites {
 		t.Run(tc.name, func(t *testing.T) {
-			h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
+			h, _, calls, _ := routedLogHarness(t, withGithubRowAt)
 			url := tc.seed(h)
 			c := connectorWriteClient(t)
 
@@ -106,7 +106,7 @@ func TestConnectorRow_LandingWritesGoThroughTheConnector(t *testing.T) {
 // reported as a failure, and created=false tells settle the title and body are
 // not the ones supplied.
 func TestConnectorRow_CreateDraftPRAdoptsAnOpenPR(t *testing.T) {
-	h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
+	h, _, calls, _ := routedLogHarness(t, withGithubRowAt)
 	h.backend.repo.SeedBranch(landingBranch, "9")
 	c := connectorWriteClient(t)
 	first, created, err := c.CreateDraftPR("title", "body", "main", landingBranch)
@@ -126,7 +126,7 @@ func TestConnectorRow_CreateDraftPRAdoptsAnOpenPR(t *testing.T) {
 
 // DeleteBranch refuses the base branch before any call is made.
 func TestConnectorRow_DeleteBranchRefusesTheBaseBranch(t *testing.T) {
-	h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
+	h, _, calls, _ := routedLogHarness(t, withGithubRowAt)
 	before := h.backend.hitCount()
 
 	err := connectorWriteClient(t).DeleteBranch("main", "main")
@@ -143,7 +143,7 @@ func TestConnectorRow_DeleteBranchRefusesTheBaseBranch(t *testing.T) {
 func TestLandingWrites_PlainRowRoutesThroughTheConnector(t *testing.T) {
 	for _, tc := range routedLandingWrites {
 		t.Run(tc.name, func(t *testing.T) {
-			h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
+			h, _, calls, _ := routedLogHarness(t, withGithubRowAt)
 			url := tc.seed(h)
 
 			_ = tc.write(connectorWriteClient(t), url)
@@ -160,7 +160,7 @@ func TestLandingWrites_PlainRowRoutesThroughTheConnector(t *testing.T) {
 func TestPlainRow_LoadFailureFailsTheLandingWrite(t *testing.T) {
 	for _, tc := range routedLandingWrites {
 		t.Run(tc.name, func(t *testing.T) {
-			h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
+			h, _, calls, _ := routedLogHarness(t, withGithubRowAt)
 			url := tc.seed(h)
 			boom := errors.New("github connector failed to load")
 			hookLoads(t, func(func() (*connectorhost.Connector, error)) (*connectorhost.Connector, error) { return nil, boom })
@@ -181,7 +181,7 @@ func TestPlainRow_RefusedRouteFailsTheLandingWrite(t *testing.T) {
 	for _, tc := range routedLandingWrites {
 		t.Run(tc.name, func(t *testing.T) {
 			h, _, calls, _ := routedLogHarness(t, func(t *testing.T, host string) {
-				applyGithubRow(t, host, func(r *backendrows.Row) {
+				decodeGithubRow(t, host, func(r *backendrows.Row) {
 					r.Routes = r.Routes[:0:0]
 					for _, rt := range allRoutes(t, host) {
 						// Compose no longer reads the Connector's remote through
@@ -218,7 +218,7 @@ func TestConnectorRow_MissingCapabilityFailsTheLandingWrite(t *testing.T) {
 		{"Merge", "forge.prs", connectorforge.ErrPRForgeUnsupported},
 	} {
 		t.Run(tc.write+"/"+tc.capName, func(t *testing.T) {
-			h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
+			h, _, calls, _ := routedLogHarness(t, withGithubRowAt)
 			withoutCapability(t, tc.capName)
 			for _, w := range routedLandingWrites {
 				if w.name != tc.write {
@@ -238,7 +238,7 @@ func TestConnectorRow_MissingCapabilityFailsTheLandingWrite(t *testing.T) {
 // A Connector without forge.autoMerge fails the enqueue by name instead of
 // reaching gh.
 func TestConnectorRow_EnqueueAutoMergeWithoutTheCapabilityFails(t *testing.T) {
-	h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
+	h, _, calls, _ := routedLogHarness(t, withGithubRowAt)
 	withoutCapability(t, "forge.autoMerge")
 	url := h.SeedOpenPR("9")
 
@@ -255,7 +255,7 @@ func TestConnectorRow_EnqueueAutoMergeWithoutTheCapabilityFails(t *testing.T) {
 // A transient merge failure surfaces as the class core's merge loop retries,
 // and nothing is deleted for a merge that did not land.
 func TestConnectorRow_MergeTransientFailureIsRetryable(t *testing.T) {
-	h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
+	h, _, calls, _ := routedLogHarness(t, withGithubRowAt)
 	url := h.SeedLandablePR("9")
 	h.scriptMerge(http.StatusBadGateway)
 	c := connectorWriteClient(t)
@@ -280,7 +280,7 @@ func TestConnectorRow_MergeTransientFailureIsRetryable(t *testing.T) {
 // refuses it must not turn a merged PR into a failed settle.
 func TestConnectorRow_MergeSurvivesAFailedBranchDelete(t *testing.T) {
 	h, _, calls, logDir := routedLogHarness(t, func(t *testing.T, host string) {
-		applyGithubRow(t, host, func(r *backendrows.Row) {
+		decodeGithubRow(t, host, func(r *backendrows.Row) {
 			r.Routes = r.Routes[:0:0]
 			for _, rt := range allRoutes(t, host) {
 				if rt.Method != "DELETE" {
@@ -313,7 +313,7 @@ func TestConnectorRow_MergeSurvivesAFailedBranchDelete(t *testing.T) {
 
 // A merged same-repository PR has its head branch deleted.
 func TestConnectorRow_MergeDeletesASameRepoHead(t *testing.T) {
-	h, _, _, _ := routedLogHarness(t, useGithubRowAt)
+	h, _, _, _ := routedLogHarness(t, withGithubRowAt)
 	url := h.SeedLandablePR("9")
 
 	if err := connectorWriteClient(t).Merge(url); err != nil {
@@ -327,7 +327,7 @@ func TestConnectorRow_MergeDeletesASameRepoHead(t *testing.T) {
 // A cross-repository PR's head is not in the base repository, so the merge
 // deletes nothing: a same-named base-repo branch would be someone else's.
 func TestConnectorRow_MergeLeavesACrossRepoHeadAlone(t *testing.T) {
-	h, _, _, logDir := routedLogHarness(t, useGithubRowAt)
+	h, _, _, logDir := routedLogHarness(t, withGithubRowAt)
 	url := h.SeedLandableForkPR("9")
 
 	if err := connectorWriteClient(t).Merge(url); err != nil {
@@ -350,7 +350,7 @@ func TestConnectorRow_MergeLeavesACrossRepoHeadAlone(t *testing.T) {
 // A head the repository already deleted is done, not a fault: nothing is
 // recorded for a clean run.
 func TestConnectorRow_MergeWithTheHeadAlreadyGoneRecordsNothing(t *testing.T) {
-	h, _, calls, logDir := routedLogHarness(t, useGithubRowAt)
+	h, _, calls, logDir := routedLogHarness(t, withGithubRowAt)
 	url := h.SeedOpenPR("9")
 
 	if err := connectorWriteClient(t).Merge(url); err != nil {
@@ -370,7 +370,7 @@ func TestConnectorRow_MergeWithTheHeadAlreadyGoneRecordsNothing(t *testing.T) {
 // The PR-body Closes gate is core policy; the Connector carries the body to the
 // backend byte for byte, so the keyword survives the host-side open.
 func TestConnectorRow_CreateDraftPRCarriesTheClosesBodyIntact(t *testing.T) {
-	h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
+	h, _, calls, _ := routedLogHarness(t, withGithubRowAt)
 	h.backend.repo.SeedBranch(landingBranch, "9")
 	const body = "Fixes the thing.\n\nCloses #9\n"
 
@@ -391,7 +391,7 @@ func TestConnectorRow_CreateDraftPRCarriesTheClosesBodyIntact(t *testing.T) {
 // delete the branch again when the patch is abandoned, all through the
 // Connector and core's git with no gh call.
 func TestConnectorRow_ButlerPatchPathRunsThroughTheConnector(t *testing.T) {
-	h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
+	h, _, calls, _ := routedLogHarness(t, withGithubRowAt)
 	src := t.TempDir()
 	forgetest.Run(t, "", "clone", h.backend.repo.Bare, src)
 	forgetest.Run(t, src, "checkout", "-b", "work")
@@ -425,7 +425,7 @@ func TestConnectorRow_ButlerPatchPathRunsThroughTheConnector(t *testing.T) {
 // A push-only Connector composes without a PR forge: Merge fails by the named
 // capability instead of reaching the push-only forge's Merge.
 func TestConnectorRow_MergeOnAPushOnlyConnectorNamesTheMissingCapability(t *testing.T) {
-	h, _, calls, _ := routedLogHarness(t, useGithubRowAt)
+	h, _, calls, _ := routedLogHarness(t, withGithubRowAt)
 	withoutCapability(t, "forge.prs")
 	hookLoads(t, func(load func() (*connectorhost.Connector, error)) (*connectorhost.Connector, error) {
 		conn, err := load()

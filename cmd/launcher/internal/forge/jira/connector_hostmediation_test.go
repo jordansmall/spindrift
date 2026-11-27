@@ -134,6 +134,7 @@ func (h *connectorHarness) storedComments(num string) []jiraWireComment {
 // Connector stores the property, and the read restores the marker as the
 // body's first line, which is what the Box greps for to dedup research.
 func TestConnector_ResearchMarkerRoundTripsThroughTheProperty(t *testing.T) {
+	t.Parallel()
 	if os.Getenv(connectorWasmEnv) == "" {
 		t.Skipf("%s unset: no compiled jira Connector to test", connectorWasmEnv)
 	}
@@ -186,6 +187,7 @@ func TestConnector_ResearchMarkerRoundTripsThroughTheProperty(t *testing.T) {
 // Connector stores it apart, and the read restores it so the backlog dedup
 // index finds the issue the Connector filed.
 func TestConnector_FindingDedupFindsAConnectorFiledIssue(t *testing.T) {
+	t.Parallel()
 	if os.Getenv(connectorWasmEnv) == "" {
 		t.Skipf("%s unset: no compiled jira Connector to test", connectorWasmEnv)
 	}
@@ -239,6 +241,7 @@ func TestConnector_FindingDedupFindsAConnectorFiledIssue(t *testing.T) {
 
 // A body with no marker stores no property.
 func TestConnector_PostIssueWithoutMarkerStoresNoProperty(t *testing.T) {
+	t.Parallel()
 	if os.Getenv(connectorWasmEnv) == "" {
 		t.Skipf("%s unset: no compiled jira Connector to test", connectorWasmEnv)
 	}
@@ -256,6 +259,7 @@ func TestConnector_PostIssueWithoutMarkerStoresNoProperty(t *testing.T) {
 }
 
 func TestConnector_PostIssueRejectedCreateIsAnError(t *testing.T) {
+	t.Parallel()
 	if os.Getenv(connectorWasmEnv) == "" {
 		t.Skipf("%s unset: no compiled jira Connector to test", connectorWasmEnv)
 	}
