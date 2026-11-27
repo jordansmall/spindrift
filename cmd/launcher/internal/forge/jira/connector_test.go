@@ -316,6 +316,7 @@ var connectorFlavours = []struct {
 }{{"Server", false}, {"Cloud", true}}
 
 func TestConnector_ReadContracts(t *testing.T) {
+	t.Parallel()
 	// Cloud's search walks /search/jql, Server's /search: both sit under the
 	// one search route, so a route is judged over the union of the two runs.
 	admitted := map[string]int{}
@@ -376,6 +377,7 @@ func TestConnector_ReadContracts(t *testing.T) {
 }
 
 func TestConnector_BlocksOfReturnsOutwardLinks(t *testing.T) {
+	t.Parallel()
 	for _, fl := range connectorFlavours {
 		t.Run(fl.name, func(t *testing.T) {
 			h := newConnectorHarness(t, fl.cloud)
@@ -410,6 +412,7 @@ func TestConnector_BlocksOfReturnsOutwardLinks(t *testing.T) {
 }
 
 func TestConnector_KeyRoundTripsAndOutOfGrammarIsRefused(t *testing.T) {
+	t.Parallel()
 	for _, fl := range connectorFlavours {
 		t.Run(fl.name, func(t *testing.T) {
 			h := newConnectorHarness(t, fl.cloud)
@@ -458,6 +461,7 @@ func TestConnector_KeyRoundTripsAndOutOfGrammarIsRefused(t *testing.T) {
 // restores them to the text a reader greps for: the dedup marker closes the
 // issue body and the research marker opens the marked comment only.
 func TestConnector_MarkersRestoredOnRead(t *testing.T) {
+	t.Parallel()
 	for _, fl := range connectorFlavours {
 		t.Run(fl.name, func(t *testing.T) {
 			h := newConnectorHarness(t, fl.cloud)
@@ -527,6 +531,7 @@ func (h *connectorHarness) SeedComments(num string, comments []forge.Comment) {
 // the status OR the label, so the status-only issue appearing proves the
 // status selector reached the backend's JQL.
 func TestConnector_ListIssuesSelectsByStatus(t *testing.T) {
+	t.Parallel()
 	for _, fl := range connectorFlavours {
 		t.Run(fl.name, func(t *testing.T) {
 			h := newConnectorHarnessWith(t, fl.cloud, connectortracker.Lifecycle{

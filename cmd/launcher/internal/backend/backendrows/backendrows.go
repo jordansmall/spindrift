@@ -20,7 +20,6 @@ import (
 	"path"
 	"slices"
 	"strings"
-	"sync"
 
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectorrecord"
@@ -59,12 +58,12 @@ type Row struct {
 	// BaseEnv names the knob env var holding the site's https base URL, for a
 	// Connector whose host is the Consumer's own (a Jira site). A Route or
 	// accepted Route whose Host is BaseHost takes the base URL's host and has
-	// the base URL's path prefix prepended to its Path; Use resolves them, so a
+	// the base URL's path prefix prepended to its Path; Decode resolves them, so a
 	// stored Row carries concrete hosts.
 	BaseEnv string `json:"baseEnv,omitempty"`
 	// GitRemote is the forge's https web base that core derives the clone URL
 	// <GitRemote>/<owner>/<name>.git from. A row sets it literally, as an origin
-	// with no path, or names the knob in GitRemoteEnv; Use resolves the latter
+	// with no path, or names the knob in GitRemoteEnv; Decode resolves the latter
 	// into it, so a stored Row carries the concrete base. A row with neither
 	// names no Git remote (a tracker); the forge code refuses it.
 	GitRemote string `json:"gitRemote,omitempty"`
@@ -107,7 +106,7 @@ const (
 // the accepted one lacks or words differently (an accepted Route declaring none
 // admits any body), and a path equal to or inside the accepted path's subtree.
 // The subtree test is PathSet.Admits' request-path match, sound here because
-// Use validates both tables as canonical patterns (no blanket "/").
+// Decode validates both tables as canonical patterns (no blanket "/").
 func (r Row) Widening() []connectorhost.Route {
 	var added []connectorhost.Route
 	for _, live := range r.Routes {
@@ -154,7 +153,7 @@ func documentsCovered(accepted, live map[string]string) bool {
 // AcceptedGrant, nil when AcceptedGrant is nil. A part the row declares absent
 // is skipped, as Widening is silent on a narrowed Route. The authorization
 // scheme compares normalized ("" is "bearer"). The Git remote compares the
-// declaration: Use resolves GitRemoteEnv into GitRemote, so a row naming the
+// declaration: Decode resolves GitRemoteEnv into GitRemote, so a row naming the
 // env is compared by that name alone, never by the resolved value.
 func (r Row) GrantChanges() []GrantChange {
 	a := r.AcceptedGrant
@@ -189,7 +188,7 @@ func orNone(s string) string {
 }
 
 // remoteDecl renders a Git remote declaration; the env name wins over the
-// resolved literal Use stored beside it.
+// resolved literal Decode stored beside it.
 func remoteDecl(literal, env string) string {
 	if env != "" {
 		return "env " + env
@@ -235,42 +234,11 @@ func (s Set) All() []Row {
 }
 
 // BaseError returns why Decode dropped the named row, so a caller that finds
-// no row can say why. It is nil when the row applied or is absent.
+// no row can say why. It is nil when the row decoded or is absent.
 func (s Set) BaseError(name string) error { return s.unusableBase[name] }
 
 // Gate reports whether a backend's Routes can serve the settings lookup reads.
 type Gate func(lookup func(string) string) bool
-
-var (
-	mu sync.RWMutex
-	// applied is the Set Use last stored; Applied returns it.
-	applied Set
-	gates   = map[string]Gate{}
-)
-
-// Applied is the Set Use last stored. It is transitional: it goes with the
-// process-global registry once every reader holds its own Set.
-func Applied() Set {
-	mu.RLock()
-	defer mu.RUnlock()
-	return applied
-}
-
-// Use applies the rows in raw as Decode reads them under the registered gates,
-// replacing any rows an earlier call applied; empty raw clears them.
-func Use(raw json.RawMessage, lookup func(string) string) error {
-	mu.RLock()
-	g := maps.Clone(gates)
-	mu.RUnlock()
-	set, err := Decode(raw, lookup, g)
-	if err != nil {
-		return err
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	applied = set
-	return nil
-}
 
 // Decode reads the rows in raw, a JSON array of Row; empty raw is the empty
 // Set. A row with no name, a repeated or built-in name, no module,
@@ -314,16 +282,6 @@ func Decode(raw json.RawMessage, lookup func(string) string, gates map[string]Ga
 		}
 	}
 	return Set{rows: next, unusableBase: dropped}, nil
-}
-
-// RegisterGate has Use drop, after validating it, the row named name whenever
-// applies answers false for the run's settings: a backend whose Routes cannot
-// serve the settings gets no row, so no later reader sees one. Call it from
-// init.
-func RegisterGate(name string, applies Gate) {
-	mu.Lock()
-	defer mu.Unlock()
-	gates[name] = applies
 }
 
 // unsetHost is the placeholder base host an unusable row resolves against, so
@@ -495,12 +453,6 @@ func validate(row Row, seen map[string]bool) error {
 	return nil
 }
 
-// Lookup returns the applied row for the backend name; see Set.Lookup.
-func Lookup(name string) (Row, bool) { return Applied().Lookup(name) }
-
-// All returns every applied row, sorted by name.
-func All() []Row { return Applied().All() }
-
 // Options is what Load takes from its host process.
 type Options struct {
 	// Getenv resolves the credential; nil means os.Getenv.
@@ -569,28 +521,10 @@ func Load(ctx context.Context, row Row, o Options) (*connectorhost.Connector, er
 	return o.Sandbox.LoadNetwork(ctx, wasm, n)
 }
 
-// Snapshot captures the applied rows and registered gates and returns the
-// function that restores them, for a test that applies rows to the
-// process-global set. It is not in export_test.go because cmd/launcher's
-// tests need it.
-func Snapshot() (restore func()) {
-	mu.Lock()
-	defer mu.Unlock()
-	saved, savedGates := applied, maps.Clone(gates)
-	return func() {
-		mu.Lock()
-		defer mu.Unlock()
-		applied, gates = saved, savedGates
-	}
-}
-
-// BaseError returns why Use dropped the named row; see Set.BaseError.
-func BaseError(name string) error { return Applied().BaseError(name) }
-
 // Baseline renders the Route baseline file (spindrift-connector-routes.json)
 // from raw, the launcher input document's backend rows: one object entry per
 // Connector, keyed by name in sorted order, recording its whole grant. raw
-// must be the document's own rows, not Lookup's: Use rewrites {base} hosts in
+// must be the document's own rows, not a decoded Set's: Decode rewrites {base} hosts in
 // the stored rows, and an accepted baseline records the declaration (the {base}
 // placeholder and the knob names), never a resolved host. The scheme is always
 // written, normalized; base and Git remote only when declared, so an omitted

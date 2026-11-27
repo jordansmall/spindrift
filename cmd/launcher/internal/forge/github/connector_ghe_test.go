@@ -39,13 +39,13 @@ func githubRuntimeUnderHost(t *testing.T, host string) *connectorruntime.Runtime
 }
 
 // The row's Routes pin api.github.com, so under a GitHub Enterprise GH_HOST it
-// applies none: nothing is sent to api.github.com, no connector credential is
+// keeps none: nothing is sent to api.github.com, no connector credential is
 // read, and a read fails by name rather than reaching gh.
-func TestGithubRow_GHEHostAppliesNoRow(t *testing.T) {
+func TestGithubRow_GHEHostKeepsNoRow(t *testing.T) {
 	rt := githubRuntimeUnderHost(t, "ghe.example.com")
 	t.Setenv("GH_HOST", "ghe.example.com")
 	if _, ok := rt.Row("github"); ok {
-		t.Fatal("the github row is applied under GH_HOST=ghe.example.com")
+		t.Fatal("the runtime holds a github row under GH_HOST=ghe.example.com")
 	}
 	if _, ok := routedRow(rt); ok {
 		t.Fatal("routedRow reports a routed row under GH_HOST=ghe.example.com")

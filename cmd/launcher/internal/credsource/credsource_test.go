@@ -11,6 +11,7 @@ import (
 )
 
 func TestStatic(t *testing.T) {
+	t.Parallel()
 	if got := Static("v").Value(); got != "v" {
 		t.Fatalf("Value = %q, want v", got)
 	}
@@ -27,6 +28,7 @@ func write(t *testing.T, path, body string) {
 }
 
 func TestFileRotationAndFallback(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "tok")
 	src := File(path, Static("startup"))
 	if got := src.Value(); got != "startup" {
@@ -43,6 +45,7 @@ func TestFileRotationAndFallback(t *testing.T) {
 }
 
 func TestFileKeepsLastGoodValue(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "tok")
 	src := File(path, Static("startup"))
 	write(t, path, "good")
@@ -62,12 +65,14 @@ func TestFileKeepsLastGoodValue(t *testing.T) {
 }
 
 func TestFileNilFallback(t *testing.T) {
+	t.Parallel()
 	if got := File(filepath.Join(t.TempDir(), "none"), nil).Value(); got != "" {
 		t.Fatalf("Value = %q, want empty", got)
 	}
 }
 
 func TestFileFallbackTracksUntilFirstGoodRead(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "tok")
 	cmd, err := NewCommand("E", "c", func(string) (string, error) { return "one\n", nil })
 	if err != nil {
@@ -84,6 +89,7 @@ func TestFileFallbackTracksUntilFirstGoodRead(t *testing.T) {
 }
 
 func TestCommandResolvesAndRefreshes(t *testing.T) {
+	t.Parallel()
 	out := "one\n"
 	c, err := NewCommand("E", "vault get e", func(cmd string) (string, error) {
 		if cmd != "vault get e" {
@@ -104,6 +110,7 @@ func TestCommandResolvesAndRefreshes(t *testing.T) {
 }
 
 func TestCommandRefreshFailureKeepsPreviousValue(t *testing.T) {
+	t.Parallel()
 	fail := false
 	c, err := NewCommand("E", "vault get hunter2", func(string) (string, error) {
 		if fail {
@@ -128,6 +135,7 @@ func TestCommandRefreshFailureKeepsPreviousValue(t *testing.T) {
 }
 
 func TestNewCommandFailureIsValueFree(t *testing.T) {
+	t.Parallel()
 	c, err := NewCommand("E", "vault get hunter2", func(string) (string, error) { return "", errors.New("x") })
 	if err == nil || c != nil {
 		t.Fatalf("got %v, %v; want an error and no source", c, err)
@@ -138,6 +146,7 @@ func TestNewCommandFailureIsValueFree(t *testing.T) {
 }
 
 func TestConcurrentUse(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "tok")
 	var n atomic.Int64
 	c, err := NewCommand("E", "c", func(string) (string, error) { return "v\n", nil })

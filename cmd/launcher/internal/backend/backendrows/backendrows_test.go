@@ -25,13 +25,6 @@ import (
 
 const fixturesEnv = "SPINDRIFT_CONNECTOR_FIXTURES_DIR"
 
-func isolate(t *testing.T) {
-	t.Helper()
-	backendrows.Reset()
-	t.Cleanup(backendrows.Reset)
-	t.Cleanup(backendrows.Snapshot())
-}
-
 func rows(t *testing.T, v any) json.RawMessage {
 	t.Helper()
 	b, err := json.Marshal(v)
@@ -49,14 +42,12 @@ func noEnv(string) string { return "" }
 
 var getRepos = connectorhost.Route{Method: "GET", Host: "api.fixture.test", Path: "/repos"}
 
-func TestUseRoundTripsRowsThroughLookup(t *testing.T) {
-	isolate(t)
+func TestDecodeRoundTripsRowsThroughLookup(t *testing.T) {
+	t.Parallel()
 	raw := json.RawMessage(`[{"name":"fixture","module":"/nix/store/x-network.wasm",` +
 		`"routes":[{"method":"GET","host":"api.fixture.test","path":"/repos"}],"credentialEnv":"FIXTURE_TOKEN"}]`)
-	if err := backendrows.Use(raw, noEnv); err != nil {
-		t.Fatal(err)
-	}
-	got, ok := backendrows.Lookup("fixture")
+	set := use(t, raw, noEnv)
+	got, ok := set.Lookup("fixture")
 	if !ok {
 		t.Fatal("Lookup(fixture) = false")
 	}
@@ -64,29 +55,13 @@ func TestUseRoundTripsRowsThroughLookup(t *testing.T) {
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Errorf("Lookup = %+v, want %+v", got, want)
 	}
-	if _, ok := backendrows.Lookup("other"); ok {
+	if _, ok := set.Lookup("other"); ok {
 		t.Error("Lookup(other) = true, want false")
 	}
 }
 
-func TestUseWithoutRowsClearsTheEarlierRows(t *testing.T) {
-	for name, raw := range map[string]json.RawMessage{"nil": nil, "empty": {}, "whitespace": []byte("  \n"), "empty array": []byte("[]")} {
-		t.Run(name, func(t *testing.T) {
-			isolate(t)
-			if err := backendrows.Use(rows(t, []backendrows.Row{row("x", getRepos)}), noEnv); err != nil {
-				t.Fatal(err)
-			}
-			if err := backendrows.Use(raw, noEnv); err != nil {
-				t.Fatal(err)
-			}
-			if _, ok := backendrows.Lookup("x"); ok {
-				t.Error("Lookup(x) = true after a document with no rows")
-			}
-		})
-	}
-}
-
 func TestDecodeRefusesInvalidRowsNamingTheBackend(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct {
 		raw       json.RawMessage
 		want      []string
@@ -132,45 +107,30 @@ func TestDecodeRefusesInvalidRowsNamingTheBackend(t *testing.T) {
 	}
 }
 
-func TestUseReplacesTheEarlierRows(t *testing.T) {
-	isolate(t)
-	if err := backendrows.Use(rows(t, []backendrows.Row{row("x", getRepos), row("y", getRepos)}), noEnv); err != nil {
-		t.Fatal(err)
-	}
-	if err := backendrows.Use(rows(t, []backendrows.Row{row("x", getRepos)}), noEnv); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := backendrows.Lookup("x"); !ok {
-		t.Error("Lookup(x) = false after the second document kept it")
-	}
-	if _, ok := backendrows.Lookup("y"); ok {
-		t.Error("Lookup(y) = true although the second document dropped it")
-	}
-}
-
-func TestUseAppliesNothingWhenAnyRowIsInvalid(t *testing.T) {
-	isolate(t)
-	err := backendrows.Use(rows(t, []backendrows.Row{row("good", getRepos), {Name: "bad"}}), noEnv)
+func TestDecodeAppliesNothingWhenAnyRowIsInvalid(t *testing.T) {
+	t.Parallel()
+	set, err := backendrows.Decode(rows(t, []backendrows.Row{row("good", getRepos), {Name: "bad"}}), noEnv, nil)
 	if err == nil {
-		t.Fatal("Use() = nil, want an error")
+		t.Fatal("Decode() = nil, want an error")
 	}
-	if _, ok := backendrows.Lookup("good"); ok {
+	if _, ok := set.Lookup("good"); ok {
 		t.Error("good row stored although the document was refused")
 	}
 }
 
-func TestUseValidatesAcceptedRoutesWhenPresent(t *testing.T) {
+func TestDecodeValidatesAcceptedRoutesWhenPresent(t *testing.T) {
+	t.Parallel()
 	withAccepted := func(name string, accepted ...connectorhost.Route) backendrows.Row {
 		r := row(name, getRepos)
 		r.AcceptedRoutes = accepted
 		return r
 	}
 	t.Run("blanket path is refused and applies nothing", func(t *testing.T) {
-		isolate(t)
+		t.Parallel()
 		blanket := connectorhost.Route{Method: "GET", Host: "api.fixture.test", Path: "/"}
-		err := backendrows.Use(rows(t, []backendrows.Row{row("good", getRepos), withAccepted("broad", blanket)}), noEnv)
+		set, err := backendrows.Decode(rows(t, []backendrows.Row{row("good", getRepos), withAccepted("broad", blanket)}), noEnv, nil)
 		if err == nil {
-			t.Fatal("Use() = nil, want an error")
+			t.Fatal("Decode() = nil, want an error")
 		}
 		for _, w := range []string{"backend rows: ", "broad", "accepted routes", "GET api.fixture.test /"} {
 			if !strings.Contains(err.Error(), w) {
@@ -180,19 +140,18 @@ func TestUseValidatesAcceptedRoutesWhenPresent(t *testing.T) {
 		if !errors.Is(err, connectorhost.ErrRouteTable) {
 			t.Errorf("err = %v, want ErrRouteTable", err)
 		}
-		if _, ok := backendrows.Lookup("good"); ok {
+		if _, ok := set.Lookup("good"); ok {
 			t.Error("good row stored although the document was refused")
 		}
 	})
 	t.Run("empty and valid baselines pass", func(t *testing.T) {
-		isolate(t)
-		if err := backendrows.Use(rows(t, []backendrows.Row{withAccepted("none"), withAccepted("some", getRepos)}), noEnv); err != nil {
-			t.Fatalf("Use() = %v", err)
-		}
+		t.Parallel()
+		use(t, rows(t, []backendrows.Row{withAccepted("none"), withAccepted("some", getRepos)}), noEnv)
 	})
 }
 
 func TestCoreBackendsAreRegistered(t *testing.T) {
+	t.Parallel()
 	for _, n := range []string{"local", "git"} {
 		if _, ok := backend.ByName(n); !ok {
 			t.Errorf("%q is not a generated backend", n)
@@ -383,6 +342,7 @@ func withDocs(r connectorhost.Route, docs map[string]string) connectorhost.Route
 }
 
 func TestWidening(t *testing.T) {
+	t.Parallel()
 	r := func(method, host, path string) connectorhost.Route {
 		return connectorhost.Route{Method: method, Host: host, Path: path}
 	}
@@ -437,6 +397,7 @@ func TestWidening(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			got := backendrows.Row{Routes: tc.live, AcceptedRoutes: tc.accepted}.Widening()
 			if fmt.Sprint(got) != fmt.Sprint(tc.want) {
 				t.Errorf("Widening() = %v, want %v", got, tc.want)
@@ -446,6 +407,7 @@ func TestWidening(t *testing.T) {
 }
 
 func TestGrantChanges(t *testing.T) {
+	t.Parallel()
 	base := backendrows.Row{CredentialEnv: "TOK", BaseEnv: "SITE", GitRemote: "https://forge.test"}
 	same := backendrows.Grant{CredentialEnv: "TOK", BaseEnv: "SITE", GitRemote: "https://forge.test"}
 	with := func(r backendrows.Row, g *backendrows.Grant) backendrows.Row { r.AcceptedGrant = g; return r }
@@ -478,6 +440,7 @@ func TestGrantChanges(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			if got := tc.row.GrantChanges(); fmt.Sprint(got) != fmt.Sprint(tc.want) {
 				t.Errorf("GrantChanges() = %v, want %v", got, tc.want)
 			}
@@ -485,8 +448,8 @@ func TestGrantChanges(t *testing.T) {
 	}
 }
 
-func TestUseDecodesAcceptedGrantAndResolvedGitRemoteDoesNotDiffer(t *testing.T) {
-	isolate(t)
+func TestDecodeReadsAcceptedGrantAndResolvedGitRemoteDoesNotDiffer(t *testing.T) {
+	t.Parallel()
 	raw := json.RawMessage(`[{"name":"forge","module":"/x/f.wasm","routes":[{"method":"GET","host":"h","path":"/a"}],` +
 		`"credentialEnv":"T","gitRemoteEnv":"FORGE_URL",` +
 		`"acceptedGrant":{"credentialEnv":"T","gitRemoteEnv":"FORGE_URL"}}]`)
@@ -496,10 +459,8 @@ func TestUseDecodesAcceptedGrantAndResolvedGitRemoteDoesNotDiffer(t *testing.T) 
 		}
 		return ""
 	}
-	if err := backendrows.Use(raw, env); err != nil {
-		t.Fatal(err)
-	}
-	got, _ := backendrows.Lookup("forge")
+	set := use(t, raw, env)
+	got, _ := set.Lookup("forge")
 	if got.GitRemote != "https://forge.test" || got.AcceptedGrant == nil || got.AcceptedGrant.GitRemoteEnv != "FORGE_URL" {
 		t.Fatalf("row = %+v, want resolved remote and decoded grant", got)
 	}
@@ -509,6 +470,7 @@ func TestUseDecodesAcceptedGrantAndResolvedGitRemoteDoesNotDiffer(t *testing.T) 
 }
 
 func TestDecodeRefusesAnInvalidAcceptedGrant(t *testing.T) {
+	t.Parallel()
 	for name, grant := range map[string]string{
 		"unknown scheme":        `{"credentialScheme":"digest"}`,
 		"both git remote forms": `{"gitRemote":"https://f.test","gitRemoteEnv":"U"}`,
@@ -523,16 +485,14 @@ func TestDecodeRefusesAnInvalidAcceptedGrant(t *testing.T) {
 	}
 }
 
-func TestUseAcceptsAcceptedRoutesAndAllListsByName(t *testing.T) {
-	isolate(t)
+func TestDecodeAcceptsAcceptedRoutesAndAllListsByName(t *testing.T) {
+	t.Parallel()
 	raw := json.RawMessage(`[` +
 		`{"name":"zeta","module":"/x/z.wasm","routes":[{"method":"GET","host":"h","path":"/a"}],"credentialEnv":"T","acceptedRoutes":[]},` +
 		`{"name":"alpha","module":"/x/a.wasm","routes":[{"method":"GET","host":"h","path":"/a"}],"credentialEnv":"T",` +
 		`"acceptedRoutes":[{"method":"GET","host":"h","path":"/a"}]}]`)
-	if err := backendrows.Use(raw, noEnv); err != nil {
-		t.Fatal(err)
-	}
-	all := backendrows.All()
+	set := use(t, raw, noEnv)
+	all := set.All()
 	if len(all) != 2 || all[0].Name != "alpha" || all[1].Name != "zeta" {
 		t.Fatalf("All() = %+v, want alpha then zeta", all)
 	}
@@ -556,7 +516,8 @@ func envOf(base string) func(string) string {
 	}
 }
 
-func TestUseSubstitutesTheConfiguredBaseURLIntoRoutes(t *testing.T) {
+func TestDecodeSubstitutesTheConfiguredBaseURLIntoRoutes(t *testing.T) {
+	t.Parallel()
 	search := connectorhost.Route{Method: "GET", Host: "{base}", Path: "/rest/api/3/search"}
 	cases := map[string]struct {
 		base string
@@ -569,13 +530,11 @@ func TestUseSubstitutesTheConfiguredBaseURLIntoRoutes(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			isolate(t)
+			t.Parallel()
 			r := baseRow(search, getRepos)
 			r.AcceptedRoutes = []connectorhost.Route{search}
-			if err := backendrows.Use(rows(t, []backendrows.Row{r}), envOf(tc.base)); err != nil {
-				t.Fatal(err)
-			}
-			got, _ := backendrows.Lookup("site")
+			set := use(t, rows(t, []backendrows.Row{r}), envOf(tc.base))
+			got, _ := set.Lookup("site")
 			if len(got.Routes) != 2 || !reflect.DeepEqual(got.Routes[0], tc.want) || !reflect.DeepEqual(got.Routes[1], getRepos) {
 				t.Errorf("Routes = %v, want [%v %v]", got.Routes, tc.want, getRepos)
 			}
@@ -592,16 +551,16 @@ func TestUseSubstitutesTheConfiguredBaseURLIntoRoutes(t *testing.T) {
 // baseSearch is the one {base} route the base-URL tests below resolve.
 var baseSearch = connectorhost.Route{Method: "GET", Host: "{base}", Path: "/rest"}
 
-func TestUseRefusesABaseHostWithNoBaseEnvNamingTheBackend(t *testing.T) {
-	isolate(t)
-	err := backendrows.Use(rows(t, []backendrows.Row{row("good", getRepos), row("site", baseSearch)}), envOf("https://acme.example.net"))
+func TestDecodeRefusesABaseHostWithNoBaseEnvNamingTheBackend(t *testing.T) {
+	t.Parallel()
+	set, err := backendrows.Decode(rows(t, []backendrows.Row{row("good", getRepos), row("site", baseSearch)}), envOf("https://acme.example.net"), nil)
 	if err == nil {
-		t.Fatal("Use() = nil, want an error")
+		t.Fatal("Decode() = nil, want an error")
 	}
 	if !strings.Contains(err.Error(), `backend "site"`) {
 		t.Errorf("err = %q, want it to name the backend", err)
 	}
-	if _, ok := backendrows.Lookup("good"); ok {
+	if _, ok := set.Lookup("good"); ok {
 		t.Error("good row stored although the document was refused")
 	}
 }
@@ -609,6 +568,7 @@ func TestUseRefusesABaseHostWithNoBaseEnvNamingTheBackend(t *testing.T) {
 // The shadow and primary fields are gone from the row; a stale document that
 // still carries one is refused rather than silently changing routing.
 func TestDecodeRefusesTheRetiredShadowAndPrimaryFields(t *testing.T) {
+	t.Parallel()
 	for _, field := range []string{`"shadow":true`, `"shadowEvery":20`, `"primary":true`} {
 		t.Run(field, func(t *testing.T) {
 			t.Parallel()
@@ -621,7 +581,8 @@ func TestDecodeRefusesTheRetiredShadowAndPrimaryFields(t *testing.T) {
 	}
 }
 
-func TestUseSkipsABaseRowWithAnUnusableBase(t *testing.T) {
+func TestDecodeSkipsABaseRowWithAnUnusableBase(t *testing.T) {
+	t.Parallel()
 	for name, base := range map[string]string{
 		"unset":                 "",
 		"no scheme":             "acme.example.net",
@@ -641,68 +602,44 @@ func TestUseSkipsABaseRowWithAnUnusableBase(t *testing.T) {
 		"dot segment":           "https://jira.corp/./jira",
 	} {
 		t.Run(name, func(t *testing.T) {
-			isolate(t)
-			if err := backendrows.Use(rows(t, []backendrows.Row{row("good", getRepos), baseRow(baseSearch)}), envOf(base)); err != nil {
-				t.Fatalf("Use() = %v, want the row left unapplied", err)
-			}
-			if _, ok := backendrows.Lookup("site"); ok {
+			t.Parallel()
+			set := use(t, rows(t, []backendrows.Row{row("good", getRepos), baseRow(baseSearch)}), envOf(base))
+			if _, ok := set.Lookup("site"); ok {
 				t.Error("row with an unusable base applied")
 			}
-			if _, ok := backendrows.Lookup("good"); !ok {
+			if _, ok := set.Lookup("good"); !ok {
 				t.Error("good row not applied")
 			}
 		})
 	}
 }
 
-func TestBaseErrorReportsTheBaseOfADroppedRowOnly(t *testing.T) {
-	isolate(t)
-	good, site := row("good", getRepos), baseRow(baseSearch)
-	if err := backendrows.Use(rows(t, []backendrows.Row{good, site}), envOf("http://site.lan:3000")); err != nil {
-		t.Fatal(err)
-	}
-	if err := backendrows.BaseError("site"); err == nil || !strings.Contains(err.Error(), "must be an https URL") {
-		t.Errorf("BaseError(site) = %v, want the https error", err)
-	}
-	if err := backendrows.BaseError("good"); err != nil {
-		t.Errorf("BaseError(good) = %v, want nil for a row with no base", err)
-	}
-	if err := backendrows.Use(rows(t, []backendrows.Row{good, site}), envOf("https://site.example.net")); err != nil {
-		t.Fatal(err)
-	}
-	if err := backendrows.BaseError("site"); err != nil {
-		t.Errorf("BaseError(site) = %v, want nil once the row applied", err)
-	}
-}
-
-func TestUseStillValidatesAnUnconfiguredBaseRow(t *testing.T) {
-	isolate(t)
+func TestDecodeStillValidatesAnUnconfiguredBaseRow(t *testing.T) {
+	t.Parallel()
 	bad := baseRow(baseSearch)
 	bad.CredentialEnv = ""
-	err := backendrows.Use(rows(t, []backendrows.Row{bad}), envOf(""))
+	_, err := backendrows.Decode(rows(t, []backendrows.Row{bad}), envOf(""), nil)
 	if err == nil || !strings.Contains(err.Error(), "no credentialEnv") {
 		t.Errorf("err = %v, want the missing credentialEnv refused", err)
 	}
 }
 
-func TestUseRefusesALeadingWildcardOnABaseRouteBeforeThePrefixIsAdded(t *testing.T) {
+func TestDecodeRefusesALeadingWildcardOnABaseRouteBeforeThePrefixIsAdded(t *testing.T) {
+	t.Parallel()
 	for _, path := range []string{"/*", "/*/x"} {
-		isolate(t)
 		r := connectorhost.Route{Method: "GET", Host: "{base}", Path: path}
-		err := backendrows.Use(rows(t, []backendrows.Row{baseRow(r)}), envOf("https://h/jira"))
+		_, err := backendrows.Decode(rows(t, []backendrows.Row{baseRow(r)}), envOf("https://h/jira"), nil)
 		if !errors.Is(err, connectorhost.ErrRouteWildcardRoot) {
 			t.Errorf("path %q: err = %v, want ErrRouteWildcardRoot", path, err)
 		}
 	}
 }
 
-func TestUseMapsARootBaseRouteToTheBarePrefix(t *testing.T) {
-	isolate(t)
+func TestDecodeMapsARootBaseRouteToTheBarePrefix(t *testing.T) {
+	t.Parallel()
 	root := connectorhost.Route{Method: "GET", Host: "{base}", Path: "/"}
-	if err := backendrows.Use(rows(t, []backendrows.Row{baseRow(root)}), envOf("https://acme.example.net/jira")); err != nil {
-		t.Fatal(err)
-	}
-	got, _ := backendrows.Lookup("site")
+	set := use(t, rows(t, []backendrows.Row{baseRow(root)}), envOf("https://acme.example.net/jira"))
+	got, _ := set.Lookup("site")
 	if want := (connectorhost.Route{Method: "GET", Host: "acme.example.net", Path: "/jira", NamedByKnob: true}); !reflect.DeepEqual(got.Routes[0], want) {
 		t.Errorf("Routes[0] = %v, want %v", got.Routes[0], want)
 	}
@@ -737,53 +674,6 @@ func TestLoadRoutesEveryLoadThroughTheOptionsSandbox(t *testing.T) {
 	}
 	if len(l.networks) != 2 || l.networks[0] != "fixture" || l.networks[1] != "fixture" {
 		t.Errorf("sandbox saw loads %v, want two for fixture", l.networks)
-	}
-}
-
-func TestUseDropsARowItsGateRefuses(t *testing.T) {
-	isolate(t)
-	backendrows.RegisterGate("gated", func(lookup func(string) string) bool { return lookup("GATE_OPEN") != "" })
-	raw := rows(t, []backendrows.Row{row("gated", getRepos)})
-	if err := backendrows.Use(raw, noEnv); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := backendrows.Lookup("gated"); ok {
-		t.Error("a row whose gate answers false is applied")
-	}
-	open := func(k string) string {
-		if k == "GATE_OPEN" {
-			return "1"
-		}
-		return ""
-	}
-	if err := backendrows.Use(raw, open); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := backendrows.Lookup("gated"); !ok {
-		t.Error("a row whose gate answers true is dropped")
-	}
-}
-
-func TestUseValidatesARowItsGateRefuses(t *testing.T) {
-	isolate(t)
-	backendrows.RegisterGate("gated", func(func(string) string) bool { return false })
-	bad := row("gated")
-	bad.Routes = nil
-	if err := backendrows.Use(rows(t, []backendrows.Row{bad}), noEnv); err == nil {
-		t.Error("an invalid row passed validation because its gate refuses it")
-	}
-}
-
-func TestSnapshotRestoreDropsAGateRegisteredAfterIt(t *testing.T) {
-	isolate(t)
-	restore := backendrows.Snapshot()
-	backendrows.RegisterGate("gated", func(func(string) string) bool { return false })
-	restore()
-	if err := backendrows.Use(rows(t, []backendrows.Row{row("gated", getRepos)}), noEnv); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := backendrows.Lookup("gated"); !ok {
-		t.Error("a gate registered after Snapshot survives its restore")
 	}
 }
 
@@ -834,8 +724,8 @@ func remoteRow(name, remote, remoteEnv string) backendrows.Row {
 	return r
 }
 
-func TestUseDecodesTheGitRemoteFields(t *testing.T) {
-	isolate(t)
+func TestDecodeReadsTheGitRemoteFields(t *testing.T) {
+	t.Parallel()
 	raw := json.RawMessage(`[` +
 		`{"name":"lit","module":"/x/l.wasm","routes":[{"method":"GET","host":"h","path":"/a"}],"credentialEnv":"T","gitRemote":"https://github.com"},` +
 		`{"name":"knob","module":"/x/k.wasm","routes":[{"method":"GET","host":"h","path":"/a"}],"credentialEnv":"T","gitRemoteEnv":"FORGE_URL"},` +
@@ -846,18 +736,17 @@ func TestUseDecodesTheGitRemoteFields(t *testing.T) {
 		}
 		return ""
 	}
-	if err := backendrows.Use(raw, env); err != nil {
-		t.Fatal(err)
-	}
+	set := use(t, raw, env)
 	for name, want := range map[string]string{"lit": "https://github.com", "knob": "https://git.example.net/forgejo", "tracker": ""} {
-		got, ok := backendrows.Lookup(name)
+		got, ok := set.Lookup(name)
 		if !ok || got.GitRemote != want {
 			t.Errorf("Lookup(%s) = %q, %v; want GitRemote %q", name, got.GitRemote, ok, want)
 		}
 	}
 }
 
-func TestUseRefusesAMalformedGitRemoteNamingTheBackend(t *testing.T) {
+func TestDecodeRefusesAMalformedGitRemoteNamingTheBackend(t *testing.T) {
+	t.Parallel()
 	for name, r := range map[string]backendrows.Row{
 		"path":     remoteRow("forge", "https://github.com/org", ""),
 		"slash":    remoteRow("forge", "https://github.com/", ""),
@@ -867,19 +756,20 @@ func TestUseRefusesAMalformedGitRemoteNamingTheBackend(t *testing.T) {
 		"both":     remoteRow("forge", "https://github.com", "FORGE_URL"),
 	} {
 		t.Run(name, func(t *testing.T) {
-			isolate(t)
-			err := backendrows.Use(rows(t, []backendrows.Row{row("good", getRepos), r}), noEnv)
+			t.Parallel()
+			set, err := backendrows.Decode(rows(t, []backendrows.Row{row("good", getRepos), r}), noEnv, nil)
 			if err == nil || !strings.Contains(err.Error(), `backend "forge"`) {
-				t.Fatalf("Use() = %v, want an error naming the backend", err)
+				t.Fatalf("Decode() = %v, want an error naming the backend", err)
 			}
-			if _, ok := backendrows.Lookup("good"); ok {
+			if _, ok := set.Lookup("good"); ok {
 				t.Error("good row stored although the document was refused")
 			}
 		})
 	}
 }
 
-func TestUseResolvesGitRemoteEnv(t *testing.T) {
+func TestDecodeResolvesGitRemoteEnv(t *testing.T) {
+	t.Parallel()
 	for name, tc := range map[string]struct{ base, want string }{
 		"bare host":      {"https://git.example.net", "https://git.example.net"},
 		"trailing slash": {"https://git.example.net/", "https://git.example.net"},
@@ -887,24 +777,23 @@ func TestUseResolvesGitRemoteEnv(t *testing.T) {
 		"subpath slash":  {"https://git.example.net:8443/a/b/", "https://git.example.net:8443/a/b"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			isolate(t)
+			t.Parallel()
 			env := func(k string) string {
 				if k == "FORGE_URL" {
 					return tc.base
 				}
 				return ""
 			}
-			if err := backendrows.Use(rows(t, []backendrows.Row{remoteRow("forge", "", "FORGE_URL")}), env); err != nil {
-				t.Fatal(err)
-			}
-			if got, _ := backendrows.Lookup("forge"); got.GitRemote != tc.want {
+			set := use(t, rows(t, []backendrows.Row{remoteRow("forge", "", "FORGE_URL")}), env)
+			if got, _ := set.Lookup("forge"); got.GitRemote != tc.want {
 				t.Errorf("GitRemote = %q, want %q", got.GitRemote, tc.want)
 			}
 		})
 	}
 }
 
-func TestUseSkipsARowWithAnUnusableGitRemoteEnv(t *testing.T) {
+func TestDecodeSkipsARowWithAnUnusableGitRemoteEnv(t *testing.T) {
+	t.Parallel()
 	for name, base := range map[string]string{
 		"unset":      "",
 		"no scheme":  "git.example.net",
@@ -914,23 +803,21 @@ func TestUseSkipsARowWithAnUnusableGitRemoteEnv(t *testing.T) {
 		"dot suffix": "https://git.example.net/./forgejo",
 	} {
 		t.Run(name, func(t *testing.T) {
-			isolate(t)
+			t.Parallel()
 			env := func(k string) string {
 				if k == "FORGE_URL" {
 					return base
 				}
 				return ""
 			}
-			if err := backendrows.Use(rows(t, []backendrows.Row{row("good", getRepos), remoteRow("forge", "", "FORGE_URL")}), env); err != nil {
-				t.Fatalf("Use() = %v, want the row left unapplied", err)
-			}
-			if _, ok := backendrows.Lookup("forge"); ok {
+			set := use(t, rows(t, []backendrows.Row{row("good", getRepos), remoteRow("forge", "", "FORGE_URL")}), env)
+			if _, ok := set.Lookup("forge"); ok {
 				t.Error("row with an unusable git remote applied")
 			}
-			if _, ok := backendrows.Lookup("good"); !ok {
+			if _, ok := set.Lookup("good"); !ok {
 				t.Error("good row not applied")
 			}
-			if backendrows.BaseError("forge") == nil {
+			if set.BaseError("forge") == nil {
 				t.Error("BaseError(forge) = nil, want why the row was dropped")
 			}
 		})
@@ -950,4 +837,14 @@ func TestLoadWithoutASandboxFailsWithErrNoConnectorSandbox(t *testing.T) {
 	if _, err := backendrows.Load(context.Background(), r, backendrows.Options{}); !errors.Is(err, connectorsandbox.ErrNoConnectorSandbox) {
 		t.Fatalf("Load = %v, want ErrNoConnectorSandbox", err)
 	}
+}
+
+// use decodes raw under lookup with no gates, failing the test on error.
+func use(t *testing.T, raw json.RawMessage, lookup func(string) string) backendrows.Set {
+	t.Helper()
+	set, err := backendrows.Decode(raw, lookup, nil)
+	if err != nil {
+		t.Fatalf("Decode() = %v", err)
+	}
+	return set
 }

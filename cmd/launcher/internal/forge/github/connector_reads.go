@@ -42,7 +42,7 @@ func routeRow(rt *connectorruntime.Runtime) (backendrows.Row, error) {
 	if host := Host(); !strings.EqualFold(host, DefaultHost) {
 		return backendrows.Row{}, fmt.Errorf("%w: GH_HOST=%s is not %s and the github Connector's routes pin api.github.com, so GitHub Enterprise is not served", ErrNoRoute, host, DefaultHost)
 	}
-	return backendrows.Row{}, fmt.Errorf("%w: no github backend row is applied; import spindrift.flakeModules.default (the root module), not core's module directly", ErrNoRoute)
+	return backendrows.Row{}, fmt.Errorf("%w: no github backend row in the runtime; import spindrift.flakeModules.default (the root module), not core's module directly", ErrNoRoute)
 }
 
 // noteRouted records the error a routed read or write returned and returns

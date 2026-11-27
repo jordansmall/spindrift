@@ -30,16 +30,6 @@ func TestDecodeReturnsTheRowsAsASet(t *testing.T) {
 	}
 }
 
-func TestDecodeStoresNothingGlobally(t *testing.T) {
-	isolate(t)
-	if _, err := backendrows.Decode(rows(t, []backendrows.Row{row("solo", getRepos)}), noEnv, nil); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := backendrows.Lookup("solo"); ok {
-		t.Error("Decode applied a row to the process-global set")
-	}
-}
-
 func TestDecodeOfNoRowsIsTheEmptySet(t *testing.T) {
 	t.Parallel()
 	for _, raw := range [][]byte{nil, {}, []byte("  \n"), []byte("[]")} {

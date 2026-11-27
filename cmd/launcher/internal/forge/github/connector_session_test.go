@@ -40,13 +40,13 @@ func (r *loadRecorder) loads() []*connectorhost.Connector {
 	return append([]*connectorhost.Connector(nil), r.loaded...)
 }
 
-// recordingRuntime is a runtime over the applied github row whose own sandbox
+// recordingRuntime is a runtime over the decoded github row whose own sandbox
 // is a loadRecorder, closed with the test.
 func recordingRuntime(t *testing.T) (*connectorruntime.Runtime, *loadRecorder) {
 	t.Helper()
-	row, ok := appliedRows.Lookup("github")
+	row, ok := testRows.Lookup("github")
 	if !ok {
-		t.Fatal("no github backend row applied")
+		t.Fatal("no github backend row in the runtime")
 	}
 	rec := &loadRecorder{Loader: connectorsandboxtest.InProcess()}
 	rt := connectorruntime.New(backendrows.NewSet(row), credsourcetest.EnvRows(row), rec)
@@ -71,7 +71,7 @@ func viewsOf(e *execClient) clientViews {
 // A tracker and Code Forge built once and run through many operations build
 // their views once and share one session: one Connector load, none rebuilt.
 func TestConnector_OperationsShareOneSession(t *testing.T) {
-	h, _, _, _ := routedLogHarness(t, useGithubRowAt)
+	h, _, _, _ := routedLogHarness(t, withGithubRowAt)
 	h.SeedIssue(forge.Issue{Number: "1", Title: "one", Labels: []string{testLabels.Dispatchable}})
 	prURL := h.SeedDraftPR("9")
 	h.backend.repo.SeedBranch(landingBranch, "9")
@@ -130,7 +130,7 @@ func TestConnector_OperationsShareOneSession(t *testing.T) {
 // A guest killed by a trap fails the call that finds it dead; the next read
 // reloads in the runtime's own sandbox and succeeds on the views already built.
 func TestConnector_KilledGuestReloadsInsideTheRuntimeSandbox(t *testing.T) {
-	h, _, _, _ := routedLogHarness(t, useGithubRowAt)
+	h, _, _, _ := routedLogHarness(t, withGithubRowAt)
 	h.SeedIssue(forge.Issue{Number: "2", Title: "two"})
 	rt, rec := recordingRuntime(t)
 	c := NewExecClient(connectorRepo, testLabels, WithConnectors(rt))

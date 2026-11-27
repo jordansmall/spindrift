@@ -201,6 +201,7 @@ func slicesDeleteMethod(routes []connectorhost.Route, method string) []connector
 // The Connector merges by rebase only, so a MERGE_METHOD it cannot honour is
 // refused rather than silently ignored.
 func TestConnectorForge_RefusesAMergeMethodTheConnectorCannotHonour(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
 	rt := useForgejoRow(t, srv.URL, func(*backendrows.Row) {})

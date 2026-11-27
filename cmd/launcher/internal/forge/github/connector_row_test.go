@@ -81,7 +81,7 @@ func connectorFiles(t *testing.T, logDir, suffix string) []string {
 // Under a routed row every read the Connector declares is answered by the
 // Connector over the API, never by gh.
 func TestConnectorRow_ReadsGoThroughTheConnector(t *testing.T) {
-	h, c, calls, logDir := routedLogHarness(t, useGithubRowAt)
+	h, c, calls, logDir := routedLogHarness(t, withGithubRowAt)
 	h.SeedIssue(forge.Issue{Number: "1", Title: "one", Labels: []string{testLabels.Dispatchable}})
 	h.SeedIssue(forge.Issue{Number: "2", Title: "two"})
 	prURL := h.SeedOpenPR("1")
@@ -162,7 +162,7 @@ func TestConnectorRow_ReadsGoThroughTheConnector(t *testing.T) {
 func TestConnectorRow_NoReadRunsGh(t *testing.T) {
 	for _, tc := range routedReads {
 		t.Run(tc.name, func(t *testing.T) {
-			_, c, calls, _ := routedLogHarness(t, useGithubRowAt)
+			_, c, calls, _ := routedLogHarness(t, withGithubRowAt)
 
 			_ = tc.read(c, "https://github.com/owner/repo/pull/1")
 
@@ -175,7 +175,7 @@ func TestConnectorRow_NoReadRunsGh(t *testing.T) {
 
 // A Connector row's Connector audits to the run's Connector record.
 func TestConnectorRow_AuditsToTheConnectorRecord(t *testing.T) {
-	_, c, _, logDir := routedLogHarness(t, useGithubRowAt)
+	_, c, _, logDir := routedLogHarness(t, withGithubRowAt)
 
 	if _, err := c.ListIssues(forge.Dispatchable); err != nil {
 		t.Fatal(err)
@@ -191,7 +191,7 @@ func TestConnectorRow_AuditsToTheConnectorRecord(t *testing.T) {
 func TestConnectorRow_LoadFailureFailsTheReadAndIsRecorded(t *testing.T) {
 	for _, tc := range routedReads {
 		t.Run(tc.name, func(t *testing.T) {
-			_, c, calls, logDir := routedLogHarness(t, useGithubRowAt)
+			_, c, calls, logDir := routedLogHarness(t, withGithubRowAt)
 			boom := errors.New("github connector failed to load")
 			hookLoads(t, func(func() (*connectorhost.Connector, error)) (*connectorhost.Connector, error) { return nil, boom })
 
@@ -226,7 +226,7 @@ func TestConnectorRow_LoadFailureFailsTheReadAndIsRecorded(t *testing.T) {
 // with that refusal, never falls back to gh, and the Connector audit shows it.
 func TestConnectorRow_RefusedRouteFailsTheReadAndIsAudited(t *testing.T) {
 	_, c, calls, logDir := routedLogHarness(t, func(t *testing.T, host string) {
-		applyGithubRow(t, host, func(r *backendrows.Row) {
+		decodeGithubRow(t, host, func(r *backendrows.Row) {
 			r.Routes = r.Routes[:0:0]
 			for _, rt := range allRoutes(t, host) {
 				if !strings.Contains(rt.Path, "/issues") {
@@ -268,7 +268,7 @@ func TestConnectorRow_RefusedRouteFailsTheReadAndIsAudited(t *testing.T) {
 // next read loads a fresh one instead of failing with "connector unusable".
 func TestConnectorRow_FatalCallFailureReloadsTheConnectorForTheNextRead(t *testing.T) {
 	_, c, calls, logDir := routedLogHarness(t, func(t *testing.T, host string) {
-		applyGithubRow(t, host, func(r *backendrows.Row) {
+		decodeGithubRow(t, host, func(r *backendrows.Row) {
 			r.Routes = r.Routes[:0:0]
 			for _, rt := range allRoutes(t, host) {
 				if !strings.Contains(rt.Path, "/issues") {
@@ -320,7 +320,7 @@ func allRoutes(t *testing.T, host string) []connectorhost.Route {
 // A Connector lacking the capability a routed read needs fails it as
 // unsupported, never falling back to gh.
 func TestConnectorRow_MissingCapabilityFailsTheReadWithoutGh(t *testing.T) {
-	_, c, calls, _ := routedLogHarness(t, useGithubRowAt)
+	_, c, calls, _ := routedLogHarness(t, withGithubRowAt)
 	withoutCapability(t, "tracker.nativeDeps")
 
 	_, err := c.NativeDepsOf("1")
@@ -347,7 +347,7 @@ func TestConnectorRow_EveryReadRecordsItsFailure(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, c, _, logDir := routedLogHarness(t, useGithubRowAt)
+			_, c, _, logDir := routedLogHarness(t, withGithubRowAt)
 			boom := errors.New("github connector failed to load")
 			hookLoads(t, func(func() (*connectorhost.Connector, error)) (*connectorhost.Connector, error) { return nil, boom })
 
@@ -370,7 +370,7 @@ func TestConnectorRow_EveryReadRecordsItsFailure(t *testing.T) {
 // in the read's error and the Connector log, naming the credential variable and
 // never its value.
 func TestConnectorRow_UnsetCredentialIsNamedInTheReadErrorAndRecord(t *testing.T) {
-	_, c, _, logDir := routedLogHarness(t, useGithubRowAt)
+	_, c, _, logDir := routedLogHarness(t, withGithubRowAt)
 	t.Setenv(tokenCredentialEnv, "")
 
 	_, err := c.Issue("1")
@@ -397,7 +397,7 @@ func TestConnectorRow_TokenIntrospectionAuditsToTheConnectorRecord(t *testing.T)
 	dir := t.TempDir()
 	t.Chdir(dir)
 	b := newTokenBackend(t, "ghp_abc")
-	useGithubRowAt(t, b.Listener.Addr().String())
+	withGithubRowAt(t, b.Listener.Addr().String())
 	old := connectorOptions
 	connectorOptions = backendrows.Options{Client: b.Client(), PublicForTest: connectorhost.LoopbackForTest}
 	t.Cleanup(func() { connectorOptions = old })
@@ -426,7 +426,7 @@ func TestMergeCommitFrom_WithoutTheReaderIsMissingCapability(t *testing.T) {
 // CheckRun is the merge wait's CI poll: under a routed row it reads the state
 // and the in-flight run link from the Connector, never gh.
 func TestConnectorRow_CheckRunComesFromTheConnector(t *testing.T) {
-	h, c, calls, _ := routedLogHarness(t, useGithubRowAt)
+	h, c, calls, _ := routedLogHarness(t, withGithubRowAt)
 	prURL := h.SeedOpenPR("1")
 	h.SeedCheckStates(prURL, []forge.RollupState{forge.StatePending})
 	runs := h.backend.web + "/actions/runs/"
@@ -449,7 +449,7 @@ func TestConnectorRow_CheckRunComesFromTheConnector(t *testing.T) {
 // A Connector without forge.ciRun is an unsupported read, not a silent gh poll.
 func TestConnectorRow_CheckRunWithoutTheCapabilityFailsWithoutGh(t *testing.T) {
 	withoutCapability(t, "forge.ciRun")
-	h, c, calls, _ := routedLogHarness(t, useGithubRowAt)
+	h, c, calls, _ := routedLogHarness(t, withGithubRowAt)
 	prURL := h.SeedOpenPR("1")
 
 	_, _, err := c.CheckRun(prURL)
@@ -462,7 +462,7 @@ func TestConnectorRow_CheckRunWithoutTheCapabilityFailsWithoutGh(t *testing.T) {
 	}
 }
 
-// routedSandboxHarness chdirs into a scratch directory, applies the row via
+// routedSandboxHarness chdirs into a scratch directory, decodes the row via
 // useRow, and returns the audit file path
 // this process would write. A non-nil seed is written there first; nil leaves
 // the file absent.
@@ -491,7 +491,7 @@ var knownStats = connectorsandbox.Stats{
 }
 
 func TestRecordRoutedSandboxTotals_AppendsOneLineToTheAuditFile(t *testing.T) {
-	audit := routedSandboxHarness(t, useGithubRowAt, []byte(seededAudit))
+	audit := routedSandboxHarness(t, withGithubRowAt, []byte(seededAudit))
 
 	RecordRoutedSandboxTotals(testRuntime(t), knownStats)
 
@@ -533,7 +533,7 @@ func TestRecordRoutedSandboxTotals_AppendsOneLineToTheAuditFile(t *testing.T) {
 // A process that never read through its Connector has no record pair,
 // and recording must not make one: a pair reads as a dirty run.
 func TestRecordRoutedSandboxTotals_CreatesNoRecordPair(t *testing.T) {
-	audit := routedSandboxHarness(t, useGithubRowAt, nil)
+	audit := routedSandboxHarness(t, withGithubRowAt, nil)
 
 	RecordRoutedSandboxTotals(testRuntime(t), knownStats)
 
@@ -543,7 +543,7 @@ func TestRecordRoutedSandboxTotals_CreatesNoRecordPair(t *testing.T) {
 }
 
 func TestRecordRoutedSandboxTotals_AppendsUnderAPlainRow(t *testing.T) {
-	audit := routedSandboxHarness(t, useGithubRowAt, []byte(seededAudit))
+	audit := routedSandboxHarness(t, withGithubRowAt, []byte(seededAudit))
 
 	RecordRoutedSandboxTotals(testRuntime(t), knownStats)
 
@@ -555,7 +555,7 @@ func TestRecordRoutedSandboxTotals_AppendsUnderAPlainRow(t *testing.T) {
 // The runtime decides whether the row is routed: one holding no github row
 // writes nothing, even where an audit file already exists.
 func TestRecordRoutedSandboxTotals_WritesNothingWithoutARowOnTheRuntime(t *testing.T) {
-	audit := routedSandboxHarness(t, useGithubRowAt, []byte(seededAudit))
+	audit := routedSandboxHarness(t, withGithubRowAt, []byte(seededAudit))
 
 	RecordRoutedSandboxTotals(nil, knownStats)
 	RecordRoutedSandboxTotals(connectorruntime.New(backendrows.Set{}, nil, testSandbox()), knownStats)

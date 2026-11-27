@@ -30,7 +30,7 @@ func TestStrategyShape(t *testing.T) {
 	}
 }
 
-// With no routed row (none applied, or a GitHub Enterprise
+// With no routed row (none decoded, or a GitHub Enterprise
 // GH_HOST) the Ledger has no remote to name: NewLedger fails with ErrNoRoute
 // rather than falling back to a gh credential-helper URL.
 func TestStrategyLedgerFailsWithNoRoute(t *testing.T) {

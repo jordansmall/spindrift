@@ -32,7 +32,7 @@ type routedContractEnv struct {
 
 func newRoutedContractEnv(t *testing.T) *routedContractEnv {
 	t.Helper()
-	h, _, calls, logDir := routedLogHarness(t, useGithubRowAt)
+	h, _, calls, logDir := routedLogHarness(t, withGithubRowAt)
 	s := backendkit.Shared{
 		Connectors: testRuntime(t),
 		RepoSlug:   connectorRepo, Labels: testLabels, VerdictLabels: forge.ResearchVerdictLabels(),
@@ -173,7 +173,7 @@ func (h routedCodeForgeHarness) Unreachable() forge.CodeForge {
 	srv := httptest.NewTLSServer(http.NotFoundHandler())
 	host := srv.Listener.Addr().String()
 	srv.Close()
-	useGithubRowAt(h.t, host)
+	withGithubRowAt(h.t, host)
 	cf, err := Strategy.NewCodeForge(backendkit.Shared{RepoSlug: connectorRepo, Labels: testLabels, Connectors: testRuntime(h.t)}, nil, forge.SanitizedParent{}, nil)
 	if err != nil {
 		h.t.Fatal(err)

@@ -7,6 +7,7 @@ import (
 )
 
 func TestStatusMappingFor(t *testing.T) {
+	t.Parallel()
 	const mapping = `{"dispatchable":"To Do"}`
 	if got := statusMappingFor(dispatchkind.TrackerWork, mapping); got != mapping {
 		t.Errorf("work = %q, want the mapping", got)

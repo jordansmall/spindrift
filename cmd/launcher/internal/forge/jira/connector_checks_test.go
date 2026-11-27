@@ -46,6 +46,7 @@ func (h *connectorHarness) mutex(f func()) {
 // project, 401 and 403 are an auth failure, and any other failure reads as a
 // project the credential cannot reach.
 func TestConnector_Probe(t *testing.T) {
+	t.Parallel()
 	for _, fl := range connectorFlavours {
 		t.Run(fl.name, func(t *testing.T) {
 			h := newConnectorHarness(t, fl.cloud)
@@ -136,6 +137,7 @@ var doctorFixtures = []doctorFixture{
 // each fixture's findings are the rows' verdicts over the scripted site: the
 // passing fixture reports every row ok, each other one at least one finding.
 func TestConnector_DoctorChecks(t *testing.T) {
+	t.Parallel()
 	for _, fl := range connectorFlavours {
 		for _, fx := range doctorFixtures {
 			t.Run(fl.name+"/"+fx.name, func(t *testing.T) {

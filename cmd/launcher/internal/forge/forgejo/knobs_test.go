@@ -14,6 +14,7 @@ func lookupFrom(m map[string]string) forgejo.Lookup {
 }
 
 func TestReadKnobs_UnsetYieldsDefaults(t *testing.T) {
+	t.Parallel()
 	k, err := forgejo.ReadKnobs(lookupFrom(nil))
 	if err != nil {
 		t.Fatalf("ReadKnobs: %v", err)
@@ -27,6 +28,7 @@ func TestReadKnobs_UnsetYieldsDefaults(t *testing.T) {
 }
 
 func TestReadKnobs_SetYieldsValues(t *testing.T) {
+	t.Parallel()
 	k, err := forgejo.ReadKnobs(lookupFrom(map[string]string{
 		"FORGEJO_BASE_URL": "https://git.example.test",
 		"FORGEJO_TOKEN":    "tok",

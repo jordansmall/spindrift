@@ -19,22 +19,22 @@ import (
 	"spindrift.dev/launcher/internal/hostpaths"
 )
 
-// useGithubRow applies a github backend row whose Connector reaches b, as a
-// document's row would, and restores the applied set afterwards.
-func useGithubRow(t *testing.T, b *tokenBackend) {
+// withGithubRow decodes a github backend row whose Connector reaches b, as a
+// document's row would, and restores the previous set afterwards.
+func withGithubRow(t *testing.T, b *tokenBackend) {
 	t.Helper()
-	useGithubRowAt(t, b.Listener.Addr().String())
+	withGithubRowAt(t, b.Listener.Addr().String())
 }
 
-// useGithubRowAt is useGithubRow for a backend at host.
-func useGithubRowAt(t *testing.T, host string) { applyGithubRow(t, host, func(*backendrows.Row) {}) }
+// withGithubRowAt is withGithubRow for a backend at host.
+func withGithubRowAt(t *testing.T, host string) { decodeGithubRow(t, host, func(*backendrows.Row) {}) }
 
-// appliedRows is the backend rows the running test applied through
-// applyGithubRow; the harness helpers build their runtimes over it. Tests that
+// testRows is the backend rows the running test decoded through
+// decodeGithubRow; the harness helpers build their runtimes over it. Tests that
 // set it also change directory or environment, so none run in parallel.
-var appliedRows backendrows.Set
+var testRows backendrows.Set
 
-func applyGithubRow(t *testing.T, host string, adjust func(*backendrows.Row)) {
+func decodeGithubRow(t *testing.T, host string, adjust func(*backendrows.Row)) {
 	t.Helper()
 	path, routes := githubConnectorRoutes(t, host, connectorRepo)
 	row := backendrows.Row{Name: "github", Module: path, Routes: routes, CredentialEnv: tokenCredentialEnv, GitRemote: "https://" + host}
@@ -47,9 +47,9 @@ func applyGithubRow(t *testing.T, host string, adjust func(*backendrows.Row)) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prev := appliedRows
-	t.Cleanup(func() { appliedRows = prev })
-	appliedRows = set
+	prev := testRows
+	t.Cleanup(func() { testRows = prev })
+	testRows = set
 }
 
 // The Strategy's introspection loads the backend row's Connector with the
@@ -59,7 +59,7 @@ func TestIntrospect_ReportsTheGrantAndAuditsTheRequests(t *testing.T) {
 	scopes := "read:org, repo"
 	b := newTokenBackend(t, "ghp_abc")
 	b.scopes = &scopes
-	useGithubRow(t, b)
+	withGithubRow(t, b)
 	calls := countGH(t)
 	auditPath := chdirAuditPath(t)
 
@@ -91,7 +91,7 @@ func TestIntrospect_IgnoresTheHostsCredential(t *testing.T) {
 	t.Setenv(tokenCredentialEnv, "ghp_hosts_own")
 	chdirAuditPath(t)
 	b := newTokenBackend(t, "ghp_abc")
-	useGithubRow(t, b)
+	withGithubRow(t, b)
 
 	if _, err := introspect(testSandbox(), githubRow(t), backendrows.Options{Client: b.Client(), PublicForTest: connectorhost.LoopbackForTest}, "ghp_abc", connectorRepo); err != nil {
 		t.Fatal(err)
@@ -108,19 +108,19 @@ func TestIntrospect_RefusedReadIsAnError(t *testing.T) {
 	chdirAuditPath(t)
 	b := newTokenBackend(t, "ghp_abc")
 	b.userStatus = http.StatusUnauthorized
-	useGithubRow(t, b)
+	withGithubRow(t, b)
 	_, err := introspect(testSandbox(), githubRow(t), backendrows.Options{Client: b.Client(), PublicForTest: connectorhost.LoopbackForTest}, "ghp_abc", connectorRepo)
 	if err == nil || errors.Is(err, backendkit.ErrUnsupported) {
 		t.Fatalf("err = %v, want a non-unsupported error", err)
 	}
 }
 
-// githubRow is the github row useGithubRow applied.
+// githubRow is the github row withGithubRow decoded.
 func githubRow(t *testing.T) backendrows.Row {
 	t.Helper()
-	row, ok := appliedRows.Lookup("github")
+	row, ok := testRows.Lookup("github")
 	if !ok {
-		t.Fatal("no github backend row applied")
+		t.Fatal("no github backend row in the runtime")
 	}
 	return row
 }
@@ -150,7 +150,7 @@ func chdirAuditPath(t *testing.T) string {
 // load with its path, and nothing reaches the backend.
 func TestIntrospect_UnopenableAuditFileFailsTheLoad(t *testing.T) {
 	b := newTokenBackend(t, "ghp_abc")
-	useGithubRow(t, b)
+	withGithubRow(t, b)
 	auditPath := chdirAuditPath(t)
 	logDir := filepath.Dir(auditPath)
 	if err := os.MkdirAll(filepath.Dir(logDir), 0o755); err != nil {

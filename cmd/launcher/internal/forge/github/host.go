@@ -22,7 +22,7 @@ func HostFrom(getenv func(string) string) string {
 }
 
 // onDefaultHost is the row's gate. The row's Routes pin api.github.com, so
-// under any other GH_HOST no row applies: every github call fails with
+// under any other GH_HOST no row matches: every github call fails with
 // ErrNoRoute rather than going through gh. The row's credential is neither
 // fetched nor sent to a host it never targeted.
 func onDefaultHost(lookup func(string) string) bool {

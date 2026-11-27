@@ -90,13 +90,6 @@ func New(rows backendrows.Set, creds map[string]credsource.Row, sandbox connecto
 	return &Runtime{rows: rows, creds: creds, sandbox: sandbox, now: time.Now, sessions: map[sessionKey]*session{}, owned: map[string]connectorsandbox.Sandbox{}}
 }
 
-// FromRegistries is a runtime over the applied backend rows, their credential
-// sources and sandbox, which New describes; nil is none. It is transitional,
-// with backendrows.Applied.
-func FromRegistries(creds map[string]credsource.Row, sandbox connectorsandbox.Loader) *Runtime {
-	return New(backendrows.Applied(), creds, sandbox)
-}
-
 // InProcess is the Box's runtime: no backend rows, no credentials and no
 // sandbox, offering the Drivers rows names loaded in-process, first-party
 // Connectors only (driverrows.Rows.InProcess). Any load through Load fails with

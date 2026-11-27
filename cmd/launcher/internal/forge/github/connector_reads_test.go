@@ -20,10 +20,10 @@ import (
 // calls. The returned client is the production execClient.
 func routedHarness(t *testing.T) (h *connectorHarness, c *execClient, calls func() int) {
 	t.Helper()
-	return harnessWithRow(t, useGithubRowAt)
+	return harnessWithRow(t, withGithubRowAt)
 }
 
-// harnessWithRow is routedHarness with the github row applied by useRow.
+// harnessWithRow is routedHarness with the github row decoded by useRow.
 func harnessWithRow(t *testing.T, useRow func(t *testing.T, host string)) (h *connectorHarness, c *execClient, calls func() int) {
 	t.Helper()
 	h = newComposedHarness(t)
