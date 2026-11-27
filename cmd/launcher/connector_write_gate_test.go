@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -314,6 +315,41 @@ func TestConnectorWriteGate_NoGitHubRowAppliesNoGate(t *testing.T) {
 	c.IssueTracker, c.CodeForge = "github", "github"
 	if githubApplies(c) {
 		t.Error("the write gate applies with no github row")
+	}
+}
+
+// A GitHub Enterprise GH_HOST drops the github row at decode, so no github row
+// reaches the runtime and the write gate does not apply (the credential is
+// neither fetched nor sent to a host the row's Routes never targeted).
+func TestConnectorWriteGate_GitHubEnterpriseHostAppliesNoRow(t *testing.T) {
+	raw, err := json.Marshal([]backendrows.Row{{
+		Name: "github", Module: "/x/github.wasm", CredentialEnv: ghTokenEnv,
+		Routes: []connectorhost.Route{fixtureGetRepos},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for host, wantRow := range map[string]bool{"": true, "github.com": true, "ghe.corp": false} {
+		t.Run("GH_HOST="+host, func(t *testing.T) {
+			set, err := backendrows.Decode(raw, func(k string) string {
+				if k == "GH_HOST" {
+					return host
+				}
+				return ""
+			}, backendkit.RowGates())
+			if err != nil {
+				t.Fatal(err)
+			}
+			c := minimalValidConfig()
+			c.connectors = connectorruntime.New(set, nil, nil)
+			c.IssueTracker, c.CodeForge = "github", "github"
+			if _, ok := c.connectors.Row("github"); ok != wantRow {
+				t.Errorf("github row present = %v, want %v", ok, wantRow)
+			}
+			if !wantRow && githubApplies(c) {
+				t.Error("the write gate applies under a GitHub Enterprise host")
+			}
+		})
 	}
 }
 

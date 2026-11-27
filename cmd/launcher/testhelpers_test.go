@@ -13,6 +13,8 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backend/backendrows"
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
 	"spindrift.dev/launcher/internal/dispatch"
@@ -265,8 +267,10 @@ func resolveTestInput(t *testing.T) {
 // Restores the package-level Launcher input state when the calling test ends.
 func restoreLauncherInput(t *testing.T) {
 	t.Helper()
-	prevArgs, prevDoc, prevInput := testFlagArgs, testDoc, launcherInput
-	t.Cleanup(func() { testFlagArgs, testDoc, launcherInput = prevArgs, prevDoc, prevInput })
+	prevArgs, prevDoc, prevInput, prevRows := testFlagArgs, testDoc, launcherInput, launcherBackendRows
+	t.Cleanup(func() {
+		testFlagArgs, testDoc, launcherInput, launcherBackendRows = prevArgs, prevDoc, prevInput, prevRows
+	})
 }
 
 // The one seam tests configure a non-secret schema knob through.
@@ -388,4 +392,17 @@ func driverRuntime(t testing.TB) *connectorruntime.Runtime {
 	rt.UseDriverRows(rows)
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt
+}
+
+// useLauncherRows decodes the backend rows in doc, under the registered row
+// gates and an empty environment, as the rows connectorInput hands the
+// runtime, restoring the previous rows when the test ends.
+func useLauncherRows(t *testing.T, doc string) {
+	t.Helper()
+	restoreLauncherInput(t)
+	rows, err := backendrows.Decode([]byte(doc), func(string) string { return "" }, backendkit.RowGates())
+	if err != nil {
+		t.Fatal(err)
+	}
+	launcherBackendRows = rows
 }

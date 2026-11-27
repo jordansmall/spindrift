@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/driver/driverrows"
 	"spindrift.dev/launcher/internal/inputdoc"
 )
@@ -55,6 +56,12 @@ var launcherInput inputdoc.Resolved
 // the Drivers; the zero value is no rows. Code that runs before the runtime
 // exists reads Descriptors from it through Hosted(nil), which loads nothing.
 var launcherDriverRows driverrows.Rows
+
+// launcherBackendRows is the document's backend rows, decoded by mainRun beside
+// launcherInput under the registered row gates. connectorInput hands them to
+// the Connector runtime; the zero value is no rows. Folds with launcherDriverRows
+// in #7437's driver-row staging.
+var launcherBackendRows backendrows.Set
 
 // resolvedKnob reads a schema knob through the flag > document > schema
 // default tiers of launcherInput; a knob env var is rejected at startup

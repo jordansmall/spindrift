@@ -31,11 +31,10 @@ const (
 	credEnv = "CONNECTORSETUP_TEST_TOKEN"
 )
 
-// useRow registers a Connector-routed backend and its row, restoring the
-// registries when the test ends.
-func useRow(t *testing.T, totals func(*connectorruntime.Runtime, connectorsandbox.Stats)) {
+// useRow registers a Connector-routed backend and returns its decoded row,
+// restoring the registry when the test ends.
+func useRow(t *testing.T, totals func(*connectorruntime.Runtime, connectorsandbox.Stats)) backendrows.Set {
 	t.Helper()
-	t.Cleanup(backendrows.Snapshot())
 	t.Cleanup(backendkit.ReplaceRegistryForTest([]backendkit.Strategy{{
 		Descriptor:          backend.Descriptor{Name: rowName},
 		ConnectorRouted:     true,
@@ -43,13 +42,15 @@ func useRow(t *testing.T, totals func(*connectorruntime.Runtime, connectorsandbo
 	}}))
 	doc := `[{"name":"` + rowName + `","module":"/nonexistent.wasm","credentialEnv":"` + credEnv + `",
 "routes":[{"method":"GET","host":"` + rowName + `.example","path":"/x"}]}]`
-	if err := backendrows.Use([]byte(doc), func(string) string { return "" }); err != nil {
+	rows, err := backendrows.Decode([]byte(doc), func(string) string { return "" }, nil)
+	if err != nil {
 		t.Fatal(err)
 	}
+	return rows
 }
 
-func input(m map[string]string) connectorsetup.Input {
-	return connectorsetup.Input{Forge: rowName, Setting: func(env string) string { return m[env] }}
+func input(rows backendrows.Set, m map[string]string) connectorsetup.Input {
+	return connectorsetup.Input{Rows: rows, Forge: rowName, Setting: func(env string) string { return m[env] }}
 }
 
 // recordingLoader is a Connector sandbox that logs its Close into events.
@@ -73,8 +74,8 @@ func TestUnsetCredentialIsOneRuleWithAPerProgramOption(t *testing.T) {
 		require bool
 	}{{"required", true}, {"tolerated", false}} {
 		t.Run(tc.name, func(t *testing.T) {
-			useRow(t, nil)
-			rt, err := connectorsetup.New(input(nil), connectorsetup.Options{
+			rows := useRow(t, nil)
+			rt, err := connectorsetup.New(input(rows, nil), connectorsetup.Options{
 				RequireCredential: tc.require, Sandbox: connectorsandboxtest.InProcess(),
 			})
 			if tc.require {
@@ -96,9 +97,9 @@ func TestUnsetCredentialIsOneRuleWithAPerProgramOption(t *testing.T) {
 }
 
 func TestCommandErrorReturnsNoRuntime(t *testing.T) {
-	useRow(t, nil)
+	rows := useRow(t, nil)
 	var events []string
-	_, err := connectorsetup.New(input(map[string]string{credEnv + "_CMD": "mint"}), connectorsetup.Options{
+	_, err := connectorsetup.New(input(rows, map[string]string{credEnv + "_CMD": "mint"}), connectorsetup.Options{
 		Sandbox: newRecordingLoader(&events),
 		Run:     func(string) (string, error) { return "", errors.New("vault is down") },
 	})
@@ -109,9 +110,9 @@ func TestCommandErrorReturnsNoRuntime(t *testing.T) {
 
 func TestCloseStopsTheSandboxBeforeRecordingTotals(t *testing.T) {
 	var events []string
-	useRow(t, func(*connectorruntime.Runtime, connectorsandbox.Stats) { events = append(events, "totals") })
+	rows := useRow(t, func(*connectorruntime.Runtime, connectorsandbox.Stats) { events = append(events, "totals") })
 	l := newRecordingLoader(&events)
-	rt, err := connectorsetup.New(input(map[string]string{credEnv: "tok"}), connectorsetup.Options{Sandbox: l})
+	rt, err := connectorsetup.New(input(rows, map[string]string{credEnv: "tok"}), connectorsetup.Options{Sandbox: l})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,10 +134,10 @@ func TestCloseStopsTheSandboxBeforeRecordingTotals(t *testing.T) {
 }
 
 func TestRefreshReRunsCommandSourcesUntilClose(t *testing.T) {
-	useRow(t, nil)
+	rows := useRow(t, nil)
 	var runs atomic.Int32
 	start := time.Now()
-	rt, err := connectorsetup.New(input(map[string]string{credEnv + "_CMD": "mint"}), connectorsetup.Options{
+	rt, err := connectorsetup.New(input(rows, map[string]string{credEnv + "_CMD": "mint"}), connectorsetup.Options{
 		Sandbox:        connectorsandboxtest.InProcess(),
 		RefreshEvery:   5 * time.Millisecond,
 		OnRefreshError: func(string, error) {},
@@ -169,10 +170,10 @@ func TestRefreshReRunsCommandSourcesUntilClose(t *testing.T) {
 // Close, and with it the sandbox close and the totals behind it.
 func TestCloseDoesNotWaitForARefreshInFlight(t *testing.T) {
 	var events []string
-	useRow(t, func(*connectorruntime.Runtime, connectorsandbox.Stats) { events = append(events, "totals") })
+	rows := useRow(t, func(*connectorruntime.Runtime, connectorsandbox.Stats) { events = append(events, "totals") })
 	release, started := make(chan struct{}), make(chan struct{})
 	var once atomic.Bool
-	rt, err := connectorsetup.New(input(map[string]string{credEnv + "_CMD": "mint"}), connectorsetup.Options{
+	rt, err := connectorsetup.New(input(rows, map[string]string{credEnv + "_CMD": "mint"}), connectorsetup.Options{
 		Sandbox:        newRecordingLoader(&events),
 		RefreshEvery:   5 * time.Millisecond,
 		OnRefreshError: func(string, error) {},
@@ -221,8 +222,8 @@ func init() {
 }
 
 func TestStartsNoSandboxWhenNothingLoads(t *testing.T) {
-	useRow(t, nil)
-	in := input(map[string]string{credEnv: "tok"})
+	rows := useRow(t, nil)
+	in := input(rows, map[string]string{credEnv: "tok"})
 	in.RunnerKind = countingKind
 	rt, err := connectorsetup.New(in, connectorsetup.Options{})
 	if err != nil {
@@ -238,8 +239,8 @@ func TestStartsNoSandboxWhenNothingLoads(t *testing.T) {
 
 func TestRefreshWithoutAnErrorHandlerIsRefused(t *testing.T) {
 	var events []string
-	useRow(t, nil)
-	_, err := connectorsetup.New(input(map[string]string{credEnv + "_CMD": "mint"}), connectorsetup.Options{
+	rows := useRow(t, nil)
+	_, err := connectorsetup.New(input(rows, map[string]string{credEnv + "_CMD": "mint"}), connectorsetup.Options{
 		Sandbox:      newRecordingLoader(&events),
 		RefreshEvery: time.Second,
 		Run:          func(string) (string, error) { return "tok", nil },
@@ -251,9 +252,9 @@ func TestRefreshWithoutAnErrorHandlerIsRefused(t *testing.T) {
 
 func TestCloseReturnsTheSharedSandboxCloseError(t *testing.T) {
 	var totals []string
-	useRow(t, func(*connectorruntime.Runtime, connectorsandbox.Stats) { totals = append(totals, "totals") })
+	rows := useRow(t, func(*connectorruntime.Runtime, connectorsandbox.Stats) { totals = append(totals, "totals") })
 	boom := errors.New("sandbox close failed")
-	rt, err := connectorsetup.New(input(map[string]string{credEnv: "tok"}), connectorsetup.Options{
+	rt, err := connectorsetup.New(input(rows, map[string]string{credEnv: "tok"}), connectorsetup.Options{
 		Sandbox: failingCloseLoader{servedLoader{connectorsandboxtest.InProcess()}, boom},
 	})
 	if err != nil {
@@ -284,8 +285,8 @@ func (servedLoader) Stats() (connectorsandbox.Stats, bool) {
 // A sandbox that never served has no cost to record.
 func TestCloseRecordsNoTotalsWhenTheSandboxNeverServed(t *testing.T) {
 	var totals int
-	useRow(t, func(*connectorruntime.Runtime, connectorsandbox.Stats) { totals++ })
-	rt, err := connectorsetup.New(input(map[string]string{credEnv: "tok"}), connectorsetup.Options{
+	rows := useRow(t, func(*connectorruntime.Runtime, connectorsandbox.Stats) { totals++ })
+	rt, err := connectorsetup.New(input(rows, map[string]string{credEnv: "tok"}), connectorsetup.Options{
 		Sandbox: unservedLoader{connectorsandboxtest.InProcess()},
 	})
 	if err != nil {
@@ -316,18 +317,18 @@ func (l *loadRecorder) Load(_ context.Context, wasm []byte) (*connectorhost.Conn
 }
 
 func TestDriverConnectorLoadsIntoTheRuntimesSandbox(t *testing.T) {
-	useRow(t, nil)
+	rows := useRow(t, nil)
 	module := filepath.Join(t.TempDir(), "drv.wasm")
 	if err := os.WriteFile(module, []byte("wasm-bytes"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := driverrows.Parse([]byte(`[{"name":"setupdrv","module":`+strconv.Quote(module)+`}]`), nil)
+	driverRows, err := driverrows.Parse([]byte(`[{"name":"setupdrv","module":`+strconv.Quote(module)+`}]`), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	l := &loadRecorder{Loader: connectorsandboxtest.InProcess()}
-	in := input(map[string]string{credEnv: "tok"})
-	in.Drivers = rows
+	in := input(rows, map[string]string{credEnv: "tok"})
+	in.Drivers = driverRows
 	rt, err := connectorsetup.New(in, connectorsetup.Options{Sandbox: l})
 	if err != nil {
 		t.Fatal(err)
@@ -342,8 +343,8 @@ func TestDriverConnectorLoadsIntoTheRuntimesSandbox(t *testing.T) {
 }
 
 func TestRuntimeWithoutDriverRowsOffersNoDrivers(t *testing.T) {
-	useRow(t, nil)
-	rt, err := connectorsetup.New(input(map[string]string{credEnv: "tok"}), connectorsetup.Options{Sandbox: connectorsandboxtest.InProcess()})
+	rows := useRow(t, nil)
+	rt, err := connectorsetup.New(input(rows, map[string]string{credEnv: "tok"}), connectorsetup.Options{Sandbox: connectorsandboxtest.InProcess()})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -22,7 +22,7 @@ func mustStrategy(t *testing.T, name string) backendkit.Strategy {
 }
 
 func TestBuildForge_GithubTracker_BuildsBothSeams(t *testing.T) {
-	sh := backendkit.Shared{RepoSlug: "owner/repo", Labels: defaultDispatchLabels, Connectors: connectorruntime.FromRegistries(credsourcetest.Applied(), nil)}
+	sh := backendkit.Shared{RepoSlug: "owner/repo", Labels: defaultDispatchLabels, Connectors: connectorruntime.New(bakedRows, credsourcetest.EnvRows(bakedRows.All()...), nil)}
 	it, cf, err := buildForge(mustStrategy(t, "github"), mustStrategy(t, "github"), sh, knobLookup(nil, nil))
 	if err != nil {
 		t.Fatalf("buildForge: %v", err)
@@ -49,7 +49,7 @@ func TestBuildForge_BuildsEachSeamFromItsOwnRow(t *testing.T) {
 			},
 		}
 	}
-	sh := backendkit.Shared{RepoSlug: "owner/repo", Labels: defaultDispatchLabels, Connectors: connectorruntime.FromRegistries(credsourcetest.Applied(), nil)}
+	sh := backendkit.Shared{RepoSlug: "owner/repo", Labels: defaultDispatchLabels, Connectors: connectorruntime.New(bakedRows, credsourcetest.EnvRows(bakedRows.All()...), nil)}
 
 	if _, _, err := buildForge(stub("a"), stub("b"), sh, knobLookup(nil, nil)); err != nil {
 		t.Fatalf("buildForge: %v", err)

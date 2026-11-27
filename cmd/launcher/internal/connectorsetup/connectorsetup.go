@@ -45,6 +45,9 @@ type Input struct {
 	// Drivers are the parsed Driver rows (driverrows.Parse) the runtime offers
 	// through Drivers; the zero value offers none.
 	Drivers driverrows.Rows
+	// Rows are the decoded backend rows (backendrows.Decode) the runtime serves
+	// and whose credentials it sources; the zero value has none.
+	Rows backendrows.Set
 }
 
 // Options is how the Launcher and the Daemon differ: only the Daemon sets
@@ -70,7 +73,7 @@ type Options struct {
 }
 
 // New resolves every row's credential, builds the Connector sandbox and
-// returns the runtime over the registered rows and in.Drivers. Closing the
+// returns the runtime over in.Rows and in.Drivers. Closing the
 // runtime, once its sessions close, signals the refresh to stop, then closes the
 // sandbox, then records each backend's sandbox totals. It builds nothing on an
 // error.
@@ -85,7 +88,7 @@ func New(in Input, opts Options) (*connectorruntime.Runtime, error) {
 	sourced, err := rowcredential.Resolution{
 		Forge: in.Forge, Tracker: in.Tracker, Template: in.SecretCmd,
 		Run: run, Applied: in.Applied, Lookup: in.Setting,
-	}.Sources(backendrows.All())
+	}.Sources(in.Rows.All())
 	if err != nil && (opts.RequireCredential || !errors.Is(err, rowcredential.ErrUnset)) {
 		return nil, err
 	}
@@ -94,7 +97,7 @@ func New(in Input, opts Options) (*connectorruntime.Runtime, error) {
 	if l == nil {
 		l = sandbox.ForKind(in.RunnerKind, runner.Config{Runtime: in.Runtime}, in.Artifacts, in.Knobs, in.Dir)
 	}
-	rt := connectorruntime.FromRegistries(sourced.Rows, l)
+	rt := connectorruntime.New(in.Rows, sourced.Rows, l)
 	rt.UseDriverRows(in.Drivers)
 
 	if opts.RefreshEvery > 0 && len(sourced.Commands) > 0 {

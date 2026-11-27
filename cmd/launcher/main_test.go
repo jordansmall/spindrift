@@ -6647,7 +6647,6 @@ func TestMainRun_InputDocument_BackendRowBaseEnvResolution(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			t.Cleanup(backendrows.Snapshot())
 			if tc.env != "" {
 				t.Setenv(tc.env, "https://acme.example/jira")
 			}
@@ -6660,9 +6659,9 @@ func TestMainRun_InputDocument_BackendRowBaseEnvResolution(t *testing.T) {
 			}
 			var stdout, stderr bytes.Buffer
 			mainRunT(t, []string{"--input", docPath, "research"}, &stdout, &stderr)
-			row, ok := backendrows.Lookup("probe")
+			row, ok := launcherBackendRows.Lookup("probe")
 			if !ok {
-				t.Fatalf("backendrows.Lookup(probe) = false; stderr=%s", stderr.String())
+				t.Fatalf("launcherBackendRows.Lookup(probe) = false; stderr=%s", stderr.String())
 			}
 			if len(row.Routes) != 1 || row.Routes[0].Host != "acme.example" || row.Routes[0].Path != "/jira/rest/api/3/issue" {
 				t.Errorf("routes = %+v, want host acme.example and path /jira/rest/api/3/issue", row.Routes)

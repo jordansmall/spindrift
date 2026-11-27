@@ -104,3 +104,15 @@ func TestAutoMergeRemedyClauseReadsShared(t *testing.T) {
 		t.Fatalf("clause = %q", got)
 	}
 }
+
+func TestRowGatesKeysTheGatedStrategiesByName(t *testing.T) {
+	reset(t)
+	gated := strategy("gated")
+	gated.RowGate = func(func(string) string) bool { return false }
+	Register(gated)
+	Register(strategy("plain"))
+	gates := RowGates()
+	if len(gates) != 1 || gates["gated"] == nil {
+		t.Fatalf("RowGates() = %v, want only the gated strategy's gate", gates)
+	}
+}

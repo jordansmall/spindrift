@@ -4397,7 +4397,7 @@ func TestRunQuickstart_SplitPairing_UnparseableTrackerRepoURLReprompts(t *testin
 // runtime has the in-process engine as its sandbox.
 func runQuickstartT(t *testing.T, dir string, env Environment, cmdRunner CommandRunner, forgeBuilder ForgeBuilder, w io.Writer, stdin io.Reader, interactive, force bool) error {
 	t.Helper()
-	rt := connectorruntime.FromRegistries(nil, connectorsandboxtest.InProcess())
+	rt := connectorruntime.New(bakedRows, nil, connectorsandboxtest.InProcess())
 	t.Cleanup(func() { _ = rt.Close() })
 	return runQuickstartOn(t, rt, dir, env, cmdRunner, forgeBuilder, w, stdin, interactive, force)
 }
@@ -4406,7 +4406,7 @@ func runQuickstartT(t *testing.T, dir string, env Environment, cmdRunner Command
 // sandbox, as the quickstart binary builds.
 func runQuickstartNoSandboxT(t *testing.T, dir string, env Environment, cmdRunner CommandRunner, forgeBuilder ForgeBuilder, w io.Writer, stdin io.Reader, interactive, force bool) error {
 	t.Helper()
-	rt := connectorruntime.FromRegistries(nil, nil)
+	rt := connectorruntime.New(bakedRows, nil, nil)
 	t.Cleanup(func() { _ = rt.Close() })
 	return runQuickstartOn(t, rt, dir, env, cmdRunner, forgeBuilder, w, stdin, interactive, force)
 }

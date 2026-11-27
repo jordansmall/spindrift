@@ -2218,11 +2218,12 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return configErrorCode(verb, int(exitcode.ConfigInvalid))
 	}
-	if err := backendrows.Use(resolved.Backends, backendRowSetting(resolved, env)); err != nil {
+	backends, err := backendrows.Decode(resolved.Backends, backendRowSetting(resolved, env), backendkit.RowGates())
+	if err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return configErrorCode(verb, int(exitcode.ConfigInvalid))
 	}
-	launcherInput, launcherDriverRows = resolved, rows
+	launcherInput, launcherDriverRows, launcherBackendRows = resolved, rows, backends
 	// Both run after launcherInput is in place: CODE_FORGE and ISSUE_TRACKER may
 	// be set through the document alone. The fallback runs first: it exports a
 	// core secret the row sources then read, so the template runs once.

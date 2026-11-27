@@ -159,11 +159,7 @@ func TestBuildDemandSources_GitHubReadsAmbientRepoSlug(t *testing.T) {
 // a source and each is told how to configure one, never a native fallback.
 func TestBuildDemandSources_JiraWithoutAConnectorRowHasNoSource(t *testing.T) {
 	clearKnobEnvT(t)
-	t.Cleanup(backendrows.Snapshot())
-	if err := backendrows.Use(nil, func(string) string { return "" }); err != nil {
-		t.Fatal(err)
-	}
-	connectors := connectorruntime.FromRegistries(credsourcetest.Applied(), connectorsandboxtest.InProcess())
+	connectors := connectorruntime.New(backendrows.Set{}, nil, connectorsandboxtest.InProcess())
 	t.Cleanup(func() { _ = connectors.Close() })
 	src, missing := buildDemandSources(connectors, demandDocT(map[string]string{
 		"ISSUE_TRACKER":       "jira",
@@ -405,11 +401,7 @@ func TestBuildDemandSources_UnsetKnobsResolveToSchemaDefaults(t *testing.T) {
 // gets a source and each is told why, never a native fallback.
 func TestBuildDemandSources_ForgejoWithoutAConnectorRowHasNoSource(t *testing.T) {
 	clearKnobEnvT(t)
-	t.Cleanup(backendrows.Snapshot())
-	if err := backendrows.Use(nil, func(string) string { return "" }); err != nil {
-		t.Fatal(err)
-	}
-	src, missing := buildDemandSources(connectorruntime.FromRegistries(credsourcetest.Applied(), connectorsandboxtest.InProcess()), demandDocT(map[string]string{
+	src, missing := buildDemandSources(connectorruntime.New(backendrows.Set{}, nil, connectorsandboxtest.InProcess()), demandDocT(map[string]string{
 		"ISSUE_TRACKER": "forgejo",
 		"REPO_SLUG":     "owner/repo",
 		"FORGEJO_TOKEN": "tok",
@@ -918,22 +910,19 @@ func TestRepoURL_GitHubEnterpriseHost(t *testing.T) {
 // called: it would reach the network.
 func TestBuildDemandSources_ForgejoConnectorRowBuildsProbeSource(t *testing.T) {
 	clearKnobEnvT(t)
-	t.Cleanup(backendrows.Snapshot())
 	module := os.Getenv("SPINDRIFT_FORGEJO_CONNECTOR_WASM")
 	if module == "" {
 		t.Skip("SPINDRIFT_FORGEJO_CONNECTOR_WASM unset: no compiled forgejo Connector to test")
 	}
 	raw := `[{"name":"forgejo","module":"` + module + `","credentialEnv":"FORGEJO_TOKEN",
 "baseEnv":"FORGEJO_BASE_URL","routes":[{"method":"GET","host":"{base}","path":"/api/v1/repos/{repo}/issues"}]}]`
-	if err := backendrows.Use([]byte(raw), func(k string) string {
+	rows := useRows(t, []byte(raw), func(k string) string {
 		if k == "FORGEJO_BASE_URL" {
 			return "https://forgejo.example"
 		}
 		return ""
-	}); err != nil {
-		t.Fatal(err)
-	}
-	connectors := connectorruntime.FromRegistries(credsourcetest.Applied(), connectorsandboxtest.InProcess())
+	})
+	connectors := connectorruntime.New(rows, credsourcetest.EnvRows(rows.All()...), connectorsandboxtest.InProcess())
 	t.Cleanup(func() { _ = connectors.Close() })
 	src, missing := buildDemandSources(connectors, demandDocT(map[string]string{
 		"ISSUE_TRACKER": "forgejo", "REPO_SLUG": "owner/repo", "FORGEJO_TOKEN": "tok", "LABEL": "ready-for-agent",
@@ -1145,11 +1134,11 @@ func TestProbeRoute_NoCategoryCapabilityIsSilent(t *testing.T) {
 	}
 }
 
-// demandRuntime is a Connector runtime over the applied rows, closed with the
+// demandRuntime is a Connector runtime with no backend rows, closed with the
 // test.
 func demandRuntime(t *testing.T) *connectorruntime.Runtime {
 	t.Helper()
-	rt := connectorruntime.FromRegistries(credsourcetest.Applied(), connectorsandboxtest.InProcess())
+	rt := connectorruntime.New(backendrows.Set{}, nil, connectorsandboxtest.InProcess())
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt
 }
