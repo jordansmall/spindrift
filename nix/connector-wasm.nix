@@ -62,4 +62,5 @@ pkgs.runCommand "connector-wasm-fixtures" { nativeBuildInputs = [ pkgs.go ]; } '
   done
   build tracker-violate.wasm -ldflags=-X=main.mode=violate ./tracker
   build tracker-writes-violate.wasm -ldflags=-X=main.mode=writes-violate ./tracker
+  build tracker-undeclared.wasm -ldflags=-X=main.mode=undeclared ./tracker
 ''

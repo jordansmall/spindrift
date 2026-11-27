@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/connectorforge/connectorforgetest"
+	"spindrift.dev/launcher/internal/connectorprotocol"
+	"spindrift.dev/launcher/internal/connectorprotocol/schematest"
 	"spindrift.dev/launcher/internal/connectortest"
 	"spindrift.dev/launcher/internal/fixturebuild"
 )
@@ -125,5 +127,63 @@ func TestRun_ScriptedDialectConnectorPassesOnlyWithItsScript(t *testing.T) {
 	}
 	if want := "--- PASS: TestConnectorConformance/TrackerReadContract"; !strings.Contains(out, want) {
 		t.Errorf("output does not show the read contract passing, want %q:\n%s", want, out)
+	}
+}
+
+// A Connector that declares a capability it registers no handler for fails the
+// declared-capability check, naming the capability.
+func TestRun_UndeclaredCapabilityFailsDeclaredCapabilities(t *testing.T) {
+	out, err := conformanceChild(t, nil, "tracker-undeclared.wasm", "tracker.example", http.MethodGet)
+	if err == nil {
+		t.Fatalf("a tracker declaring a capability it does not serve passed conformance:\n%s", out)
+	}
+	for _, want := range []string{
+		"--- FAIL: TestConnectorConformance/DeclaredCapabilities",
+		`"tracker.blocks"`,
+		`"tracker.blocks" did not answer`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output does not contain %q:\n%s", want, out)
+		}
+	}
+	if want := "--- PASS: TestConnectorConformance/TrackerReadContract"; !strings.Contains(out, want) {
+		t.Errorf("the read contract should still pass, want %q:\n%s", want, out)
+	}
+}
+
+func TestRun_DeclaredCapabilitiesRunForEveryFixture(t *testing.T) {
+	for _, tc := range []struct{ wasm, host string }{
+		{"tracker.wasm", "tracker.example"},
+		{"tracker-writes.wasm", "tracker.example"},
+		{"forge.wasm", "forge.example"},
+		{connectorforgetest.PRWasm, "forge.example"},
+	} {
+		out, err := conformanceChild(t, nil, tc.wasm, tc.host, http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodDelete)
+		if err != nil {
+			t.Fatalf("%s failed conformance:\n%s", tc.wasm, out)
+		}
+		if want := "--- PASS: TestConnectorConformance/DeclaredCapabilities"; !strings.Contains(out, want) {
+			t.Errorf("%s: want %q:\n%s", tc.wasm, want, out)
+		}
+	}
+}
+
+func TestSampleParamsCoverTheProtocol(t *testing.T) {
+	schema, err := schematest.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, m := range connectorprotocol.Methods {
+		if _, ok := declaredAxis(m.Capability); !ok || m.Raw {
+			continue
+		}
+		params, ok := sampleParams(name, "https://backend.example/api/v1", "1")
+		if !ok {
+			t.Errorf("sampleParams has no sample for %q", name)
+			continue
+		}
+		if err := schema.ValidateParams(name, params); err != nil {
+			t.Errorf("sample for %q does not match the protocol: %v", name, err)
+		}
 	}
 }

@@ -3,8 +3,10 @@
 // contract for "tracker", the whole tracker contract when it also registers
 // "tracker.transition" and "tracker.editLabels", the branch contract for
 // "forge.branches", the Code Forge contract for a push-only forge and the PR
-// Forge contract for "forge.prs". A Connector supplies its wasm, its declared
-// Route table and any scripted answers its dialect needs.
+// Forge contract for "forge.prs". Whatever else it declares, every tracker or
+// forge capability it registers must answer each method it serves, as the
+// DeclaredCapabilities subtest calls them. A Connector supplies its wasm, its
+// declared Route table and any scripted answers its dialect needs.
 //
 // The backend it runs against is scripted and forgejo-shaped: REST under
 // /api/v1 (a Target.API of the backend URL plus /api/v1), with the repository
@@ -126,6 +128,9 @@ func Run(t *testing.T, c connectortest.Connector) {
 		t.Run("CodeForgeContract", func(t *testing.T) {
 			forgetest.RunCodeForgeContract(t, connectorforgetest.NewFor(t, c))
 		})
+	}
+	if hasDeclared(caps) {
+		t.Run("DeclaredCapabilities", func(t *testing.T) { declaredCapabilities(t, c, caps) })
 	}
 	if !ran {
 		t.Fatalf("connector registers none of the capabilities that select a conformance contract (%q for TrackerReadContract, %q for BranchContract, %q or %q for CodeForgeContract, %q for PRForgeContract); it registers %v, so conformance attests nothing",

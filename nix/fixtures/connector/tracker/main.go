@@ -13,7 +13,9 @@
 // {API}/repos/{Repo}/issues, answering its html_url verbatim) and
 // tracker.listLabels (GET {API}/repos/{Repo}/labels), and passes a comment's
 // author_association through unvetted, so a scripted backend can make it relay
-// answers core must refuse.
+// answers core must refuse; "undeclared" is faithful and read-only but also
+// declares tracker.blocks, which it registers no handler for, so the declared
+// capability check must catch it.
 package main
 
 import (
@@ -36,6 +38,9 @@ func init() {
 	}
 	if mode == "hostile" {
 		tracker.RegisterWrites(tracker.Writer{FileIssue: fileIssue, ListLabels: listLabels})
+	}
+	if mode == "undeclared" {
+		connector.Register("tracker.blocks")
 	}
 	tracker.Register(tracker.Reader{
 		ListIssues:    listIssues,

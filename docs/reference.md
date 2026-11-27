@@ -2448,8 +2448,9 @@ mean at runtime is issue #6751. The worked example is the fixture Connector in
   wasm (and, for a backend, its Route table; one named after no core backend
   row runs the tracker and forge contracts its registered capabilities select,
   against a scripted backend, and may add a `script` to its entry), as
-  `connector-<name>-go-fmt`, `-go-vet`, `-go-test` and `-conformance`. They
-  live only in the subflake: core's root `checks` carry none (bar the
+  `connector-<name>-go-fmt`, `-go-vet`, `-go-test` and `-conformance`. Its
+  conformance check also fails if a tracker or forge capability it declares has
+  a method that gives no real answer. They live only in the subflake: core's root `checks` carry none (bar the
   test-only fixtures'), and the root's `drivers-<name>-go-test` and
   `backends-<name>-go-test` skip their Connector conformance tests. `nix run
   .#connector-dev -- <connector> flake check` runs them, CI's `connector` lane

@@ -483,8 +483,9 @@ type Retry struct {
 	DoneOn []string
 }
 
-// Method is one protocol method. Capability is "" for a method with none, and
-// Raw marks a method whose request is raw bytes rather than JSON params.
+// Method is one protocol method. Capability is "" for a method with none,
+// Raw marks a method whose request is raw bytes rather than JSON params, and
+// Optional one a Connector may omit while declaring its capability.
 type Method struct {
 	Name        string
 	Axis        Axis
@@ -492,6 +493,7 @@ type Method struct {
 	Retry       Retry
 	ResultCheck string
 	Raw         bool
+	Optional    bool
 }
 
 // Methods maps every method name to its row.
@@ -515,7 +517,7 @@ var Methods = map[string]Method{
 	MethodForgePrsForBranch:      {Name: MethodForgePrsForBranch, Axis: AxisForge, Capability: CapForge, Retry: Retry{Safe: true}, ResultCheck: CheckPrShape},
 	MethodForgePr:                {Name: MethodForgePr, Axis: AxisForge, Capability: CapForge, Retry: Retry{Safe: true}, ResultCheck: CheckPrAnswer},
 	MethodForgeChecks:            {Name: MethodForgeChecks, Axis: AxisForge, Capability: CapForge, Retry: Retry{Safe: true}, ResultCheck: CheckRollupState},
-	MethodForgeJobLog:            {Name: MethodForgeJobLog, Axis: AxisForge, Capability: CapForge, Retry: Retry{Safe: true}, ResultCheck: CheckDecode},
+	MethodForgeJobLog:            {Name: MethodForgeJobLog, Axis: AxisForge, Capability: CapForge, Retry: Retry{Safe: true}, ResultCheck: CheckDecode, Optional: true},
 	MethodForgeBranchExists:      {Name: MethodForgeBranchExists, Axis: AxisForge, Capability: CapForgeBranches, Retry: Retry{Safe: true}, ResultCheck: CheckDecode},
 	MethodForgeDeleteBranch:      {Name: MethodForgeDeleteBranch, Axis: AxisForge, Capability: CapForgeBranches, Retry: Retry{Safe: true, DoneOn: []string{ClassNotFound}}, ResultCheck: CheckDecode},
 	MethodForgeBehind:            {Name: MethodForgeBehind, Axis: AxisForge, Capability: CapForgePrs, Retry: Retry{Safe: true}, ResultCheck: CheckBehindCount},
