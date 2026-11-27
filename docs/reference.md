@@ -4638,6 +4638,13 @@ description and a regen.
   methods under the fake host: each request stays inside a declared Route or the
   Connector refuses it, and `HTTPRequest` itself refuses a URL over
   `MaxHTTPURL`.
+  `(*FakeHost).CheckDeclared(t, samples)` calls, through the fake host, every
+  required method of each capability the Connector registered (the generated
+  capability-to-methods table; a method the protocol marks optional, like
+  `forge.jobLog`, is not required) with the `connector.Sample` supplied for it,
+  and fails unless the answer is a non-null result: a declared capability with
+  no handler, no sample, an error answer or a capability the tracker and forge
+  protocol does not define all fail.
   Three small helpers cover what HTTP-backed Connectors each rewrote.
   `connector.SendJSON(req, in, out)` sends through `HTTPRequest` with `in`
   JSON-encoded and decodes a 2xx answer into `out`; it classes a failed send

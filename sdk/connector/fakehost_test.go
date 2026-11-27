@@ -4,6 +4,7 @@ package connector
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"runtime"
 	"strings"
@@ -52,10 +53,7 @@ type stubTB struct {
 func (s *stubTB) Helper()          {}
 func (s *stubTB) Cleanup(f func()) { s.cleanups = append(s.cleanups, f) }
 func (s *stubTB) Fatalf(format string, args ...any) {
-	s.fatal = format
-	if len(args) > 0 {
-		s.fatal = args[0].(error).Error()
-	}
+	s.fatal = fmt.Sprintf(format, args...)
 	runtime.Goexit()
 }
 

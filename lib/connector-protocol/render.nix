@@ -7,6 +7,7 @@
 let
   inherit (builtins)
     attrNames
+    concatMap
     concatStringsSep
     deepSeq
     elem
@@ -22,11 +23,13 @@ let
     isList
     isString
     length
+    lessThan
     listToAttrs
     map
     mapAttrs
     match
     seq
+    sort
     split
     stringLength
     substring
@@ -230,9 +233,7 @@ let
       what = "method ${toJSON (m.name or "?")}";
       axis = axisOf m.name;
       retry = m.retry;
-    in
-    [
-      (checkFields what m [
+      required = [
         "name"
         "capability"
         "params"
@@ -241,7 +242,11 @@ let
         "resultCheck"
         "raw"
         "doc"
-      ])
+      ];
+    in
+    [
+      (checkKeys what m (required ++ [ "optional" ]) required)
+      (if isBool (m.optional or false) then true else fail "${what}: optional must be a bool")
       (
         if match "(tracker|forge|driver)\\.[A-Za-z][A-Za-z0-9]*" m.name != null then
           true
@@ -1270,11 +1275,38 @@ let
             commented "${prefix}${goIdent e.name}" e.doc + "${prefix}${goIdent e.name} = ${goString e.name}\n"
           ) entries
         );
+      # The methods each network capability must serve, for FakeHost.CheckDeclared.
+      # A method a row marks optional is left out: a Connector may omit it.
+      capabilityMethodsText =
+        let
+          entryOf =
+            axis: c:
+            let
+              served = sort lessThan (
+                map (m: m.name) (
+                  filter (m: axisOf m.name == axis && m.capability == c.name && !(m.optional or false)) desc.methods
+                )
+              );
+            in
+            "\t${goString c.name}: {${concatStringsSep ", " (map goString served)}},\n";
+        in
+        "// capabilityMethods maps each tracker and forge capability to the methods a\n"
+        + "// Connector declaring it must serve, sorted; a method the protocol marks\n"
+        + "// optional is not listed.\n"
+        + "var capabilityMethods = map[string][]string{\n"
+        + concatStringsSep "" (
+          concatMap (axis: map (entryOf axis) desc.capabilities.${axis}) [
+            "tracker"
+            "forge"
+          ]
+        )
+        + "}\n\n";
       files = {
         connector = {
           idents = [
             "protocolVersion"
             "Class"
+            "capabilityMethods"
           ]
           ++ map (c: goIdent c.name) desc.errorClasses
           ++ map goIdent limits;
@@ -1297,7 +1329,8 @@ let
                 n:
                 commented (goIdent n) desc.limits.${n}.doc + "${goIdent n} = ${toString desc.limits.${n}.value}\n"
               ) limits
-            );
+            )
+            + capabilityMethodsText;
         };
         event = {
           idents = [

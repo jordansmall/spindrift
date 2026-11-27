@@ -49,17 +49,22 @@ in
   (method "forge.checks" "forge" numbered (t.ref "rollup") retryable "rollupState"
     "The status-check rollup of the PR's head commit; an empty `state` means it has no checks."
   )
-  (method "forge.jobLog" "forge"
-    (t.object {
-      inherit target;
-      jobId = t.string;
-      tail = t.integer;
-      errorLines = t.integer;
-    })
-    (t.open { log = t.string; })
-    retryable
-    "decode"
-    "The last `tail` bytes of a job's log, preceded by the error lines of the head it cut, up to `errorLines` bytes; optional, and a failed read only costs failure detail its logs."
+  (
+    (method "forge.jobLog" "forge"
+      (t.object {
+        inherit target;
+        jobId = t.string;
+        tail = t.integer;
+        errorLines = t.integer;
+      })
+      (t.open { log = t.string; })
+      retryable
+      "decode"
+      "The last `tail` bytes of a job's log, preceded by the error lines of the head it cut, up to `errorLines` bytes; optional, and a failed read only costs failure detail its logs."
+    )
+    // {
+      optional = true;
+    }
   )
   (method "forge.branchExists" "forge.branches" branched (t.open {
     exists = t.boolean;
