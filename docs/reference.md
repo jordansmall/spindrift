@@ -4632,6 +4632,12 @@ description and a regen.
   request sent, and reports the declared Routes no test used. It is a test
   aid, not a control: it does not apply the address policy, which only the
   real host checks, and the real host stays the authority on every request.
+  `connector.HostileInputs()` is the shared corpus of hostile ids, labels and
+  branch names (`.`, `..`, slashes, percent-encodings, `;`, control characters,
+  non-ASCII, a value past `MaxHTTPURL`) a Connector's tests run through its
+  methods under the fake host: each request stays inside a declared Route or the
+  Connector refuses it, and `HTTPRequest` itself refuses a URL over
+  `MaxHTTPURL`.
   Three small helpers cover what HTTP-backed Connectors each rewrote.
   `connector.SendJSON(req, in, out)` sends through `HTTPRequest` with `in`
   JSON-encoded and decodes a 2xx answer into `out`; it classes a failed send

@@ -134,3 +134,17 @@ func TestResponseHeaderOutsideWasip1HasNoHost(t *testing.T) {
 		t.Errorf("ResponseHeader = %q, %v, want absent without a host", got, ok)
 	}
 }
+
+func TestHTTPRequestRefusesAnOverlongURLBeforeTheHost(t *testing.T) {
+	saved := hostCall
+	t.Cleanup(func() { hostCall = saved })
+	hostCall = func(_, _ []byte) (uint64, error) {
+		t.Fatal("an over-limit URL reached the host call")
+		return 0, nil
+	}
+	_, err := HTTPRequest(Request{Method: "GET", URL: "https://h.example/" + strings.Repeat("a", MaxHTTPURL)})
+	var ce *Error
+	if !errors.As(err, &ce) || ce.Class != Permanent {
+		t.Fatalf("err = %v, want a Permanent *Error", err)
+	}
+}

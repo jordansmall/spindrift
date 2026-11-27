@@ -38,10 +38,14 @@ var hostCall = hostHTTPRequest
 // to a network Connector only. An error means the request did not complete (the
 // transport failed, the credential could not be resolved, or the body could not
 // be read) and is the Connector's to handle; its text is a fixed reason, the
-// detail staying in the host's audit log. A request the host refuses, or a
+// detail staying in the host's audit log. A URL over MaxHTTPURL is refused here
+// as a Permanent *Error, never sent. Any other request the host refuses, or a
 // response over MaxHTTPResponse, does not return: the host aborts the call and
 // closes the Connector.
 func HTTPRequest(req Request) (Response, error) {
+	if len(req.URL) > MaxHTTPURL {
+		return Response{}, Errorf(Permanent, "connector: url is %d bytes, over the %d-byte limit", len(req.URL), MaxHTTPURL)
+	}
 	raw, err := json.Marshal(req)
 	if err != nil {
 		return Response{}, fmt.Errorf("connector: encode request: %w", err)
