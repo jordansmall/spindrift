@@ -2655,8 +2655,9 @@ section as `{name, module, routes, acceptedRoutes, acceptedGrant, credentialEnv,
 credentialKnob, credentialScheme, identityEnv, baseEnv, gitRemote,
 gitRemoteEnv}` (`acceptedGrant` and the last five optional); `credentialKnob` is the Consumer knob
 that names `credentialEnv`, and doctor shows it. The launcher and the daemon
-validate and store the rows (the `backendrows` package: `Use` validates the
-rows whole and exits `config-invalid` on a bad one). `Lookup` finds a row and
+decode the rows once (the `backendrows` package: `Decode` validates the rows
+whole and exits `config-invalid` on a bad one) and hand the resulting `Set` to
+the runtime. `Set.Lookup` finds a row and
 `Load` binds its module to its Route table through the Connector host. The
 routed backends ([Backend Connectors](#backend-connectors)) call them. The host
 reads the credential from its own environment at each request and attaches it
