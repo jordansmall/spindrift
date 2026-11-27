@@ -1767,3 +1767,18 @@ done
 
 Take each row's median `start-ns` (Start) and `ns/op` (HostCall), and its
 ratios against the one-sandbox row of its own runtime and round.
+
+## Amendment (issue #7555): the backend row registry is folded into the runtime
+
+The backend row registry went the way of the Driver registry (#7556).
+`backendrows.Decode` returns an immutable `Set` and stores nothing; the
+Launcher and the Daemon hand it to `connectorsetup.New` as `Input.Rows`, and
+quickstart builds its runtime over it with `connectorruntime.New`. Doctor's
+Route-table checks, the Connector write gate and the backend factories read
+rows from the runtime they are handed. The package-level `backendrows.Use`,
+`Lookup`, `All`, `BaseError`, `Snapshot` and `RegisterGate`, and
+`connectorruntime.FromRegistries`, no longer exist; `Set.Lookup`, `Set.All`,
+`Set.BaseError` and `Runtime.BaseError` answer the same questions. A backend's
+row gate is the `RowGate` of its `backendkit.Strategy`, and callers pass
+`backendkit.RowGates()` to `Decode`, or just that `RowGate` when decoding one
+backend's row.
