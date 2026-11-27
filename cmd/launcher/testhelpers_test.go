@@ -388,7 +388,7 @@ func driverRuntime(t testing.TB) *connectorruntime.Runtime {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt := connectorruntime.FromRegistries(nil, connectorsandboxtest.InProcess())
+	rt := connectorruntime.New(backendrows.NewSet(), nil, connectorsandboxtest.InProcess())
 	rt.UseDriverRows(rows)
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt

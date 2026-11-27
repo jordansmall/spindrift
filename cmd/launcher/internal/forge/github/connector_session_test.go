@@ -44,7 +44,7 @@ func (r *loadRecorder) loads() []*connectorhost.Connector {
 // is a loadRecorder, closed with the test.
 func recordingRuntime(t *testing.T) (*connectorruntime.Runtime, *loadRecorder) {
 	t.Helper()
-	row, ok := backendrows.Lookup("github")
+	row, ok := appliedRows.Lookup("github")
 	if !ok {
 		t.Fatal("no github backend row applied")
 	}

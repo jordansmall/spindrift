@@ -55,11 +55,11 @@ func newClient(t *testing.T, repo string, labels forge.DispatchLabels, opts ...E
 	return NewExecClient(repo, labels, append([]ExecOption{WithConnectors(testRuntime(t))}, opts...)...)
 }
 
-// testRuntime is a Connector runtime over the applied rows and the installed
+// testRuntime is a Connector runtime over the rows applyGithubRow applied and the installed
 // sandbox, closed with the test.
 func testRuntime(t *testing.T) *connectorruntime.Runtime {
 	t.Helper()
-	rt := connectorruntime.FromRegistries(credsourcetest.Applied(), testSandbox())
+	rt := connectorruntime.New(appliedRows, credsourcetest.EnvRows(appliedRows.All()...), testSandbox())
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt
 }

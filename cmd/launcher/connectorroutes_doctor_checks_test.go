@@ -15,19 +15,16 @@ import (
 	"spindrift.dev/launcher/internal/doctor"
 )
 
-// useConnectorRows applies rows to the process-wide registry, for the tests
-// that still build their runtime from it.
+// useConnectorRows makes rows the launcher's backend rows, for the tests that
+// build their runtime from them.
 func useConnectorRows(t *testing.T, rows ...backendrows.Row) {
 	t.Helper()
-	t.Cleanup(backendrows.Snapshot())
 	routeThroughConnector(t, "fixture")
 	raw, err := json.Marshal(rows)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := backendrows.Use(raw, func(string) string { return "" }); err != nil {
-		t.Fatal(err)
-	}
+	useLauncherRows(t, string(raw))
 }
 
 // rowsRuntime is the runtime over rows, with lookup answering the knob a
