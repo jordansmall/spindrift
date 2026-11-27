@@ -124,6 +124,9 @@ func TestBranchExistsEscapesSegments(t *testing.T) {
 	}
 }
 
+// TestBranchNamesRefused pins which names are refused outright, which the
+// corpus run in TestHostileInputs does not: it only requires a request to stay
+// inside a Route.
 func TestBranchNamesRefused(t *testing.T) {
 	got := stub(t, nil)
 	for _, b := range []string{"", ".", "..", "a/../b", "a//b", "/a", "a/", "a/.", "a;b"} {
