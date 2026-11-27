@@ -136,7 +136,9 @@ func TestIssueKeyIsPathEscaped(t *testing.T) {
 
 // A key that cannot stay one path segment is refused by the Connector before
 // any request is sent (the host would refuse "." and ".." and close the
-// Connector), and the Connector stays usable for the next call.
+// Connector), and the Connector stays usable for the next call. The corpus run
+// in TestHostileInputs only requires a request to stay inside a Route; this
+// pins which keys are refused outright.
 func TestIssueKeyRefusedBeforeAnyRequest(t *testing.T) {
 	got := serve(t, "/jira/rest/api/2/issue/ENG-1", `{"key":"ENG-1"}`)
 	for _, key := range []string{"", ".", "..", "ENG-1/../../x", "a;b"} {
