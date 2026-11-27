@@ -47,7 +47,7 @@ func loadViaRow(t *testing.T, sb connectorsandbox.Loader) error {
 		t.Fatal(err)
 	}
 	row := backendrows.Row{Name: "x", Module: module}
-	rt := connectorruntime.New([]backendrows.Row{row}, nil, sb)
+	rt := connectorruntime.New(backendrows.NewSet(row), nil, sb)
 	defer rt.Close()
 	_, err := rt.Connector(row, connectorruntime.SessionSpec{})
 	return err

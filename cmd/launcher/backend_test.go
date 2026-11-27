@@ -365,7 +365,7 @@ func forgejoFixtureRuntime(t *testing.T) *connectorruntime.Runtime {
 	if row, ok := backendrows.Lookup("forgejo"); ok {
 		rows = append(rows, row)
 	}
-	rt := connectorruntime.New(rows, credsourcetest.EnvRows(rows...), capPadSandbox{connectorsandboxtest.InProcess()})
+	rt := connectorruntime.New(backendrows.NewSet(rows...), credsourcetest.EnvRows(rows...), capPadSandbox{connectorsandboxtest.InProcess()})
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt
 }

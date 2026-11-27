@@ -4,5 +4,5 @@ package backendrows
 func Reset() {
 	mu.Lock()
 	defer mu.Unlock()
-	applied = map[string]Row{}
+	applied = Set{}
 }

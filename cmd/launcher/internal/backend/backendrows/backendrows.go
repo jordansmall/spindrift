@@ -1,8 +1,9 @@
-// Package backendrows applies the backend rows of the launcher input document
+// Package backendrows decodes the backend rows of the launcher input document
 // (ADR 0073, issue #6805): a network Connector's compiled module, Route table
-// and credential knob. A backend without a row here is built from the generated
-// registry. It is a package of its own because it imports connectorhost, which
-// must not import the registry.
+// and credential knob. Decode returns them as an immutable Set the Connector
+// runtime holds; a backend without a row is built from the generated registry.
+// It is a package of its own because it imports connectorhost, which must not
+// import the registry.
 package backendrows
 
 import (
@@ -200,28 +201,93 @@ func remoteDecl(literal, env string) string {
 // `core = true` rows of lib/backends/ (ADR 0068, decision 7).
 var coreBackends = map[string]bool{"git": true, "local": true}
 
+// Set is the backend rows one document decoded, plus why each dropped row
+// has none. The zero Set is empty.
+type Set struct {
+	rows map[string]Row
+	// unusableBase is the base error of each row Decode dropped.
+	unusableBase map[string]error
+}
+
+// NewSet is the Set of rows already validated, for a caller that builds its
+// rows in code rather than decoding a document. A repeated name keeps the last.
+func NewSet(rows ...Row) Set {
+	byName := make(map[string]Row, len(rows))
+	for _, row := range rows {
+		byName[row.Name] = row
+	}
+	return Set{rows: byName}
+}
+
+// Lookup returns the Set's row for the backend name. ok is false when the Set
+// has none, and the caller builds the native backend from the generated
+// registry.
+func (s Set) Lookup(name string) (Row, bool) {
+	row, ok := s.rows[name]
+	return row, ok
+}
+
+// All returns every row, sorted by name.
+func (s Set) All() []Row {
+	rows := slices.Collect(maps.Values(s.rows))
+	slices.SortFunc(rows, func(a, b Row) int { return strings.Compare(a.Name, b.Name) })
+	return rows
+}
+
+// BaseError returns why Decode dropped the named row, so a caller that finds
+// no row can say why. It is nil when the row applied or is absent.
+func (s Set) BaseError(name string) error { return s.unusableBase[name] }
+
+// Gate reports whether a backend's Routes can serve the settings lookup reads.
+type Gate func(lookup func(string) string) bool
+
 var (
-	mu      sync.RWMutex
-	applied = map[string]Row{}
-	// unusableBase holds the base error of each row Use dropped.
-	unusableBase = map[string]error{}
+	mu sync.RWMutex
+	// applied is the Set Use last stored; Applied returns it.
+	applied Set
+	gates   = map[string]Gate{}
 )
 
-// Use applies the rows in raw, a JSON array of Row, replacing any rows an
-// earlier call applied; empty raw clears them. A row with no name, a repeated
-// or built-in name, no module, credentialEnv or routes, or an invalid Route
-// table or non-empty accepted baseline is an error. A row's BaseHost routes
-// are resolved from lookup(BaseEnv) first, so validation sees the concrete
-// table (an unusable base drops the row, see resolveBase); BaseHost without
-// a BaseEnv is an error. The credential is only required at request time (see
-// Load). Rows are validated whole before any is stored.
+// Applied is the Set Use last stored. It is transitional: it goes with the
+// process-global registry once every reader holds its own Set.
+func Applied() Set {
+	mu.RLock()
+	defer mu.RUnlock()
+	return applied
+}
+
+// Use applies the rows in raw as Decode reads them under the registered gates,
+// replacing any rows an earlier call applied; empty raw clears them.
 func Use(raw json.RawMessage, lookup func(string) string) error {
+	mu.RLock()
+	g := maps.Clone(gates)
+	mu.RUnlock()
+	set, err := Decode(raw, lookup, g)
+	if err != nil {
+		return err
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	applied = set
+	return nil
+}
+
+// Decode reads the rows in raw, a JSON array of Row; empty raw is the empty
+// Set. A row with no name, a repeated or built-in name, no module,
+// credentialEnv or routes, or an invalid Route table or non-empty accepted
+// baseline is an error. A row's BaseHost routes are resolved from
+// lookup(BaseEnv) first, so validation sees the concrete table (an unusable
+// base drops the row, see resolveBase); BaseHost without a BaseEnv is an
+// error. The credential is only required at request time (see Load). Rows are
+// validated whole before any is kept. A row whose gate in gates answers false
+// for lookup is validated, then dropped without a trace; nil gates is none.
+func Decode(raw json.RawMessage, lookup func(string) string, gates map[string]Gate) (Set, error) {
 	var rows []Row
 	if len(bytes.TrimSpace(raw)) != 0 {
 		dec := json.NewDecoder(bytes.NewReader(raw))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&rows); err != nil {
-			return fmt.Errorf("backend rows: %w", err)
+			return Set{}, fmt.Errorf("backend rows: %w", err)
 		}
 	}
 	seen := map[string]bool{}
@@ -239,37 +305,25 @@ func Use(raw json.RawMessage, lookup func(string) string) error {
 			err = validate(resolved, seen)
 		}
 		if err != nil {
-			return fmt.Errorf("backend rows: %w", err)
+			return Set{}, fmt.Errorf("backend rows: %w", err)
 		}
 		if unusable != nil {
 			dropped[resolved.Name] = unusable
-		} else if gateAllows(resolved.Name, lookup) {
+		} else if gate, gated := gates[resolved.Name]; !gated || gate(lookup) {
 			next[resolved.Name] = resolved
 		}
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	applied, unusableBase = next, dropped
-	return nil
+	return Set{rows: next, unusableBase: dropped}, nil
 }
-
-var gates = map[string]func(lookup func(string) string) bool{}
 
 // RegisterGate has Use drop, after validating it, the row named name whenever
 // applies answers false for the run's settings: a backend whose Routes cannot
 // serve the settings gets no row, so no later reader sees one. Call it from
 // init.
-func RegisterGate(name string, applies func(lookup func(string) string) bool) {
+func RegisterGate(name string, applies Gate) {
 	mu.Lock()
 	defer mu.Unlock()
 	gates[name] = applies
-}
-
-func gateAllows(name string, lookup func(string) string) bool {
-	mu.RLock()
-	applies, ok := gates[name]
-	mu.RUnlock()
-	return !ok || applies(lookup)
 }
 
 // unsetHost is the placeholder base host an unusable row resolves against, so
@@ -441,24 +495,11 @@ func validate(row Row, seen map[string]bool) error {
 	return nil
 }
 
-// Lookup returns the document's row for the backend name. ok is false when the
-// document has none, and the caller builds the native backend from the
-// generated registry.
-func Lookup(name string) (Row, bool) {
-	mu.RLock()
-	defer mu.RUnlock()
-	row, ok := applied[name]
-	return row, ok
-}
+// Lookup returns the applied row for the backend name; see Set.Lookup.
+func Lookup(name string) (Row, bool) { return Applied().Lookup(name) }
 
 // All returns every applied row, sorted by name.
-func All() []Row {
-	mu.RLock()
-	defer mu.RUnlock()
-	rows := slices.Collect(maps.Values(applied))
-	slices.SortFunc(rows, func(a, b Row) int { return strings.Compare(a.Name, b.Name) })
-	return rows
-}
+func All() []Row { return Applied().All() }
 
 // Options is what Load takes from its host process.
 type Options struct {
@@ -535,21 +576,16 @@ func Load(ctx context.Context, row Row, o Options) (*connectorhost.Connector, er
 func Snapshot() (restore func()) {
 	mu.Lock()
 	defer mu.Unlock()
-	saved, savedGates, savedBase := maps.Clone(applied), maps.Clone(gates), maps.Clone(unusableBase)
+	saved, savedGates := applied, maps.Clone(gates)
 	return func() {
 		mu.Lock()
 		defer mu.Unlock()
-		applied, gates, unusableBase = saved, savedGates, savedBase
+		applied, gates = saved, savedGates
 	}
 }
 
-// BaseError returns why Use dropped the named row, so a caller that finds no
-// row can say why. It is nil when the row applied or is absent.
-func BaseError(name string) error {
-	mu.RLock()
-	defer mu.RUnlock()
-	return unusableBase[name]
-}
+// BaseError returns why Use dropped the named row; see Set.BaseError.
+func BaseError(name string) error { return Applied().BaseError(name) }
 
 // Baseline renders the Route baseline file (spindrift-connector-routes.json)
 // from raw, the launcher input document's backend rows: one object entry per

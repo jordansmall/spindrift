@@ -86,7 +86,7 @@ func TestUseWithoutRowsClearsTheEarlierRows(t *testing.T) {
 	}
 }
 
-func TestUseRefusesInvalidRowsNamingTheBackend(t *testing.T) {
+func TestDecodeRefusesInvalidRowsNamingTheBackend(t *testing.T) {
 	cases := map[string]struct {
 		raw       json.RawMessage
 		want      []string
@@ -112,10 +112,10 @@ func TestUseRefusesInvalidRowsNamingTheBackend(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			isolate(t)
-			err := backendrows.Use(tc.raw, noEnv)
+			t.Parallel()
+			_, err := backendrows.Decode(tc.raw, noEnv, nil)
 			if err == nil {
-				t.Fatal("Use() = nil, want an error")
+				t.Fatal("Decode() = nil, want an error")
 			}
 			if !strings.HasPrefix(err.Error(), "backend rows: ") {
 				t.Errorf("err = %q, want the backend rows prefix", err)
@@ -508,16 +508,16 @@ func TestUseDecodesAcceptedGrantAndResolvedGitRemoteDoesNotDiffer(t *testing.T) 
 	}
 }
 
-func TestUseRefusesAnInvalidAcceptedGrant(t *testing.T) {
+func TestDecodeRefusesAnInvalidAcceptedGrant(t *testing.T) {
 	for name, grant := range map[string]string{
 		"unknown scheme":        `{"credentialScheme":"digest"}`,
 		"both git remote forms": `{"gitRemote":"https://f.test","gitRemoteEnv":"U"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			isolate(t)
+			t.Parallel()
 			raw := json.RawMessage(`[{"name":"x","module":"/x/x.wasm","routes":[{"method":"GET","host":"h","path":"/a"}],"credentialEnv":"T","acceptedGrant":` + grant + `}]`)
-			if err := backendrows.Use(raw, noEnv); err == nil || !strings.Contains(err.Error(), "accepted grant") {
-				t.Errorf("Use() = %v, want an accepted grant error", err)
+			if _, err := backendrows.Decode(raw, noEnv, nil); err == nil || !strings.Contains(err.Error(), "accepted grant") {
+				t.Errorf("Decode() =%v, want an accepted grant error", err)
 			}
 		})
 	}
@@ -608,14 +608,14 @@ func TestUseRefusesABaseHostWithNoBaseEnvNamingTheBackend(t *testing.T) {
 
 // The shadow and primary fields are gone from the row; a stale document that
 // still carries one is refused rather than silently changing routing.
-func TestUseRefusesTheRetiredShadowAndPrimaryFields(t *testing.T) {
+func TestDecodeRefusesTheRetiredShadowAndPrimaryFields(t *testing.T) {
 	for _, field := range []string{`"shadow":true`, `"shadowEvery":20`, `"primary":true`} {
 		t.Run(field, func(t *testing.T) {
-			isolate(t)
+			t.Parallel()
 			doc := rows(t, []backendrows.Row{row("gh", getRepos)})
 			doc = append(bytes.TrimSuffix(doc, []byte("}]")), []byte(","+field+"}]")...)
-			if err := backendrows.Use(doc, noEnv); err == nil || !strings.Contains(err.Error(), "unknown field") {
-				t.Errorf("Use(%s) = %v, want an unknown-field error", doc, err)
+			if _, err := backendrows.Decode(doc, noEnv, nil); err == nil || !strings.Contains(err.Error(), "unknown field") {
+				t.Errorf("Decode(%s) =%v, want an unknown-field error", doc, err)
 			}
 		})
 	}
