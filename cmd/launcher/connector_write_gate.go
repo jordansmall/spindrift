@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/backend"
-	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/doctor"
 )
@@ -47,9 +46,9 @@ func githubSides(c config) []githubSide {
 
 // githubApplies reports whether the github backend row reads through the
 // Connector and the Connector carries github writes. It looks the row up per
-// call: backendrows loads after package init, when gateRegistry is built.
+// call: the row lives in c.connectors, the config's own runtime.
 func githubApplies(c config) bool {
-	row, ok := backendrows.Lookup(backend.GitHub.Name)
+	row, ok := c.connectors.Row(backend.GitHub.Name)
 	readsThroughConnector := ok && backendkit.ForgeReadsThroughConnector(row.Name)
 	return readsThroughConnector && len(githubSides(c)) > 0
 }
@@ -96,7 +95,7 @@ func warnConnectorWriteUndetermined(w io.Writer, c config, env, reason string) {
 // applySecretCmdFallback fill for every core secret before any verb runs; a
 // credential only a refresh file supplies is not seen, and so not introspected.
 func checkConnectorWriteGate(c config, w io.Writer) error {
-	row, ok := backendrows.Lookup(backend.GitHub.Name)
+	row, ok := c.connectors.Row(backend.GitHub.Name)
 	if !ok {
 		return nil
 	}

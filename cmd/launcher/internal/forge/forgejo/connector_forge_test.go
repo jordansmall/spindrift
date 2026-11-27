@@ -33,9 +33,9 @@ import (
 // and core's git both read it.
 const connectorCredentialEnv = forgejo.ForgejoTokenEnv
 
-// useForgejoRow applies a forgejo backend row, shaped as the input document
+// forgejoRows decodes a forgejo backend row, shaped as the input document
 // carries it, with its {base} routes resolved against baseURL.
-func useForgejoRow(t *testing.T, baseURL string, adjust func(*backendrows.Row)) {
+func forgejoRows(t *testing.T, baseURL string, adjust func(*backendrows.Row)) backendrows.Set {
 	t.Helper()
 	path, table := declaredRoutes(t)
 	row := backendrows.Row{
@@ -47,32 +47,35 @@ func useForgejoRow(t *testing.T, baseURL string, adjust func(*backendrows.Row)) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(backendrows.Snapshot())
-	if err := backendrows.Use(doc, func(k string) string {
+	set, err := backendrows.Decode(doc, func(k string) string {
 		if k == forgejo.ForgejoBaseURLEnv {
 			return baseURL
 		}
 		return ""
-	}); err != nil {
+	}, nil)
+	if err != nil {
 		t.Fatal(err)
 	}
+	return set
 }
 
-// buildForge runs the production constructor; git and the Connector both read
-// FORGEJO_TOKEN from the environment.
-func buildForge(t *testing.T, srv *httptest.Server, mergeMethod string) (forge.CodeForge, error) {
+// useForgejoRow is the Connector runtime, loading in-process, over the row
+// forgejoRows decodes, closed with the test.
+func useForgejoRow(t *testing.T, baseURL string, adjust func(*backendrows.Row)) *connectorruntime.Runtime {
 	t.Helper()
-	return buildForgeAt(t, srv.URL, mergeMethod)
+	return runtimeOver(t, forgejoRows(t, baseURL, adjust), connectorsandboxtest.InProcess())
 }
 
-// buildForgeAt is buildForge for an instance served under base, which may carry a subpath.
-func buildForgeAt(t *testing.T, base, mergeMethod string) (forge.CodeForge, error) {
+// buildForge runs the production constructor over rt; git and the Connector
+// both read FORGEJO_TOKEN from the environment.
+func buildForge(t *testing.T, rt *connectorruntime.Runtime, srv *httptest.Server, mergeMethod string) (forge.CodeForge, error) {
 	t.Helper()
-	return buildForgeOn(newRuntime(t), base, mergeMethod)
+	return buildForgeOn(rt, srv.URL, mergeMethod)
 }
 
-// buildForgeOn is buildForgeAt over rt, so a test chooses the sandbox the
-// Connector loads into.
+// buildForgeOn is buildForge for an instance served under base, which may
+// carry a subpath, over rt so a test chooses the sandbox the Connector loads
+// into.
 func buildForgeOn(rt *connectorruntime.Runtime, base, mergeMethod string) (forge.CodeForge, error) {
 	l := mapLookup(map[string]string{forgejo.ForgejoBaseURLEnv: base, forgejo.ForgejoTokenEnv: connectorToken})
 	s := backendkit.Shared{RepoSlug: connectorRepo, BaseBranch: "main", GitUserName: "Test Bot", GitUserEmail: "bot@example.com", MergeMethod: mergeMethod, Connectors: rt}
@@ -90,13 +93,14 @@ func productionForge(t *testing.T, srv *httptest.Server) (forge.CodeForge, []con
 // productionForgeAt is productionForge for an instance served under base.
 func productionForgeAt(t *testing.T, srv *httptest.Server, base string) (forge.CodeForge, []connectorhost.Route, string, error) {
 	t.Helper()
-	useForgejoRow(t, base, func(*backendrows.Row) {})
+	set := forgejoRows(t, base, func(*backendrows.Row) {})
+	rt := runtimeOver(t, set, connectorsandboxtest.InProcess())
 	t.Setenv(connectorCredentialEnv, connectorToken)
 	t.Cleanup(forgejo.SetConnectorClient(srv.Client()))
 	dir := t.TempDir()
 	t.Chdir(dir)
-	cf, err := buildForgeAt(t, base, "")
-	row, _ := backendrows.Lookup("forgejo")
+	cf, err := buildForgeOn(rt, base, "")
+	row, _ := set.Lookup("forgejo")
 	return cf, connectortracker.Routes(row.Routes, connectorRepo), filepath.Join(hostpaths.LogDir(dir), connectorrecord.Name("forgejo", ".audit.jsonl")), err
 }
 
@@ -105,10 +109,10 @@ func productionForgeAt(t *testing.T, srv *httptest.Server, base string) (forge.C
 func TestConnectorForge_LoadFailureFailsConstruction(t *testing.T) {
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
-	useForgejoRow(t, srv.URL, func(r *backendrows.Row) { r.Module = filepath.Join(t.TempDir(), "absent.wasm") })
+	rt := useForgejoRow(t, srv.URL, func(r *backendrows.Row) { r.Module = filepath.Join(t.TempDir(), "absent.wasm") })
 	t.Chdir(t.TempDir())
 
-	cf, err := buildForge(t, srv, "")
+	cf, err := buildForge(t, rt, srv, "")
 
 	if err == nil || !strings.Contains(err.Error(), "read module") {
 		t.Errorf("err = %v, want the module read error", err)
@@ -124,7 +128,7 @@ func TestConnectorForge_UnopenableAuditFileFailsConstruction(t *testing.T) {
 	var hits atomic.Int32
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits.Add(1) }))
 	t.Cleanup(srv.Close)
-	useForgejoRow(t, srv.URL, func(*backendrows.Row) {})
+	rt := useForgejoRow(t, srv.URL, func(*backendrows.Row) {})
 	t.Setenv(connectorCredentialEnv, connectorToken)
 	t.Cleanup(forgejo.SetConnectorClient(srv.Client()))
 	dir := t.TempDir()
@@ -137,7 +141,7 @@ func TestConnectorForge_UnopenableAuditFileFailsConstruction(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cf, err := buildForge(t, srv, "")
+	cf, err := buildForge(t, rt, srv, "")
 
 	want := filepath.Join(logDir, connectorrecord.Name("forgejo", ".audit.jsonl"))
 	if err == nil || !strings.Contains(err.Error(), want) || cf != nil {
@@ -152,8 +156,7 @@ func TestConnectorForge_LoadErrorIsReturnedAsIs(t *testing.T) {
 	boom := errors.New("connector would not load")
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
-	useForgejoRow(t, srv.URL, func(*backendrows.Row) {})
-	rt := runtimeOver(t, &failingSandbox{Loader: connectorsandboxtest.InProcess(), err: boom})
+	rt := runtimeOver(t, forgejoRows(t, srv.URL, func(*backendrows.Row) {}), &failingSandbox{Loader: connectorsandboxtest.InProcess(), err: boom})
 	t.Chdir(t.TempDir())
 
 	if cf, err := buildForgeOn(rt, srv.URL, ""); !errors.Is(err, boom) || cf != nil {
@@ -167,14 +170,14 @@ func TestConnectorForge_LoadErrorIsReturnedAsIs(t *testing.T) {
 func TestConnectorForge_RefusedRouteFailsTheOperation(t *testing.T) {
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
-	useForgejoRow(t, srv.URL, func(r *backendrows.Row) {
+	rt := useForgejoRow(t, srv.URL, func(r *backendrows.Row) {
 		r.Routes = append(slicesDeleteMethod(r.Routes, "GET"), connectorhost.Route{Method: "GET", Host: backendrows.BaseHost, Path: "/unrelated"})
 	})
 	t.Setenv(connectorCredentialEnv, connectorToken)
 	t.Cleanup(forgejo.SetConnectorClient(srv.Client()))
 	t.Chdir(t.TempDir())
 
-	cf, err := buildForge(t, srv, "")
+	cf, err := buildForge(t, rt, srv, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,9 +203,9 @@ func slicesDeleteMethod(routes []connectorhost.Route, method string) []connector
 func TestConnectorForge_RefusesAMergeMethodTheConnectorCannotHonour(t *testing.T) {
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
-	useForgejoRow(t, srv.URL, func(*backendrows.Row) {})
+	rt := useForgejoRow(t, srv.URL, func(*backendrows.Row) {})
 	for _, method := range []string{"squash", "merge"} {
-		cf, err := buildForge(t, srv, method)
+		cf, err := buildForge(t, rt, srv, method)
 		if !errors.Is(err, forgejo.ErrMergeMethod) || !strings.Contains(err.Error(), "MERGE_METHOD") || cf != nil {
 			t.Errorf("MERGE_METHOD=%s: buildForge = (%v, %v), want (nil, ErrMergeMethod)", method, cf, err)
 		}
@@ -217,11 +220,11 @@ func TestPlainRow_BuildsTheConnectorForgeAndTracker(t *testing.T) {
 	t.Cleanup(forgejo.SetConnectorClient(srv.Client()))
 	t.Chdir(t.TempDir())
 
-	useForgejoRow(t, srv.URL, func(*backendrows.Row) {})
-	if _, err := buildForge(t, srv, ""); err != nil {
+	rt := useForgejoRow(t, srv.URL, func(*backendrows.Row) {})
+	if _, err := buildForge(t, rt, srv, ""); err != nil {
 		t.Fatal(err)
 	}
-	tr, err := buildTracker(t, srv)
+	tr, err := buildTracker(t, rt, srv)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,6 +236,7 @@ func TestPlainRow_BuildsTheConnectorForgeAndTracker(t *testing.T) {
 // Forgejo runs only through its Connector: without a row neither the Code
 // Forge nor the tracker is built, and neither degrades to a native adapter.
 func TestNoConnectorRow_RefusesTheCodeForgeAndTheTracker(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
 	rt := connectorruntime.New(backendrows.Set{}, nil, &failingSandbox{Loader: connectorsandboxtest.InProcess(), err: errors.New("unexpected load"), onLoad: func() {
@@ -252,19 +256,25 @@ func TestNoConnectorRow_RefusesTheCodeForgeAndTheTracker(t *testing.T) {
 // A plain row whose base is not https is dropped by the row set as unusable;
 // the forge build must name the base, not point at a row that exists.
 func TestPlainRow_PlaintextBaseNamesTheBase(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
-	useForgejoRow(t, "http://forgejo.lan:3000", func(*backendrows.Row) {})
+	set := forgejoRows(t, "http://forgejo.lan:3000", func(*backendrows.Row) {})
+	baseErr := set.BaseError("forgejo")
+	if baseErr == nil {
+		t.Fatal("the plaintext base left no base error on the row set")
+	}
+	rt := runtimeOver(t, set, connectorsandboxtest.InProcess())
 
-	cf, err := buildForge(t, srv, "squash")
+	cf, err := buildForge(t, rt, srv, "squash")
 	if !errors.Is(err, forgejo.ErrNoConnectorRow) || cf != nil {
 		t.Fatalf("buildForge = (%v, %v), want (nil, ErrNoConnectorRow)", cf, err)
 	}
-	if !strings.Contains(err.Error(), "must be an https URL") || !strings.Contains(err.Error(), forgejo.ForgejoBaseURLEnv) {
+	if !errors.Is(err, baseErr) || !strings.Contains(err.Error(), "must be an https URL") || !strings.Contains(err.Error(), forgejo.ForgejoBaseURLEnv) {
 		t.Errorf("err = %q, want it to say %s must be an https URL", err, forgejo.ForgejoBaseURLEnv)
 	}
-	tr, err := buildTracker(t, srv)
-	if !errors.Is(err, forgejo.ErrNoConnectorRow) || tr != nil || !strings.Contains(err.Error(), "must be an https URL") {
+	tr, err := buildTracker(t, rt, srv)
+	if !errors.Is(err, forgejo.ErrNoConnectorRow) || !errors.Is(err, baseErr) || tr != nil || !strings.Contains(err.Error(), "must be an https URL") {
 		t.Errorf("buildTracker = (%v, %v), want (nil, ErrNoConnectorRow naming the base)", tr, err)
 	}
 }
@@ -330,19 +340,10 @@ func TestConnectorForge_SelfHostedUnderASubpath(t *testing.T) {
 	}
 }
 
-// newRuntime is the Connector runtime over the rows the test applied and the
-// in-process engine, closed with the test.
-func newRuntime(t *testing.T) *connectorruntime.Runtime {
-	t.Helper()
-	rt := connectorruntime.FromRegistries(credsourcetest.Applied(), connectorsandboxtest.InProcess())
-	t.Cleanup(func() { _ = rt.Close() })
-	return rt
-}
-
 // buildTracker runs the production constructor for the issue tracker.
-func buildTracker(t *testing.T, srv *httptest.Server) (forge.IssueTracker, error) {
+func buildTracker(t *testing.T, rt *connectorruntime.Runtime, srv *httptest.Server) (forge.IssueTracker, error) {
 	t.Helper()
-	return buildTrackerOn(newRuntime(t), srv)
+	return buildTrackerOn(rt, srv)
 }
 
 func buildTrackerOn(rt *connectorruntime.Runtime, srv *httptest.Server) (forge.IssueTracker, error) {
@@ -372,10 +373,10 @@ func (s *strippedSandbox) LoadNetwork(ctx context.Context, wasm []byte, n connec
 func TestConnectorTracker_LoadFailureFailsConstruction(t *testing.T) {
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
-	useForgejoRow(t, srv.URL, func(r *backendrows.Row) { r.Module = filepath.Join(t.TempDir(), "absent.wasm") })
+	rt := useForgejoRow(t, srv.URL, func(r *backendrows.Row) { r.Module = filepath.Join(t.TempDir(), "absent.wasm") })
 	t.Chdir(t.TempDir())
 
-	tr, err := buildTracker(t, srv)
+	tr, err := buildTracker(t, rt, srv)
 
 	if err == nil || !strings.Contains(err.Error(), "read module") || tr != nil {
 		t.Errorf("buildTracker = (%v, %v), want (nil, the module read error)", tr, err)
@@ -388,14 +389,8 @@ func TestConnectorTracker_LoadFailureFailsConstruction(t *testing.T) {
 func TestConnectorTracker_RefusesAConnectorMissingACapability(t *testing.T) {
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
-	useForgejoRow(t, srv.URL, func(*backendrows.Row) {})
-	row, ok := backendrows.Lookup("forgejo")
-	if !ok {
-		t.Fatal("no forgejo row")
-	}
 	sb := &strippedSandbox{Loader: connectorsandboxtest.InProcess(), drop: []string{connectortracker.CapLabeled, connectortracker.CapProbe}}
-	rt := connectorruntime.New(backendrows.NewSet(row), credsourcetest.EnvRows(row), sb)
-	t.Cleanup(func() { _ = rt.Close() })
+	rt := runtimeOver(t, forgejoRows(t, srv.URL, func(*backendrows.Row) {}), sb)
 	t.Setenv(connectorCredentialEnv, connectorToken)
 	t.Cleanup(forgejo.SetConnectorClient(srv.Client()))
 	t.Chdir(t.TempDir())
@@ -416,14 +411,14 @@ func TestConnectorTracker_RefusedRouteFailsTheOperation(t *testing.T) {
 	var requests atomic.Int32
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests.Add(1) }))
 	t.Cleanup(srv.Close)
-	useForgejoRow(t, srv.URL, func(r *backendrows.Row) {
+	rt := useForgejoRow(t, srv.URL, func(r *backendrows.Row) {
 		r.Routes = append(slicesDeleteMethod(r.Routes, "GET"), connectorhost.Route{Method: "GET", Host: backendrows.BaseHost, Path: "/unrelated"})
 	})
 	t.Setenv(connectorCredentialEnv, connectorToken)
 	t.Cleanup(forgejo.SetConnectorClient(srv.Client()))
 	t.Chdir(t.TempDir())
 
-	tr, err := buildTracker(t, srv)
+	tr, err := buildTracker(t, rt, srv)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -484,15 +479,45 @@ func (s *failingSandbox) LoadNetwork(context.Context, []byte, connectorhost.Netw
 	return nil, s.err
 }
 
-// runtimeOver is the Connector runtime over the forgejo row the test applied,
-// loading into sb, closed with the test.
-func runtimeOver(t *testing.T, sb connectorsandbox.Loader) *connectorruntime.Runtime {
+// runtimeOver is the Connector runtime over set, loading into sb, closed with
+// the test.
+func runtimeOver(t *testing.T, set backendrows.Set, sb connectorsandbox.Loader) *connectorruntime.Runtime {
 	t.Helper()
-	row, ok := backendrows.Lookup("forgejo")
-	if !ok {
-		t.Fatal("no forgejo row")
-	}
-	rt := connectorruntime.New(backendrows.NewSet(row), credsourcetest.EnvRows(row), sb)
+	rt := connectorruntime.New(set, credsourcetest.EnvRows(set.All()...), sb)
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt
+}
+
+// A forgejo row whose base the environment leaves unset is dropped by the row
+// set; building from a runtime over it fails with ErrNoConnectorRow wrapping
+// the row set's own base error, with no Connector module involved.
+func TestUnusableBase_WrapsTheRowSetsBaseError(t *testing.T) {
+	t.Parallel()
+	doc, err := json.Marshal([]backendrows.Row{{
+		Name: "forgejo", Module: "forgejo.wasm", Routes: []connectorhost.Route{{Method: "GET", Host: backendrows.BaseHost, Path: "/api/v1/version"}},
+		CredentialEnv: connectorCredentialEnv, BaseEnv: forgejo.ForgejoBaseURLEnv, GitRemoteEnv: forgejo.ForgejoBaseURLEnv,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := backendrows.Decode(doc, func(string) string { return "" }, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseErr := set.BaseError("forgejo")
+	if baseErr == nil {
+		t.Fatal("an unset base left no base error on the row set")
+	}
+	rt := runtimeOver(t, set, &failingSandbox{Loader: connectorsandboxtest.InProcess(), err: errors.New("unexpected load")})
+	s := backendkit.Shared{RepoSlug: connectorRepo, Connectors: rt}
+	l := mapLookup(map[string]string{})
+
+	_, err = forgejo.Strategy.NewIssueTracker(s, l)
+	if !errors.Is(err, forgejo.ErrNoConnectorRow) || !errors.Is(err, baseErr) {
+		t.Errorf("NewIssueTracker err = %v, want ErrNoConnectorRow wrapping %v", err, baseErr)
+	}
+	_, err = forgejo.Strategy.NewCodeForge(s, l, forge.SanitizedParent{}, nil)
+	if !errors.Is(err, forgejo.ErrNoConnectorRow) || !errors.Is(err, baseErr) {
+		t.Errorf("NewCodeForge err = %v, want ErrNoConnectorRow wrapping %v", err, baseErr)
+	}
 }

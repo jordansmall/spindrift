@@ -5,28 +5,29 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/connectorsandbox/connectorsandboxtest"
 	"spindrift.dev/launcher/internal/forge/forgejo"
 )
 
 // sessionEnv is a runtime over a counting sandbox and a fake forgejo that
 // answers Probe, for the tests of what the forge and the tracker share.
-func sessionEnv(t *testing.T) (*strippedSandbox, *httptest.Server) {
+func sessionEnv(t *testing.T) (*strippedSandbox, *connectorruntime.Runtime, *httptest.Server) {
 	t.Helper()
 	f := startFakeForgejo(t, httptest.NewTLSServer)
 	f.token = connectorToken
-	useForgejoRow(t, f.srv.URL, func(*backendrows.Row) {})
+	sb := &strippedSandbox{Loader: connectorsandboxtest.InProcess()}
 	t.Setenv(connectorCredentialEnv, connectorToken)
 	t.Cleanup(forgejo.SetConnectorClient(f.srv.Client()))
 	t.Chdir(t.TempDir())
-	return &strippedSandbox{Loader: connectorsandboxtest.InProcess()}, f.srv
+	return sb, runtimeOver(t, forgejoRows(t, f.srv.URL, func(*backendrows.Row) {}), sb), f.srv
 }
 
 // A guest that dies does not end the forge: the next operation
 // runs on a reloaded Connector, as a daemon needs.
 func TestConnectorForge_ReloadsAfterGuestDeath(t *testing.T) {
-	sb, srv := sessionEnv(t)
-	cf, err := buildForgeOn(runtimeOver(t, sb), srv.URL, "")
+	sb, rt, srv := sessionEnv(t)
+	cf, err := buildForgeOn(rt, srv.URL, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,8 +51,7 @@ func TestConnectorForge_ReloadsAfterGuestDeath(t *testing.T) {
 // A row that serves both axes loads one Connector for the tracker and the
 // Code Forge together, and one reload serves both after the guest dies.
 func TestConnectorForgeAndTracker_ShareOneConnector(t *testing.T) {
-	sb, srv := sessionEnv(t)
-	rt := runtimeOver(t, sb)
+	sb, rt, srv := sessionEnv(t)
 	cf, err := buildForgeOn(rt, srv.URL, "")
 	if err != nil {
 		t.Fatal(err)

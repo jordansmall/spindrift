@@ -34,7 +34,7 @@ var Strategy = backendkit.Strategy{
 		if s.Connectors == nil {
 			return nil, fmt.Errorf("forgejo: %w", connectorruntime.ErrNoRuntime)
 		}
-		row, err := connectorRow()
+		row, err := connectorRow(s.Connectors)
 		if err != nil {
 			return nil, err
 		}
@@ -48,7 +48,7 @@ var Strategy = backendkit.Strategy{
 		if s.Connectors == nil {
 			return nil, fmt.Errorf("forgejo: %w", connectorruntime.ErrNoRuntime)
 		}
-		row, err := connectorRow()
+		row, err := connectorRow(s.Connectors)
 		if err != nil {
 			return nil, err
 		}
@@ -62,7 +62,7 @@ var Strategy = backendkit.Strategy{
 		if s.Connectors == nil {
 			return backendkit.LedgerSite{}, fmt.Errorf("forgejo: %w", connectorruntime.ErrNoRuntime)
 		}
-		row, err := connectorRow()
+		row, err := connectorRow(s.Connectors)
 		if err != nil {
 			return backendkit.LedgerSite{}, err
 		}

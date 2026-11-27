@@ -19,7 +19,7 @@ import (
 // fault, so the rows reach the report half only.
 func connectorRoutesChecks(c config) []doctor.Check {
 	var checks []doctor.Check
-	for _, row := range backendrows.All() {
+	for _, row := range c.connectors.Rows() {
 		if !rowcredential.Reads(row, c.CodeForge, c.IssueTracker) {
 			continue
 		}

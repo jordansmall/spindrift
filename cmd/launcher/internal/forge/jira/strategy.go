@@ -12,7 +12,7 @@ import (
 )
 
 // errNoConnectorRow is the jira tracker with no backend row loaded: the Connector
-// is the only implementation, and backendrows.Use also drops a row whose
+// is the only implementation, and backendrows.Decode also drops a row whose
 // JIRA_BASE_URL resolveBase rejects.
 var errNoConnectorRow = errors.New("ISSUE_TRACKER=jira needs the jira Connector: register its connectorData " +
 	"in the Consumer's spindrift.connectorData and set JIRA_BASE_URL to a base its row accepts " +

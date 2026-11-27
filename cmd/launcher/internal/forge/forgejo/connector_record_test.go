@@ -42,11 +42,11 @@ func refuseGETs(r *backendrows.Row) {
 func TestConnectorTracker_FailedCallIsRecordedByMethod(t *testing.T) {
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
-	useForgejoRow(t, srv.URL, refuseGETs)
+	rt := useForgejoRow(t, srv.URL, refuseGETs)
 	t.Setenv(connectorCredentialEnv, connectorToken)
 	t.Cleanup(forgejo.SetConnectorClient(srv.Client()))
 	t.Chdir(t.TempDir())
-	tr, err := buildTracker(t, srv)
+	tr, err := buildTracker(t, rt, srv)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,10 +64,10 @@ func TestConnectorTracker_FailedCallIsRecordedByMethod(t *testing.T) {
 func TestConnectorTracker_LoadFailureIsRecorded(t *testing.T) {
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
-	useForgejoRow(t, srv.URL, func(r *backendrows.Row) { r.Module = filepath.Join(t.TempDir(), "missing.wasm") })
+	rt := useForgejoRow(t, srv.URL, func(r *backendrows.Row) { r.Module = filepath.Join(t.TempDir(), "missing.wasm") })
 	t.Chdir(t.TempDir())
 
-	if _, err := buildTracker(t, srv); err == nil {
+	if _, err := buildTracker(t, rt, srv); err == nil {
 		t.Fatal("want the load error")
 	}
 
@@ -100,10 +100,10 @@ func TestConnectorTracker_LostClaimRaceRecordsNothing(t *testing.T) {
 func TestConnectorForge_LoadFailureIsRecorded(t *testing.T) {
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
-	useForgejoRow(t, srv.URL, func(r *backendrows.Row) { r.Module = filepath.Join(t.TempDir(), "missing.wasm") })
+	rt := useForgejoRow(t, srv.URL, func(r *backendrows.Row) { r.Module = filepath.Join(t.TempDir(), "missing.wasm") })
 	t.Chdir(t.TempDir())
 
-	if _, err := buildForge(t, srv, ""); err == nil {
+	if _, err := buildForge(t, rt, srv, ""); err == nil {
 		t.Fatal("want the load error")
 	}
 
@@ -115,11 +115,11 @@ func TestConnectorForge_LoadFailureIsRecorded(t *testing.T) {
 func TestConnectorForge_FailedCallIsRecordedByMethod(t *testing.T) {
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
-	useForgejoRow(t, srv.URL, refuseGETs)
+	rt := useForgejoRow(t, srv.URL, refuseGETs)
 	t.Setenv(connectorCredentialEnv, connectorToken)
 	t.Cleanup(forgejo.SetConnectorClient(srv.Client()))
 	t.Chdir(t.TempDir())
-	cf, err := buildForge(t, srv, "")
+	cf, err := buildForge(t, rt, srv, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,10 +140,9 @@ func TestConnectorForge_FailedCallIsRecordedByMethod(t *testing.T) {
 func TestConnectorForge_ComposeFailureIsRecorded(t *testing.T) {
 	srv := httptest.NewTLSServer(nil)
 	t.Cleanup(srv.Close)
-	useForgejoRow(t, srv.URL, func(*backendrows.Row) {})
 	t.Setenv(connectorCredentialEnv, connectorToken)
 	t.Cleanup(forgejo.SetConnectorClient(srv.Client()))
-	rt := runtimeOver(t, &strippedSandbox{Loader: connectorsandboxtest.InProcess(), drop: []string{connectorforge.CapBranches}})
+	rt := runtimeOver(t, forgejoRows(t, srv.URL, func(*backendrows.Row) {}), &strippedSandbox{Loader: connectorsandboxtest.InProcess(), drop: []string{connectorforge.CapBranches}})
 	t.Chdir(t.TempDir())
 
 	if _, err := buildForgeOn(rt, srv.URL, ""); !errors.Is(err, connectorforge.ErrNotForge) {
