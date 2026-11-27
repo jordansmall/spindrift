@@ -130,7 +130,7 @@ func New(in Input, opts Options) (*connectorruntime.Runtime, error) {
 		if st, ok := l.Stats(); ok {
 			for _, s := range backendkit.Strategies() {
 				if s.RecordSandboxTotals != nil {
-					s.RecordSandboxTotals(st)
+					s.RecordSandboxTotals(rt, st)
 				}
 			}
 		}

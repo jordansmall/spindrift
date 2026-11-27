@@ -5,7 +5,7 @@ import (
 )
 
 func (e *execClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error) {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return nil, err
 	}
@@ -16,7 +16,7 @@ func (e *execClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error
 // ListIssues it filters on no label, so issues with no dispatch label
 // yet are included.
 func (e *execClient) ListOpenIssues() ([]forge.Issue, error) {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return nil, err
 	}
@@ -28,7 +28,7 @@ func (e *execClient) ListOpenIssues() ([]forge.Issue, error) {
 // is a durable triage decision the host must not refile. The Connector scans
 // one label at a time and merges them (forge.MergeLabeledIssues).
 func (e *execClient) ListIssuesWithLabels(state forge.IssueState, labels []string) ([]forge.Issue, error) {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return nil, err
 	}
@@ -36,7 +36,7 @@ func (e *execClient) ListIssuesWithLabels(state forge.IssueState, labels []strin
 }
 
 func (e *execClient) Issue(num string) (forge.Issue, error) {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return forge.Issue{}, err
 	}
@@ -46,7 +46,7 @@ func (e *execClient) Issue(num string) (forge.Issue, error) {
 // Comments returns issue num's comments oldest-first, the order
 // forge.IssueText assumes when it windows to the last 10.
 func (e *execClient) Comments(num string) ([]forge.Comment, error) {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +68,7 @@ func (e *execClient) StateLabels() forge.DispatchLabels {
 // claim errors with forge.ErrAlreadyClaimed, editing nothing, when InProgress
 // is already present (#3887); the check is read-then-edit, not atomic.
 func (e *execClient) TransitionState(num string, from, to forge.DispatchState) error {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return err
 	}
@@ -77,7 +77,7 @@ func (e *execClient) TransitionState(num string, from, to forge.DispatchState) e
 
 // AddLabels implements forge.IssueLabeler (issue #4074).
 func (e *execClient) AddLabels(num string, labels []string) error {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return err
 	}
@@ -92,7 +92,7 @@ var _ forge.IssueLabeler = (*execClient)(nil)
 // instead of silently keeping InProgress alongside the verdict label. The check
 // is not atomic: another process can flip the label between the read and edit.
 func (e *execClient) CompleteVerdict(num string, verdict forge.Verdict) error {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return err
 	}
@@ -104,7 +104,7 @@ var _ forge.NativeDepsReader = (*execClient)(nil)
 // NativeDepsOf reads issue num's blocked_by relationships from GitHub's
 // native issue-dependencies API.
 func (e *execClient) NativeDepsOf(num string) ([]string, error) {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +114,7 @@ func (e *execClient) NativeDepsOf(num string) ([]string, error) {
 // MatchesRoute reports whether issue num is in the client's Issue route, the
 // per-issue read of the route Issue itself leaves unnarrowed (ADR 0075).
 func (e *execClient) MatchesRoute(num string) (bool, error) {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return false, err
 	}
@@ -126,7 +126,7 @@ func (e *execClient) MatchesRoute(num string) (bool, error) {
 // relationship, so unlike DepsOf there is no body-text fallback and a lookup
 // failure is returned directly (issue #1744).
 func (e *execClient) BlocksOf(num string) ([]forge.Dependency, error) {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +138,7 @@ func (e *execClient) BlocksOf(num string) ([]forge.Dependency, error) {
 // TransitionState(_, InProgress) strips that label before recoverByNumber runs,
 // so the timeline is the only route back to it.
 func (e *execClient) PriorClaimState(num string) (forge.DispatchState, bool, error) {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return forge.Untriaged, false, err
 	}
@@ -150,7 +150,7 @@ func (e *execClient) PriorClaimState(num string) (forge.DispatchState, bool, err
 // close for a status=already-resolved outcome (issue #4015), which must never
 // read as "not planned". An already-closed issue is a no-op.
 func (e *execClient) CloseMergedIssue(num string) error {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return err
 	}
@@ -158,7 +158,7 @@ func (e *execClient) CloseMergedIssue(num string) error {
 }
 
 func (e *execClient) Comment(num, body string) error {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return err
 	}
@@ -169,7 +169,7 @@ func (e *execClient) Comment(num, body string) error {
 // caller-supplied one, per the do-not-trust-the-agent-target invariant (issues
 // #2028, #1949). It returns the created issue's html_url.
 func (e *execClient) PostIssue(title, body string, labels []string) (string, error) {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return "", err
 	}
@@ -183,7 +183,7 @@ var _ forge.HostPostedIssueFiler = (*execClient)(nil)
 // untrusted Box; the Connector quotes each term and rejects text that could
 // break out of the quoting.
 func (e *execClient) SearchIssues(text string, state forge.IssueState, label string, limit int) ([]forge.Issue, error) {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return nil, err
 	}

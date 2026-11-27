@@ -45,7 +45,7 @@ var Strategy = backendkit.Strategy{
 		}
 		// Refuse an unhonourable MERGE_METHOD at launch, as the forgejo row
 		// does, rather than at the first merge.
-		if _, ok := routedRow(); ok {
+		if _, ok := routedRow(s.Connectors); ok {
 			if err := checkRoutedMergeMethod(s.MergeMethod); err != nil {
 				return nil, err
 			}
@@ -53,7 +53,7 @@ var Strategy = backendkit.Strategy{
 		return NewExecClient(s.RepoSlug, s.Labels, codeForgeOpts(s)...), nil
 	},
 	NewLedger: func(s backendkit.Shared, _ backendkit.Lookup) (backendkit.LedgerSite, error) {
-		row, err := routeRow()
+		row, err := routeRow(s.Connectors)
 		if err != nil {
 			return backendkit.LedgerSite{}, err
 		}

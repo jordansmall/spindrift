@@ -5,46 +5,53 @@ import (
 	"errors"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorruntime"
+	"spindrift.dev/launcher/internal/credsource/credsourcetest"
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// useGithubRowUnderHost applies a plain github row with GH_HOST answering host,
-// the way the launcher resolves it for backendrows.Use.
-func useGithubRowUnderHost(t *testing.T, host string) {
+// githubRuntimeUnderHost is a runtime over a plain github row decoded with
+// GH_HOST answering host and the row's real gate, the way the launcher
+// resolves it, closed with the test.
+func githubRuntimeUnderHost(t *testing.T, host string) *connectorruntime.Runtime {
 	t.Helper()
 	routes := []connectorhost.Route{{Method: "GET", Host: "api.github.com", Path: "/repos"}}
 	doc, err := json.Marshal([]backendrows.Row{{Name: "github", Module: "/x/github.wasm", Routes: routes, CredentialEnv: tokenCredentialEnv}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(backendrows.Snapshot())
 	lookup := func(k string) string {
 		if k == "GH_HOST" {
 			return host
 		}
 		return ""
 	}
-	if err := backendrows.Use(doc, lookup); err != nil {
+	set, err := backendrows.Decode(doc, lookup, map[string]backendrows.Gate{backend.GitHub.Name: Strategy.RowGate})
+	if err != nil {
 		t.Fatal(err)
 	}
+	rt := connectorruntime.New(set, credsourcetest.EnvRows(set.All()...), testSandbox())
+	t.Cleanup(func() { _ = rt.Close() })
+	return rt
 }
 
 // The row's Routes pin api.github.com, so under a GitHub Enterprise GH_HOST it
 // applies none: nothing is sent to api.github.com, no connector credential is
 // read, and a read fails by name rather than reaching gh.
 func TestGithubRow_GHEHostAppliesNoRow(t *testing.T) {
-	useGithubRowUnderHost(t, "ghe.example.com")
+	rt := githubRuntimeUnderHost(t, "ghe.example.com")
 	t.Setenv("GH_HOST", "ghe.example.com")
-	if _, ok := backendrows.Lookup("github"); ok {
+	if _, ok := rt.Row("github"); ok {
 		t.Fatal("the github row is applied under GH_HOST=ghe.example.com")
 	}
-	if _, ok := routedRow(); ok {
+	if _, ok := routedRow(rt); ok {
 		t.Fatal("routedRow reports a routed row under GH_HOST=ghe.example.com")
 	}
 	calls := countGH(t)
-	c := newClient(t, connectorRepo, forge.DispatchLabels{})
+	c := NewExecClient(connectorRepo, forge.DispatchLabels{}, WithConnectors(rt))
 	if _, err := c.ListOpenIssues(); !errors.Is(err, ErrNoRoute) {
 		t.Errorf("ListOpenIssues error = %v, want ErrNoRoute", err)
 	}
@@ -56,8 +63,8 @@ func TestGithubRow_GHEHostAppliesNoRow(t *testing.T) {
 func TestGithubRow_DefaultHostStillRoutes(t *testing.T) {
 	for _, host := range []string{"", "github.com", "GitHub.com"} {
 		t.Run(host, func(t *testing.T) {
-			useGithubRowUnderHost(t, host)
-			if _, ok := routedRow(); !ok {
+			t.Parallel()
+			if _, ok := routedRow(githubRuntimeUnderHost(t, host)); !ok {
 				t.Errorf("routedRow is not routed under GH_HOST=%q", host)
 			}
 		})

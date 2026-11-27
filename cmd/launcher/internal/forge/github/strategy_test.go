@@ -8,6 +8,7 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/connectorruntime"
 )
 
 func TestStrategyShape(t *testing.T) {
@@ -33,18 +34,16 @@ func TestStrategyShape(t *testing.T) {
 // GH_HOST) the Ledger has no remote to name: NewLedger fails with ErrNoRoute
 // rather than falling back to a gh credential-helper URL.
 func TestStrategyLedgerFailsWithNoRoute(t *testing.T) {
-	s := backendkit.Shared{RepoSlug: "o/r"}
-	for name, setup := range map[string]func(*testing.T){
-		"no row": func(t *testing.T) {
-			t.Cleanup(backendrows.Snapshot())
-			if err := backendrows.Use([]byte("[]"), func(string) string { return "" }); err != nil {
-				t.Fatal(err)
-			}
-			t.Setenv("GH_HOST", "")
+	for name, rt := range map[string]func(*testing.T) *connectorruntime.Runtime{
+		"no runtime": func(*testing.T) *connectorruntime.Runtime { return nil },
+		"no row": func(t *testing.T) *connectorruntime.Runtime {
+			return connectorruntime.New(backendrows.Set{}, nil, testSandbox())
 		},
+		"GHE host": func(t *testing.T) *connectorruntime.Runtime { return githubRuntimeUnderHost(t, "ghe.example.com") },
 	} {
 		t.Run(name, func(t *testing.T) {
-			setup(t)
+			t.Parallel()
+			s := backendkit.Shared{RepoSlug: "o/r", Connectors: rt(t)}
 			if _, err := Strategy.NewLedger(s, nil); !errors.Is(err, ErrNoRoute) {
 				t.Errorf("NewLedger err = %v, want ErrNoRoute", err)
 			}

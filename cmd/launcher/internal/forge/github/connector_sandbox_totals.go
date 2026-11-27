@@ -10,18 +10,20 @@ import (
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/connectorrecord"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/hostpaths"
 )
 
 // RecordRoutedSandboxTotals appends the run's Connector sandbox cost to this
 // process's Connector audit file, the only home a routed run has for it: a
-// routed row writes no shadow summary. Call it once, after the sandbox
+// routed row writes no shadow summary. It does nothing for a runtime without
+// the github row. Call it once, after the sandbox
 // closed, so the totals are final. It writes nothing unless the audit file
 // already exists, since a pair for a process that never read through its
 // routed Connector would count as a dirty run, and never touches the .log.
-func RecordRoutedSandboxTotals(st connectorsandbox.Stats) {
-	if _, ok := routedRow(); !ok {
+func RecordRoutedSandboxTotals(rt *connectorruntime.Runtime, st connectorsandbox.Stats) {
+	if _, ok := routedRow(rt); !ok {
 		return
 	}
 	pwd, err := os.Getwd()

@@ -26,7 +26,7 @@ func introspectToken(rt *connectorruntime.Runtime, token, repoSlug string) (forg
 	if rt == nil {
 		return forge.TokenIntrospection{}, fmt.Errorf("github: %w", connectorruntime.ErrNoRuntime)
 	}
-	row, err := routeRow()
+	row, err := routeRow(rt)
 	if err != nil {
 		return forge.TokenIntrospection{}, err
 	}

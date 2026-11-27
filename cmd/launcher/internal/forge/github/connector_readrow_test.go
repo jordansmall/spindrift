@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -84,17 +85,15 @@ func TestCalls_WithoutARoutedRowFailNamedAndNeverRunGh(t *testing.T) {
 		want  string
 	}{
 		{"NoRow", func(t *testing.T) (*execClient, func() int) {
-			t.Cleanup(backendrows.Snapshot())
-			if err := backendrows.Use([]byte("[]"), func(string) string { return "" }); err != nil {
-				t.Fatal(err)
-			}
 			t.Setenv("GH_HOST", "")
-			return newClient(t, connectorRepo, testLabels), countGH(t)
+			rt := connectorruntime.New(backendrows.Set{}, nil, testSandbox())
+			t.Cleanup(func() { _ = rt.Close() })
+			return NewExecClient(connectorRepo, testLabels, WithConnectors(rt)), countGH(t)
 		}, "no github backend row"},
 		{"GHEHost", func(t *testing.T) (*execClient, func() int) {
-			useGithubRowUnderHost(t, "ghe.example.com")
+			rt := githubRuntimeUnderHost(t, "ghe.example.com")
 			t.Setenv("GH_HOST", "ghe.example.com")
-			return newClient(t, connectorRepo, testLabels), countGH(t)
+			return NewExecClient(connectorRepo, testLabels, WithConnectors(rt)), countGH(t)
 		}, "GH_HOST"},
 	} {
 		for _, rd := range callsNeedingARow {

@@ -4,7 +4,7 @@ package github
 // when none are failing. The fetch is best-effort: a non-nil error means the
 // detail is unavailable, and callers should proceed without it.
 func (e *execClient) FailureDetail(url string) (string, error) {
-	row, err := routeRow()
+	row, err := routeRow(e.connectors)
 	if err != nil {
 		return "", err
 	}
