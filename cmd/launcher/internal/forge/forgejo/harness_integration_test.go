@@ -550,7 +550,7 @@ func connectorBackend() backendBuilder {
 		t.Cleanup(front.Close)
 		rewrite = strings.NewReplacer(forgejoDefaultRootURL, front.URL, baseURL, front.URL)
 
-		useForgejoRow(t, front.URL, func(*backendrows.Row) {})
+		rt := useForgejoRow(t, front.URL, func(*backendrows.Row) {})
 		t.Setenv(connectorCredentialEnv, token)
 		t.Setenv("GIT_SSL_NO_VERIFY", "true") // the proxy's certificate is self-signed
 		t.Cleanup(forgejo.SetConnectorClient(front.Client()))
@@ -558,7 +558,7 @@ func connectorBackend() backendBuilder {
 
 		l := mapLookup(map[string]string{forgejo.ForgejoBaseURLEnv: front.URL, forgejo.ForgejoTokenEnv: token})
 		s := backendkit.Shared{RepoSlug: repo, BaseBranch: "main", GitUserName: "Harness", GitUserEmail: "harness@harness.local", MergeMethod: "rebase",
-			Labels: testLabels, VerdictLabels: forge.ResearchVerdictLabels(), Connectors: newRuntime(t)}
+			Labels: testLabels, VerdictLabels: forge.ResearchVerdictLabels(), Connectors: rt}
 		tr, err := forgejo.Strategy.NewIssueTracker(s, l)
 		if err != nil {
 			t.Fatalf("issue tracker: %v", err)

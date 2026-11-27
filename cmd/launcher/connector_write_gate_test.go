@@ -19,19 +19,22 @@ import (
 // ghTokenEnv is the github row's one credential: core's own GH_TOKEN.
 const ghTokenEnv = "GH_TOKEN"
 
-// useGithubConnectorRow applies a github row
-// with GH_TOKEN set, and swaps the github token hook for f.
-func useGithubConnectorRow(t *testing.T, f backendkit.TokenIntrospector) {
+// useGithubConnectorRow is a runtime over a github row
+// with GH_TOKEN set; it swaps the github token hook for f.
+func useGithubConnectorRow(t *testing.T, f backendkit.TokenIntrospector) *connectorruntime.Runtime {
 	t.Helper()
 	row := backendrows.Row{Name: "github", Module: "/x/github.wasm", CredentialEnv: ghTokenEnv, Routes: []connectorhost.Route{fixtureGetRepos}}
-	useConnectorRows(t, row)
+	rt := rowsRuntime(t, noKnobs, row)
 	t.Setenv(ghTokenEnv, "connector-token")
 	swapIntrospector(t, "github", f)
+	return rt
 }
 
 // walkConnectorWriteGate runs only the connector-write-github gate over
-// c, through the walk the gated tier (walkEnforce) and doctor (walkReport) share.
-func walkConnectorWriteGate(c config, mode walkMode) (string, error) {
+// c over rt, through the walk the gated tier (walkEnforce) and doctor
+// (walkReport) share.
+func walkConnectorWriteGate(rt *connectorruntime.Runtime, c config, mode walkMode) (string, error) {
+	c.connectors = rt
 	var buf bytes.Buffer
 	var gates []launchGate
 	for _, g := range gateRegistry {
@@ -45,11 +48,11 @@ func walkConnectorWriteGate(c config, mode walkMode) (string, error) {
 
 func TestConnectorWriteGate_RefusesAReadOnlyCredential(t *testing.T) {
 	var gotToken string
-	useGithubConnectorRow(t, func(_ *connectorruntime.Runtime, token, _ string) (forge.TokenIntrospection, error) {
+	rt := useGithubConnectorRow(t, func(_ *connectorruntime.Runtime, token, _ string) (forge.TokenIntrospection, error) {
 		gotToken = token
 		return forge.TokenIntrospection{Introspectable: true, WriteCapable: false}, nil
 	})
-	out, err := walkConnectorWriteGate(minimalValidConfig(), walkEnforce)
+	out, err := walkConnectorWriteGate(rt, minimalValidConfig(), walkEnforce)
 	if !errors.Is(err, errLaunchGateConfigInvalid) {
 		t.Fatalf("err = %v, want errLaunchGateConfigInvalid", err)
 	}
@@ -99,12 +102,12 @@ func TestConnectorWriteGate_OneSideRefusesAReadOnlyCredential(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			useGithubConnectorRow(t, func(*connectorruntime.Runtime, string, string) (forge.TokenIntrospection, error) {
+			rt := useGithubConnectorRow(t, func(*connectorruntime.Runtime, string, string) (forge.TokenIntrospection, error) {
 				return forge.TokenIntrospection{Introspectable: true, WriteCapable: false}, nil
 			})
 			c := minimalValidConfig()
 			c.IssueTracker, c.CodeForge = tc.tracker, tc.forge
-			_, err := walkConnectorWriteGate(c, walkEnforce)
+			_, err := walkConnectorWriteGate(rt, c, walkEnforce)
 			if !errors.Is(err, errLaunchGateConfigInvalid) {
 				t.Fatalf("err = %v, want errLaunchGateConfigInvalid", err)
 			}
@@ -123,10 +126,10 @@ func TestConnectorWriteGate_OneSideRefusesAReadOnlyCredential(t *testing.T) {
 }
 
 func TestConnectorWriteGate_PRSideOnlyUndeterminableWarnsWithFullSet(t *testing.T) {
-	useGithubConnectorRow(t, func(*connectorruntime.Runtime, string, string) (forge.TokenIntrospection, error) {
+	rt := useGithubConnectorRow(t, func(*connectorruntime.Runtime, string, string) (forge.TokenIntrospection, error) {
 		return forge.TokenIntrospection{Reason: "fine-grained PAT"}, nil
 	})
-	out, err := walkConnectorWriteGate(prSideOnlyConfig(), walkEnforce)
+	out, err := walkConnectorWriteGate(rt, prSideOnlyConfig(), walkEnforce)
 	if err != nil {
 		t.Fatalf("err = %v, want nil: undeterminable scopes warn", err)
 	}
@@ -138,12 +141,12 @@ func TestConnectorWriteGate_PRSideOnlyUndeterminableWarnsWithFullSet(t *testing.
 }
 
 func TestConnectorWriteGate_PRSideOnlyInstallationTokenWarns(t *testing.T) {
-	useGithubConnectorRow(t, func(*connectorruntime.Runtime, string, string) (forge.TokenIntrospection, error) {
+	rt := useGithubConnectorRow(t, func(*connectorruntime.Runtime, string, string) (forge.TokenIntrospection, error) {
 		t.Error("introspector called for an installation token, want it skipped")
 		return forge.TokenIntrospection{}, nil
 	})
 	t.Setenv(ghTokenEnv, "ghs_installationtoken")
-	out, err := walkConnectorWriteGate(prSideOnlyConfig(), walkEnforce)
+	out, err := walkConnectorWriteGate(rt, prSideOnlyConfig(), walkEnforce)
 	if err != nil {
 		t.Fatalf("err = %v, want nil", err)
 	}
@@ -165,10 +168,10 @@ func TestConnectorWriteGate_UndeterminableWarns(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			useGithubConnectorRow(t, func(*connectorruntime.Runtime, string, string) (forge.TokenIntrospection, error) {
+			rt := useGithubConnectorRow(t, func(*connectorruntime.Runtime, string, string) (forge.TokenIntrospection, error) {
 				return tc.result, tc.err
 			})
-			out, err := walkConnectorWriteGate(minimalValidConfig(), walkEnforce)
+			out, err := walkConnectorWriteGate(rt, minimalValidConfig(), walkEnforce)
 			if err != nil {
 				t.Fatalf("err = %v, want nil: undeterminable scopes warn", err)
 			}
@@ -182,10 +185,10 @@ func TestConnectorWriteGate_UndeterminableWarns(t *testing.T) {
 }
 
 func TestConnectorWriteGate_NotIntrospectableWithoutReasonFallsBack(t *testing.T) {
-	useGithubConnectorRow(t, func(*connectorruntime.Runtime, string, string) (forge.TokenIntrospection, error) {
+	rt := useGithubConnectorRow(t, func(*connectorruntime.Runtime, string, string) (forge.TokenIntrospection, error) {
 		return forge.TokenIntrospection{}, nil
 	})
-	out, err := walkConnectorWriteGate(minimalValidConfig(), walkEnforce)
+	out, err := walkConnectorWriteGate(rt, minimalValidConfig(), walkEnforce)
 	if err != nil {
 		t.Fatalf("err = %v, want nil: an empty-Reason introspection warns", err)
 	}
@@ -195,20 +198,20 @@ func TestConnectorWriteGate_NotIntrospectableWithoutReasonFallsBack(t *testing.T
 }
 
 func TestConnectorWriteGate_IntrospectionFailureIsConnectivity(t *testing.T) {
-	useGithubConnectorRow(t, func(*connectorruntime.Runtime, string, string) (forge.TokenIntrospection, error) {
+	rt := useGithubConnectorRow(t, func(*connectorruntime.Runtime, string, string) (forge.TokenIntrospection, error) {
 		return forge.TokenIntrospection{}, errors.New("boom")
 	})
-	_, err := walkConnectorWriteGate(minimalValidConfig(), walkEnforce)
+	_, err := walkConnectorWriteGate(rt, minimalValidConfig(), walkEnforce)
 	if !errors.Is(err, doctor.ErrConnectivity) || !strings.Contains(err.Error(), ghTokenEnv) {
 		t.Fatalf("err = %v, want a connectivity error naming %s", err, ghTokenEnv)
 	}
 }
 
 func TestConnectorWriteGate_WriteCapablePasses(t *testing.T) {
-	useGithubConnectorRow(t, func(*connectorruntime.Runtime, string, string) (forge.TokenIntrospection, error) {
+	rt := useGithubConnectorRow(t, func(*connectorruntime.Runtime, string, string) (forge.TokenIntrospection, error) {
 		return forge.TokenIntrospection{Introspectable: true, WriteCapable: true}, nil
 	})
-	out, err := walkConnectorWriteGate(minimalValidConfig(), walkEnforce)
+	out, err := walkConnectorWriteGate(rt, minimalValidConfig(), walkEnforce)
 	if err != nil || strings.Contains(out, "WARNING") {
 		t.Fatalf("err = %v, output = %q, want a clean pass", err, out)
 	}
@@ -224,13 +227,13 @@ func TestConnectorWriteGate_NotApplicable(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			called := false
-			useGithubConnectorRow(t, func(*connectorruntime.Runtime, string, string) (forge.TokenIntrospection, error) {
+			rt := useGithubConnectorRow(t, func(*connectorruntime.Runtime, string, string) (forge.TokenIntrospection, error) {
 				called = true
 				return forge.TokenIntrospection{Introspectable: true}, nil
 			})
 			c := minimalValidConfig()
 			c.IssueTracker, c.CodeForge = tc.tracker, tc.forge
-			out, err := walkConnectorWriteGate(c, walkEnforce)
+			out, err := walkConnectorWriteGate(rt, c, walkEnforce)
 			if err != nil || called || out != "" {
 				t.Errorf("err = %v, called = %v, output = %q, want the gate skipped", err, called, out)
 			}
@@ -240,12 +243,12 @@ func TestConnectorWriteGate_NotApplicable(t *testing.T) {
 
 func TestConnectorWriteGate_InstallationTokenWarnsWithoutIntrospecting(t *testing.T) {
 	called := false
-	useGithubConnectorRow(t, func(*connectorruntime.Runtime, string, string) (forge.TokenIntrospection, error) {
+	rt := useGithubConnectorRow(t, func(*connectorruntime.Runtime, string, string) (forge.TokenIntrospection, error) {
 		called = true
 		return forge.TokenIntrospection{Introspectable: true, WriteCapable: false}, nil
 	})
 	t.Setenv(ghTokenEnv, "ghs_installationtoken")
-	out, err := walkConnectorWriteGate(minimalValidConfig(), walkEnforce)
+	out, err := walkConnectorWriteGate(rt, minimalValidConfig(), walkEnforce)
 	if err != nil {
 		t.Fatalf("err = %v, want nil: an installation token's Issues permission is undeterminable", err)
 	}
@@ -261,12 +264,12 @@ func TestConnectorWriteGate_InstallationTokenWarnsWithoutIntrospecting(t *testin
 
 func TestConnectorWriteGate_UnsetCredentialPassesSilently(t *testing.T) {
 	called := false
-	useGithubConnectorRow(t, func(*connectorruntime.Runtime, string, string) (forge.TokenIntrospection, error) {
+	rt := useGithubConnectorRow(t, func(*connectorruntime.Runtime, string, string) (forge.TokenIntrospection, error) {
 		called = true
 		return forge.TokenIntrospection{}, nil
 	})
 	t.Setenv(ghTokenEnv, "")
-	out, err := walkConnectorWriteGate(minimalValidConfig(), walkEnforce)
+	out, err := walkConnectorWriteGate(rt, minimalValidConfig(), walkEnforce)
 	if err != nil || called || strings.Contains(out, "WARNING") {
 		t.Errorf("err = %v, called = %v, output = %q, want a pass without a warning", err, called, out)
 	}
@@ -285,10 +288,10 @@ func TestConnectorWriteGate_DoctorReportsWriteCapability(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			useGithubConnectorRow(t, func(*connectorruntime.Runtime, string, string) (forge.TokenIntrospection, error) {
+			rt := useGithubConnectorRow(t, func(*connectorruntime.Runtime, string, string) (forge.TokenIntrospection, error) {
 				return tc.result, nil
 			})
-			out, err := walkConnectorWriteGate(minimalValidConfig(), walkReport)
+			out, err := walkConnectorWriteGate(rt, minimalValidConfig(), walkReport)
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("err = %v, wantErr = %v", err, tc.wantErr)
 			}
@@ -302,29 +305,15 @@ func TestConnectorWriteGate_DoctorReportsWriteCapability(t *testing.T) {
 }
 
 // Under a GH_HOST other than github.com the github row is not applied (its
-// Routes pin api.github.com), so the write gate does not apply and the
+// Routes pin api.github.com; the gate itself is pinned by the github package),
+// so the runtime holds no github row, the write gate does not apply and the
 // connector credential is not needed this run.
-func TestConnectorWriteGate_GitHubEnterpriseHostAppliesNoRow(t *testing.T) {
-	row := backendrows.Row{Name: "github", Module: "/x/github.wasm", CredentialEnv: ghTokenEnv, Routes: []connectorhost.Route{fixtureGetRepos}}
-	ghe := func(k string) string {
-		if k == "GH_HOST" {
-			return "ghe.example.com"
-		}
-		return ""
-	}
-	useConnectorRowsWith(t, ghe, row)
+func TestConnectorWriteGate_NoGitHubRowAppliesNoGate(t *testing.T) {
 	c := minimalValidConfig()
+	c.connectors = rowsRuntime(t, noKnobs)
 	c.IssueTracker, c.CodeForge = "github", "github"
 	if githubApplies(c) {
-		t.Error("the write gate applies under GH_HOST=ghe.example.com")
-	}
-	if rows := backendrows.All(); len(rows) != 0 {
-		t.Errorf("rows = %+v, want none, so no credential is fetched or sent", rows)
-	}
-
-	useConnectorRowsWith(t, func(string) string { return "" }, row)
-	if _, ok := backendrows.Lookup("github"); !ok {
-		t.Error("the github row is dropped under the default host")
+		t.Error("the write gate applies with no github row")
 	}
 }
 
@@ -332,14 +321,11 @@ func TestConnectorWriteGate_GitHubEnterpriseHostAppliesNoRow(t *testing.T) {
 // Connector loads into that runtime's sandbox.
 func TestConnectorWriteGate_IntrospectsThroughTheConfigsRuntime(t *testing.T) {
 	var got *connectorruntime.Runtime
-	useGithubConnectorRow(t, func(rt *connectorruntime.Runtime, _, _ string) (forge.TokenIntrospection, error) {
+	rt := useGithubConnectorRow(t, func(rt *connectorruntime.Runtime, _, _ string) (forge.TokenIntrospection, error) {
 		got = rt
 		return forge.TokenIntrospection{Introspectable: true, WriteCapable: true}, nil
 	})
-	rt := connectorruntime.FromRegistries(nil, nil)
-	c := minimalValidConfig()
-	c.connectors = rt
-	if _, err := walkConnectorWriteGate(c, walkEnforce); err != nil {
+	if _, err := walkConnectorWriteGate(rt, minimalValidConfig(), walkEnforce); err != nil {
 		t.Fatal(err)
 	}
 	if got != rt {

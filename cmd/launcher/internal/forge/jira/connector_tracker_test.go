@@ -28,7 +28,7 @@ import (
 	"spindrift.dev/launcher/internal/hostpaths"
 )
 
-func useJiraRow(t *testing.T) {
+func jiraRows(t *testing.T) backendrows.Set {
 	t.Helper()
 	row := backendrows.Row{
 		Name:          "jira",
@@ -40,17 +40,18 @@ func useJiraRow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(backendrows.Snapshot())
-	if err := backendrows.Use(doc, func(string) string { return "" }); err != nil {
+	set, err := backendrows.Decode(doc, func(string) string { return "" }, nil)
+	if err != nil {
 		t.Fatal(err)
 	}
+	return set
 }
 
-func newJiraTracker(t *testing.T) (forge.IssueTracker, error) {
+func newJiraTracker(t *testing.T, set backendrows.Set) (forge.IssueTracker, error) {
 	t.Helper()
 	t.Chdir(t.TempDir()) // the audit file lands under the host log dir
 	env := map[string]string{"JIRA_BASE_URL": "https://jira.example", "JIRA_PROJECT_KEY": "PROJ", "JIRA_TOKEN": "tok"}
-	return jira.Strategy.NewIssueTracker(backendkit.Shared{Connectors: newRuntime(t, env)}, func(k string) (string, bool) {
+	return jira.Strategy.NewIssueTracker(backendkit.Shared{Connectors: newRuntime(t, set, env)}, func(k string) (string, bool) {
 		v, ok := env[k]
 		return v, ok
 	})
@@ -59,18 +60,14 @@ func newJiraTracker(t *testing.T) (forge.IssueTracker, error) {
 // The Connector is the only tracker: one that cannot load fails the
 // constructor with its error rather than degrading to anything else.
 func TestConnectorTrackerFailsWithTheLoadError(t *testing.T) {
-	useJiraRow(t)
-	if _, err := newJiraTracker(t); !errors.Is(err, os.ErrNotExist) {
+	set := jiraRows(t)
+	if _, err := newJiraTracker(t, set); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("err = %v, want the module read error", err)
 	}
 }
 
 func TestNoJiraRowIsAnActionableErrorNotANativeFallback(t *testing.T) {
-	t.Cleanup(backendrows.Snapshot())
-	if err := backendrows.Use(nil, func(string) string { return "" }); err != nil {
-		t.Fatal(err)
-	}
-	_, err := newJiraTracker(t)
+	_, err := newJiraTracker(t, backendrows.NewSet())
 	if err == nil || !strings.Contains(err.Error(), "spindrift.connectorData") || !strings.Contains(err.Error(), "JIRA_BASE_URL") {
 		t.Fatalf("err = %v, want one naming the Connector's spindrift.connectorData and a JIRA_BASE_URL", err)
 	}
@@ -292,8 +289,8 @@ func connectorLog(t *testing.T) string {
 // A Connector that fails to load is recorded, so a run's failure is
 // not left to a caller that may swallow it (shell completion does).
 func TestConnectorTracker_LoadFailureIsRecorded(t *testing.T) {
-	useJiraRow(t)
-	if _, err := newJiraTracker(t); err == nil {
+	set := jiraRows(t)
+	if _, err := newJiraTracker(t, set); err == nil {
 		t.Fatal("want the load error")
 	}
 	if log := connectorLog(t); !strings.Contains(log, `"op":"load the Connector"`) || !strings.Contains(log, "missing.wasm") {
@@ -346,21 +343,21 @@ func TestConnectorTracker_FailedIssueReadReportsTransient(t *testing.T) {
 // a test binary has no runner to start a sandbox on; a test swaps it.
 var harnessSandbox connectorsandbox.Loader = connectorsandboxtest.InProcess()
 
-// newRuntime is the Connector runtime over the rows the test applied and the
+// newRuntime is the Connector runtime over set and the
 // harnessSandbox, closed with the test. Credentials read the
 // process environment but for the identity, which comes from the knobs, as the
 // launcher's lookup does.
-func newRuntime(t *testing.T, knobs map[string]string) *connectorruntime.Runtime {
+func newRuntime(t *testing.T, set backendrows.Set, knobs map[string]string) *connectorruntime.Runtime {
 	t.Helper()
-	creds := credsourcetest.Applied()
-	for _, row := range backendrows.All() {
+	creds := credsourcetest.EnvRows(set.All()...)
+	for _, row := range set.All() {
 		if row.IdentityEnv != "" {
 			cr := creds[row.Name]
 			cr.Identity = credsource.Static(knobs[row.IdentityEnv])
 			creds[row.Name] = cr
 		}
 	}
-	rt := connectorruntime.FromRegistries(creds, harnessSandbox)
+	rt := connectorruntime.New(set, creds, harnessSandbox)
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt
 }

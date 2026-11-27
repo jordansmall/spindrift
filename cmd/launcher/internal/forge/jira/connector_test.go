@@ -213,7 +213,6 @@ func tryProductionHarness(t *testing.T, cloud bool, tr dispatchkind.Tracker, map
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(backendrows.Snapshot())
 	env := map[string]string{
 		jira.JiraBaseURLEnv:       h.srv.URL,
 		jira.JiraProjectKeyEnv:    connectorProject,
@@ -228,18 +227,19 @@ func tryProductionHarness(t *testing.T, cloud bool, tr dispatchkind.Tracker, map
 	if !cloud {
 		env[jira.JiraDeploymentEnv] = "server"
 	}
-	if err := backendrows.Use(row, func(k string) string { return env[k] }); err != nil {
+	set, err := backendrows.Decode(row, func(k string) string { return env[k] }, nil)
+	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(jira.ConnectorClientForTest(h.srv.Client()))
 
 	h.tr, err = jira.Strategy.NewIssueTracker(
-		backendkit.Shared{Labels: testLabels, VerdictLabels: forge.ResearchVerdictLabels(), Tracker: tr, Connectors: newRuntime(t, env)},
+		backendkit.Shared{Labels: testLabels, VerdictLabels: forge.ResearchVerdictLabels(), Tracker: tr, Connectors: newRuntime(t, set, env)},
 		func(k string) (string, bool) { v, ok := env[k]; return v, ok })
 	if err != nil {
 		return nil, err
 	}
-	live, _ := backendrows.Lookup("jira")
+	live, _ := set.Lookup("jira")
 	h.routes = connectortracker.Routes(live.Routes, connectorProject)
 	return h, nil
 }

@@ -11,17 +11,13 @@ import (
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/doctor"
 )
 
+// useConnectorRows applies rows to the process-wide registry, for the tests
+// that still build their runtime from it.
 func useConnectorRows(t *testing.T, rows ...backendrows.Row) {
-	t.Helper()
-	useConnectorRowsWith(t, func(string) string { return "" }, rows...)
-}
-
-// useConnectorRowsWith applies rows with lookup answering the knob a row's
-// baseEnv names.
-func useConnectorRowsWith(t *testing.T, lookup func(string) string, rows ...backendrows.Row) {
 	t.Helper()
 	t.Cleanup(backendrows.Snapshot())
 	routeThroughConnector(t, "fixture")
@@ -29,10 +25,31 @@ func useConnectorRowsWith(t *testing.T, lookup func(string) string, rows ...back
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := backendrows.Use(raw, lookup); err != nil {
+	if err := backendrows.Use(raw, func(string) string { return "" }); err != nil {
 		t.Fatal(err)
 	}
 }
+
+// rowsRuntime is the runtime over rows, with lookup answering the knob a
+// row's baseEnv names; no Connector loads into it.
+func rowsRuntime(t *testing.T, lookup func(string) string, rows ...backendrows.Row) *connectorruntime.Runtime {
+	t.Helper()
+	routeThroughConnector(t, "fixture")
+	raw, err := json.Marshal(rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := backendrows.Decode(raw, lookup, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := connectorruntime.New(set, nil, nil)
+	t.Cleanup(func() { _ = rt.Close() })
+	return rt
+}
+
+// noKnobs is the lookup of a document whose rows read no knob.
+func noKnobs(string) string { return "" }
 
 // routeThroughConnector registers a backend strategy per name that reads
 // through its Connector, so doctor scopes its Route rows to it.
@@ -49,8 +66,9 @@ func routeThroughConnector(t *testing.T, names ...string) {
 
 // fixtureConfig runs the Code Forge and the issue tracker both through the
 // "fixture" row.
-func fixtureConfig() config {
+func fixtureConfig(rt *connectorruntime.Runtime) config {
 	c := minimalValidConfig()
+	c.connectors = rt
 	c.CodeForge = "fixture"
 	c.IssueTracker = "fixture"
 	return c
@@ -74,8 +92,8 @@ func runConnectorRows(t *testing.T, checks []doctor.Check) string {
 }
 
 func TestDoctorCheckSets_ConnectorRoutesRowsAreReportOnly(t *testing.T) {
-	useConnectorRows(t, connectorRow([]connectorhost.Route{fixtureGetRepos}, []connectorhost.Route{fixtureGetRepos}))
-	classify, report := doctorCheckSets(fixtureConfig())
+	rt := rowsRuntime(t, noKnobs, connectorRow([]connectorhost.Route{fixtureGetRepos}, []connectorhost.Route{fixtureGetRepos}))
+	classify, report := doctorCheckSets(fixtureConfig(rt))
 	for _, name := range []string{"connector-routes[fixture]", "connector-routes-widened[fixture]"} {
 		if ch := checkByName(t, report, name); ch.Tier != doctor.Advisory {
 			t.Errorf("%s Tier = %v, want Advisory", name, ch.Tier)
@@ -89,8 +107,8 @@ func TestDoctorCheckSets_ConnectorRoutesRowsAreReportOnly(t *testing.T) {
 }
 
 func TestConnectorRoutesChecks_ListRoutesAndCredential(t *testing.T) {
-	useConnectorRows(t, connectorRow([]connectorhost.Route{fixtureGetRepos}, []connectorhost.Route{fixtureGetRepos, fixturePostRepos}))
-	out := runConnectorRows(t, connectorRoutesChecks(fixtureConfig()))
+	rt := rowsRuntime(t, noKnobs, connectorRow([]connectorhost.Route{fixtureGetRepos}, []connectorhost.Route{fixtureGetRepos, fixturePostRepos}))
+	out := runConnectorRows(t, connectorRoutesChecks(fixtureConfig(rt)))
 	for _, want := range []string{"connector-routes[fixture]", "credential knob fixtureToken (env FIXTURE_TOKEN)", "GET api.fixture.test /repos", "POST api.fixture.test /repos"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
@@ -103,13 +121,13 @@ func TestConnectorRoutesChecks_ConfigHostedRowListsTheResolvedHost(t *testing.T)
 	issue := connectorhost.Route{Method: "POST", Host: backendrows.BaseHost, Path: "/rest/issue"}
 	row := connectorRow([]connectorhost.Route{search}, []connectorhost.Route{search, issue})
 	row.BaseEnv = "FIXTURE_BASE_URL"
-	useConnectorRowsWith(t, func(k string) string {
+	rt := rowsRuntime(t, func(k string) string {
 		if k == "FIXTURE_BASE_URL" {
 			return "https://acme.example.net/jira"
 		}
 		return ""
 	}, row)
-	out := runConnectorRows(t, connectorRoutesChecks(fixtureConfig()))
+	out := runConnectorRows(t, connectorRoutesChecks(fixtureConfig(rt)))
 	for _, want := range []string{"GET acme.example.net /jira/rest/search", "\n+ POST acme.example.net /jira/rest/issue", "host from FIXTURE_BASE_URL"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
@@ -126,16 +144,16 @@ func TestConnectorRoutesChecks_ConfigHostedRowListsTheResolvedHost(t *testing.T)
 func TestConnectorRoutesChecks_NoKnobFallsBackToEnv(t *testing.T) {
 	row := connectorRow(nil, []connectorhost.Route{fixtureGetRepos})
 	row.CredentialKnob = ""
-	useConnectorRows(t, row)
-	out := runConnectorRows(t, connectorRoutesChecks(fixtureConfig()))
+	rt := rowsRuntime(t, noKnobs, row)
+	out := runConnectorRows(t, connectorRoutesChecks(fixtureConfig(rt)))
 	if !strings.Contains(out, "credential FIXTURE_TOKEN;") {
 		t.Errorf("output lacks the env-only credential:\n%s", out)
 	}
 }
 
 func TestConnectorRoutesChecks_WideningFailsNamingAddedRoutes(t *testing.T) {
-	useConnectorRows(t, connectorRow([]connectorhost.Route{fixtureGetRepos}, []connectorhost.Route{fixtureGetRepos, fixturePostRepos}))
-	out := runConnectorRows(t, connectorRoutesChecks(fixtureConfig()))
+	rt := rowsRuntime(t, noKnobs, connectorRow([]connectorhost.Route{fixtureGetRepos}, []connectorhost.Route{fixtureGetRepos, fixturePostRepos}))
+	out := runConnectorRows(t, connectorRoutesChecks(fixtureConfig(rt)))
 	for _, want := range []string{"connector-routes-widened[fixture]", "\n+ POST api.fixture.test /repos", "spindrift-connector-routes.json", "spindrift connectors accept"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
@@ -144,7 +162,7 @@ func TestConnectorRoutesChecks_WideningFailsNamingAddedRoutes(t *testing.T) {
 	if strings.Contains(out, "+ GET api.fixture.test /repos") {
 		t.Errorf("accepted route reported as added:\n%s", out)
 	}
-	for _, r := range doctor.RunChecks(connectorRoutesChecks(fixtureConfig())) {
+	for _, r := range doctor.RunChecks(connectorRoutesChecks(fixtureConfig(rt))) {
 		if doctor.Blocking(r) {
 			t.Errorf("%s blocks; a widening must stay advisory", r.Check.Name)
 		}
@@ -154,8 +172,8 @@ func TestConnectorRoutesChecks_WideningFailsNamingAddedRoutes(t *testing.T) {
 func TestConnectorRoutesChecks_HeaderWideningNamesTheHeader(t *testing.T) {
 	live := fixtureGetRepos
 	live.RequestHeaders, live.ResponseHeaders = []string{"X-Extra"}, []string{"X-Seen"}
-	useConnectorRows(t, connectorRow([]connectorhost.Route{fixtureGetRepos}, []connectorhost.Route{live}))
-	out := runConnectorRows(t, connectorRoutesChecks(fixtureConfig()))
+	rt := rowsRuntime(t, noKnobs, connectorRow([]connectorhost.Route{fixtureGetRepos}, []connectorhost.Route{live}))
+	out := runConnectorRows(t, connectorRoutesChecks(fixtureConfig(rt)))
 	for _, want := range []string{"connector-routes-widened[fixture]", "\n+ GET api.fixture.test /repos (sends X-Extra) (reads X-Seen)"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
@@ -170,8 +188,8 @@ func TestConnectorRoutesChecks_DocumentWideningNamesTheDocuments(t *testing.T) {
 	accepted.Documents = map[string]string{"A": "query { a }"}
 	live := post
 	live.Documents = map[string]string{"A": "query { a }", "B": "query { b }"}
-	useConnectorRows(t, connectorRow([]connectorhost.Route{accepted}, []connectorhost.Route{live}))
-	out := runConnectorRows(t, connectorRoutesChecks(fixtureConfig()))
+	rt := rowsRuntime(t, noKnobs, connectorRow([]connectorhost.Route{accepted}, []connectorhost.Route{live}))
+	out := runConnectorRows(t, connectorRoutesChecks(fixtureConfig(rt)))
 	for _, want := range []string{"connector-routes-widened[fixture]", "\n+ POST api.fixture.test /repos (documents A@ddd02bba, B@115b9db7)"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
@@ -189,8 +207,8 @@ func TestConnectorRoutesChecks_ChangedDocumentTextIsAWideningWithDistinctLines(t
 	if accepted.String() == live.String() {
 		t.Fatalf("a changed document text renders the same line: %s", live)
 	}
-	useConnectorRows(t, connectorRow([]connectorhost.Route{accepted}, []connectorhost.Route{live}))
-	out := runConnectorRows(t, connectorRoutesChecks(fixtureConfig()))
+	rt := rowsRuntime(t, noKnobs, connectorRow([]connectorhost.Route{accepted}, []connectorhost.Route{live}))
+	out := runConnectorRows(t, connectorRoutesChecks(fixtureConfig(rt)))
 	for _, want := range []string{"connector-routes-widened[fixture]", "\n+ " + live.String()} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
@@ -208,13 +226,13 @@ func TestConnectorRoutesChecks_JiraWriteRoutesRenderAsAdded(t *testing.T) {
 	accepted := []connectorhost.Route{get("/rest/api/2/search")}
 	row := connectorRow(accepted, append([]connectorhost.Route{accepted[0]}, put, post, label))
 	row.BaseEnv = "FIXTURE_BASE_URL"
-	useConnectorRowsWith(t, func(k string) string {
+	rt := rowsRuntime(t, func(k string) string {
 		if k == "FIXTURE_BASE_URL" {
 			return "https://acme.example.net"
 		}
 		return ""
 	}, row)
-	out := runConnectorRows(t, connectorRoutesChecks(fixtureConfig()))
+	out := runConnectorRows(t, connectorRoutesChecks(fixtureConfig(rt)))
 	for _, want := range []string{"\n+ PUT acme.example.net /rest/api/2/issue", "\n+ POST acme.example.net /rest/api/2/issue", "\n+ GET acme.example.net /rest/api/2/label"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
@@ -228,13 +246,13 @@ func TestConnectorRoutesChecks_WithinAcceptedPasses(t *testing.T) {
 		"narrowed":  {[]connectorhost.Route{fixtureGetRepos}, []connectorhost.Route{fixtureGetOne}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			useConnectorRows(t, connectorRow(tc.accepted, tc.live))
-			for _, r := range doctor.RunChecks(connectorRoutesChecks(fixtureConfig())) {
+			rt := rowsRuntime(t, noKnobs, connectorRow(tc.accepted, tc.live))
+			for _, r := range doctor.RunChecks(connectorRoutesChecks(fixtureConfig(rt))) {
 				if r.Err != nil {
 					t.Errorf("%s failed: %v", r.Check.Name, r.Err)
 				}
 			}
-			if out := runConnectorRows(t, connectorRoutesChecks(fixtureConfig())); !strings.Contains(out, "within the accepted baseline") {
+			if out := runConnectorRows(t, connectorRoutesChecks(fixtureConfig(rt))); !strings.Contains(out, "within the accepted baseline") {
 				t.Errorf("output lacks the accepted-table message:\n%s", out)
 			}
 		})
@@ -242,8 +260,8 @@ func TestConnectorRoutesChecks_WithinAcceptedPasses(t *testing.T) {
 }
 
 func TestConnectorRoutesChecks_NoBaselineCountsEveryRouteAdded(t *testing.T) {
-	useConnectorRows(t, connectorRow(nil, []connectorhost.Route{fixtureGetRepos}))
-	out := runConnectorRows(t, connectorRoutesChecks(fixtureConfig()))
+	rt := rowsRuntime(t, noKnobs, connectorRow(nil, []connectorhost.Route{fixtureGetRepos}))
+	out := runConnectorRows(t, connectorRoutesChecks(fixtureConfig(rt)))
 	if !strings.Contains(out, "+ GET api.fixture.test /repos") {
 		t.Errorf("output lacks the added route:\n%s", out)
 	}
@@ -253,8 +271,8 @@ func TestConnectorRoutesChecks_WidenedGrantNamesThePart(t *testing.T) {
 	row := connectorRow([]connectorhost.Route{fixtureGetRepos}, []connectorhost.Route{fixtureGetRepos})
 	row.CredentialEnv = "OTHER_TOKEN"
 	row.AcceptedGrant = &backendrows.Grant{CredentialEnv: "FIXTURE_TOKEN"}
-	useConnectorRows(t, row)
-	out := runConnectorRows(t, connectorRoutesChecks(fixtureConfig()))
+	rt := rowsRuntime(t, noKnobs, row)
+	out := runConnectorRows(t, connectorRoutesChecks(fixtureConfig(rt)))
 	for _, want := range []string{"connector-routes-widened[fixture]", "credential variable: OTHER_TOKEN (accepted: FIXTURE_TOKEN)"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
@@ -271,16 +289,16 @@ func TestConnectorRoutesChecks_WidenedGrantNamesThePart(t *testing.T) {
 func TestConnectorRoutesChecks_ScopedToTheRowTheRunReads(t *testing.T) {
 	other := connectorRow(nil, []connectorhost.Route{fixtureGetRepos})
 	other.Name = "other"
-	useConnectorRows(t, connectorRow(nil, []connectorhost.Route{fixtureGetRepos}), other)
+	rt := rowsRuntime(t, noKnobs, connectorRow(nil, []connectorhost.Route{fixtureGetRepos}), other)
 	routeThroughConnector(t, "other")
 	var names []string
-	for _, ch := range connectorRoutesChecks(fixtureConfig()) {
+	for _, ch := range connectorRoutesChecks(fixtureConfig(rt)) {
 		names = append(names, ch.Name)
 	}
 	if got, want := strings.Join(names, ","), "connector-routes[fixture],connector-routes-widened[fixture]"; got != want {
 		t.Errorf("checks = %s, want %s", got, want)
 	}
-	c := fixtureConfig()
+	c := fixtureConfig(rt)
 	c.IssueTracker = "other"
 	if got := len(connectorRoutesChecks(c)); got != 4 {
 		t.Errorf("forge and tracker on two rows: %d checks, want 4", got)
@@ -288,8 +306,8 @@ func TestConnectorRoutesChecks_ScopedToTheRowTheRunReads(t *testing.T) {
 }
 
 func TestConnectorRoutesChecks_UnroutedRunGetsNoChecks(t *testing.T) {
-	useConnectorRows(t, connectorRow(nil, []connectorhost.Route{fixtureGetRepos}))
-	c := fixtureConfig()
+	rt := rowsRuntime(t, noKnobs, connectorRow(nil, []connectorhost.Route{fixtureGetRepos}))
+	c := fixtureConfig(rt)
 	c.CodeForge, c.IssueTracker = "git", "github"
 	if got := connectorRoutesChecks(c); len(got) != 0 {
 		t.Errorf("connectorRoutesChecks = %d rows, want none for a run reading no Connector row", len(got))
@@ -297,9 +315,9 @@ func TestConnectorRoutesChecks_UnroutedRunGetsNoChecks(t *testing.T) {
 }
 
 func TestConnectorRoutesChecks_NoRowsNoChecks(t *testing.T) {
-	useConnectorRows(t)
-	if got := connectorRoutesChecks(fixtureConfig()); len(got) != 0 {
-		t.Errorf("connectorRoutesChecks(fixtureConfig()) = %d rows, want none", len(got))
+	rt := rowsRuntime(t, noKnobs)
+	if got := connectorRoutesChecks(fixtureConfig(rt)); len(got) != 0 {
+		t.Errorf("connectorRoutesChecks(fixtureConfig(rt)) = %d rows, want none", len(got))
 	}
 }
 
@@ -317,7 +335,6 @@ func TestConnectorRoutesWidened_FromNixRenderedBaseline(t *testing.T) {
 		widening bool
 	}{{"widened", true}, {"accepted", false}, {"narrowed", false}, {"grant", false}, {"grant-remoteenv", false}} {
 		t.Run(tc.doc, func(t *testing.T) {
-			t.Cleanup(backendrows.Snapshot())
 			raw, err := os.ReadFile(filepath.Join(dir, tc.doc+".json"))
 			if err != nil {
 				t.Fatal(err)
@@ -328,12 +345,13 @@ func TestConnectorRoutesWidened_FromNixRenderedBaseline(t *testing.T) {
 			if err := json.Unmarshal(raw, &parsed); err != nil || len(parsed.Backends) == 0 {
 				t.Fatalf("document carries no backends section (err=%v): %s", err, raw)
 			}
-			if err := backendrows.Use(parsed.Backends, func(string) string { return "" }); err != nil {
+			set, err := backendrows.Decode(parsed.Backends, noKnobs, nil)
+			if err != nil {
 				t.Fatal(err)
 			}
-			row, ok := backendrows.Lookup("fixture")
+			row, ok := set.Lookup("fixture")
 			if !ok {
-				t.Fatal("backendrows.Lookup(fixture) = false after the document's rows applied")
+				t.Fatal("set.Lookup(fixture) = false after the document's rows decoded")
 			}
 			_, err = connectorRoutesWidenedCheck(row).Probe()
 			if tc.widening {
@@ -354,8 +372,8 @@ func TestConnectorRoutesChecks_RedirectingLogRouteShowsAsWidening(t *testing.T) 
 	issues := connectorhost.Route{Method: "GET", Host: "api.github.com", Path: "/repos/o/r/issues"}
 	graphql := connectorhost.Route{Method: "POST", Host: "api.github.com", Path: "/graphql"}
 	logs := connectorhost.Route{Method: "GET", Host: "api.github.com", Path: "/repos/o/r/actions/jobs", FollowRedirect: true}
-	useConnectorRows(t, connectorRow([]connectorhost.Route{issues, graphql}, []connectorhost.Route{issues, graphql, logs}))
-	out := runConnectorRows(t, connectorRoutesChecks(fixtureConfig()))
+	rt := rowsRuntime(t, noKnobs, connectorRow([]connectorhost.Route{issues, graphql}, []connectorhost.Route{issues, graphql, logs}))
+	out := runConnectorRows(t, connectorRoutesChecks(fixtureConfig(rt)))
 	if want := "\n+ GET api.github.com /repos/o/r/actions/jobs (follows redirect)"; !strings.Contains(out, want) {
 		t.Errorf("output lacks %q:\n%s", want, out)
 	}
@@ -389,8 +407,8 @@ func TestConnectorRoutesChecks_GithubForgeWritesShowAsWidening(t *testing.T) {
 		route("GET", "/repos/o/r/rules/branches"),
 		route("GET", "/installation/repositories"),
 	}
-	useConnectorRows(t, connectorRow(accepted, append(append([]connectorhost.Route{}, accepted...), added...)))
-	out := runConnectorRows(t, connectorRoutesChecks(fixtureConfig()))
+	rt := rowsRuntime(t, noKnobs, connectorRow(accepted, append(append([]connectorhost.Route{}, accepted...), added...)))
+	out := runConnectorRows(t, connectorRoutesChecks(fixtureConfig(rt)))
 	for _, r := range added {
 		if want := "\n+ " + r.String(); !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
@@ -423,8 +441,8 @@ func TestConnectorRoutesChecks_GithubTrackerWritesShowAsWidening(t *testing.T) {
 		route("GET", "/repos/o/r/labels"),
 		route("POST", "/repos/o/r/labels"),
 	}
-	useConnectorRows(t, connectorRow(accepted, append(append([]connectorhost.Route{}, accepted...), added...)))
-	out := runConnectorRows(t, connectorRoutesChecks(fixtureConfig()))
+	rt := rowsRuntime(t, noKnobs, connectorRow(accepted, append(append([]connectorhost.Route{}, accepted...), added...)))
+	out := runConnectorRows(t, connectorRoutesChecks(fixtureConfig(rt)))
 	for _, r := range added {
 		if want := "\n+ " + r.String(); !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)

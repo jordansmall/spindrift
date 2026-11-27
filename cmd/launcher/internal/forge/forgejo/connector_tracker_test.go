@@ -10,6 +10,7 @@ import (
 
 	"spindrift.dev/launcher/internal/backend/backendrows"
 	"spindrift.dev/launcher/internal/backendkit"
+	"spindrift.dev/launcher/internal/connectorruntime"
 	"spindrift.dev/launcher/internal/dedupmarker"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgejo"
@@ -22,6 +23,7 @@ import (
 type trackerHarness struct {
 	*connectorHarness
 	tr forge.IssueTracker
+	rt *connectorruntime.Runtime
 }
 
 var (
@@ -37,12 +39,12 @@ var (
 func newTrackerHarness(t *testing.T) trackerHarness {
 	t.Helper()
 	h := newConnectorHarness(t, true)
-	useForgejoRow(t, h.srv.URL, func(*backendrows.Row) {})
-	tr, err := buildTracker(t, h.srv)
+	rt := useForgejoRow(t, h.srv.URL, func(*backendrows.Row) {})
+	tr, err := buildTracker(t, rt, h.srv)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return trackerHarness{h, tr}
+	return trackerHarness{h, tr, rt}
 }
 
 func (w trackerHarness) Tracker() forge.IssueTracker           { return w.tr }
@@ -262,7 +264,7 @@ func TestConnectorTracker_IssueRouteNarrowsReadsAndFilesWithItsLabel(t *testing.
 
 	tr, err := forgejo.Strategy.NewIssueTracker(backendkit.Shared{
 		RepoSlug: connectorRepo, Labels: testLabels, VerdictLabels: forge.ResearchVerdictLabels(),
-		Route: forge.Route{{Kind: "label", Value: routeLabel}}, Connectors: newRuntime(t),
+		Route: forge.Route{{Kind: "label", Value: routeLabel}}, Connectors: w.rt,
 	}, mapLookup(map[string]string{forgejo.ForgejoBaseURLEnv: w.srv.URL, forgejo.ForgejoTokenEnv: connectorToken}))
 	if err != nil {
 		t.Fatal(err)

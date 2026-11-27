@@ -39,8 +39,8 @@ func TestStrategyValidateTrackerNamesBlankBaseURL(t *testing.T) {
 
 func TestStrategyLedgerURLUsesLookupBaseURL(t *testing.T) {
 	l := mapLookup(map[string]string{"FORGEJO_BASE_URL": "https://forge.example/forgejo/", "FORGEJO_TOKEN": "tok"})
-	useForgejoRow(t, "https://forge.example/forgejo/", func(*backendrows.Row) {})
-	site, err := forgejo.Strategy.NewLedger(backendkit.Shared{RepoSlug: "o/r", Connectors: newRuntime(t)}, l)
+	rt := useForgejoRow(t, "https://forge.example/forgejo/", func(*backendrows.Row) {})
+	site, err := forgejo.Strategy.NewLedger(backendkit.Shared{RepoSlug: "o/r", Connectors: rt}, l)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,9 +130,9 @@ func TestStrategyValidateRejectsBlankBaseURL(t *testing.T) {
 func TestStrategyLedgerSiteCarriesCredentialNotUserinfo(t *testing.T) {
 	const token = "tok-6860"
 	l := mapLookup(map[string]string{"FORGEJO_BASE_URL": "https://forge.example", "FORGEJO_TOKEN": token})
-	useForgejoRow(t, "https://forge.example", func(*backendrows.Row) {})
+	rt := useForgejoRow(t, "https://forge.example", func(*backendrows.Row) {})
 	t.Setenv(connectorCredentialEnv, token)
-	site, err := forgejo.Strategy.NewLedger(backendkit.Shared{RepoSlug: "o/r", Connectors: newRuntime(t)}, l)
+	site, err := forgejo.Strategy.NewLedger(backendkit.Shared{RepoSlug: "o/r", Connectors: rt}, l)
 	if err != nil {
 		t.Fatal(err)
 	}

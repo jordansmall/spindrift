@@ -29,14 +29,14 @@ var connectorClient *http.Client
 // Connector.
 var ErrNoConnectorRow = errors.New("forgejo runs only through its Connector, which needs a forgejo backend row with a usable base")
 
-// connectorRow is the forgejo backend row both halves are built from.
+// connectorRow is the forgejo backend row of rt that both halves are built from.
 // Otherwise it returns ErrNoConnectorRow, wrapping the row set's base error
 // when that is why the row is absent.
-func connectorRow() (backendrows.Row, error) {
-	if row, ok := backendrows.Lookup(backend.Forgejo.Name); ok {
+func connectorRow(rt *connectorruntime.Runtime) (backendrows.Row, error) {
+	if row, ok := rt.Row(backend.Forgejo.Name); ok {
 		return row, nil
 	}
-	if baseErr := backendrows.BaseError(backend.Forgejo.Name); baseErr != nil {
+	if baseErr := rt.BaseError(backend.Forgejo.Name); baseErr != nil {
 		return backendrows.Row{}, fmt.Errorf("%w: %w", ErrNoConnectorRow, baseErr)
 	}
 	return backendrows.Row{}, ErrNoConnectorRow
