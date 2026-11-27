@@ -6,8 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"spindrift.dev/launcher/internal/connectorforge/connectorforgetest"
-	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectortest"
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/connectortracker/connectortrackertest"
 	"spindrift.dev/launcher/internal/forge"
@@ -21,20 +20,17 @@ const (
 // hostileConnector is the fixture tracker that relays whatever the scripted
 // backend answers for filing, comments and labels, so each case is a hostile
 // Connector as far as core can tell.
-func hostileConnector(t *testing.T, script ...connectorforgetest.Scripted) connectorforgetest.Connector {
+func hostileConnector(t *testing.T, script ...connectortest.Scripted) connectortest.Connector {
 	t.Helper()
-	c := connectorforgetest.Connector{
-		Wasm:   connectorforgetest.FixtureWasm(t, "tracker-hostile.wasm"),
+	return connectortest.Connector{
+		Wasm:   connectortest.FixtureWasm(t, "tracker-hostile.wasm"),
+		Routes: connectortest.RoutePerMethod("tracker.example", http.MethodGet, http.MethodPost),
 		Script: script,
 	}
-	for _, m := range []string{http.MethodGet, http.MethodPost} {
-		c.Routes = append(c.Routes, connectorhost.Route{Method: m, Host: "tracker.example", Path: "/api/v1/repos/{repo}"})
-	}
-	return c
 }
 
-func answer(method, path, body string) connectorforgetest.Scripted {
-	return connectorforgetest.Scripted{Method: method, Path: path, Status: http.StatusOK, Body: body}
+func answer(method, path, body string) connectortest.Scripted {
+	return connectortest.Scripted{Method: method, Path: path, Status: http.StatusOK, Body: body}
 }
 
 // requester is the harness's count of requests the backend answered.

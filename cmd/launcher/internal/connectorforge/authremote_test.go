@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/connectorforge/connectorforgetest"
+	"spindrift.dev/launcher/internal/connectortest"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/gitexec/gitexectest"
 )
@@ -15,7 +16,7 @@ import (
 // backend itself, at the exact clone URL, and gate it on the credential: a site
 // that scoped the helper to any other URL fails with "could not read Username".
 
-const cloneURLPath = "/" + connectorforgetest.Repo + ".git/"
+const cloneURLPath = "/" + connectortest.Repo + ".git/"
 
 // Serial: WithGitOverHTTPS -> gitexectest.ServeTLS t.Setenv GIT_SSL_CAINFO.
 func TestSeedMirrorAuthenticatesAtTheCloneURL(t *testing.T) {

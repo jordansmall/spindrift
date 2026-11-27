@@ -9,7 +9,7 @@
 // The backend it runs against is scripted and forgejo-shaped: REST under
 // /api/v1 (a Target.API of the backend URL plus /api/v1), with the repository
 // at /repos/o/r. A Connector that speaks another dialect scripts the
-// responses it needs (connectorforgetest.Scripted) or does not run here.
+// responses it needs (connectortest.Scripted) or does not run here.
 package connectorconformance
 
 import (
@@ -23,6 +23,7 @@ import (
 	"spindrift.dev/launcher/internal/connectorforge"
 	"spindrift.dev/launcher/internal/connectorforge/connectorforgetest"
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectortest"
 	"spindrift.dev/launcher/internal/connectortracker"
 	"spindrift.dev/launcher/internal/connectortracker/connectortrackertest"
 	"spindrift.dev/launcher/internal/forge/forgetest"
@@ -35,7 +36,7 @@ const (
 	// RoutesEnv is its declared Route table: a JSON array of
 	// {method, host, path, followRedirect}.
 	RoutesEnv = "SPINDRIFT_BACKEND_CONNECTOR_ROUTES"
-	// ScriptEnv is an optional JSON array of connectorforgetest.Scripted.
+	// ScriptEnv is an optional JSON array of connectortest.Scripted.
 	ScriptEnv = "SPINDRIFT_BACKEND_CONNECTOR_SCRIPT"
 )
 
@@ -46,7 +47,7 @@ const capTracker = "tracker"
 // FromEnv reads the Connector under test from the environment, skipping the
 // test when WasmEnv is unset: a skip is not an attestation, so the Nix check
 // demands this test's PASS line.
-func FromEnv(t *testing.T) connectorforgetest.Connector {
+func FromEnv(t *testing.T) connectortest.Connector {
 	t.Helper()
 	path := os.Getenv(WasmEnv)
 	if path == "" {
@@ -56,7 +57,7 @@ func FromEnv(t *testing.T) connectorforgetest.Connector {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := connectorforgetest.Connector{Wasm: wasm}
+	c := connectortest.Connector{Wasm: wasm}
 	if err := json.Unmarshal([]byte(os.Getenv(RoutesEnv)), &c.Routes); err != nil {
 		t.Fatalf("%s: %v", RoutesEnv, err)
 	}
@@ -70,7 +71,7 @@ func FromEnv(t *testing.T) connectorforgetest.Connector {
 
 // capabilities is c's handshake capabilities, from a load that grants no
 // network.
-func capabilities(t *testing.T, c connectorforgetest.Connector) []string {
+func capabilities(t *testing.T, c connectortest.Connector) []string {
 	t.Helper()
 	conn, err := connectorhost.LoadNetwork(context.Background(), c.Wasm, connectorhost.Network{
 		Name:  "conformance",
@@ -86,7 +87,7 @@ func capabilities(t *testing.T, c connectorforgetest.Connector) []string {
 // Run runs one subtest per contract c's capabilities register. The subtest
 // names are the contract names a failure reports. A Connector registering none
 // fails: a pass would attest nothing.
-func Run(t *testing.T, c connectorforgetest.Connector) {
+func Run(t *testing.T, c connectortest.Connector) {
 	t.Helper()
 	caps := capabilities(t, c)
 	has := func(name string) bool { return slices.Contains(caps, name) }

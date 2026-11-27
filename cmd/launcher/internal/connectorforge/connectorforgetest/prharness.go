@@ -7,6 +7,7 @@ import (
 
 	"testing"
 
+	"spindrift.dev/launcher/internal/connectortest"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/seambundle"
@@ -36,7 +37,7 @@ func NewPRVariant(t *testing.T, wasm string) *PRHarness {
 }
 
 // NewPRFor is NewPR over a Connector's own wasm and declared Route table.
-func NewPRFor(t *testing.T, c Connector) *PRHarness {
+func NewPRFor(t *testing.T, c connectortest.Connector) *PRHarness {
 	t.Helper()
 	return &PRHarness{newBase(t, inProcess, c)}
 }
