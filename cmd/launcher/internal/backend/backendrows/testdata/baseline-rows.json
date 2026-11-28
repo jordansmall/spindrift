@@ -2,6 +2,7 @@
   {
     "name": "zeta",
     "module": "/store/zeta.wasm",
+    "axes": ["tracker", "forge"],
     "credentialEnv": "ZETA_TOKEN",
     "gitRemote": "https://git.zeta.example",
     "routes": [

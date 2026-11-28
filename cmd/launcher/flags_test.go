@@ -634,7 +634,7 @@ func TestPrintSubcommands_ExactOutput(t *testing.T) {
 		"  stats [--json] [--reingest] [--root <dir>]... [--since <time>] [--kind <kind>] [--include-inferred=false] [--by <dimension>[,<dimension>...]]  summarise Dispatch cost per pass role from the logs under .spindrift (notional API-equivalent USD), across one or more --root checkouts; --json emits one Dispatch Record per line\n" +
 		"  shadow-replay --driver <name> [--connector <driver.wasm>] [<log-dir>]                                                                          replay archived Pass logs through one Driver's shadow Connector beside its native Strategy, writing each log's comparison to a .shadow-replay.jsonl sidecar (see docs/reference.md)\n" +
 		"  registry discover <repo-dir> <routes-file> [--force]                                                                                           discover registry routes from a Target repo checkout and write the routes file (ADR 0045)\n" +
-		"  connectors accept [<baseline-file>]                                                                                                            write every Connector's current grant (Routes, credential, scheme, base, Git remote) into the Route baseline file, default ./spindrift-connector-routes.json (ADR 0073)\n"
+		"  connectors accept [<baseline-file>]                                                                                                            write every Connector's current grant (Routes, credential, scheme, base, Git remote, axes) into the Route baseline file, default ./spindrift-connector-routes.json (ADR 0073)\n"
 
 	var buf bytes.Buffer
 	printSubcommands(&buf)

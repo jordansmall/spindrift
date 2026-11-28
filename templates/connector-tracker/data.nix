@@ -8,6 +8,8 @@
   name = "connectorname";
   module = pkgs: "${import ./package.nix { inherit pkgs core; }}/connectorname.wasm";
   routes = import ./routes.nix;
+  axes = [ "tracker" ];
+  displayName = "connectorname";
   # The base is not a secret, so any env-schema knob may carry it; the
   # Connector's own keeps it beside its token.
   base = "connectornameConnectorBaseURL";

@@ -412,6 +412,7 @@ func TestGrantChanges(t *testing.T) {
 	same := backendrows.Grant{CredentialEnv: "TOK", BaseEnv: "SITE", GitRemote: "https://forge.test"}
 	with := func(r backendrows.Row, g *backendrows.Grant) backendrows.Row { r.AcceptedGrant = g; return r }
 	scheme := func(s string) backendrows.Row { r := base; r.CredentialScheme = s; return r }
+	axes := func(a ...string) backendrows.Row { r := base; r.Axes = a; return r }
 	envRemote := backendrows.Row{CredentialEnv: "TOK", GitRemote: "https://forge.test", GitRemoteEnv: "FORGE_URL"}
 	cases := []struct {
 		name string
@@ -435,6 +436,11 @@ func TestGrantChanges(t *testing.T) {
 			[]backendrows.GrantChange{{"Git remote", "env FORGE_URL", "https://forge.test"}}},
 		{"env remote matches", with(envRemote, &backendrows.Grant{CredentialEnv: "TOK", GitRemoteEnv: "FORGE_URL"}), nil},
 		{"narrowing is silent", with(backendrows.Row{CredentialEnv: "TOK"}, &same), nil},
+		{"axis declared but not accepted", with(axes("tracker", "forge"), &backendrows.Grant{CredentialEnv: "TOK", BaseEnv: "SITE", GitRemote: "https://forge.test", Axes: []string{"tracker"}}),
+			[]backendrows.GrantChange{{"axis", "forge", "none"}}},
+		{"axes within the grant", with(axes("forge"), &backendrows.Grant{CredentialEnv: "TOK", BaseEnv: "SITE", GitRemote: "https://forge.test", Axes: []string{"tracker", "forge"}}), nil},
+		{"axes against a grant with none", with(axes("tracker"), &same),
+			[]backendrows.GrantChange{{"axis", "tracker", "none"}}},
 		{"several parts", with(base, &backendrows.Grant{}),
 			[]backendrows.GrantChange{{"credential variable", "TOK", "none"}, {"base", "SITE", "none"}, {"Git remote", "https://forge.test", "none"}}},
 	}
@@ -474,6 +480,7 @@ func TestDecodeRefusesAnInvalidAcceptedGrant(t *testing.T) {
 	for name, grant := range map[string]string{
 		"unknown scheme":        `{"credentialScheme":"digest"}`,
 		"both git remote forms": `{"gitRemote":"https://f.test","gitRemoteEnv":"U"}`,
+		"unknown axis":          `{"axes":["filer"]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

@@ -302,7 +302,13 @@ let
   effectiveConnectorFragments =
     let
       # Imported directly: `fragmentPaths` depends on this very binding.
-      inherit (import ./fragment-paths.nix) declaredBy pathOf;
+      inherit (import ./fragment-paths.nix)
+        declaredBy
+        pathOf
+        connectorProblemsWith
+        unservedProblems
+        shipped
+        ;
       taken = lib.concatMap (f: declaredBy f.shipped) connectorFragments;
       # A Consumer forking a fallback Connector's fragment, under any name,
       # takes over the paths it declares: drop them from the fallback, from
@@ -327,14 +333,48 @@ let
               filter = p: _: !lib.elem (lib.removePrefix "${toString f.dir}/" p) dropped;
             };
           };
+      # A third-party Connector's own folder serves the axes its backend row
+      # declares (issue #7647); a first-party one keeps core's axis folders.
+      withAxes =
+        f:
+        if backendRows ? ${f.name} && !backendFirstParty.${f.name} then
+          f // { axes = backendRows.${f.name}.axes or [ ]; }
+        else
+          f;
       isFallback = f: lib.elem f.name fragmentFallbackConnectors;
       fallback = lib.filter (f: f.shipped != { }) (
         map (f: (withoutTaken f) // { name = "${f.name} (batteries fallback)"; }) (
           lib.filter isFallback (import ../nix/connector-fragments.nix)
         )
       );
+      contributions = lib.sort (a: b: a.name < b.name) (map withAxes connectorFragments ++ fallback);
+      # The one gate every consumer of the contributions (scans, the image's
+      # fragments install) passes through, so a Consumer's bad Connector
+      # fragments fail here rather than at a Box's first prompt read.
+      # A third-party row contributing no fragments is held to the same rule.
+      # A row on a first-party backend's name is skipped: checkBackendRow
+      # refuses it by name, and its fragments would only mask that refusal.
+      unregistered = lib.filter (
+        n:
+        !backendFirstParty.${n}
+        && !batteriesBackendRows ? ${n}
+        && !lib.any (f: f.name == n) connectorFragments
+      ) (lib.attrNames backendRows);
+      problems =
+        connectorProblemsWith shipped contributions
+        ++ lib.concatMap (
+          n:
+          unservedProblems {
+            name = n;
+            axes = backendRows.${n}.axes or [ ];
+            shipped = { };
+          }
+        ) unregistered;
     in
-    lib.sort (a: b: a.name < b.name) (connectorFragments ++ fallback);
+    if problems != [ ] then
+      throw "mkHarness: a Connector's fragment dir disagrees with the axes its backend row declares or the fragments it ships:\n  ${lib.concatStringsSep "\n  " problems}"
+    else
+      contributions;
   # folderOf and mayBeAbsent are connector-independent; the rest resolve over
   # the Connectors' contributions.
   fragmentPaths =
@@ -762,18 +802,31 @@ let
     name: row:
     let
       scheme = row.credentialScheme or "bearer";
+      nameErr = connectorNames.firstPartyNameError {
+        inherit name;
+        firstParty = backendFirstParty.${name};
+        firstPartyNames = lib.attrNames batteriesBackendRows;
+      };
       credentialErr = connectorNames.backendCredentialError {
         inherit name row coreEnvs;
         firstParty = backendFirstParty.${name};
         otherEnvs = otherBackendEnvs name;
+      };
+      factsErr = connectorNames.backendFactsError {
+        inherit name row;
+        firstParty = backendFirstParty.${name};
       };
     in
     if lib.elem name coreBackendNames then
       throw "mkHarness: backendRows.${name} is a built-in backend and cannot be replaced by a Connector row"
     else if !(builtins.isFunction (row.module or null)) then
       throw "mkHarness: backendRows.${name} must carry `module`, a function of pkgs returning the Connector's wasm path"
+    else if nameErr != null then
+      throw nameErr
     else if credentialErr != null then
       throw credentialErr
+    else if factsErr != null then
+      throw factsErr
     else if
       !(lib.elem scheme [
         "bearer"
@@ -844,6 +897,7 @@ let
       // lib.optionalAttrs (r ? baseEnv) { inherit (r) baseEnv; }
       // lib.optionalAttrs (r ? gitRemote) { inherit (r) gitRemote; }
       // lib.optionalAttrs (r ? gitRemoteEnv) { inherit (r) gitRemoteEnv; }
+      // lib.optionalAttrs (r ? axes) { inherit (r) axes; }
     ) checkedBackendRows;
   checkedBackendRows = lib.mapAttrs checkBackendRow backendRows;
   # A third-party Connector row beyond its accepted baseline must not run
@@ -2102,6 +2156,7 @@ else
         runInputDocumentFile
         backendBundleDirs
         backendFirstParty
+        effectiveConnectorFragments
         baselineRefusals
         ;
       driverExecBin = imageDriver.driverExecBin;

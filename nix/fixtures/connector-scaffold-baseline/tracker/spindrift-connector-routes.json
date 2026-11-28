@@ -1,0 +1,1 @@
+{"connectorname":{"credentialEnv":"CONNECTORNAME_TOKEN","credentialScheme":"bearer","baseEnv":"SPINDRIFT_CONNECTORNAME_CONNECTOR_BASE_URL","axes":["tracker"],"routes":[{"method":"GET","host":"{base}","path":"/api/v1/repos/{repo}"}]}}

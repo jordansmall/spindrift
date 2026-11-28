@@ -83,11 +83,16 @@ let
     );
 
   # The template's `shipped` (`toRef` maps its token) must equal the reference's
-  # minus the keys in `omits`, which must each be a key the reference ships.
+  # minus the keys in `omits`, which must each be a key the reference ships,
+  # plus `adds`, keys the reference does not ship but the template does.
   shippedMatches =
-    toRef: omits: ref: tmpl:
+    toRef: omits: adds: ref: tmpl:
+    let
+      mapped = mapAttrs' (k: v: nameValuePair (toRef k) (map toRef v));
+    in
     all (k: ref ? ${k}) omits
-    && mapAttrs' (k: v: nameValuePair (toRef k) (map toRef v)) tmpl == removeAttrs ref omits;
+    && all (k: !(ref ? ${k})) (attrNames adds)
+    && mapped tmpl == removeAttrs ref omits // mapped adds;
 
   # `got` must hold every name in `required` and none outside `allowed`.
   namesProblems =
@@ -127,7 +132,8 @@ let
   # narrows the template's file set before the compare (a driver template
   # carries a starter corpus the reference's own testdata outgrows);
   # `omitsFragments` names the reference `shipped` fragments the template
-  # deliberately leaves out. `mainCalls` are SDK calls main.go must make beyond
+  # deliberately leaves out and `addsFragments` the `shipped` entries it carries
+  # beyond the reference's. `mainCalls` are SDK calls main.go must make beyond
   # `<sdkPackage>.Register(`; `extra` adds the kind's own pins, given the
   # trees and `outputs`.
   scaffold =
@@ -136,6 +142,7 @@ let
       ref,
       tmplFiles ? (fs: fs),
       omitsFragments ? [ ],
+      addsFragments ? { },
       sdkPackage,
       mainCalls ? [ ],
       extra,
@@ -155,8 +162,9 @@ let
       omittedFiles = optionals (omitsFragments != [ ]) (
         omittedFragmentFiles omitsFragments (load refDir "fragments.nix").shipped
       );
+      addedFiles = map (p: "fragments/${toRef p}") (declaredBy addsFragments);
       fileSet = fileSetProblems ref tmplSet (
-        sorted (subtractLists omittedFiles (skeletonOf (relFiles refDir)))
+        sorted (subtractLists omittedFiles (skeletonOf (relFiles refDir)) ++ addedFiles)
       );
 
       flakes = forBoth (d: load d "flake.nix");
@@ -248,6 +256,7 @@ let
             toRef
             tmplSet
             omitsFragments
+            addsFragments
             consumed
             ;
           entry = entries.tmpl;
@@ -272,6 +281,7 @@ let
       toRef,
       tmplSet,
       omitsFragments,
+      addsFragments,
       consumed,
       entry,
     }:
@@ -305,12 +315,26 @@ let
         subtractLists [ "knobs" ] (attrNames rows.tmpl)
       )
     # The template's backend and knobs may use fewer of the reference's options
-    # (token auth, not Basic), never one it does not.
-    ++ namesProblems "registered row backend" [
-      "module"
-      "routes"
-      "base"
-    ] (subtractLists [ "credential" ] (attrNames rows.ref.backend)) (attrNames rows.tmpl.backend)
+    # (token auth, not Basic), never one it does not. The template is
+    # third-party, so it also carries `axes` and `displayName`, which a
+    # first-party reference leaves to core's backend rows.
+    ++
+      namesProblems "registered row backend"
+        [
+          "module"
+          "routes"
+          "axes"
+          "displayName"
+          "base"
+        ]
+        (
+          subtractLists [ "credential" ] (attrNames rows.ref.backend)
+          ++ [
+            "axes"
+            "displayName"
+          ]
+        )
+        (attrNames rows.tmpl.backend)
     ++ expect (
       rows.tmpl.knobs.${token + "ConnectorToken"}.env == connectorNames.derivedCredentialEnv token
     ) "registered row knobs: the template's ${token}ConnectorToken knob must carry the derived env"
@@ -330,8 +354,8 @@ let
     ++ sameNames "fragments.nix attrs" (attrNames (frag refDir)) (attrNames (frag tmplDir))
     ++ expect (
       toRef (frag tmplDir).name == (frag refDir).name
-      && shippedMatches toRef omitsFragments (frag refDir).shipped (frag tmplDir).shipped
-    ) "fragments.nix: name differs, or shipped is not ${ref}'s minus omitsFragments"
+      && shippedMatches toRef omitsFragments addsFragments (frag refDir).shipped (frag tmplDir).shipped
+    ) "fragments.nix: name differs, or shipped is not ${ref}'s minus omitsFragments plus addsFragments"
     ++ fragmentFileProblems (sorted (map toRef (declaredBy (frag tmplDir).shipped))) (
       sorted (fragmentFilesOf tmplSet)
     )
@@ -364,6 +388,13 @@ let
   trackerScaffold = scaffold {
     tmplDir = ../../templates/connector-tracker;
     ref = "jira";
+    # A third-party tracker owes the three tracker-axis fragments core ships for
+    # its own trackers only (lib/fragment-paths.nix, issue #7647).
+    addsFragments = {
+      "filer-dedup.md" = [ token ];
+      "pr-body-issue-ref.md" = [ token ];
+      "pr-body-no-issue-ref.md" = [ token ];
+    };
     sdkPackage = "tracker";
     extra = backendExtra;
   };
@@ -388,6 +419,53 @@ let
     sdkPackage = "driver";
     extra = driverExtra;
   };
+
+  # A scaffold's data and fragments through mkHarness's own validation, as a
+  # Consumer registering them hits it (issue #7647): the registration checks
+  # fire as the row is read and the fragment validation as the image's prompt
+  # dir is derived, so forcing every image's derivation path is the whole test,
+  # with nothing built. The template-to-reference comparison above cannot see a
+  # fragment folder mkHarness would refuse.
+  harnessAccepts =
+    baseline: data:
+    let
+      consumer = fixtures.consumerAtVia baseline { } [
+        ../../lib/flakeModule.nix
+        (fixtures.registerData data)
+      ];
+      images = consumer.packages.${system};
+    in
+    (builtins.tryEval (builtins.deepSeq (attrValues (builtins.mapAttrs (_: p: p.drvPath) images)) true))
+    .success;
+  scaffoldedData = tmplDir: ((load tmplDir "default.nix").lib.connector { inherit core; }).data;
+  # The same data with `file` dropped from the shipped set and the folder, so
+  # the Connector contributes cleanly yet no longer serves its declared axis.
+  withoutFragment =
+    data: file:
+    data
+    // {
+      fragments = data.fragments // {
+        dir = builtins.path {
+          path = data.fragments.dir;
+          name = "fragments-without-${file}";
+          filter = p: _: baseNameOf p != file;
+        };
+        shipped = removeAttrs data.fragments.shipped [ file ];
+      };
+    };
+  harnessScaffold =
+    kind: owed:
+    let
+      name = "connector-scaffold-harness-${kind}";
+      data = scaffoldedData (../../templates + "/connector-${kind}");
+      baseline = ../fixtures/connector-scaffold-baseline + "/${kind}";
+    in
+    assert assertMsg (harnessAccepts baseline data)
+      "${name}: mkHarness refuses the template's data and fragments registered as a Consumer would";
+    assert assertMsg (all (
+      f: !harnessAccepts baseline (withoutFragment data f)
+    ) owed) "${name}: control: dropping an owed fragment must make mkHarness refuse";
+    pkgs.runCommand name { } "touch $out";
 
   controls = {
     moduleFormIsRefused =
@@ -442,19 +520,19 @@ let
         "fragments/u/b.md"
       ];
     noOmissionDropsNothing = omittedFragmentFiles [ ] { "a.md" = [ "t" ]; } == [ ];
-    shippedEqualPasses = shippedMatches (x: x) [ ] { "a.md" = [ "t" ]; } { "a.md" = [ "t" ]; };
-    shippedOmissionPasses = shippedMatches (x: x) [ "b.md" ] {
+    shippedEqualPasses = shippedMatches (x: x) [ ] { } { "a.md" = [ "t" ]; } { "a.md" = [ "t" ]; };
+    shippedOmissionPasses = shippedMatches (x: x) [ "b.md" ] { } {
       "a.md" = [ "t" ];
       "b.md" = [ "t" ];
     } { "a.md" = [ "t" ]; };
     shippedTemplateMissingKey =
-      !shippedMatches (x: x) [ ] {
+      !shippedMatches (x: x) [ ] { } {
         "a.md" = [ "t" ];
         "b.md" = [ "t" ];
       } { "a.md" = [ "t" ]; };
-    shippedKeyRefLacks = !shippedMatches (x: x) [ ] { "a.md" = [ "t" ]; } { "b.md" = [ "t" ]; };
+    shippedKeyRefLacks = !shippedMatches (x: x) [ ] { } { "a.md" = [ "t" ]; } { "b.md" = [ "t" ]; };
     shippedTemplateKeepsOmittedKey =
-      !shippedMatches (x: x) [ "b.md" ]
+      !shippedMatches (x: x) [ "b.md" ] { }
         {
           "a.md" = [ "t" ];
           "b.md" = [ "t" ];
@@ -464,17 +542,25 @@ let
           "b.md" = [ "t" ];
         };
     shippedFolderListDiffers =
-      !shippedMatches (x: x) [ ] {
+      !shippedMatches (x: x) [ ] { } {
         "a.md" = [
           "t"
           "u"
         ];
       } { "a.md" = [ "t" ]; };
     shippedOmissionRefLacks =
-      !shippedMatches (x: x) [ "nope.md" ] { "a.md" = [ "t" ]; } { "a.md" = [ "t" ]; };
-    shippedMapsToken = shippedMatches (builtins.replaceStrings [ "tok" ] [ "ref" ]) [ ] {
+      !shippedMatches (x: x) [ "nope.md" ] { } { "a.md" = [ "t" ]; } { "a.md" = [ "t" ]; };
+    shippedMapsToken = shippedMatches (builtins.replaceStrings [ "tok" ] [ "ref" ]) [ ] { } {
       "ref.md" = [ "ref" ];
     } { "tok.md" = [ "tok" ]; };
+    shippedAddPasses = shippedMatches (x: x) [ ] { "b.md" = [ "t" ]; } { "a.md" = [ "t" ]; } {
+      "a.md" = [ "t" ];
+      "b.md" = [ "t" ];
+    };
+    shippedAddMissing =
+      !shippedMatches (x: x) [ ] { "b.md" = [ "t" ]; } { "a.md" = [ "t" ]; } { "a.md" = [ "t" ]; };
+    shippedAddRefHas =
+      !shippedMatches (x: x) [ ] { "a.md" = [ "t" ]; } { "a.md" = [ "t" ]; } { "a.md" = [ "t" ]; };
   };
   failedControls = filter (n: !controls.${n}) (attrNames controls);
 
@@ -501,6 +587,14 @@ in
     assert assertMsg (hasCorpusCase driverScaffold.files)
       "templates/connector-driver carries no starter corpus (testdata/corpus/<case>/pass.jsonl)";
     check "connector-scaffold-driver" "templates/connector-driver" driverScaffold;
+
+  connector-scaffold-harness-tracker = harnessScaffold "tracker" [
+    "filer-dedup.md"
+    "pr-body-issue-ref.md"
+    "pr-body-no-issue-ref.md"
+  ];
+
+  connector-scaffold-harness-forge = harnessScaffold "forge" [ "fix-ci-read.md" ];
 
   connector-scaffold-forge =
     check "connector-scaffold-forge" "templates/connector-forge"

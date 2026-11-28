@@ -1782,3 +1782,25 @@ rows from the runtime they are handed. The package-level `backendrows.Use`,
 row gate is the `RowGate` of its `backendkit.Strategy`, and callers pass
 `backendkit.RowGates()` to `Decode`, or just that `RowGate` when decoding one
 backend's row.
+
+## Amendment (issue #7647): a third-party row's descriptor is core-derived and fixed
+
+A third-party backend row's data declares two facts about itself, `axes` (a
+non-empty subset of `tracker` and `forge`) and `displayName`, and no more.
+Core gives every third-party row one fixed, host-mediated descriptor, the same
+for all of them. Its signal derives from the row name, as the credential
+variable does (#7560), and the capability facts are core's to set, so none is
+data. A Connector that could declare them would be choosing which host paths
+core trusts it on, which is the choice the data form takes away. A first-party
+row keeps its facts in core's backend rows and may set neither field, and a
+third-party row may not take a first-party name, so the name rule above holds
+at evaluation. The descriptor itself is wired in later tickets; this one
+records the rule and the data it leaves.
+
+The declared `axes` are part of the accepted baseline. `spindrift connectors
+accept` records them, and an axis the baseline lacks is refused at evaluation
+and reported by doctor, like an added Route. Declaring an axis also commits the
+Connector to its prompts: its own fragment folder is accepted on each declared
+axis and on no other, and it must ship every fragment of that axis that has no
+shared root fallback, even when it registers no fragments. `mkHarness` fails
+evaluation naming the Connector and the fragment.

@@ -181,6 +181,64 @@ rec {
     else
       null;
 
+  # The axes a third-party backend row may serve (issue #7647).
+  backendAxes = [
+    "tracker"
+    "forge"
+  ];
+
+  # Why a mkHarness backend row's `axes` and `displayName` cannot stand, or
+  # null. A first-party row keeps both in core's backend rows and sets neither;
+  # a third-party row has no other source and sets both.
+  backendFactsError =
+    {
+      name,
+      firstParty,
+      row,
+    }:
+    let
+      fail = why: "mkHarness: backendRows.${name} ${why}";
+      axes = row.axes or null;
+      unknown = builtins.filter (a: !(builtins.isString a && builtins.elem a backendAxes)) axes;
+      show = a: if builtins.isString a then "'${a}'" else "a ${builtins.typeOf a}";
+      known = builtins.concatStringsSep " and " backendAxes;
+      duplicate = builtins.filter (a: builtins.length (builtins.filter (b: b == a) axes) > 1) axes;
+    in
+    if firstParty then
+      if row ? axes then
+        fail "is a first-party row; its axes are core's backend row facts, so it must not set `axes`"
+      else if row ? displayName then
+        fail "is a first-party row; its display name is core's backend row fact, so it must not set `displayName`"
+      else
+        null
+    else if !(row ? axes) then
+      fail "is third-party and must declare `axes`, a non-empty list drawn from ${known}"
+    else if !(builtins.isList axes) || axes == [ ] then
+      fail "`axes` must be a non-empty list drawn from ${known}"
+    else if unknown != [ ] then
+      fail "`axes` names ${builtins.concatStringsSep ", " (map show unknown)}; the axes are ${known}"
+    else if duplicate != [ ] then
+      fail "`axes` names ${show (builtins.head duplicate)} twice; list each axis once"
+    else if !(row ? displayName) then
+      fail "is third-party and must declare `displayName`, a non-empty string"
+    else if !(builtins.isString row.displayName) || row.displayName == "" then
+      fail "`displayName` must be a non-empty string"
+    else
+      null;
+
+  # Why a row cannot take a first-party backend's name, or null: a first-party
+  # name always means the first-party Connector (ADR 0073).
+  firstPartyNameError =
+    {
+      name,
+      firstParty,
+      firstPartyNames,
+    }:
+    if firstParty || !builtins.elem name firstPartyNames then
+      null
+    else
+      "mkHarness: backendRows.${name} is not the first-party ${name} Connector; a first-party backend name always means the first-party Connector (ADR 0073), so a third-party Connector must take another name";
+
   # Why a derived credential variable is refused because another Connector's
   # knob carries it (the host would attach that value to the row's routes), or
   # null.

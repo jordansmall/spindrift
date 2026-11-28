@@ -17,6 +17,7 @@ let
   };
 
   rosterLib = import ../lib/roster.nix { inherit (pkgs) lib; };
+  rowFragments = import ./fixtures/connector-fragments-rows.nix;
   connectorData = import ../lib/connector-data.nix;
 
   dogfoodShadow = import ./dogfood-shadow.nix;
@@ -764,10 +765,24 @@ let
   hasAll = msg: builtins.all (s: pkgs.lib.hasInfix s msg);
   # A hand-written row as the data core builds it back into the same row, for
   # checks that probe a row's contents: a Connector registers as data only
-  # (issue #7562). The backend row's fields sit flat beside the row's own.
+  # (issue #7562). The backend row's fields sit flat beside the row's own. A
+  # row declaring axes ships the fragments serving them, as a real third-party
+  # Connector must (issue #7647), unless the row brings its own `fragments`.
   rowAsData = name: row: {
     spindrift.connectorData = [
-      ({ inherit name; } // removeAttrs row [ "backend" ] // row.backend or { })
+      (
+        {
+          inherit name;
+        }
+        // pkgs.lib.optionalAttrs ((row.backend.axes or [ ]) != [ ] && !row ? fragments) {
+          fragments = rowFragments {
+            inherit name;
+            axes = row.backend.axes;
+          };
+        }
+        // removeAttrs row [ "backend" ]
+        // row.backend or { }
+      )
     ];
   };
 
@@ -854,6 +869,7 @@ let
     "narrowed"
     "grant"
     "grant-remoteenv"
+    "grant-noaxes"
   ] (n: baselineConsumerAt (./fixtures/connector-routes + "/${n}"));
   connectorBaselineDocs = pkgs.runCommand "connector-baseline-docs" { } (
     ''
@@ -966,6 +982,7 @@ in
     moduleConsumerVia
     moduleConsumerWith
     connectorConsumerVia
+    consumerAtVia
     registerData
     fails
     hasAll

@@ -15,5 +15,5 @@ var subcommandRegistry = []subcommandEntry{
 	{name: "stats", usage: "[--json] [--reingest] [--root <dir>]... [--since <time>] [--kind <kind>] [--include-inferred=false] [--by <dimension>[,<dimension>...]]", doc: "summarise Dispatch cost per pass role from the logs under .spindrift (notional API-equivalent USD), across one or more --root checkouts; --json emits one Dispatch Record per line"},
 	{name: "shadow-replay", usage: "--driver <name> [--connector <driver.wasm>] [<log-dir>]", doc: "replay archived Pass logs through one Driver's shadow Connector beside its native Strategy, writing each log's comparison to a .shadow-replay.jsonl sidecar (see docs/reference.md)"},
 	{name: "registry", usage: "discover <repo-dir> <routes-file> [--force]", doc: "discover registry routes from a Target repo checkout and write the routes file (ADR 0045)"},
-	{name: "connectors", usage: "accept [<baseline-file>]", doc: "write every Connector's current grant (Routes, credential, scheme, base, Git remote) into the Route baseline file, default ./spindrift-connector-routes.json (ADR 0073)"},
+	{name: "connectors", usage: "accept [<baseline-file>]", doc: "write every Connector's current grant (Routes, credential, scheme, base, Git remote, axes) into the Route baseline file, default ./spindrift-connector-routes.json (ADR 0073)"},
 }

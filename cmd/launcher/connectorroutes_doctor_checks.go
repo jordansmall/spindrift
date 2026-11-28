@@ -12,9 +12,10 @@ import (
 
 // connectorRoutesChecks builds two Advisory rows per network Connector row the
 // configured run reads through: the Route table it holds, and the diff of its
-// grant (Routes, credential variable, authorization scheme, base, Git remote)
-// against the Consumer's accepted baseline (ADR 0073, issue #6806). A row the
-// run does not read through is no concern of this run's doctor (issue #7383).
+// grant (Routes, credential variable, authorization scheme, base, Git remote,
+// axes) against the Consumer's accepted baseline (ADR 0073, issue #6806). A row
+// the run does not read through is no concern of this run's doctor (issue
+// #7383).
 // A widening is a finding for the operator to review, never a configuration
 // fault, so the rows reach the report half only.
 func connectorRoutesChecks(c config) []doctor.Check {
