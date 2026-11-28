@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -18,6 +19,7 @@ import (
 
 	"spindrift.dev/launcher/internal/connectorhost"
 	"spindrift.dev/launcher/internal/connectorsandbox"
+	"spindrift.dev/launcher/internal/panicguard"
 	"spindrift.dev/launcher/internal/runner"
 )
 
@@ -85,6 +87,10 @@ type Sandbox struct {
 	r     Starter
 	label string
 
+	// closeMu serializes Close, which holds it across the stops it waits on and
+	// so cannot be mu: Err, Stats and loads must not wait behind a hung host.
+	closeMu sync.Mutex
+
 	mu    sync.Mutex
 	state state
 	// cur is the latest generation, running or dead; nil while idle, after a
@@ -97,12 +103,18 @@ type Sandbox struct {
 	past   connectorsandbox.Stats
 	served bool
 	err    error
+	// retiring is the generations whose stop is still running off mu, each with
+	// a channel closed once that stop returns. A stop can hang on a host the
+	// runner failed to kill, so nothing holding mu may wait on one.
+	retiring map[*generation]chan struct{}
 }
 
 var _ connectorsandbox.Loader = (*Sandbox)(nil)
 
 // New returns a Sandbox that starts through r. label names r in a start error.
-func New(r Starter, label string) *Sandbox { return &Sandbox{r: r, label: label, state: idle} }
+func New(r Starter, label string) *Sandbox {
+	return &Sandbox{r: r, label: label, state: idle, retiring: map[*generation]chan struct{}{}}
+}
 
 // transition moves s to state to. An illegal move is a bug in this file, so it
 // panics rather than returning an error that would mask the caller's own. s.mu
@@ -157,15 +169,23 @@ func (s *Sandbox) ensure() (*connectorhost.Sessions, error) {
 	return g.sessions, nil
 }
 
-// retire closes and stops a generation that is being replaced. Sessions.Close
-// reaps the host, so a long-lived Sandbox does not leave a zombie, open pipes
-// and a runner entry behind per restart. Its error is the dead host's exit
-// status, which the restart does not need. g is dropped here, so a Kill that
-// fails is logged and never retried: the orphan sweep reaps that sandbox once
-// this process has exited. s.mu is held.
+// retire folds a generation that is being replaced into past and stops it off
+// s.mu: the stop can hang on a host that will not die. The stats fold now
+// because a dead host's meter no longer grows. Close retries the kill only while
+// the stop is still running; a Kill that failed after it returned is left to the
+// Orphans sweep, and a stop that never returns keeps its goroutine for the life
+// of the process. s.mu is held.
 func (s *Sandbox) retire(g *generation) {
-	_ = g.stop(context.Background())
 	s.past = g.addStats(s.past)
+	done := make(chan struct{})
+	s.retiring[g] = done
+	panicguard.Go(func() {
+		_ = g.stop(context.Background())
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		delete(s.retiring, g)
+		close(done)
+	})
 }
 
 // addStats folds g's start time and exchanges into st; a generation whose hello
@@ -266,14 +286,43 @@ func (s *Sandbox) Stats() (connectorsandbox.Stats, bool) {
 	return st, s.served
 }
 
-// Close stops the current sandbox, if one started, and closes the Sandbox: no
-// load starts one after it.
+// Close closes the Sandbox, so no load starts a sandbox after it, and stops the
+// current sandbox, if one started. It also retries the Kill of every
+// generation whose retirement is still running and waits for those stops to
+// finish, until ctx ends: a stuck retirement is then reported by name. ctx does
+// not bound the current sandbox's stop, which waits on its host without limit.
+// Concurrent Closes serialize on closeMu, so none returns before the host is
+// reaped; s.mu is taken only to snapshot the generations.
 func (s *Sandbox) Close(ctx context.Context) error {
+	s.closeMu.Lock()
+	defer s.closeMu.Unlock()
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.transition(closed)
-	if s.cur == nil {
-		return nil
+	cur := s.cur
+	pending := maps.Clone(s.retiring)
+	s.mu.Unlock()
+
+	// The retirements are killed first: cur's stop may itself never return.
+	var errs []error
+	for g := range pending {
+		errs = append(errs, g.kill())
 	}
-	return s.cur.stop(ctx)
+	if cur != nil {
+		errs = append(errs, cur.stop(ctx))
+	}
+	for g, done := range pending {
+		// Checked first: select picks at random when both are ready, and a
+		// finished retirement must not be reported as still stopping.
+		select {
+		case <-done:
+			continue
+		default:
+		}
+		select {
+		case <-done:
+		case <-ctx.Done():
+			errs = append(errs, fmt.Errorf("Connector sandbox %s: still stopping: %w", g.name, ctx.Err()))
+		}
+	}
+	return errors.Join(errs...)
 }
