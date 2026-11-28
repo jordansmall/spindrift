@@ -21,6 +21,7 @@
     "credentialEnv": "ZETA_TOKEN",
     "credentialScheme": "bearer",
     "gitRemote": "https://git.zeta.example",
+    "axes": ["tracker","forge"],
     "routes": [
       {"method":"GET","host":"api.zeta.example","path":"/v1/repos"},
       {"method":"POST","host":"api.zeta.example","path":"/v1/repos/{repo}/pulls","followRedirect":true}

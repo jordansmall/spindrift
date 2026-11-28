@@ -75,6 +75,6 @@
   {
     name = "connectors";
     usage = "accept [<baseline-file>]";
-    doc = "write every Connector's current grant (Routes, credential, scheme, base, Git remote) into the Route baseline file, default ./spindrift-connector-routes.json (ADR 0073)";
+    doc = "write every Connector's current grant (Routes, credential, scheme, base, Git remote, axes) into the Route baseline file, default ./spindrift-connector-routes.json (ADR 0073)";
   }
 ]

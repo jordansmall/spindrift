@@ -79,10 +79,10 @@ let
   # no secret either, so any env-schema knob may carry it.
   #
   # `acceptedRoutes` and `acceptedGrant` are the Consumer's reviewed baseline of
-  # a Connector's whole grant (Routes, credential, scheme, base, Git remote),
-  # read from its own tree, never an option: a Connector's module cannot set
-  # its own, and a lock bump that widens a grant leaves it untouched so doctor
-  # shows the diff. The path is built by concatenation, not "${self}", which
+  # a Connector's whole grant (Routes, credential, scheme, base, Git remote,
+  # axes), read from its own tree, never an option: a Connector's module cannot
+  # set its own, and a lock bump that widens a grant leaves it untouched so
+  # doctor shows the diff. The path is built by concatenation, not "${self}", which
   # would copy a fixture's whole repo path into the store.
   acceptedRoutesFile = self.outPath + "/spindrift-connector-routes.json";
   acceptedRoutesBaseline =

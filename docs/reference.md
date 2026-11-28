@@ -2776,7 +2776,7 @@ fails evaluation of the `spindrift` package (`apps.default`) and of
 `apps.daemon`, so nothing from it runs before the Operator accepts it. The
 error names the Connector and lists each added Route (`added Route GET host
 /path`, with `(followRedirect)` where set) and each added or changed credential
-variable, authorization scheme, base or Git remote (`added <part> <value>`, or
+variable, authorization scheme, base, Git remote or axis (`added <part> <value>`, or
 `changed <part> <value> (accepted: <value>)`).
 The compare is stricter than doctor's: an entry in the legacy Routes-only
 shape records no grant, so every grant part the row declares counts as added.
@@ -2786,7 +2786,7 @@ To accept a widening, review the doctor lines, then run `spindrift connectors
 accept [<baseline-file>]` in the Consumer flake's root and commit the diff. The
 verb writes every backend row of the Launcher input document into the file
 (default `./spindrift-connector-routes.json`) from the Route table and credential
-wiring the rows declare now, with the scheme always written. It replaces the
+wiring the rows declare now (and a third-party row's `axes`), with the scheme always written. It replaces the
 whole file, so a hand-added entry or a stale one is dropped, and it prints
 `wrote <file>; review its diff, then commit it`. Doctor then reports `within
 the accepted baseline`, and a refused third-party Connector evaluates again.

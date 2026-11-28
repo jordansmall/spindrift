@@ -854,6 +854,7 @@ let
     "narrowed"
     "grant"
     "grant-remoteenv"
+    "grant-noaxes"
   ] (n: baselineConsumerAt (./fixtures/connector-routes + "/${n}"));
   connectorBaselineDocs = pkgs.runCommand "connector-baseline-docs" { } (
     ''

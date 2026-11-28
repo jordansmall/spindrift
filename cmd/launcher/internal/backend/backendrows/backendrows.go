@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/connectorhost"
+	"spindrift.dev/launcher/internal/connectorprotocol"
 	"spindrift.dev/launcher/internal/connectorrecord"
 	"spindrift.dev/launcher/internal/connectorsandbox"
 	"spindrift.dev/launcher/internal/registryvocab"
@@ -70,6 +71,10 @@ type Row struct {
 	// GitRemoteEnv names the knob env var holding the forge's web base URL,
 	// which may carry a path prefix (a Forgejo served under a subpath).
 	GitRemoteEnv string `json:"gitRemoteEnv,omitempty"`
+	// Axes are the families the Connector serves ("tracker", "forge"), declared
+	// by a third-party row and never by a first-party one. Doctor diffs them
+	// against the accepted baseline: an axis the baseline lacks is a widening.
+	Axes []string `json:"axes,omitempty"`
 }
 
 // Grant is the accepted non-Route parts of a Row's grant, named as the Row names
@@ -77,11 +82,12 @@ type Row struct {
 // bearer) is accepted as absent when the Grant lacks it, so a Row declaring it is
 // a widening; a Row declaring less than the Grant accepts is a narrowing, and silent.
 type Grant struct {
-	CredentialEnv    string `json:"credentialEnv,omitempty"`
-	CredentialScheme string `json:"credentialScheme,omitempty"`
-	BaseEnv          string `json:"baseEnv,omitempty"`
-	GitRemote        string `json:"gitRemote,omitempty"`
-	GitRemoteEnv     string `json:"gitRemoteEnv,omitempty"`
+	CredentialEnv    string   `json:"credentialEnv,omitempty"`
+	CredentialScheme string   `json:"credentialScheme,omitempty"`
+	BaseEnv          string   `json:"baseEnv,omitempty"`
+	GitRemote        string   `json:"gitRemote,omitempty"`
+	GitRemoteEnv     string   `json:"gitRemoteEnv,omitempty"`
+	Axes             []string `json:"axes,omitempty"`
 }
 
 // GrantChange is one non-Route part of a Row's grant that differs from the
@@ -170,6 +176,11 @@ func (r Row) GrantChanges() []GrantChange {
 	add("authorization scheme", schemeOf(r.CredentialScheme), schemeOf(a.CredentialScheme))
 	add("base", r.BaseEnv, a.BaseEnv)
 	add("Git remote", remoteDecl(r.GitRemote, r.GitRemoteEnv), remoteDecl(a.GitRemote, a.GitRemoteEnv))
+	for _, axis := range r.Axes {
+		if !slices.Contains(a.Axes, axis) {
+			add("axis", axis, "")
+		}
+	}
 	return out
 }
 
@@ -412,11 +423,26 @@ func validScheme(s string) bool {
 	return s == "" || s == SchemeBearer || s == SchemeBasic
 }
 
+// unknownAxis returns the first of axes a row may not declare: only the tracker
+// and forge families have a baseline-recorded grant (a driver is no backend row).
+func unknownAxis(axes []string) string {
+	for _, a := range axes {
+		if a != string(connectorprotocol.AxisTracker) && a != string(connectorprotocol.AxisForge) {
+			return a
+		}
+	}
+	return ""
+}
+
 func schemeError(s string) error {
 	return fmt.Errorf("unknown credentialScheme %q, want bearer or basic", s)
 }
 
 func validate(row Row, seen map[string]bool) error {
+	badAxis, badGrantAxis := unknownAxis(row.Axes), ""
+	if row.AcceptedGrant != nil {
+		badGrantAxis = unknownAxis(row.AcceptedGrant.Axes)
+	}
 	switch {
 	case row.Name == "":
 		return errors.New("a backend row has no name")
@@ -438,6 +464,10 @@ func validate(row Row, seen map[string]bool) error {
 		return fmt.Errorf("backend %q: identityEnv applies only to the basic credentialScheme", row.Name)
 	case row.AcceptedGrant != nil && !validScheme(row.AcceptedGrant.CredentialScheme):
 		return fmt.Errorf("backend %q: accepted grant: %w", row.Name, schemeError(row.AcceptedGrant.CredentialScheme))
+	case badAxis != "":
+		return fmt.Errorf("backend %q: unknown axis %q, want tracker or forge", row.Name, badAxis)
+	case badGrantAxis != "":
+		return fmt.Errorf("backend %q: accepted grant: unknown axis %q, want tracker or forge", row.Name, badGrantAxis)
 	case row.AcceptedGrant != nil && row.AcceptedGrant.GitRemote != "" && row.AcceptedGrant.GitRemoteEnv != "":
 		return fmt.Errorf("backend %q: accepted grant: gitRemote and gitRemoteEnv are mutually exclusive", row.Name)
 	}
@@ -527,7 +557,7 @@ func Load(ctx context.Context, row Row, o Options) (*connectorhost.Connector, er
 // must be the document's own rows, not a decoded Set's: Decode rewrites {base} hosts in
 // the stored rows, and an accepted baseline records the declaration (the {base}
 // placeholder and the knob names), never a resolved host. The scheme is always
-// written, normalized; base and Git remote only when declared, so an omitted
+// written, normalized; base, Git remote and axes only when declared, so an omitted
 // part is accepted as absent. Routes keep the row's order, one per line, so a
 // change reads as a reviewable diff.
 func Baseline(raw json.RawMessage) ([]byte, error) {
@@ -580,6 +610,13 @@ func writeBaselineEntry(buf *bytes.Buffer, row Row) error {
 			return err
 		}
 		fmt.Fprintf(buf, "    %q: %s,\n", kv.key, val)
+	}
+	if len(row.Axes) > 0 {
+		axes, err := marshalPlain(row.Axes)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(buf, "    \"axes\": %s,\n", axes)
 	}
 	buf.WriteString("    \"routes\": [")
 	for i, r := range row.Routes {

@@ -1,1 +1,1 @@
-{"fixture":{"credentialEnv":"FIXTURE_TOKEN","credentialScheme":"bearer","baseEnv":"FIXTURE_BASE_URL","gitRemoteEnv":"FIXTURE_REMOTE","routes":[{"method":"GET","host":"api.fixture.test","path":"/repos"}]}}
+{"fixture":{"credentialEnv":"FIXTURE_TOKEN","credentialScheme":"bearer","baseEnv":"FIXTURE_BASE_URL","gitRemoteEnv":"FIXTURE_REMOTE","axes":["tracker"],"routes":[{"method":"GET","host":"api.fixture.test","path":"/repos"}]}}

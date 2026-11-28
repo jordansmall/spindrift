@@ -10,6 +10,7 @@ rec {
     "baseEnv"
     "gitRemote"
     "gitRemoteEnv"
+    "axes"
   ];
 
   # The values `backendrows.validate` accepts. A row holding another fails
@@ -26,7 +27,12 @@ rec {
     let
       keys = builtins.attrNames grant;
       unknown = builtins.filter (k: !(builtins.elem k grantKeys)) keys;
-      nonString = builtins.filter (k: !(builtins.isString grant.${k})) keys;
+      # `axes` alone holds a list; every other part is a string.
+      nonString = builtins.filter (k: k != "axes" && !(builtins.isString grant.${k})) keys;
+      backendAxes = (import ./connector-names.nix).backendAxes;
+      badAxes =
+        !(builtins.isList (grant.axes or [ ]))
+        || builtins.any (a: !(builtins.isString a && builtins.elem a backendAxes)) (grant.axes or [ ]);
     in
     if !(builtins.isAttrs grant) then
       "${what} must be an object"
@@ -34,6 +40,8 @@ rec {
       "${what} has unknown key(s) ${builtins.concatStringsSep ", " unknown}; allowed: ${builtins.concatStringsSep ", " grantKeys}"
     else if nonString != [ ] then
       "${what} must hold strings; ${builtins.concatStringsSep ", " nonString} is not"
+    else if badAxes then
+      "${what} has axes that are no list of ${builtins.concatStringsSep " and " backendAxes}"
     else if !(builtins.elem (grant.credentialScheme or "") schemes) then
       "${what} has credentialScheme '${grant.credentialScheme}'; allowed: bearer, basic"
     else if (grant.gitRemote or "") != "" && (grant.gitRemoteEnv or "") != "" then
@@ -82,7 +90,10 @@ rec {
         part "credential variable" (row.credentialEnv or "") (grant.credentialEnv or "")
         ++ part "authorization scheme" (scheme (row.credentialScheme or "")) acceptedScheme
         ++ part "base" (row.baseEnv or "") (grant.baseEnv or "")
-        ++ part "Git remote" (remote row) (remote grant);
+        ++ part "Git remote" (remote row) (remote grant)
+        ++ map (a: "\n  added axis ${a}") (
+          builtins.filter (a: !(builtins.elem a (grant.axes or [ ]))) (row.axes or [ ])
+        );
       added = map routeLine uncovered ++ changes;
     in
     if !(row ? acceptedRoutes) then

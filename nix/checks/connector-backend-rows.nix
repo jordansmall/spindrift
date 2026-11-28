@@ -615,17 +615,17 @@ in
       ''
         doc=${(withRows { fixture = row; }).internals.runInputDocumentFile}
         jq -e '.backends | length == 1
-          and (.[0] | keys == ["credentialEnv", "module", "name", "routes"])
+          and (.[0] | keys == ["axes", "credentialEnv", "module", "name", "routes"])
           and .[0].name == "fixture"
           and .[0].credentialEnv == "FIXTURE_TOKEN"
           and .[0].routes == [{method: "GET", host: "api.fixture.test", path: "/repos"}]
           and (.[0].module | endswith("/network.wasm"))' "$doc"
         test -f "$(jq -r '.backends[0].module' "$doc")"
-        jq -e '.backends[0] | keys == ["credentialEnv", "credentialScheme", "identityEnv", "module", "name", "routes"]
+        jq -e '.backends[0] | keys == ["axes", "credentialEnv", "credentialScheme", "identityEnv", "module", "name", "routes"]
           and .credentialScheme == "basic" and .identityEnv == "FIXTURE_EMAIL"' ${
             (withRows { fixture = basicRow; }).internals.runInputDocumentFile
           }
-        jq -e '.backends[0] | keys == ["baseEnv", "credentialEnv", "module", "name", "routes"]
+        jq -e '.backends[0] | keys == ["axes", "baseEnv", "credentialEnv", "module", "name", "routes"]
           and .baseEnv == "FIXTURE_BASE_URL" and .routes[0].host == "{base}"' ${
             (withRows { fixture = baseRow; }).internals.runInputDocumentFile
           }
@@ -919,7 +919,7 @@ in
       ''
         jq -e '.backends | map({key: .name, value: .credentialEnv}) | from_entries
           == {"my-thing": "MY_THING_TOKEN", "fixture": "FIXTURE_TOKEN"}' ${doc}
-        jq -e '.backends | all(.[]; keys == ["credentialEnv", "module", "name", "routes"])' ${doc}
+        jq -e '.backends | all(.[]; keys == ["axes", "credentialEnv", "module", "name", "routes"])' ${doc}
         touch $out
       '';
 
@@ -1599,7 +1599,8 @@ in
           module: .backends[0].module,
           routes: [{method: "GET", host: "api.fixture.test", path: "/repos"}],
           credentialEnv: "FIXTURE_TOKEN",
-          credentialKnob: "fixtureToken"
+          credentialKnob: "fixtureToken",
+          axes: ["tracker"]
         }] and (.backends[0].module | endswith("/network.wasm"))' "$doc"
       test -f "$(jq -r '.backends[0].module' "$doc")"
       ${fixtures.runInputDocOf (
@@ -1615,7 +1616,8 @@ in
           credentialKnob: "probeToken",
           credentialScheme: "basic",
           identityEnv: "PROBE_EMAIL",
-          baseEnv: "PROBE_BASE_URL"
+          baseEnv: "PROBE_BASE_URL",
+          axes: ["tracker"]
         }]' "$doc"
       ${fixtures.runInputDocOf (
         programOf (probe {
@@ -1678,6 +1680,35 @@ in
         };
       };
     })) "a direct row may carry an acceptedGrant";
+    assert assertMsg (evaluates (withRows {
+      fixture = row // {
+        acceptedGrant = {
+          credentialEnv = "FIXTURE_TOKEN";
+          axes = [
+            "tracker"
+            "forge"
+          ];
+        };
+      };
+    })) "a direct acceptedGrant may record axes";
+    assert assertMsg (
+      !(evaluates (withRows {
+        fixture = row // {
+          acceptedGrant = {
+            axes = "tracker";
+          };
+        };
+      }))
+    ) "a direct acceptedGrant whose axes are no list must fail evaluation";
+    assert assertMsg (
+      !(evaluates (withRows {
+        fixture = row // {
+          acceptedGrant = {
+            axes = [ "filer" ];
+          };
+        };
+      }))
+    ) "a direct acceptedGrant naming an unknown axis must fail evaluation";
     assert assertMsg (
       !(evaluates (withRows {
         fixture = row // {
@@ -1697,8 +1728,9 @@ in
       }))
     ) "a direct acceptedGrant with a non-string value must fail evaluation";
     pkgs.runCommand "connector-backend-rows-accepted-baseline" { nativeBuildInputs = [ pkgs.jq ]; } ''
-      jq -e '.backends[0] | .acceptedRoutes == [{method: "GET", host: "api.fixture.test", path: "/repos"}] and .acceptedGrant == {credentialEnv: "FIXTURE_TOKEN", credentialScheme: "bearer", baseEnv: "FIXTURE_BASE_URL", gitRemote: "https://fixture.test"}' ${fixtures.connectorBaselineDocs}/grant.json
-      jq -e '.backends[0].acceptedGrant == {credentialEnv: "FIXTURE_TOKEN", credentialScheme: "bearer", baseEnv: "FIXTURE_BASE_URL", gitRemoteEnv: "FIXTURE_REMOTE"}' ${fixtures.connectorBaselineDocs}/grant-remoteenv.json
+      jq -e '.backends[0] | .acceptedRoutes == [{method: "GET", host: "api.fixture.test", path: "/repos"}] and .acceptedGrant == {credentialEnv: "FIXTURE_TOKEN", credentialScheme: "bearer", baseEnv: "FIXTURE_BASE_URL", gitRemote: "https://fixture.test", axes: ["tracker"]}' ${fixtures.connectorBaselineDocs}/grant.json
+      jq -e '.backends[0].acceptedGrant == {credentialEnv: "FIXTURE_TOKEN", credentialScheme: "bearer", baseEnv: "FIXTURE_BASE_URL", gitRemoteEnv: "FIXTURE_REMOTE", axes: ["tracker"]}' ${fixtures.connectorBaselineDocs}/grant-remoteenv.json
+      jq -e '.backends[0] | .axes == ["tracker"] and (.acceptedGrant | has("axes") | not)' ${fixtures.connectorBaselineDocs}/grant-noaxes.json
       jq -e '.backends[0] | has("acceptedGrant") | not' ${fixtures.connectorBaselineDocs}/accepted.json
       jq -e '.backends[0].acceptedRoutes == [{method: "GET", host: "api.fixture.test", path: "/repos/x"}]' ${fixtures.connectorBaselineDocs}/widened.json
       jq -e '.backends[0].acceptedRoutes == [{method: "GET", host: "api.fixture.test", path: "/repos"}]' ${fixtures.connectorBaselineDocs}/accepted.json
@@ -1720,6 +1752,7 @@ in
         credentialScheme = "bearer";
         baseEnv = "FIXTURE_BASE_URL";
         gitRemote = "https://fixture.test";
+        axes = [ "tracker" ];
       };
       live = {
         routes = [ goodRoute ];
@@ -1727,6 +1760,7 @@ in
         credentialScheme = "bearer";
         baseEnv = "FIXTURE_BASE_URL";
         gitRemote = "https://fixture.test";
+        axes = [ "tracker" ];
         acceptedRoutes = [ goodRoute ];
         acceptedGrant = grant;
       };
@@ -1831,7 +1865,44 @@ in
       "added authorization scheme bearer"
       "added base FIXTURE_BASE_URL"
       "added Git remote https://fixture.test"
+      "added axis tracker"
     ]) "a Routes-only entry has no grant, so every declared part is added";
+    assert assertMsg (mentions (live // {
+      axes = [
+        "tracker"
+        "forge"
+      ];
+    }) [ "added axis forge" ]) "an axis the accepted grant lacks must be listed as added";
+    assert assertMsg (
+      !(pkgs.lib.hasInfix "added axis tracker" (
+        refusal (
+          live
+          // {
+            axes = [
+              "tracker"
+              "forge"
+            ];
+          }
+        )
+      ))
+    ) "an accepted axis must not be listed";
+    assert assertMsg (
+      refusal (
+        live
+        // {
+          axes = [ "forge" ];
+          acceptedGrant = grant // {
+            axes = [
+              "tracker"
+              "forge"
+            ];
+          };
+        }
+      ) == null
+    ) "declaring fewer axes than accepted is a narrowing, never refused";
+    assert assertMsg (
+      refusal (live // { acceptedGrant = removeAttrs grant [ "axes" ]; }) != null
+    ) "a grant recording no axes accepts none";
     assert assertMsg (mentions (legacy // { credentialScheme = "basic"; }) [
       "added authorization scheme basic"
     ]) "a basic scheme against a Routes-only entry is added, not changed";
@@ -1917,6 +1988,7 @@ in
       grant = {
         credentialEnv = "FIXTURE_TOKEN";
         credentialScheme = "bearer";
+        axes = [ "tracker" ];
       };
       narrower = goodRoute // {
         path = "/repos/x";
@@ -1943,6 +2015,23 @@ in
           acceptedGrant = grant;
         };
       };
+      axisWidened = withRows {
+        fixture = row // {
+          axes = [
+            "tracker"
+            "forge"
+          ];
+          acceptedRoutes = [ goodRoute ];
+          acceptedGrant = grant;
+        };
+      };
+      axisWithin = withRows {
+        fixture = row // {
+          acceptedRoutes = [ goodRoute ];
+          acceptedGrant = grant;
+        };
+      };
+      flakeNoAxes = fixtures.baselineConsumers.grant-noaxes;
       messages = h: builtins.concatStringsSep "\n" h.internals.baselineRefusals;
       flakeWidened = fixtures.baselineConsumers.widened;
     in
@@ -1969,6 +2058,17 @@ in
     assert assertMsg (pkgs.lib.hasInfix "changed authorization scheme basic (accepted: bearer)" (
       messages schemeWidened
     )) "the refusal must name the widened authorization scheme";
+    assert assertMsg (bothRun axisWithin) "control: a row inside its accepted axes must run";
+    assert assertMsg (!(eitherRuns axisWidened)) "an axis beyond the accepted baseline must refuse the CLI and the daemon";
+    assert assertMsg (
+      accepts axisWidened && evaluates axisWidened
+    ) "connectors accept and the input document must still evaluate for an axis-refused Connector";
+    assert assertMsg (pkgs.lib.hasInfix "added axis forge" (messages axisWidened)
+      && !(pkgs.lib.hasInfix "added axis tracker" (messages axisWidened))
+    ) "the refusal must name the added axis alone";
+    assert assertMsg (
+      !(forces flakeNoAxes.apps.${system}.default.program)
+    ) "a Consumer whose baseline file records no axes must refuse a Connector declaring one";
     assert assertMsg (
       !(forces flakeWidened.apps.${system}.default.program)
     ) "a Consumer whose baseline file is narrower than its Connector must refuse";
@@ -2020,6 +2120,7 @@ in
       grant = {
         credentialEnv = "FIXTURE_TOKEN";
         credentialScheme = "bearer";
+        axes = [ "tracker" ];
       };
       within =
         extra:

@@ -328,9 +328,14 @@ func TestConnectorRoutesWidened_FromNixRenderedBaseline(t *testing.T) {
 		t.Skip("SPINDRIFT_FIXTURE_CONNECTOR_BASELINE_DOCS is unset")
 	}
 	for _, tc := range []struct {
-		doc      string
-		widening bool
-	}{{"widened", true}, {"accepted", false}, {"narrowed", false}, {"grant", false}, {"grant-remoteenv", false}} {
+		doc string
+		// wantErr is a substring the probe's error must carry; empty means no widening.
+		wantErr string
+	}{
+		{doc: "widened", wantErr: "+ GET api.fixture.test /repos"},
+		{doc: "accepted"}, {doc: "narrowed"}, {doc: "grant"}, {doc: "grant-remoteenv"},
+		{doc: "grant-noaxes", wantErr: "axis: tracker (accepted: none)"},
+	} {
 		t.Run(tc.doc, func(t *testing.T) {
 			raw, err := os.ReadFile(filepath.Join(dir, tc.doc+".json"))
 			if err != nil {
@@ -351,9 +356,9 @@ func TestConnectorRoutesWidened_FromNixRenderedBaseline(t *testing.T) {
 				t.Fatal("set.Lookup(fixture) = false after the document's rows decoded")
 			}
 			_, err = connectorRoutesWidenedCheck(row).Probe()
-			if tc.widening {
-				if err == nil || !strings.Contains(err.Error(), "+ GET api.fixture.test /repos") {
-					t.Fatalf("widened baseline: want an error naming %q, got %v", "+ GET api.fixture.test /repos", err)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("%s baseline: want an error naming %q, got %v", tc.doc, tc.wantErr, err)
 				}
 			} else if err != nil {
 				t.Fatalf("%s baseline must not flag a widening, got %v", tc.doc, err)

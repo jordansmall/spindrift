@@ -857,6 +857,7 @@ let
       // lib.optionalAttrs (r ? baseEnv) { inherit (r) baseEnv; }
       // lib.optionalAttrs (r ? gitRemote) { inherit (r) gitRemote; }
       // lib.optionalAttrs (r ? gitRemoteEnv) { inherit (r) gitRemoteEnv; }
+      // lib.optionalAttrs (r ? axes) { inherit (r) axes; }
     ) checkedBackendRows;
   checkedBackendRows = lib.mapAttrs checkBackendRow backendRows;
   # A third-party Connector row beyond its accepted baseline must not run
