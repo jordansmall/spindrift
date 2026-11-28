@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -344,6 +345,8 @@ type killableHosts struct {
 	mu     sync.Mutex
 	stdins []io.Closer
 	waited []*atomic.Bool
+	// wrap, if set, replaces each started host's Wait.
+	wrap func(wait func() error) func() error
 }
 
 func (h *killableHosts) start(name string) (runner.ConnectorSandbox, error) {
@@ -351,6 +354,9 @@ func (h *killableHosts) start(name string) (runner.ConnectorSandbox, error) {
 	waited := new(atomic.Bool)
 	inner := sb.Wait
 	sb.Wait = func() error { waited.Store(true); return inner() }
+	if h.wrap != nil {
+		sb.Wait = h.wrap(sb.Wait)
+	}
 	h.mu.Lock()
 	h.stdins = append(h.stdins, sb.Stdin)
 	h.waited = append(h.waited, waited)
@@ -435,14 +441,169 @@ func TestRestartReapsTheDeadGeneration(t *testing.T) {
 	if _, err := s.Load(context.Background(), notWasm); !reachedHost(err) {
 		t.Fatalf("Load after the host died = %v, want the restarted host's rejection", err)
 	}
-	if !h.reaped(0) {
-		t.Error("the restart left the dead generation unreaped until Close")
-	}
+	// The reap runs off s.mu, so it may land after Load returns.
+	eventually(t, "the restart left the dead generation unreaped until Close", func() bool { return h.reaped(0) && killCount(f) >= 1 })
 	if h.reaped(1) {
 		t.Error("the live generation was reaped")
 	}
-	if got := killCount(f); got < 1 {
-		t.Errorf("Kill calls = %v, want the dead generation stopped on restart", f.KillCalls)
+}
+
+// eventually fails the test unless cond holds within a few seconds.
+func eventually(t *testing.T, msg string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatal(msg)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// within fails the test unless fn returns in a few seconds, well under
+// closeGrace; a stuck retirement would otherwise hang the test.
+func within(t *testing.T, what string, fn func()) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() { defer close(done); fn() }()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatalf("%s blocked behind the stuck retirement", what)
+	}
+}
+
+// stuckFirstHost is a killableHosts whose first generation's Wait never
+// returns until unstick is called, the way a host whose Kill failed never
+// reaps. Register unstick as a cleanup after the Sandbox's Close, so it runs
+// first, since a failing test may leave Sandbox state locked behind the hang.
+func stuckFirstHost() (h *killableHosts, unstick func()) {
+	h = &killableHosts{}
+	release := make(chan struct{})
+	unstick = sync.OnceFunc(func() { close(release) })
+	var n atomic.Int32
+	h.wrap = func(wait func() error) func() error {
+		if n.Add(1) != 1 {
+			return wait
+		}
+		return func() error { <-release; return wait() }
+	}
+	return h, unstick
+}
+
+// retiringCount is how many retired generations are still being stopped.
+func retiringCount(s *Sandbox) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.retiring)
+}
+
+// deadStuckGeneration loads a sandbox on a stuckFirstHost, with Kill failing
+// when killErr is set, and kills generation 0, so the next Load retires it.
+// retired is that generation's name.
+func deadStuckGeneration(t *testing.T, killErr error) (f *runner.Fake, s *Sandbox, retired string, unstick func()) {
+	t.Helper()
+	f = runner.NewFake()
+	f.KillErr = killErr
+	h, unstick := stuckFirstHost()
+	f.StartConnectorSandboxFunc = h.start
+	s = New(f, "podman")
+	t.Cleanup(func() { _ = s.Close(context.Background()) })
+	t.Cleanup(unstick)
+	_, _ = s.Load(context.Background(), notWasm)
+	retired = s.cur.name
+	h.kill(t, 0, s.cur.sessions)
+	return f, s, retired, unstick
+}
+
+func TestStuckRetirementDoesNotBlockTheSandbox(t *testing.T) {
+	f, s, _, _ := deadStuckGeneration(t, errors.New("podman rm -f: boom"))
+
+	var err error
+	within(t, "Load", func() { _, err = s.Load(context.Background(), notWasm) })
+	if !reachedHost(err) {
+		t.Fatalf("Load after the host died = %v, want the restarted host's rejection", err)
+	}
+	if got := f.ConnectorSandboxStarts; len(got) != 2 {
+		t.Fatalf("starts = %v, want a fresh generation", got)
+	}
+	if n := retiringCount(s); n != 1 {
+		t.Fatalf("retiring = %d, want the stuck generation still pending", n)
+	}
+	within(t, "Err", func() { _ = s.Err() })
+	within(t, "Stats", func() { _, _ = s.Stats() })
+}
+
+func TestConcurrentClosesBothWaitForTheCurrentStop(t *testing.T) {
+	f := runner.NewFake()
+	h, unstick := stuckFirstHost()
+	f.StartConnectorSandboxFunc = h.start
+	s := New(f, "podman")
+	t.Cleanup(unstick)
+	_, _ = s.Load(context.Background(), notWasm)
+
+	var wg sync.WaitGroup
+	returned := make([]atomic.Bool, 2)
+	for i := range returned {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = s.Close(context.Background())
+			returned[i].Store(true)
+		}()
+		// The first Close must be inside the stuck stop before the second starts.
+		time.Sleep(50 * time.Millisecond)
+	}
+	// Neither Close may return while the host is unreaped, the second one
+	// included, yet Err and Stats must not wait behind them.
+	time.Sleep(200 * time.Millisecond)
+	for i := range returned {
+		if returned[i].Load() {
+			t.Errorf("Close #%d returned while the current host was still unreaped", i+1)
+		}
+	}
+	within(t, "Err", func() { _ = s.Err() })
+	within(t, "Stats", func() { _, _ = s.Stats() })
+
+	unstick()
+	within(t, "the Closes", wg.Wait)
+}
+
+func TestConcurrentRestartsStartOneGeneration(t *testing.T) {
+	f := runner.NewFake()
+	h, unstick := stuckFirstHost()
+	var starts atomic.Int32
+	f.StartConnectorSandboxFunc = func(name string) (runner.ConnectorSandbox, error) {
+		starts.Add(1)
+		return h.start(name)
+	}
+	s := New(f, "podman")
+	t.Cleanup(func() { _ = s.Close(context.Background()) })
+	t.Cleanup(unstick)
+	_, _ = s.Load(context.Background(), notWasm)
+	h.kill(t, 0, s.cur.sessions)
+
+	var wg sync.WaitGroup
+	got := make([]*connectorhost.Sessions, 8)
+	for i := range got {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ss, err := s.ensure()
+			if err != nil {
+				t.Errorf("ensure = %v", err)
+			}
+			got[i] = ss
+		}()
+	}
+	within(t, "concurrent ensures", wg.Wait)
+	for _, ss := range got {
+		if ss != got[0] {
+			t.Fatal("concurrent loads were served by different generations")
+		}
+	}
+	if n := starts.Load(); n != 2 {
+		t.Fatalf("starts = %d, want the first generation and exactly one successor", n)
 	}
 }
 
@@ -564,5 +725,53 @@ func TestTransitionRejectsIllegalMoves(t *testing.T) {
 		if s.state != tc.from {
 			t.Errorf("%s -> %s left state %s, want it unchanged", tc.from, tc.to, s.state)
 		}
+	}
+}
+
+func TestCloseBoundedByCtxWhileARetirementIsStuck(t *testing.T) {
+	f, s, retired, unstick := deadStuckGeneration(t, errors.New("podman rm -f: boom"))
+	_, _ = s.Load(context.Background(), notWasm)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	var err error
+	within(t, "Close", func() { err = s.Close(ctx) })
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Close = %v, want the ctx deadline", err)
+	}
+	if !strings.Contains(err.Error(), retired) {
+		t.Fatalf("Close = %v, want it to name the stuck generation %s", err, retired)
+	}
+	if !slices.Contains(f.KillCalls, retired) {
+		t.Fatalf("Kill calls = %v, want Close's retry of %s", f.KillCalls, retired)
+	}
+	within(t, "Err", func() { _ = s.Err() })
+	within(t, "Stats", func() { _, _ = s.Stats() })
+	unstick()
+	eventually(t, "the retirement never finished", func() bool { return retiringCount(s) == 0 })
+}
+
+func TestCloseWaitsForAFinishingRetirement(t *testing.T) {
+	f, s, retired, unstick := deadStuckGeneration(t, nil)
+	_, _ = s.Load(context.Background(), notWasm)
+
+	closed := make(chan error, 1)
+	go func() { closed <- s.Close(context.Background()) }()
+	select {
+	case err := <-closed:
+		t.Fatalf("Close returned %v while the retired host was still unreaped", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	unstick()
+	var err error
+	within(t, "Close", func() { err = <-closed })
+	if err != nil {
+		t.Fatalf("Close = %v", err)
+	}
+	if left := retiringCount(s); left != 0 {
+		t.Fatalf("retiring = %d after Close, want none", left)
+	}
+	if !slices.Contains(f.KillCalls, retired) {
+		t.Fatalf("Kill calls = %v, want the retired %s killed", f.KillCalls, retired)
 	}
 }

@@ -4749,10 +4749,11 @@ never falling back to its own process.
   tries again. On a bwrap host that denies unprivileged user namespaces,
   bwrap exits at once and its message is the stderr named.
 - **Restart.** A sandbox whose host died is restarted by the next load, which
-  first closes and reaps the dead one. Sessions open on the dead one fail and
-  are not moved to the new one. A failed restart is a failed start (see
-  **Failure**). A closed sandbox is never restarted: a load after the close
-  fails and starts nothing.
+  starts the new one at once and closes and reaps the dead one in the
+  background, so a host whose `Kill` fails does not block a load. Sessions
+  open on the dead one fail and are not moved to the new one. A failed
+  restart is a failed start (see **Failure**). A closed sandbox is never
+  restarted: a load after the close fails and starts nothing.
 - **Lifetime.** A run's sandboxes last no longer than its run; the daemon's
   own sandboxes, which serve its demand probe, last as long as the daemon
   process and restart as above after a crash. On every exit path
@@ -4760,12 +4761,15 @@ never falling back to its own process.
   shutdown gate, and daemon shutdown with runs in flight, where each daemon
   child is its own run with its own sandboxes) the Launcher closes every
   sandbox the run started, including one whose row failed to load (a restart
-  already stopped the dead one as it started this one): it closes each one's
+  stops the dead one in the background): it closes each one's
   stdin, then calls the runner's `Kill` on its name as the backstop, logging
   `==> stopped Connector sandbox: <name>` once it succeeds.
   A failed `Kill` logs a warning instead and is retried by the next exit step;
-  a restart's failed `Kill` of the dead sandbox is logged and not retried,
-  leaving it to the **Orphans** sweep once the process exits.
+  the close also kills every restart's dead sandbox still being reaped, and
+  waits for those reaps only until its context ends, reporting one still
+  stopping by name and leaving it to the **Orphans** sweep. That context
+  bounds only those reaps, not the current sandbox's own stop, and a `Kill`
+  that failed after a reap returned is not retried, also left to the sweep.
   The sandbox outlives an interrupted run's settle: the runner starts it in a
   process group of its own, so a terminal Ctrl-C reaches the Launcher but not
   the sandbox, and the close comes only after the settle's tracker writes
