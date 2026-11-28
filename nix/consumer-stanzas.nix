@@ -21,6 +21,7 @@
   schema ? import ../lib/env-schema.nix,
 }:
 let
+  quickstartAxes = import ../lib/quickstart-axes.nix;
   compose =
     row:
     let
@@ -38,6 +39,38 @@ let
           id = ((connectorRows.${row.name} or { }).backend or { }).identity or null;
         in
         if id != null && !(declared ? ${id}) then schema.${id} else null;
+      ownSettings = lib.filterAttrs (_: k: k.flakeOption or false) (row.knobs or { });
+      # A knob serves the axis its group names unless it sets `axes` itself.
+      axisOfGroup = {
+        issues = "tracker";
+        forge = "forge";
+      };
+      axesOf = k: k.axes or (lib.optional (axisOfGroup ? ${k.group or ""}) axisOfGroup.${k.group or ""});
+      badAxes = lib.concatMap (
+        name:
+        let
+          k = ownSettings.${name};
+          axes = axesOf k;
+          where = "${file}: settings knob ${name}";
+          list = lib.concatStringsSep ", ";
+          unknownAxes = lib.filter (a: !(lib.elem a quickstartAxes)) axes;
+          # Checked first: a non-string-list `axes` must reach the named error,
+          # not lib.elem or concatStringsSep.
+          strings = builtins.isList axes && lib.all builtins.isString axes;
+        in
+        lib.optional (
+          !strings
+        ) "${where}: `axes` must be a list of strings drawn from ${list quickstartAxes}"
+        ++ lib.optional (strings && axes == [ ]) (
+          if k ? axes then
+            "${where}: `axes` must be non-empty, drawn from ${list quickstartAxes}"
+          else
+            "${where}: group \"${k.group or ""}\" implies no axis, so set `axes` from ${list quickstartAxes}"
+        )
+        ++ lib.optional (
+          strings && unknownAxes != [ ]
+        ) "${where}: `axes` has unknown axis(es): ${list unknownAxes} (valid: ${list quickstartAxes})"
+      ) (lib.attrNames ownSettings);
       missing = lib.optional (stanza == null) "${file}: row declares no consumerStanza";
       unknown = map (
         k: "${file}: consumerStanza.connectorKnobs names ${k}, which its Connector does not declare"
@@ -54,10 +87,10 @@ let
       ) "${file}: tokenEnvVar ${row.tokenEnvVar} is not in lib/env-schema.nix";
     in
     {
-      errors = missing ++ unknown ++ unlisted ++ noToken;
+      errors = missing ++ badAxes ++ unknown ++ unlisted ++ noToken;
       stanza = {
         inherit (row) name displayName;
-        settings = lib.filterAttrs (_: k: k.flakeOption or false) (row.knobs or { });
+        settings = lib.mapAttrs (_: k: k // { axes = axesOf k; }) ownSettings;
         secrets =
           lib.optional (tokenEntry != null) tokenEntry
           ++ lib.optional (identityEntry != null) identityEntry

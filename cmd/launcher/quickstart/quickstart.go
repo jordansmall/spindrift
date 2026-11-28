@@ -906,13 +906,11 @@ func renderFlakeNix(a answers) (string, error) {
 				return "", fmt.Errorf("backend %q derives knob %s from the remote, but its Consumer stanza has no setting for it", choice.name, env)
 			}
 		}
-		// A row chosen only as the tracker leaves its forge-group knobs out: the
-		// forge axis is served by another row, so they would configure nothing.
-		// Filtered by option group rather than whole-row, since the forgejo row's
-		// issues.forgejo.baseURL is also its forge's knob.
+		// A knob whose axis another row serves configures nothing.
 		var settings []stanzaSetting
 		for _, s := range stanza.Settings {
-			if choice.name == a.forge.name || !strings.HasPrefix(s.Path, forgeOptionGroup) {
+			if (choice.name == a.tracker.name && slices.Contains(s.Axes, axisTracker)) ||
+				(choice.name == a.forge.name && slices.Contains(s.Axes, axisForge)) {
 				settings = append(settings, s)
 			}
 		}
@@ -1164,7 +1162,3 @@ func ambientCredential(env Environment, names []string) (value, name string, ok 
 	}
 	return "", "", false
 }
-
-// forgeOptionGroup is the nix option group the code-forge knobs live under,
-// derived from pathCodeForge's own prefix ("forge.").
-var forgeOptionGroup = pathCodeForge[:strings.LastIndex(pathCodeForge, ".")+1]

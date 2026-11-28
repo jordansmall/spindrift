@@ -15,11 +15,13 @@ type consumerStanza struct {
 }
 
 // stanzaSetting is one settings-block knob of a Consumer stanza: its env name,
-// nix option path, and the Nix literal a Consumer writes for its schema default.
+// nix option path, the Nix literal a Consumer writes for its schema default, and
+// the axes ("tracker", "forge") whose selection makes it relevant.
 type stanzaSetting struct {
 	Env     string
 	Path    string
 	Default string
+	Axes    []string
 }
 
 // stanzaSecret is one harness.env line of a Consumer stanza. Secret is false
@@ -55,28 +57,28 @@ var consumerStanzas = map[string]consumerStanza{
 	"git": {
 		DisplayName: "Git",
 		Settings: []stanzaSetting{
-			{Env: "CODE_FORGE_REMOTE_URL", Path: "forge.remoteURL", Default: "\"\""},
+			{Env: "CODE_FORGE_REMOTE_URL", Path: "forge.remoteURL", Default: "\"\"", Axes: []string{"forge"}},
 		},
 	},
 	"local": {
 		DisplayName: "local",
 		Settings: []stanzaSetting{
-			{Env: "CODE_FORGE_ACCUMULATION_REPO_DIR", Path: "forge.accumulationRepoDir", Default: "\"\""},
-			{Env: "LOCAL_ISSUES_DIR", Path: "issues.localDir", Default: "\".spindrift/issues\""},
-			{Env: "LOCAL_ISSUE_REFERENCE", Path: "issues.localReference", Default: "false"},
+			{Env: "CODE_FORGE_ACCUMULATION_REPO_DIR", Path: "forge.accumulationRepoDir", Default: "\"\"", Axes: []string{"forge"}},
+			{Env: "LOCAL_ISSUES_DIR", Path: "issues.localDir", Default: "\".spindrift/issues\"", Axes: []string{"tracker"}},
+			{Env: "LOCAL_ISSUE_REFERENCE", Path: "issues.localReference", Default: "false", Axes: []string{"tracker"}},
 		},
 	},
 	"jira": {
 		DisplayName: "Jira",
 		Settings: []stanzaSetting{
-			{Env: "JIRA_BASE_URL", Path: "issues.jira.baseURL", Default: "\"\""},
-			{Env: "JIRA_DEPLOYMENT", Path: "issues.jira.deployment", Default: "\"cloud\""},
-			{Env: "JIRA_EMAIL", Path: "issues.jira.email", Default: "\"\""},
-			{Env: "JIRA_INCLUDE_COMMENTS", Path: "issues.jira.includeComments", Default: "false"},
-			{Env: "JIRA_ISSUE_TYPE", Path: "issues.jira.issueType", Default: "\"Task\""},
-			{Env: "JIRA_LIFECYCLE", Path: "issues.jira.lifecycle", Default: "\"hybrid\""},
-			{Env: "JIRA_PROJECT_KEY", Path: "issues.jira.projectKey", Default: "\"\""},
-			{Env: "JIRA_STATUS_MAPPING", Path: "issues.jira.statusMapping", Default: "\"\""},
+			{Env: "JIRA_BASE_URL", Path: "issues.jira.baseURL", Default: "\"\"", Axes: []string{"tracker"}},
+			{Env: "JIRA_DEPLOYMENT", Path: "issues.jira.deployment", Default: "\"cloud\"", Axes: []string{"tracker"}},
+			{Env: "JIRA_EMAIL", Path: "issues.jira.email", Default: "\"\"", Axes: []string{"tracker"}},
+			{Env: "JIRA_INCLUDE_COMMENTS", Path: "issues.jira.includeComments", Default: "false", Axes: []string{"tracker"}},
+			{Env: "JIRA_ISSUE_TYPE", Path: "issues.jira.issueType", Default: "\"Task\"", Axes: []string{"tracker"}},
+			{Env: "JIRA_LIFECYCLE", Path: "issues.jira.lifecycle", Default: "\"hybrid\"", Axes: []string{"tracker"}},
+			{Env: "JIRA_PROJECT_KEY", Path: "issues.jira.projectKey", Default: "\"\"", Axes: []string{"tracker"}},
+			{Env: "JIRA_STATUS_MAPPING", Path: "issues.jira.statusMapping", Default: "\"\"", Axes: []string{"tracker"}},
 		},
 		Secrets: []stanzaSecret{
 			{Env: "JIRA_TOKEN", Secret: true},
@@ -89,7 +91,7 @@ var consumerStanzas = map[string]consumerStanza{
 	"forgejo": {
 		DisplayName: "Forgejo",
 		Settings: []stanzaSetting{
-			{Env: "FORGEJO_BASE_URL", Path: "issues.forgejo.baseURL", Default: "\"https://codeberg.org\""},
+			{Env: "FORGEJO_BASE_URL", Path: "issues.forgejo.baseURL", Default: "\"https://codeberg.org\"", Axes: []string{"tracker", "forge"}},
 		},
 		Secrets: []stanzaSecret{
 			{Env: "FORGEJO_TOKEN", Secret: true},

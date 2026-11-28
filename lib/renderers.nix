@@ -1298,10 +1298,7 @@ rec {
         "identityEnvVar"
       ]
       ++ map (f: f.attr) rowFields;
-      quickstartAxes = [
-        "tracker"
-        "forge"
-      ];
+      quickstartAxes = import ./quickstart-axes.nix;
       # Quickstart asks for the issue tracker, so a block must set that axis;
       # each axis it names must be one the backend can actually serve. Returns the
       # problem as a string, or null when the block is valid.
@@ -1669,6 +1666,7 @@ rec {
             env = s.settings.${name}.env;
             path = resolveNixPath name s.settings.${name};
             default = nixLiteral s.settings.${name};
+            axes = s.settings.${name}.axes;
           }) (builtins.filter (name: s.settings.${name} ? env) (builtins.attrNames s.settings))
         );
       field = name: value: "\t\t${name}: ${value},\n";
@@ -1682,9 +1680,10 @@ rec {
           else
             "\t\tSettings: []stanzaSetting{\n"
             + concatStrings (
-              map (e: "\t\t\t{Env: ${goStr e.env}, Path: ${goStr e.path}, Default: ${goStr e.default}},\n") (
-                settingsOf s
-              )
+              map (
+                e:
+                "\t\t\t{Env: ${goStr e.env}, Path: ${goStr e.path}, Default: ${goStr e.default}, Axes: []string{${builtins.concatStringsSep ", " (map goStr e.axes)}}},\n"
+              ) (settingsOf s)
             )
             + "\t\t},\n"
         )
@@ -1728,11 +1727,13 @@ rec {
     + "}\n"
     + "\n"
     + "// stanzaSetting is one settings-block knob of a Consumer stanza: its env name,\n"
-    + "// nix option path, and the Nix literal a Consumer writes for its schema default.\n"
+    + "// nix option path, the Nix literal a Consumer writes for its schema default, and\n"
+    + "// the axes (\"tracker\", \"forge\") whose selection makes it relevant.\n"
     + "type stanzaSetting struct {\n"
     + "\tEnv string\n"
     + "\tPath string\n"
     + "\tDefault string\n"
+    + "\tAxes []string\n"
     + "}\n"
     + "\n"
     + "// stanzaSecret is one harness.env line of a Consumer stanza. Secret is false\n"
