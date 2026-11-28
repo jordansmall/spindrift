@@ -9,5 +9,10 @@
     # The Connector registers no comment writer, so the shared root step naming
     # a forge token would be wrong for it. Drop this entry once it posts comments.
     "issue-blocked-comment-relay.md" = [ "connectorname" ];
+    # A Connector declaring the tracker axis owes these three, which core ships
+    # for its own trackers only (issue #7647).
+    "filer-dedup.md" = [ "connectorname" ];
+    "pr-body-issue-ref.md" = [ "connectorname" ];
+    "pr-body-no-issue-ref.md" = [ "connectorname" ];
   };
 }

@@ -982,6 +982,7 @@ in
     moduleConsumerVia
     moduleConsumerWith
     connectorConsumerVia
+    consumerAtVia
     registerData
     fails
     hasAll
