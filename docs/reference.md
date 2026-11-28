@@ -2629,7 +2629,9 @@ A Code Forge row (github, forgejo, or a forge Connector) also declares
 no path (github's `https://github.com`) or the env-schema key of a knob holding
 the forge's https web base URL (forgejo's `forgejoBaseURL`). It renders as
 `gitRemote` or `gitRemoteEnv`; evaluation fails naming the Connector on a forge
-row with none, or one in neither form. A tracker-only row may omit it.
+row with none, or one in neither form. A tracker-only row may omit it. The
+github row's `gitRemote` must sit on the `GH_HOST` host (`github.com` by
+default), else its PR reads, PR writes, and the Ledger fail closed.
 
 Evaluation fails, naming the Connector and the route, on a Route table the host
 would refuse at load: a method outside `GET`, `HEAD`, `POST`, `PUT`, `PATCH`
@@ -2866,6 +2868,9 @@ such causes. A Consumer flake with no github row (one importing core's module
 directly) has none. Under a `GH_HOST` other than `github.com` the row is
 dropped, since its Routes pin `api.github.com`, so GitHub Enterprise is not
 served until the Connector's Routes cover it, and no connector token is read.
+The row's `gitRemote` must also sit on the `GH_HOST` host (`github.com` by
+default): a remote on another host fails every github PR read, PR write, and the
+Ledger with `ErrNoRoute` naming both hosts, before any credential is sent.
 Core runs no `gh` at all: the Box's
 open-PR question is answered by the Launcher (issue #6902). The ADR 0073 migration window is closed and its all-or-none rule is in
 force: the Bundle registers no native network backend, and a Go test fails if

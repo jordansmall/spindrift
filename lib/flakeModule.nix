@@ -658,7 +658,7 @@ in
                           gitRemote = mkOption {
                             type = types.nullOr types.str;
                             default = null;
-                            description = "Where the forge's Git remote lives: a literal https origin (`https://host[:port]`, no path) or the env-schema key of the knob holding the forge's https web base URL (any env-schema knob, like `base`). Required of a Code Forge row (github, forgejo), where core derives the clone URL from it; other rows may omit it.";
+                            description = "Where the forge's Git remote lives: a literal https origin (`https://host[:port]`, no path) or the env-schema key of the knob holding the forge's https web base URL (any env-schema knob, like `base`). Required of a Code Forge row (github, forgejo), where core derives the clone URL from it; other rows may omit it. A github row's remote must be on the `GH_HOST` host (github.com by default), else its PR reads, PR writes, and the Ledger fail closed.";
                           };
                         };
                       }
