@@ -3007,7 +3007,8 @@ forge accepted `http`.
 It must also be the origin of the Forgejo server's `ROOT_URL`, the host Forgejo
 builds `html_url` from, not an internal alias or another hostname: a filed
 issue's URL or a PR URL on a different host is refused. The default https port
-is implied for filed-issue URLs, so `https://h` and `https://h:443` match.
+is implied for filed-issue and PR URLs, so `https://h` and `https://h:443` match;
+any other port must match exactly.
 
 The Connector also ships the forgejo fragment folder,
 `connectors/forgejo/fragments/forgejo/` (`filer-dedup.md` and `fix-ci-read.md`),
