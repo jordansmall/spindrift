@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.5.0](https://github.com/jordansmall/spindrift/compare/jira-v0.4.0...jira-v0.5.0) (2026-11-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **connectors:** Connector flakes no longer export flakeModules.default and core.lib.connectorModule is gone; register a Connector by adding its connectorData output to spindrift.connectorData.
+* **jira:** SPINDRIFT_JIRA_CONNECTOR_TOKEN and SPINDRIFT_JIRA_CONNECTOR_EMAIL are removed. Move their values to JIRA_TOKEN and JIRA_EMAIL, and SPINDRIFT_JIRA_CONNECTOR_TOKEN_CMD to JIRA_TOKEN_CMD.
+
+### Features
+
+* **connectors:** register the jira Connector as data ([e0ae5a5](https://github.com/jordansmall/spindrift/commit/e0ae5a55bfcba955aa38e1ab366acb272f21656e)), closes [#7558](https://github.com/jordansmall/spindrift/issues/7558)
+* **jira:** authorize the jira Connector with JIRA_TOKEN and JIRA_EMAIL ([2cf3e6e](https://github.com/jordansmall/spindrift/commit/2cf3e6e862df2ef4626beb193e164f6eb6e9b1f3)), closes [#7501](https://github.com/jordansmall/spindrift/issues/7501)
+
+
+### Bug Fixes
+
+* **connector/jira:** page listings through the SDK's Pages loop ([9880b02](https://github.com/jordansmall/spindrift/commit/9880b026eb2558d816b3f5fd6b1a5071d45ccfa1)), closes [#7571](https://github.com/jordansmall/spindrift/issues/7571)
+* **connector/jira:** send and decode through the SDK's SendJSON ([cba9c0b](https://github.com/jordansmall/spindrift/commit/cba9c0b99fe937b0dbf643cb03576b7c5003a89c)), closes [#7571](https://github.com/jordansmall/spindrift/issues/7571)
+
+
+### Security
+
+* **connector/jira:** refuse an unusable path segment before sending ([1fe6318](https://github.com/jordansmall/spindrift/commit/1fe63185bb7d1db70578773aa4bef7efc3877ef8)), closes [#7571](https://github.com/jordansmall/spindrift/issues/7571)
+
+
+### Code Refactoring
+
+* **connectors:** drop the flake-module registration path ([cc88d2e](https://github.com/jordansmall/spindrift/commit/cc88d2e506394742c94394806726e4ea351843ff)), closes [#7562](https://github.com/jordansmall/spindrift/issues/7562)
+* **jira:** drop the send seam and test on the SDK fake host ([e5400f3](https://github.com/jordansmall/spindrift/commit/e5400f3b52297c3f2d003d83473313a25960b854)), closes [#7568](https://github.com/jordansmall/spindrift/issues/7568)
+
+
+### Tests
+
+* **jira:** run the hostile corpus and the capability check ([c44b6b9](https://github.com/jordansmall/spindrift/commit/c44b6b9f50920c2ad4d93413b112bdf6640b6ab2)), closes [#7574](https://github.com/jordansmall/spindrift/issues/7574)
+
 ## [0.4.0](https://github.com/jordansmall/spindrift/compare/jira-v0.3.0...jira-v0.4.0) (2026-11-24)
 
 

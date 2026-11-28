@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.4.0](https://github.com/jordansmall/spindrift/compare/forgejo-v0.3.0...forgejo-v0.4.0) (2026-11-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **connectors:** Connector flakes no longer export flakeModules.default and core.lib.connectorModule is gone; register a Connector by adding its connectorData output to spindrift.connectorData.
+* **connector/forgejo:** a forgejo listing of more than 100 pages now fails with a permanent error naming the bound, instead of paging on until the host closes the Connector.
+* **protocol:** core refuses a forge or Driver Connector built against protocol 0.3; rebuild it against the 0.4 SDK.
+* **forge:** sdk/forge's Probe moved from PRs to Branches and is required there. A forge Connector without forge.probe no longer composes.
+* **protocol:** forge.remote is no longer part of the protocol and sdk/forge's Branches has no Remote field. An out-of-tree forge Connector must drop it.
+* **forgejo:** SPINDRIFT_FORGEJO_CONNECTOR_TOKEN and SPINDRIFT_FORGEJO_CONNECTOR_TOKEN_CMD are removed. Set FORGEJO_TOKEN (or FORGEJO_TOKEN_CMD), which now authorizes forgejo Connector requests and git.
+
+### Features
+
+* **connectors:** declare the headers github and forgejo send and read ([d1ef6e6](https://github.com/jordansmall/spindrift/commit/d1ef6e637e7f2c3109a2f1c8c9a23d75006ca3b7)), closes [#7565](https://github.com/jordansmall/spindrift/issues/7565)
+* **connectors:** register the forgejo Connector as data ([1ecdee7](https://github.com/jordansmall/spindrift/commit/1ecdee7a0575f1db095bf62ac13781b1f77326cb)), closes [#7558](https://github.com/jordansmall/spindrift/issues/7558)
+* **forgejo:** authorize the forgejo Connector with FORGEJO_TOKEN ([a47ee04](https://github.com/jordansmall/spindrift/commit/a47ee04d344317efc4e8d536acdf9ad3b3aa2e47)), closes [#7500](https://github.com/jordansmall/spindrift/issues/7500)
+* **forge:** probe a forge's liveness through forge.probe ([1c588aa](https://github.com/jordansmall/spindrift/commit/1c588aa53cbed60d6a2cb3e9d371c95bdda115ce)), closes [#7510](https://github.com/jordansmall/spindrift/issues/7510)
+* **nix:** declare each forge Connector's Git remote on its row ([1ac9d03](https://github.com/jordansmall/spindrift/commit/1ac9d03953f885f10f497c545a9ebe9f11ae52b8)), closes [#7508](https://github.com/jordansmall/spindrift/issues/7508)
+* **protocol:** remove forge.remote from the Connector protocol ([5f48d7a](https://github.com/jordansmall/spindrift/commit/5f48d7a9d72f646410fde99d56fc343c97868bb0)), closes [#7510](https://github.com/jordansmall/spindrift/issues/7510)
+* **protocol:** speak Connector protocol 0.4.0 ([217fa22](https://github.com/jordansmall/spindrift/commit/217fa22ba34d238b87a1a79e491f42960c0478d7)), closes [#7510](https://github.com/jordansmall/spindrift/issues/7510)
+
+
+### Bug Fixes
+
+* **connector/forgejo:** class a failed send transient, via SDK helpers ([3df3b72](https://github.com/jordansmall/spindrift/commit/3df3b722907f03ce500067cb590787e9de052c8a)), closes [#7570](https://github.com/jordansmall/spindrift/issues/7570)
+* **connector/forgejo:** fail a listing past 100 pages, not page on ([30065aa](https://github.com/jordansmall/spindrift/commit/30065aad062dc9b22f1e254b98dec81d16aaa206)), closes [#7570](https://github.com/jordansmall/spindrift/issues/7570)
+* **connector/forgejo:** re-check every issue before trusting the count ([5d802c3](https://github.com/jordansmall/spindrift/commit/5d802c3ae51ef1bec48014d0ec6f684f83c57976)), closes [#7409](https://github.com/jordansmall/spindrift/issues/7409) [#7570](https://github.com/jordansmall/spindrift/issues/7570)
+* **connectors/forgejo:** refuse a pull request in tracker issue() ([e964a9f](https://github.com/jordansmall/spindrift/commit/e964a9fad9ac17ef39d14a43fe933a3e80e2c718)), closes [#7358](https://github.com/jordansmall/spindrift/issues/7358)
+
+
+### Security
+
+* **connectors:** narrow the job-log Routes to a job's log ([62821a4](https://github.com/jordansmall/spindrift/commit/62821a458aa9918493da52eaf641312a805f7995)), closes [#6926](https://github.com/jordansmall/spindrift/issues/6926)
+
+
+### Code Refactoring
+
+* **connector/forgejo:** drop the send seam, test on the fake host ([50bfe67](https://github.com/jordansmall/spindrift/commit/50bfe674ee9658f64c1a3c44c205ffce03cbac24)), closes [#7570](https://github.com/jordansmall/spindrift/issues/7570)
+* **connectorforge:** probe liveness without forge.remote ([84db84d](https://github.com/jordansmall/spindrift/commit/84db84ddbff486dc1cec63d691eb95ee41f3915b)), closes [#7509](https://github.com/jordansmall/spindrift/issues/7509)
+* **connectors:** drop the flake-module registration path ([cc88d2e](https://github.com/jordansmall/spindrift/commit/cc88d2e506394742c94394806726e4ea351843ff)), closes [#7562](https://github.com/jordansmall/spindrift/issues/7562)
+
+
+### Tests
+
+* **forgejo:** cover a self-hosted instance under a subpath ([134dfd9](https://github.com/jordansmall/spindrift/commit/134dfd9a8ae5d4faf624e627be143f1844c8969f)), closes [#7509](https://github.com/jordansmall/spindrift/issues/7509)
+* **forgejo:** run the hostile corpus and the capability check ([bfcf036](https://github.com/jordansmall/spindrift/commit/bfcf0363f8dc56a15e6e50b38ea6100d73d6edfa)), closes [#7574](https://github.com/jordansmall/spindrift/issues/7574)
+
 ## [0.3.0](https://github.com/jordansmall/spindrift/compare/forgejo-v0.2.0...forgejo-v0.3.0) (2026-11-23)
 
 
