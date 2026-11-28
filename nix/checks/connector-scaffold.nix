@@ -305,12 +305,26 @@ let
         subtractLists [ "knobs" ] (attrNames rows.tmpl)
       )
     # The template's backend and knobs may use fewer of the reference's options
-    # (token auth, not Basic), never one it does not.
-    ++ namesProblems "registered row backend" [
-      "module"
-      "routes"
-      "base"
-    ] (subtractLists [ "credential" ] (attrNames rows.ref.backend)) (attrNames rows.tmpl.backend)
+    # (token auth, not Basic), never one it does not. The template is
+    # third-party, so it also carries `axes` and `displayName`, which a
+    # first-party reference leaves to core's backend rows.
+    ++
+      namesProblems "registered row backend"
+        [
+          "module"
+          "routes"
+          "axes"
+          "displayName"
+          "base"
+        ]
+        (
+          subtractLists [ "credential" ] (attrNames rows.ref.backend)
+          ++ [
+            "axes"
+            "displayName"
+          ]
+        )
+        (attrNames rows.tmpl.backend)
     ++ expect (
       rows.tmpl.knobs.${token + "ConnectorToken"}.env == connectorNames.derivedCredentialEnv token
     ) "registered row knobs: the template's ${token}ConnectorToken knob must carry the derived env"

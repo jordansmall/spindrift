@@ -2,12 +2,15 @@
 # its `spindrift.connectors.<name>` row, so the Connector ships no flake-parts
 # module of its own. A Consumer lists it in `spindrift.connectorData`.
 #
-#   { name; module; routes; credential; scheme; identity; base; gitRemote;
-#     knobs; fragments; driver; }
+#   { name; module; routes; axes; displayName; credential; scheme; identity;
+#     base; gitRemote; knobs; fragments; driver; }
 #
 # `name` is required. `module` (a function of pkgs returning the wasm path)
 # declares a backend row and needs `routes`; `scheme`, `identity`, `base` and
-# `gitRemote` belong to that row. Only a first-party row names a `credential`;
+# `gitRemote` belong to that row. A third-party row also declares `axes` (a
+# non-empty subset of tracker and forge) and `displayName`; a first-party row
+# sets neither. Only mkHarness can tell the two apart, so it enforces both and
+# neither is required here. Only a first-party row names a `credential`;
 # a third-party row's is derived from `name`. `knobs`, `fragments` and `driver`
 # are the row's own fields. `driver` is a row set, or a function of
 # nixpkgs `lib` returning one: a core-derived row
@@ -27,6 +30,8 @@ let
     name = [ "string" ];
     module = [ "lambda" ];
     routes = [ "list" ];
+    axes = [ "list" ];
+    displayName = [ "string" ];
     credential = [ "string" ];
     scheme = [ "string" ];
     identity = [
@@ -54,6 +59,8 @@ let
   };
   backendOnly = [
     "routes"
+    "axes"
+    "displayName"
     "credential"
     "scheme"
     "identity"
@@ -140,6 +147,8 @@ let
             inherit (data) module routes;
           }
           // pick [
+            "axes"
+            "displayName"
             "credential"
             "scheme"
             "identity"

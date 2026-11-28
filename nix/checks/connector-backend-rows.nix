@@ -31,6 +31,8 @@ let
   row = {
     module = p: "${fixtures.connectorWasm}/network.wasm";
     routes = [ goodRoute ];
+    axes = [ "tracker" ];
+    displayName = "Fixture";
   };
   # The batteries Connectors' own modules: a row built from one is first-party,
   # as nix/fixtures.nix builds the dogfood rows. Only the module carries the
@@ -679,6 +681,223 @@ in
       "the name alone must grant no standing: a github-named fixture row and a forgejo-named github module are third-party";
     pkgs.runCommand "connector-backend-rows-first-party-mark-follows-wasm" { } "touch $out";
 
+  # Issue #7647: a third-party row declares `axes` and `displayName`, a
+  # first-party row refuses both (its facts stay in core's rows), and a
+  # third-party row never takes a first-party backend's name. A thrown message
+  # is invisible to tryEval, so the wording is pinned on the pure decisions.
+  connector-backend-rows-axes-and-display-name =
+    let
+      inherit (fixtures) hasAll;
+      axesErr =
+        r:
+        names.backendFactsError {
+          name = "fixture";
+          firstParty = false;
+          row = r;
+        };
+      firstPartyErr =
+        r:
+        names.backendFactsError {
+          name = "github";
+          firstParty = true;
+          row = r;
+        };
+      firstPartyNames = builtins.attrNames {
+        github = ghRow;
+        forgejo = fjRow;
+        jira = jiraRow;
+      };
+      nameErr =
+        name:
+        names.firstPartyNameError {
+          inherit name firstPartyNames;
+          firstParty = false;
+        };
+      probe =
+        backend:
+        fixtures.connectorConsumerVia [
+          ../../lib/flakeModule.nix
+          (fixtures.rowAsData "probe" { inherit backend; })
+        ];
+      builds = c: forces c.apps.${system}.connectors-accept.program;
+    in
+    assert assertMsg (evaluates (withRows {
+      fixture = row;
+    })) "control: a third-party row with axes and displayName must evaluate";
+    assert assertMsg (evaluates (withRows {
+      fixture = row // {
+        axes = [
+          "tracker"
+          "forge"
+        ];
+      };
+    })) "a row on both axes must evaluate";
+    assert assertMsg (
+      !(evaluates (withRows {
+        fixture = removeAttrs row [ "axes" ];
+      }))
+    ) "a third-party row without axes must fail evaluation";
+    assert assertMsg (
+      !(evaluates (withRows {
+        fixture = removeAttrs row [ "displayName" ];
+      }))
+    ) "a third-party row without displayName must fail evaluation";
+    assert assertMsg (
+      !(evaluates (withRows {
+        fixture = row // {
+          axes = [ ];
+        };
+      }))
+    ) "a row with empty axes must fail evaluation";
+    assert assertMsg (
+      !(evaluates (withRows {
+        fixture = row // {
+          axes = [ "driver" ];
+        };
+      }))
+    ) "a row with an unknown axis must fail evaluation";
+    assert assertMsg (
+      !(evaluates (withRows {
+        fixture = row // {
+          displayName = 1;
+        };
+      }))
+    ) "a row with a non-string displayName must fail evaluation";
+    assert assertMsg (
+      !(evaluates (withRows {
+        jira = jiraRow // {
+          axes = [ "forge" ];
+        };
+      }))
+    ) "a first-party row setting axes must fail evaluation";
+    assert assertMsg (
+      !(evaluates (withRows {
+        jira = jiraRow // {
+          displayName = "Jira";
+        };
+      }))
+    ) "a first-party row setting displayName must fail evaluation";
+    assert assertMsg (evaluates (withRows {
+      jira = jiraRow;
+    })) "control: a first-party row sets neither";
+    assert assertMsg (evaluates (withRows {
+      acme = row;
+    })) "control: the same row under a non-first-party name must evaluate";
+    assert assertMsg (builtins.all (
+      n:
+      !(evaluates (withRows {
+        ${n} = row;
+      }))
+    ) firstPartyNames) "a third-party row named after a first-party backend must fail evaluation";
+    assert assertMsg (hasAll (axesErr (removeAttrs row [ "axes" ])) [
+      "backendRows.fixture"
+      "`axes`"
+      "third-party"
+    ]) "the missing-axes refusal must name the row and the field";
+    assert assertMsg (hasAll (axesErr (removeAttrs row [ "displayName" ])) [
+      "backendRows.fixture"
+      "`displayName`"
+    ]) "the missing-displayName refusal must name the row and the field";
+    assert assertMsg (hasAll (axesErr (row // { axes = [ ]; })) [
+      "backendRows.fixture"
+      "`axes`"
+      "non-empty"
+    ]) "the empty-axes refusal must name the row and the field";
+    assert assertMsg (hasAll
+      (axesErr (
+        row
+        // {
+          axes = [
+            "tracker"
+            "driver"
+          ];
+        }
+      ))
+      [
+        "backendRows.fixture"
+        "`axes`"
+        "'driver'"
+      ]
+    ) "the unknown-axis refusal must name the row, the field and the axis";
+    assert assertMsg (hasAll
+      (axesErr (
+        row
+        // {
+          axes = [
+            "tracker"
+            "tracker"
+          ];
+        }
+      ))
+      [
+        "backendRows.fixture"
+        "`axes`"
+        "'tracker' twice"
+      ]
+    ) "the duplicate-axis refusal must name the row, the field and the axis";
+    assert assertMsg (
+      !(evaluates (withRows {
+        fixture = row // {
+          axes = [
+            "tracker"
+            "tracker"
+          ];
+        };
+      }))
+    ) "a row naming an axis twice must fail evaluation";
+    assert assertMsg (hasAll (axesErr (row // { displayName = 1; })) [
+      "backendRows.fixture"
+      "`displayName`"
+      "non-empty string"
+    ]) "the bad-displayName refusal must name the row and the field";
+    assert assertMsg (axesErr row == null) "a well-formed third-party row must draw no refusal";
+    assert assertMsg (hasAll (firstPartyErr { axes = [ "forge" ]; }) [
+      "backendRows.github"
+      "first-party"
+      "`axes`"
+    ]) "a first-party row's axes refusal must name the row and the field";
+    assert assertMsg (hasAll (firstPartyErr { displayName = "GitHub"; }) [
+      "backendRows.github"
+      "first-party"
+      "`displayName`"
+    ]) "a first-party row's displayName refusal must name the row and the field";
+    assert assertMsg (
+      firstPartyErr { } == null
+    ) "a first-party row setting neither must draw no refusal";
+    assert assertMsg (builtins.all (
+      n:
+      hasAll (nameErr n) [
+        "backendRows.${n}"
+        "first-party ${n} Connector"
+        "ADR 0073"
+      ]
+    ) firstPartyNames) "the first-party-name refusal must name the row and the rule";
+    assert assertMsg (
+      names.firstPartyNameError {
+        name = "github";
+        firstParty = true;
+        inherit firstPartyNames;
+      } == null
+      && nameErr "fixture" == null
+    ) "only a non-first-party row on a first-party name is refused";
+    # The same values through the data registration path.
+    assert assertMsg (builds (
+      probe row
+    )) "control: backend data with axes and displayName must evaluate";
+    assert assertMsg (
+      !(builds (probe (removeAttrs row [ "axes" ])))
+    ) "backend data without axes must fail evaluation";
+    assert assertMsg (
+      !(builds (probe (row // { axes = [ ]; })))
+    ) "backend data with empty axes must fail evaluation";
+    assert assertMsg (
+      !(builds (probe (row // { axes = [ "driver" ]; })))
+    ) "backend data with an unknown axis must fail evaluation";
+    assert assertMsg (
+      !(builds (probe (row // { displayName = 1; })))
+    ) "backend data with a non-string displayName must fail evaluation";
+    pkgs.runCommand "connector-backend-rows-axes-and-display-name" { } "touch $out";
+
   # Issue #7560: a third-party row's credential variable is derived from its
   # row name, reaching the document through the existing `credentialEnv` field.
   connector-backend-rows-third-party-credential-derived =
@@ -1001,10 +1220,20 @@ in
       probeBackend = {
         module = p: "${fixtures.connectorWasm}/network.wasm";
         routes = [ goodRoute ];
+        axes = [ "tracker" ];
+        displayName = "Probe";
       };
       # A first-party row of core backend `rowName`: the batteries Connector's
       # own wasm, the only thing that grants it a credential of its own.
-      firstParty = rowName: probeBackend // { module = (batteries rowName null).module; };
+      firstParty =
+        rowName:
+        removeAttrs probeBackend [
+          "axes"
+          "displayName"
+        ]
+        // {
+          module = (batteries rowName null).module;
+        };
       basicBackend = probeBackend // {
         scheme = "basic";
         identity = "probeEmail";
@@ -1064,11 +1293,16 @@ in
           (fixtures.rowAsData rowName {
             knobs.probeBase = baseKnob;
             knobs.probeToken = secretKnob;
-            backend = basicBackend // {
-              inherit (firstParty rowName) module;
-              credential = "probeToken";
-              identity = knob;
-            };
+            backend =
+              removeAttrs basicBackend [
+                "axes"
+                "displayName"
+              ]
+              // {
+                inherit (firstParty rowName) module;
+                credential = "probeToken";
+                identity = knob;
+              };
           })
         ];
       programOf = c: c.apps.${system}.connectors-accept.program;
@@ -1650,6 +1884,8 @@ in
         backend = {
           module = p: "${fixtures.connectorWasm}/network.wasm";
           routes = [ goodRoute ];
+          axes = [ "tracker" ];
+          displayName = "Probe";
         };
       };
       programOf = c: c.apps.${system}.connectors-accept.program;

@@ -762,18 +762,31 @@ let
     name: row:
     let
       scheme = row.credentialScheme or "bearer";
+      nameErr = connectorNames.firstPartyNameError {
+        inherit name;
+        firstParty = backendFirstParty.${name};
+        firstPartyNames = lib.attrNames batteriesBackendRows;
+      };
       credentialErr = connectorNames.backendCredentialError {
         inherit name row coreEnvs;
         firstParty = backendFirstParty.${name};
         otherEnvs = otherBackendEnvs name;
+      };
+      factsErr = connectorNames.backendFactsError {
+        inherit name row;
+        firstParty = backendFirstParty.${name};
       };
     in
     if lib.elem name coreBackendNames then
       throw "mkHarness: backendRows.${name} is a built-in backend and cannot be replaced by a Connector row"
     else if !(builtins.isFunction (row.module or null)) then
       throw "mkHarness: backendRows.${name} must carry `module`, a function of pkgs returning the Connector's wasm path"
+    else if nameErr != null then
+      throw nameErr
     else if credentialErr != null then
       throw credentialErr
+    else if factsErr != null then
+      throw factsErr
     else if
       !(lib.elem scheme [
         "bearer"

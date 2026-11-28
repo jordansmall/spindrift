@@ -35,6 +35,8 @@ let
   good = {
     name = "datafixture";
     module = _: wasm;
+    axes = [ "tracker" ];
+    displayName = "Datafixture";
     inherit routes;
     knobs = {
       dataFixtureToken = knob "DATAFIXTURE_TOKEN" true;
@@ -122,6 +124,26 @@ let
       };
       says = [
         "'credential'"
+        "string"
+        "int"
+      ];
+    }
+    {
+      data = good // {
+        axes = "tracker";
+      };
+      says = [
+        "'axes'"
+        "list"
+        "string"
+      ];
+    }
+    {
+      data = good // {
+        displayName = 1;
+      };
+      says = [
+        "'displayName'"
         "string"
         "int"
       ];
@@ -232,6 +254,8 @@ let
         coreDerivedToken = knob "COREDERIVED_TOKEN" true;
       };
       module = _: wasm;
+      axes = [ "tracker" ];
+      displayName = "Corederived";
       inherit routes;
       driver =
         lib:

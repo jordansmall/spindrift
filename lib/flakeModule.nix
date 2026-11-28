@@ -195,6 +195,8 @@ let
       {
         inherit (b) module routes;
       }
+      // lib.optionalAttrs (b.axes != null) { inherit (b) axes; }
+      // lib.optionalAttrs (b.displayName != null) { inherit (b) displayName; }
       // baselineRowFields name
       // (
         if b.credential != null then
@@ -631,6 +633,16 @@ in
                             # Items stay raw: lib/connector-routes.nix words the errors.
                             type = types.listOf types.raw;
                             description = "The Connector's Route table, a list of `{ method; host; path; }`, each with an optional GET-only boolean `followRedirect` and optional POST-only attrset `documents` of GraphQL query texts and optional string lists `requestHeaders` and `responseHeaders`.";
+                          };
+                          axes = mkOption {
+                            type = types.nullOr (types.listOf types.str);
+                            default = null;
+                            description = "A third-party row's own: the axes it serves, a non-empty subset of `tracker` and `forge`. A first-party row leaves it null, its axes being core's backend row facts. mkHarness checks the value.";
+                          };
+                          displayName = mkOption {
+                            type = types.nullOr types.str;
+                            default = null;
+                            description = "A third-party row's own: the name shown for the Connector. A first-party row leaves it null, its display name being a core backend row fact. mkHarness checks the value.";
                           };
                           credential = mkOption {
                             type = types.nullOr types.str;

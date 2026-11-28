@@ -67,6 +67,8 @@
   # enforces. It names no credential; core derives FIXTURE_TOKEN (see
   # fixtureToken).
   module = pkgs: "${import ./package.nix { inherit pkgs core; }}/network.wasm";
+  axes = [ "tracker" ];
+  displayName = "Fixture";
   routes = [
     {
       method = "GET";
