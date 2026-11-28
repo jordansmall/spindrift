@@ -2686,8 +2686,8 @@ func TestDoctorHints_RegistryDriven(t *testing.T) {
 	if gotToken, gotSlug, _ := doctorHints("github"); gotToken != "GH_TOKEN" || gotSlug != "" {
 		t.Errorf(`doctorHints("github") = (%q, %q), want ("GH_TOKEN", "")`, gotToken, gotSlug)
 	}
-	if gotToken, gotSlug, _ := doctorHints("forgejo"); gotToken != "FORGEJO_TOKEN" || gotSlug != "FORGEJO_BASE_URL" {
-		t.Errorf(`doctorHints("forgejo") = (%q, %q), want ("FORGEJO_TOKEN", "FORGEJO_BASE_URL")`, gotToken, gotSlug)
+	if gotToken, gotSlug, _ := doctorHints("forgejo"); gotToken != "FORGEJO_TOKEN" || gotSlug != "--forgejo-base-url / issues.forgejo.baseURL" {
+		t.Errorf(`doctorHints("forgejo") = (%q, %q), want ("FORGEJO_TOKEN", "--forgejo-base-url / issues.forgejo.baseURL")`, gotToken, gotSlug)
 	}
 	// Issue #5460: a tracker with no label registry skips doctor's label check.
 	for tracker, want := range map[string]bool{"github": false, "forgejo": false, "jira": true, "local": true, "nope": false} {

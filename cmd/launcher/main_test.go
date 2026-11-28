@@ -4496,7 +4496,7 @@ func TestDoctor_AuthFailure_Forgejo(t *testing.T) {
 	}
 }
 
-// The repo-not-found remediation text names FORGEJO_BASE_URL, not REPO_SLUG,
+// The repo-not-found remediation text names --forgejo-base-url, not REPO_SLUG,
 // when the issue tracker is forgejo.
 func TestDoctor_RepoNotFound_Forgejo(t *testing.T) {
 	f := forge.NewFake()
@@ -4509,8 +4509,8 @@ func TestDoctor_RepoNotFound_Forgejo(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "FORGEJO_BASE_URL") {
-		t.Errorf("want error to mention FORGEJO_BASE_URL, got: %v", err)
+	if !strings.Contains(err.Error(), "--forgejo-base-url") {
+		t.Errorf("want error to mention --forgejo-base-url, got: %v", err)
 	}
 	if strings.Contains(err.Error(), "REPO_SLUG") {
 		t.Errorf("want error to not mention REPO_SLUG, got: %v", err)

@@ -61,7 +61,7 @@ func TestRegisteredStrategiesShape(t *testing.T) {
 			validAsTracker:     true,
 			validAsCodeForge:   true,
 			tokenEnvVar:        backend.Forgejo.TokenEnvVar,
-			doctorSlugHint:     "FORGEJO_BASE_URL",
+			doctorSlugHint:     "--forgejo-base-url / issues.forgejo.baseURL",
 			outboxRelayCapable: true,
 
 			hasValidateTracker:   true,
@@ -74,7 +74,7 @@ func TestRegisteredStrategiesShape(t *testing.T) {
 			validAsTracker:   true,
 			validAsCodeForge: false,
 			tokenEnvVar:      "JIRA_TOKEN",
-			doctorSlugHint:   "JIRA_BASE_URL / JIRA_PROJECT_KEY",
+			doctorSlugHint:   "--jira-base-url / issues.jira.baseURL and --jira-project-key / issues.jira.projectKey",
 
 			hasValidateTracker: true,
 			hasNewIssueTracker: true,

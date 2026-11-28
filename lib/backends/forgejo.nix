@@ -18,7 +18,7 @@
     flakeInput = null;
     connectorData = null;
   };
-  doctorSlugHint = "FORGEJO_BASE_URL";
+  doctorSlugHint = "--forgejo-base-url / issues.forgejo.baseURL";
   outboxRelayCapable = true;
   relayCapable = true;
   hostPostingCapable = true;
