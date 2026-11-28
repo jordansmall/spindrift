@@ -1,7 +1,9 @@
 package forgejo_test
 
 import (
+	"context"
 	"errors"
+	"net"
 	"net/http"
 	"slices"
 	"strconv"
@@ -295,6 +297,44 @@ func TestConnectorTracker_IssueRouteNarrowsReadsAndFilesWithItsLabel(t *testing.
 		if !slices.Contains(labels, want) {
 			t.Errorf("filed labels = %v, want %q among them", labels, want)
 		}
+	}
+}
+
+// A forgejo whose FORGEJO_BASE_URL and ROOT_URL spell the https default port
+// differently still files an issue: the filed-URL check treats :443 as
+// implied, so the html_url is on the configured host either way.
+func TestConnectorTracker_FiledURLHostMatchesAcrossDefaultPortSpellings(t *testing.T) {
+	for _, tc := range []struct{ name, base, web string }{
+		{"base spells :443, ROOT_URL omits it", "https://example.com:443", "https://example.com"},
+		{"base omits :443, ROOT_URL spells it", "https://example.com", "https://example.com:443"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newConnectorHarness(t, true)
+			h.mu.Lock()
+			h.web = tc.web
+			h.mu.Unlock()
+			// The fake listens on 127.0.0.1; the Connector dials the configured
+			// name, whose certificate the httptest server also covers.
+			tp := h.srv.Client().Transport.(*http.Transport).Clone()
+			tp.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, network, h.srv.Listener.Addr().String())
+			}
+			t.Cleanup(forgejo.SetConnectorClient(&http.Client{Transport: tp}))
+
+			rt := useForgejoRow(t, tc.base, func(*backendrows.Row) {})
+			l := mapLookup(map[string]string{forgejo.ForgejoBaseURLEnv: tc.base, forgejo.ForgejoTokenEnv: connectorToken})
+			tr, err := forgejo.Strategy.NewIssueTracker(backendkit.Shared{RepoSlug: connectorRepo, Labels: testLabels, VerdictLabels: forge.ResearchVerdictLabels(), Connectors: rt}, l)
+			if err != nil {
+				t.Fatal(err)
+			}
+			url, err := tr.(forge.HostPostedIssueFiler).PostIssue("port spelling", "body", nil)
+			if err != nil {
+				t.Fatalf("PostIssue: %v", err)
+			}
+			if want := tc.web + "/owner/repo/issues/"; !strings.HasPrefix(url, want) {
+				t.Errorf("url = %q, want prefix %q", url, want)
+			}
+		})
 	}
 }
 
