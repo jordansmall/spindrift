@@ -38,6 +38,27 @@ func TestIssueNoLabelsIsEmptyList(t *testing.T) {
 	}
 }
 
+func TestIssueRefusesPullRequest(t *testing.T) {
+	stub(t, map[string]connector.Response{
+		repoAPI + "/issues/9": ok(`{"number":9,"state":"open","pull_request":{"merged":false}}`),
+	})
+	_, err := issue(ttgt, "9")
+	if err == nil || !strings.Contains(err.Error(), "#9 is a pull request, not an issue") {
+		t.Fatalf("issue err = %v", err)
+	}
+}
+
+func TestIssueNullPullRequestIsAnIssue(t *testing.T) {
+	stub(t, map[string]connector.Response{
+		repoAPI + "/issues/9": ok(`{"number":9,"title":"T","body":"B","state":"open","labels":[{"name":"a"}],"pull_request":null}`),
+	})
+	i, err := issue(ttgt, "9")
+	want := tracker.Issue{Number: "9", Title: "T", Body: "B", State: "open", Labels: []string{"a"}}
+	if err != nil || !reflect.DeepEqual(i, want) {
+		t.Fatalf("issue = %#v, %v", i, err)
+	}
+}
+
 func TestIssueRefusesBadNumber(t *testing.T) {
 	got := stub(t, nil)
 	for _, n := range []string{"", "0", "-1", "07", "1/comments", "x"} {
