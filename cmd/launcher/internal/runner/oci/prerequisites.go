@@ -51,10 +51,10 @@ func podmanMachineRequiredMiB(memoryLimit string, maxParallel int) (int, error) 
 func podmanMachineMemoryRemedy(memoryLimit string, maxParallel int) string {
 	required, err := podmanMachineRequiredMiB(memoryLimit, maxParallel)
 	if err != nil {
-		return "set MEMORY_LIMIT to a positive size such as 5g, or to empty to disable the limit, then re-run doctor"
+		return "pass --memory-limit or set infra.limits.memory to a positive size such as 5g, or to empty to disable the limit, then re-run doctor"
 	}
 	return fmt.Sprintf(
-		"lower MAX_PARALLEL, raise the podman machine's RAM (podman machine set --memory %d; then restart the machine), or lower MEMORY_LIMIT",
+		"lower --max-parallel / dispatch.maxParallel, raise the podman machine's RAM (podman machine set --memory %d; then restart the machine), or lower --memory-limit / infra.limits.memory",
 		required,
 	)
 }

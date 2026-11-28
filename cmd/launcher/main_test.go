@@ -2654,7 +2654,7 @@ func TestValidateCodeForge_RejectsUnknown_ExactMessage(t *testing.T) {
 		t.Fatal("validate() should reject unrecognised CODE_FORGE")
 	}
 	want := "CODE_FORGE=\"gitlab\" is not valid; must be github, forgejo, local, or git" +
-		"\n  remedy: set CODE_FORGE to a supported value and fill in any forge-specific fields it requires"
+		"\n  remedy: pass --forge-backend or set forge.backend to a supported value and fill in any forge-specific fields it requires"
 	if err.Error() != want {
 		t.Errorf("validate() error = %q, want %q", err.Error(), want)
 	}

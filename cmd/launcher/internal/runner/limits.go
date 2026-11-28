@@ -85,7 +85,7 @@ func MemoryLimitToBytes(limit string) (int64, error) {
 }
 
 func memoryLimitPositiveErr(limit string) error {
-	return fmt.Errorf("invalid memory limit %q: must be positive (set MEMORY_LIMIT to empty to disable the limit)", limit)
+	return fmt.Errorf("invalid memory limit %q: must be positive (pass an empty --memory-limit or set infra.limits.memory to empty to disable the limit)", limit)
 }
 
 func memoryLimitOverflowErr(limit string) error {

@@ -122,7 +122,7 @@ func buildTrackerSources(connectors *connectorruntime.Runtime, doc *inputdoc.Doc
 	for _, d := range probed {
 		labels := forge.FamilyLabels(d.Labels, configured)
 		if labels.Dispatchable == "" {
-			missing[daemon.KindOf(d)] = "set LABEL (the dispatchable label is blank)"
+			missing[daemon.KindOf(d)] = "pass --dispatch-label or set issues.labels.dispatch (the dispatchable label is blank)"
 			continue
 		}
 		shared.Labels = labels
