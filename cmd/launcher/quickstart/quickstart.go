@@ -625,7 +625,7 @@ func runQuickstart(connectors *connectorruntime.Runtime, dir string, env Environ
 		if err != nil {
 			return postWriteFailure(doctorPostWriteStep, written, insideGitWorkTree, err)
 		}
-		tokenHint, slugHint, noLabelRegistry := doctorHints(a.tracker.name)
+		tokenHint, slugHint, noLabelRegistry, noRepoSlugScope := doctorHints(a.tracker.name)
 		// launcherchecks carries no runtime row: doctor.Config.Runtime below
 		// reports runtime validity.
 		launcherRows := launcherchecks.All(quickstartCheckConfig(a), quickstartCheckDeps(connectors, a))
@@ -637,6 +637,7 @@ func runQuickstart(connectors *connectorruntime.Runtime, dir string, env Environ
 			TokenHint:       tokenHint,
 			SlugHint:        slugHint,
 			NoLabelRegistry: noLabelRegistry,
+			NoRepoSlugScope: noRepoSlugScope,
 			Label:           defaultDispatchLabels.Dispatchable,
 			InProgressLabel: defaultDispatchLabels.InProgress,
 			FailedLabel:     defaultDispatchLabels.Failed,
@@ -807,15 +808,17 @@ flake.nix.bak*
 
 const quickstartEnvrc = "use flake\n"
 
-// doctorHints resolves doctor.Config's TokenHint, SlugHint, and NoLabelRegistry.
+// doctorHints resolves doctor.Config's TokenHint, SlugHint, NoLabelRegistry,
+// and NoRepoSlugScope.
 // The token hint is the row's TokenEnvVar and an empty slug hint means
-// doctor.Run's github-shaped default; an unknown tracker keeps the label check.
-func doctorHints(issueTracker string) (tokenHint, slugHint string, noLabelRegistry bool) {
+// doctor.Run's github-shaped default; an unknown tracker keeps the label check
+// and the repo-slug scope.
+func doctorHints(issueTracker string) (tokenHint, slugHint string, noLabelRegistry, noRepoSlugScope bool) {
 	row, ok := backend.ByName(issueTracker)
 	if !ok {
-		return "", "", false
+		return "", "", false, false
 	}
-	return row.TokenEnvVar, row.DoctorSlugHint, !row.LabelRegistry
+	return row.TokenEnvVar, row.DoctorSlugHint, !row.LabelRegistry, row.TrackerScopeKnob != ""
 }
 
 // backendChoice is the backend the wizard settled on, its Strategy row (set

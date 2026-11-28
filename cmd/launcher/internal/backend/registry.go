@@ -32,6 +32,10 @@ type Descriptor struct {
 	// means the github-shaped default. Doctor's token hint is TokenEnvVar.
 	DoctorSlugHint string
 
+	// TrackerScopeKnob names the knob that scopes this tracker when it is not
+	// REPO_SLUG (jira's project key); empty means the repo slug scopes it.
+	TrackerScopeKnob string
+
 	// HostMediatedRemote is true only for a backend with no writable remote to
 	// push to at all (ADR 0033: "local"): the branch returns to the host as an
 	// outbox bundle. It says nothing about where the Box clones from; see

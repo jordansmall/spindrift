@@ -174,6 +174,11 @@ type Config struct {
 	// Inverted so the zero value keeps the label check for every other caller.
 	NoLabelRegistry bool
 
+	// NoRepoSlugScope marks a tracker scoped by its own knob rather than
+	// REPO_SLUG (jira): a redirecting probe gets SlugHint's remedy, not a
+	// rename remedy. Inverted so the zero value keeps the rename remedy.
+	NoRepoSlugScope bool
+
 	// RequiredLabels are label names, beyond the four work-tier labels, whose
 	// absence fails the run even if an advisory tier lists them. The daemon
 	// preflight names every label of each kind it runs; a plain doctor names only
@@ -266,6 +271,16 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 					// error, rate-limited included, in ErrRepoNotFound.
 					if errors.Is(err, forge.ErrRateLimit) {
 						return nil, fmt.Errorf("%w: wait for the quota window to reset, then retry: %w", ErrConnectivity, err)
+					}
+					// Before not-found, which it also wraps: a redirect on a
+					// slug-scoped tracker most likely means a rename. A wrong host
+					// redirects too, so a backend's own hint stays as a fallback.
+					if errors.Is(err, forge.ErrRepoMoved) && !c.NoRepoSlugScope {
+						msg := "the repository answered a redirect, so it was likely renamed or transferred: update REPO_SLUG / --repo-slug / forge.repoSlug to its new name"
+						if c.SlugHint != "" {
+							msg += ", or check " + c.SlugHint + " is correct if only the host moved"
+						}
+						return nil, fmt.Errorf("%w: %s: %w", ErrConnectivity, msg, err)
 					}
 					if errors.Is(err, forge.ErrRepoNotFound) {
 						return nil, fmt.Errorf("%w: check %s is correct: %w", ErrConnectivity, slugHint, err)

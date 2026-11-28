@@ -347,7 +347,7 @@ const (
 	CheckPrShape = "prShape"
 	// CheckProbeRepo: connectorforge's body refuses an empty repo.
 	CheckProbeRepo = "probeRepo"
-	// CheckProbeStatus: connectortracker's body reads the status: 2xx proves the repository, 401 and 403 are an auth failure, any other status means the repository is unreachable.
+	// CheckProbeStatus: connectortracker's body reads the status: 2xx proves the repository, 401 and 403 are an auth failure, 3xx means the repository likely moved (an error wrapping both forge.ErrRepoMoved and forge.ErrRepoNotFound), any other status means the repository is unreachable.
 	CheckProbeStatus = "probeStatus"
 	// CheckResolveExitGuard: connectorhost.DriverStrategy refuses an answer that resolves a non-zero exit to 0.
 	CheckResolveExitGuard = "resolveExitGuard"

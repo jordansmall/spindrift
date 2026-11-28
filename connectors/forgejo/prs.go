@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"unicode"
 
 	"spindrift.dev/sdk/connector"
 	"spindrift.dev/sdk/forge"
@@ -203,10 +204,48 @@ func branchProtected(t forge.Target, branch string) (bool, error) {
 	return b.Protected, err
 }
 
+// probe reads the repository. A renamed or transferred repo answers a redirect
+// the host never follows, so a Location holding the repo's new API path is
+// turned into the slug to configure instead of a bare status.
 func probe(t forge.Target) (string, error) {
 	var repo struct {
 		FullName string `json:"full_name"`
 	}
-	err := send("GET", t.API, forgePath(t, ""), nil, &repo)
+	resp, err := connector.SendJSON(connector.Request{Method: "GET", URL: t.API + forgePath(t, "")}, nil, &repo)
+	if resp.Status >= 300 && resp.Status < 400 {
+		if loc, ok := responseHeader("Location"); ok {
+			if moved, ok := movedTo(loc, t.Repo); ok {
+				return "", connector.Errorf(connector.Permanent,
+					"repository %s moved to %s: update REPO_SLUG / --repo-slug / forge.repoSlug to %s", t.Repo, moved, moved)
+			}
+		}
+	}
 	return repo.FullName, err
 }
+
+// movedTo extracts owner/name from a redirect to the repository API, behind
+// any sub-path prefix; Location may be absolute or path-only. A slug equal to
+// current is no rename (a host-level redirect), nor is one with a control or format character.
+func movedTo(location, current string) (string, bool) {
+	u, err := url.Parse(location)
+	if err != nil {
+		return "", false
+	}
+	_, rest, ok := strings.Cut(u.Path, "/api/v1/repos/")
+	if !ok {
+		return "", false
+	}
+	parts := strings.Split(rest, "/")
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return "", false
+	}
+	slug := parts[0] + "/" + parts[1]
+	if strings.EqualFold(slug, current) || strings.IndexFunc(slug, unsafeRune) >= 0 {
+		return "", false
+	}
+	return slug, true
+}
+
+// unsafeRune flags control (Cc) and format (Cf) characters, the latter being
+// bidi overrides such as U+202E that disguise a slug in the error text.
+func unsafeRune(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) }

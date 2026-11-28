@@ -211,6 +211,60 @@ func TestProbe(t *testing.T) {
 	}
 }
 
+// A renamed or transferred repo answers a redirect to its new API path; the
+// host never follows it, so the probe names the new slug for the operator.
+func TestProbeNamesARedirectedRepo(t *testing.T) {
+	for _, c := range []struct{ name, loc string }{
+		{"path-only", "/api/v1/repos/new/name"},
+		{"absolute", "https://forge.test/api/v1/repos/new/name"},
+		{"sub-path", "https://forge.test/git/api/v1/repos/new/name?x=1"},
+	} {
+		stub(t, map[string]connector.Response{repoAPI: status(307)})
+		withHeaders(t, map[string]string{"Location": c.loc})
+		_, err := probe(ftgt)
+		var ce *connector.Error
+		if !errors.As(err, &ce) || ce.Class != connector.Permanent {
+			t.Fatalf("%s: err = %#v, want a Permanent error", c.name, err)
+		}
+		for _, want := range []string{"o/r", "new/name", "REPO_SLUG", "update REPO_SLUG / --repo-slug / forge.repoSlug to new/name"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%s: err = %q, missing %q", c.name, err, want)
+			}
+		}
+	}
+}
+
+// A same-slug redirect (a wrong base URL redirecting at host level) is no
+// rename, and a slug with a control character must never reach the error text.
+func TestProbeRedirectWithoutUsableLocationKeepsTheBareError(t *testing.T) {
+	for _, loc := range []map[string]string{
+		nil,
+		{"Location": "%zz"},
+		{"Location": "/login"},
+		{"Location": "https://www.forge.test/api/v1/repos/o/r"},
+		{"Location": "/api/v1/repos/O/R"},
+		{"Location": "/api/v1/repos/a%0Ab/c"},
+		{"Location": "/api/v1/repos/a%E2%80%AEb/c"},
+	} {
+		stub(t, map[string]connector.Response{repoAPI: status(307)})
+		withHeaders(t, loc)
+		_, err := probe(ftgt)
+		if err == nil || strings.Contains(err.Error(), "REPO_SLUG") {
+			t.Errorf("Location %v: err = %v, want the plain status error", loc, err)
+		}
+	}
+}
+
+func TestProbeOtherFailuresAreUnchanged(t *testing.T) {
+	stub(t, map[string]connector.Response{repoAPI: status(404)})
+	withHeaders(t, map[string]string{"Location": "/api/v1/repos/new/name"})
+	_, err := probe(ftgt)
+	var ce *connector.Error
+	if !errors.As(err, &ce) || ce.Class != connector.NotFound || strings.Contains(err.Error(), "REPO_SLUG") {
+		t.Fatalf("err = %#v, want the plain NotFound", err)
+	}
+}
+
 // A write whose answer is ignored succeeds on any 2xx, body or none: failing
 // after the forge accepted it would make core repeat the write.
 func TestWritesAcceptABodilessAnswer(t *testing.T) {

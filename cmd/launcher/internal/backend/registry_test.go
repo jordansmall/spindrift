@@ -248,3 +248,16 @@ func TestRelaysBundle(t *testing.T) {
 		t.Error("RelaysBundle of a relay-incapable forge = true, want false")
 	}
 }
+
+// Doctor's rename remedy names REPO_SLUG only for a tracker the slug scopes.
+func TestTrackerScopeKnob(t *testing.T) {
+	for name, want := range map[string]string{"github": "", "forgejo": "", "local": "", "jira": "jiraProjectKey"} {
+		d, ok := ByName(name)
+		if !ok {
+			t.Fatalf("ByName(%q) not found", name)
+		}
+		if d.TrackerScopeKnob != want {
+			t.Errorf("%s.TrackerScopeKnob = %q, want %q", name, d.TrackerScopeKnob, want)
+		}
+	}
+}

@@ -326,7 +326,7 @@ let
       commentShape = "connectortracker's body refuses a comment whose author is empty or holds a control character, or whose createdAt is not RFC3339; an association outside forge.KnownAssociation's vocabulary is blanked, not refused.";
       idList = "connectortracker's body refuses an id outside the Connector's id grammar and drops a repeated one.";
       labeledPaging = "connectortracker's body applies issueShape to each issue of a page; the cross-page part lives in walkLabeled, which fails the label closed on a next cursor already returned or a page of only issues already read, and on a walk past labeledMaxPages or labeledMaxBytes keeps what it read and warns.";
-      probeStatus = "connectortracker's body reads the status: 2xx proves the repository, 401 and 403 are an auth failure, any other status means the repository is unreachable.";
+      probeStatus = "connectortracker's body reads the status: 2xx proves the repository, 401 and 403 are an auth failure, 3xx means the repository likely moved (an error wrapping both forge.ErrRepoMoved and forge.ErrRepoNotFound), any other status means the repository is unreachable.";
       createMetaIssueType = "connectortracker's body refuses an answer whose issueTypes omit the issue type core files as (forge.IssueTypeNotOffered).";
       countClamp = "connectortracker's body refuses a negative count and clamps the rest to forge.ResultPageLimit.";
       countInterval = "connectortracker's body refuses seconds outside 1 to maxCountInterval (24 hours).";

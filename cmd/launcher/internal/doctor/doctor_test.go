@@ -209,6 +209,54 @@ func TestRun_RepoNotFound_DefaultSlugHintNamesFlagAndConfigKey(t *testing.T) {
 	}
 }
 
+func TestRun_IssueTrackerRepoMoved_NamesRepoSlugWithBaseURLFallback(t *testing.T) {
+	it := forge.NewFake()
+	// The shape connectortracker's CheckProbeStatus returns for a 3xx.
+	it.ProbeErr = fmt.Errorf("%w: %w", forge.ErrRepoNotFound, forge.ErrRepoMoved)
+	cfg := defaultDoctorConfig()
+	cfg.SlugHint = "FORGEJO_BASE_URL"
+
+	var buf bytes.Buffer
+	err := Run(it, forge.NewFake(), cfg, NewReporter(&buf, true), bufio.NewScanner(strings.NewReader("")), false, nil)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrConnectivity) || !errors.Is(err, forge.ErrRepoNotFound) {
+		t.Errorf("want ErrConnectivity and ErrRepoNotFound in chain, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "update REPO_SLUG / --repo-slug / forge.repoSlug to its new name") {
+		t.Errorf("want remedy naming REPO_SLUG, got: %v", err)
+	}
+	// A wrong host redirects too, so the base URL stays a fallback clause.
+	if !strings.Contains(err.Error(), "or check FORGEJO_BASE_URL is correct if only the host moved") {
+		t.Errorf("want FORGEJO_BASE_URL fallback clause, got: %v", err)
+	}
+}
+
+func TestRun_IssueTrackerRepoMoved_NoSlugScopeKeepsBackendHint(t *testing.T) {
+	it := forge.NewFake()
+	// A Jira probe has no repository, but its redirect wraps the same sentinels.
+	it.ProbeErr = fmt.Errorf("%w: %w", forge.ErrRepoNotFound, forge.ErrRepoMoved)
+	cfg := defaultDoctorConfig()
+	cfg.NoRepoSlugScope = true
+	cfg.SlugHint = "JIRA_BASE_URL / JIRA_PROJECT_KEY"
+
+	var buf bytes.Buffer
+	err := Run(it, forge.NewFake(), cfg, NewReporter(&buf, true), bufio.NewScanner(strings.NewReader("")), false, nil)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrConnectivity) || !errors.Is(err, forge.ErrRepoNotFound) {
+		t.Errorf("want ErrConnectivity and ErrRepoNotFound in chain, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "check JIRA_BASE_URL / JIRA_PROJECT_KEY is correct") {
+		t.Errorf("want the Jira hint, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "REPO_SLUG") {
+		t.Errorf("want no REPO_SLUG remedy for a tracker with its own scope knob, got: %v", err)
+	}
+}
+
 func TestRun_IssueTrackerRateLimitWrappedAsNotFound_SaysQuotaNotSlug(t *testing.T) {
 	it := forge.NewFake()
 	// The shape connectortracker.Probe returns: TestProbeRateLimitAndAuthAlsoMatchNotFound.
