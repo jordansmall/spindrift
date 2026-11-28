@@ -27,7 +27,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v16
+        uses: DeterminateSystems/nix-installer-action@v23
 
       # Single-threaded: CI's Determinate Nix otherwise evaluates in parallel,
       # which interleaves the sampled stacks into an unreadable profile. The
