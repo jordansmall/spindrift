@@ -262,13 +262,11 @@ func TestKillCgroup_TargetsLiveDirNotEmptyLeftover(t *testing.T) {
 	}
 }
 
-// A Box a previous Launcher started has no tracked process, so Kill must reach
-// it through its cgroup, as the OCI runners kill by name.
-func TestKill_UntrackedBoxNameKillsItsCgroup(t *testing.T) {
-	origRoot := cgroupFSRoot
-	t.Cleanup(func() { cgroupFSRoot = origRoot })
-	cgroupFSRoot = t.TempDir()
-	dir := filepath.Join(cgroupFSRoot, "anchor", "spindrift-agent-issue-42")
+// fakeCgroup creates a live per-Box cgroup dir (one pid in cgroup.procs) for
+// name under anchor beneath cgroupFSRoot and returns its path.
+func fakeCgroup(t *testing.T, anchor, name string) string {
+	t.Helper()
+	dir := filepath.Join(cgroupFSRoot, anchor, "spindrift-"+name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -278,11 +276,51 @@ func TestKill_UntrackedBoxNameKillsItsCgroup(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	return dir
+}
+
+// A Box a previous Launcher started has no tracked process, so Kill must reach
+// it through its cgroup, as the OCI runners kill by name.
+func TestKill_UntrackedBoxNameKillsItsCgroup(t *testing.T) {
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = t.TempDir()
+	dir := fakeCgroup(t, "anchor", "agent-issue-42")
 
 	if err := (&bwrapAdapter{}).Kill("agent-issue-42"); err != nil {
 		t.Fatalf("Kill: %v", err)
 	}
 	if got, _ := os.ReadFile(filepath.Join(dir, "cgroup.kill")); string(got) != "1" {
 		t.Errorf("cgroup.kill = %q, want 1", got)
+	}
+}
+
+// Two Consumers on one host run the same issue number under different Box
+// names (issue #7378), so Killing one must leave the other's cgroup live.
+func TestKill_SameIssueUnderTwoCheckoutsLeavesTheOtherLive(t *testing.T) {
+	origRoot := cgroupFSRoot
+	t.Cleanup(func() { cgroupFSRoot = origRoot })
+	cgroupFSRoot = t.TempDir()
+	const nameA, nameB = "agent-aaaaaaaaaaaa-issue-42", "agent-bbbbbbbbbbbb-issue-42"
+	// Each Box sits under its own launcher anchor, as two Consumers' launchers
+	// would leave them.
+	dirA := fakeCgroup(t, "anchor-a", nameA)
+	dirB := fakeCgroup(t, "anchor-b", nameB)
+
+	a := &bwrapAdapter{}
+	if !a.IsRunning(nameA) || !a.IsRunning(nameB) {
+		t.Fatalf("IsRunning(A)=%v IsRunning(B)=%v, want both true", a.IsRunning(nameA), a.IsRunning(nameB))
+	}
+	if err := a.Kill(nameA); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dirA, "cgroup.kill")); string(got) != "1" {
+		t.Errorf("killed Box's cgroup.kill = %q, want 1", got)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dirB, "cgroup.kill")); len(got) != 0 {
+		t.Errorf("other Box's cgroup.kill = %q, want untouched", got)
+	}
+	if !a.IsRunning(nameB) {
+		t.Error("IsRunning(B) = false after Kill(A), want true")
 	}
 }
