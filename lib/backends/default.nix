@@ -51,7 +51,9 @@
 # an env-schema entry. lib/row-knobs.nix folds them into lib/env-schema.nix, so
 # the row owns its backend-specific knobs; the generated Descriptor ignores the
 # field, and an env name or key a row shares with another declaration fails
-# eval (ADR 0068).
+# eval (ADR 0068). A flakeOption knob's optional `axes` (a non-empty subset of
+# "tracker" and "forge") overrides the axis its `group` implies ("issues" is
+# tracker, "forge" is forge).
 
 # quickstart (optional) opts the backend into Quickstart's remote-host
 # detection (ADR 0068 decision 8): `hosts` lists the git remote hosts that

@@ -41,6 +41,10 @@
     forgejoBaseURL = {
       env = "FORGEJO_BASE_URL";
       group = "issues";
+      axes = [
+        "tracker"
+        "forge"
+      ];
       default = "https://codeberg.org";
       doc = "Forgejo/Gitea instance base URL, defaulting to Codeberg; used when ISSUE_TRACKER=forgejo or CODE_FORGE=forgejo";
       flakeOption = true;

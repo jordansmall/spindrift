@@ -57,6 +57,36 @@ let
     ])).stanzas;
   omitsSecret = fixture [ (mkRow [ "stubConnectorEmail" ]) ];
   unknownKnob = fixture [ (mkRow [ "stubConnectorTokne" ]) ];
+  # A flakeOption settings knob on an otherwise valid row, for the axes errors.
+  withSetting =
+    setting:
+    fixture [
+      (
+        (mkRow [
+          "stubConnectorToken"
+          "stubConnectorEmail"
+        ])
+        // {
+          knobs.stubSetting = {
+            env = "STUB_SETTING";
+            doc = "stub setting";
+            flakeOption = true;
+          }
+          // setting;
+        }
+      )
+    ];
+  emptyAxes = withSetting { group = "core"; };
+  unknownAxis = withSetting {
+    group = "issues";
+    axes = [ "froge" ];
+  };
+  explicitEmptyAxes = withSetting {
+    group = "issues";
+    axes = [ ];
+  };
+  nonListAxes = withSetting { axes = "forge"; };
+  nonStringAxes = withSetting { axes = [ 1 ]; };
   noStanza = fixture [ (builtins.removeAttrs (mkRow [ ]) [ "consumerStanza" ]) ];
   # A backend Connector (one declaring `backend`) with no backend row, beside a
   # non-backend Connector that has none by design and must be ignored.
@@ -191,6 +221,40 @@ in
       hasInfix "lib/backends/stub.nix" (messages unknownKnob)
       && hasInfix "stubConnectorTokne" (messages unknownKnob)
     ) "consumer-stanzas: the unknown-knob message must name the row file and the knob";
+    assert assertMsg (fails emptyAxes)
+      "consumer-stanzas: a settings knob whose group implies no axis and sets none must fail eval";
+    assert assertMsg (
+      hasInfix "lib/backends/stub.nix" (messages emptyAxes) && hasInfix "stubSetting" (messages emptyAxes)
+    ) "consumer-stanzas: the no-axis message must name the row file and the knob";
+    assert assertMsg (fails unknownAxis)
+      "consumer-stanzas: a settings knob naming an unknown axis must fail eval";
+    assert assertMsg (
+      hasInfix "lib/backends/stub.nix" (messages unknownAxis)
+      && hasInfix "stubSetting" (messages unknownAxis)
+      && hasInfix "froge" (messages unknownAxis)
+    ) "consumer-stanzas: the unknown-axis message must name the row file, the knob and the axis";
+    assert assertMsg (fails nonListAxes)
+      "consumer-stanzas: a settings knob whose axes is not a list must fail eval";
+    assert assertMsg
+      (
+        hasInfix "lib/backends/stub.nix" (messages nonListAxes)
+        && hasInfix "stubSetting" (messages nonListAxes)
+      )
+      "consumer-stanzas: the non-list axes message must name the row file and the knob, not a raw type error";
+    assert assertMsg (fails explicitEmptyAxes)
+      "consumer-stanzas: a settings knob setting an empty axes must fail eval";
+    assert assertMsg (
+      hasInfix "stubSetting" (messages explicitEmptyAxes)
+      && hasInfix "must be non-empty" (messages explicitEmptyAxes)
+    ) "consumer-stanzas: the explicit-empty axes message must name the knob and the empty override";
+    assert assertMsg (fails nonStringAxes)
+      "consumer-stanzas: a settings knob whose axes holds a non-string must fail eval";
+    assert assertMsg
+      (
+        hasInfix "lib/backends/stub.nix" (messages nonStringAxes)
+        && hasInfix "stubSetting" (messages nonStringAxes)
+      )
+      "consumer-stanzas: the non-string axes message must name the row file and the knob, not a raw type error";
     assert assertMsg (fails orphanConnector)
       "consumer-stanzas: a backend Connector matching no backend row must fail eval";
     assert assertMsg (
