@@ -42,10 +42,11 @@ func TestFSProbe_LogStale_OldLogIsStale(t *testing.T) {
 }
 
 func TestFSProbe_ContainerLive_Present(t *testing.T) {
+	pwd := t.TempDir()
 	r := runner.NewFake()
-	r.RunningNames = []string{dispatch.BoxName("42")}
+	r.RunningNames = []string{dispatch.BoxName(pwd, "42")}
 
-	p := NewFSProbe(t.TempDir(), r)
+	p := NewFSProbe(pwd, r)
 	live, reachable := p.ContainerLive("42")
 	if !live || !reachable {
 		t.Errorf("ContainerLive = (%v, %v), want (true, true)", live, reachable)
@@ -82,5 +83,18 @@ func writeLog(t *testing.T, pwd, number string) {
 	path := filepath.Join(dir, "issue-"+number+".log")
 	if err := os.WriteFile(path, []byte("log"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
+	}
+}
+
+// A probe for one checkout must not see another checkout's same-numbered Box
+// as live (issue #7378).
+func TestFSProbe_ContainerLive_OtherCheckoutsBoxNotLive(t *testing.T) {
+	pwdA, pwdB := t.TempDir(), t.TempDir()
+	r := runner.NewFake()
+	r.RunningNames = []string{dispatch.BoxName(pwdB, "42")}
+
+	live, reachable := NewFSProbe(pwdA, r).ContainerLive("42")
+	if live || !reachable {
+		t.Errorf("ContainerLive = (%v, %v), want (false, true)", live, reachable)
 	}
 }

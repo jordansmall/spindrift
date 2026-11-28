@@ -362,7 +362,7 @@ func TestQuarantinePriorRunLogs_BoundedOnNonNotExistStatError(t *testing.T) {
 		t.Fatalf("seed self-referential symlink: %v", err)
 	}
 
-	if err := mustReturnWithin(t, func() error { return quarantinePriorRunLogs(d.pwd, d.number, fr) }); err == nil {
+	if err := mustReturnWithin(t, func() error { return quarantinePriorRunLogs(d.pwd, d.boxNamespace, d.number, fr) }); err == nil {
 		t.Error("quarantinePriorRunLogs: want a non-nil error on a non-NotExist stat failure, got nil")
 	}
 }
@@ -402,7 +402,7 @@ func TestQuarantinePriorRunLogs_NoOpWhenAlreadyRunning(t *testing.T) {
 		t.Fatalf("seed rotated log: %v", err)
 	}
 
-	if err := quarantinePriorRunLogs(d.pwd, d.number, fr); err != nil {
+	if err := quarantinePriorRunLogs(d.pwd, d.boxNamespace, d.number, fr); err != nil {
 		t.Fatalf("quarantinePriorRunLogs: %v", err)
 	}
 
@@ -452,7 +452,7 @@ func TestQuarantinePriorRunLogs_HoldSleepBlindSpot(t *testing.T) {
 		t.Fatalf("seed initial log: %v", err)
 	}
 
-	if err := quarantinePriorRunLogs(d.pwd, d.number, fr); err != nil {
+	if err := quarantinePriorRunLogs(d.pwd, d.boxNamespace, d.number, fr); err != nil {
 		t.Fatalf("quarantinePriorRunLogs: %v", err)
 	}
 

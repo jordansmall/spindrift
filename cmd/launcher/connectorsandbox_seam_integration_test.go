@@ -445,7 +445,7 @@ func stageOrphan(t *testing.T) (orphan string, others []string) {
 		sandbox.Name(os.Getpid(), stamp),
 		fmt.Sprintf("%s%d-%d", runner.ConnectorSandboxPrefix, deadPid, nano),
 		runner.ConnectorSandboxPrefix + "feedfacecafe-" + tail,
-		dispatch.BoxName("99"),
+		dispatch.BoxName("/work/other-checkout", "99"),
 		"spindrift-box-connector-sandbox-7",
 		fmt.Sprintf("box-%s%d-%d", runner.ConnectorSandboxPrefix, deadPid, nano),
 	}

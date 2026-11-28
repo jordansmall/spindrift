@@ -1,18 +1,46 @@
 package dispatch
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"spindrift.dev/launcher/internal/terminate"
 )
 
-// BoxName returns the deterministic sandbox name a Dispatch launches issue
-// number under. runOnce, Factory.Kill (issue #649) and reconcile's
+// BoxNamespace returns the per-checkout prefix of every Box name, so two
+// Consumers on one host never share a Box (issue #7378). It hashes pwd, the
+// launcher's cwd (os.Getwd in bootstrap) and not the repo root: a launcher
+// started from a subdirectory or another worktree gets a different namespace,
+// as its pwd-keyed logs already do. pwd is resolved through symlinks so the
+// namespace survives a restart from a differently spelled cwd. Compute it
+// once per process: re-resolving after the checkout moved would name a
+// different Box than the live one.
+func BoxNamespace(pwd string) string {
+	if abs, err := filepath.Abs(pwd); err == nil {
+		pwd = abs
+	}
+	if resolved, err := filepath.EvalSymlinks(pwd); err == nil {
+		pwd = resolved
+	}
+	sum := sha256.Sum256([]byte(filepath.Clean(pwd)))
+	return "agent-" + hex.EncodeToString(sum[:])[:12]
+}
+
+// BoxNameIn returns the sandbox name a Dispatch launches issue number under
+// within namespace. runOnce, Factory.Kill (issue #649) and reconcile's
 // LivenessProbe (issue #1432) all call it, and the last two have no live
 // *Dispatch to ask.
-func BoxName(number string) string {
-	return "agent-issue-" + number
+func BoxNameIn(namespace, number string) string {
+	return namespace + "-issue-" + number
+}
+
+// BoxName is BoxNameIn(BoxNamespace(pwd), number), for callers holding no
+// cached namespace.
+func BoxName(pwd, number string) string {
+	return BoxNameIn(BoxNamespace(pwd), number)
 }
 
 // Kill force-stops and removes the sandbox for number, if any (ADR 0024,
@@ -24,7 +52,7 @@ func (f *Factory) Kill(number string) error {
 	// past, leaving a live Box owning an issue the abort released back to the
 	// dispatchable pool (issue #3521).
 	f.closeKillLatch(number)
-	return f.runner.Kill(BoxName(number))
+	return f.runner.Kill(BoxNameIn(f.boxNamespace, number))
 }
 
 // armKillLatch mints a fresh open latch for number, replacing any latch a

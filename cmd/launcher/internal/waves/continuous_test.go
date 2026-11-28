@@ -2273,8 +2273,8 @@ func TestRunContinuous_AbortClosedWhileBoxInFlight_ReclaimsAndAbandons(t *testin
 
 		waitOn(t, started1, "issue #1 was never dispatched")
 		close(abort)
-		if got := waitOn(t, kr.killed, "Kill was never called after abort"); got != "agent-issue-1" {
-			t.Fatalf("Kill: got %q, want agent-issue-1", got)
+		if got := waitOn(t, kr.killed, "Kill was never called after abort"); got != dispatch.BoxName(dir, "1") {
+			t.Fatalf("Kill: got %q, want %s", got, dispatch.BoxName(dir, "1"))
 		}
 		close(release1)
 
@@ -2291,8 +2291,8 @@ func TestRunContinuous_AbortClosedWhileBoxInFlight_ReclaimsAndAbandons(t *testin
 	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "1" {
 		t.Fatalf("RunCalls: got %v, want exactly issue 1 (no launch after abort)", fr.RunCalls)
 	}
-	if len(kr.Fake.KillCalls) != 1 || kr.Fake.KillCalls[0] != "agent-issue-1" {
-		t.Fatalf("KillCalls: got %v, want exactly [agent-issue-1]", kr.Fake.KillCalls)
+	if len(kr.Fake.KillCalls) != 1 || kr.Fake.KillCalls[0] != dispatch.BoxName(dir, "1") {
+		t.Fatalf("KillCalls: got %v, want exactly [%s]", kr.Fake.KillCalls, dispatch.BoxName(dir, "1"))
 	}
 	var toDispatchable int
 	for _, call := range fc.TransitionStateCalls {
@@ -2371,7 +2371,7 @@ func TestRunContinuous_AbortClosedWithMultipleBoxesInFlight_ReclaimsEachOne(t *t
 
 	killedNums := []string{waitOn(t, kr.killed, "first Kill never observed"), waitOn(t, kr.killed, "second Kill never observed")}
 	slices.Sort(killedNums)
-	if want := []string{"agent-issue-1", "agent-issue-2"}; !slices.Equal(killedNums, want) {
+	if want := []string{dispatch.BoxName(dir, "1"), dispatch.BoxName(dir, "2")}; !slices.Equal(killedNums, want) {
 		t.Fatalf("killed: got %v, want %v", killedNums, want)
 	}
 
@@ -2463,8 +2463,8 @@ func TestRunContinuous_AbortAfterOneSettles_OnlyInFlightIssueReclaimed(t *testin
 		t.Fatalf("settled: got %q, want 1", got)
 	}
 
-	if got := waitOn(t, kr.killed, "Kill was never called after abort"); got != "agent-issue-2" {
-		t.Fatalf("Kill: got %q, want agent-issue-2", got)
+	if got := waitOn(t, kr.killed, "Kill was never called after abort"); got != dispatch.BoxName(dir, "2") {
+		t.Fatalf("Kill: got %q, want %s", got, dispatch.BoxName(dir, "2"))
 	}
 	close(release2)
 
@@ -2477,8 +2477,8 @@ func TestRunContinuous_AbortAfterOneSettles_OnlyInFlightIssueReclaimed(t *testin
 		t.Fatal("RunContinuous did not return")
 	}
 
-	if len(kr.Fake.KillCalls) != 1 || kr.Fake.KillCalls[0] != "agent-issue-2" {
-		t.Fatalf("KillCalls: got %v, want exactly [agent-issue-2] (issue #1 already settled, never reclaimed)", kr.Fake.KillCalls)
+	if len(kr.Fake.KillCalls) != 1 || kr.Fake.KillCalls[0] != dispatch.BoxName(dir, "2") {
+		t.Fatalf("KillCalls: got %v, want exactly [%s] (issue #1 already settled, never reclaimed)", kr.Fake.KillCalls, dispatch.BoxName(dir, "2"))
 	}
 	for _, call := range fc.TransitionStateCalls {
 		if call.Num == "1" {
@@ -2618,8 +2618,8 @@ func TestRunContinuous_StopAndAbortBothClosed_ReturnsErrSignalledStopAndReclaims
 		t.Fatal("RunContinuous did not return")
 	}
 
-	if len(kr.Fake.KillCalls) != 1 || kr.Fake.KillCalls[0] != "agent-issue-1" {
-		t.Fatalf("KillCalls: got %v, want exactly [agent-issue-1]", kr.Fake.KillCalls)
+	if len(kr.Fake.KillCalls) != 1 || kr.Fake.KillCalls[0] != dispatch.BoxName(dir, "1") {
+		t.Fatalf("KillCalls: got %v, want exactly [%s]", kr.Fake.KillCalls, dispatch.BoxName(dir, "1"))
 	}
 }
 
@@ -2790,13 +2790,13 @@ func TestRunContinuous_AbortBeforeContainerCreated_StopsBoxAndReleasesIssue(t *t
 		t.Errorf("runner.Run was entered for #%s; the abort reclaimed it before its container existed, so it must never launch", box.Issue)
 		return nil
 	}
+	dir := tempLogDir(t)
 	gate := &preLaunchGate{
 		killHook: newKillHook(fr),
-		name:     dispatch.BoxName("1"),
+		name:     dispatch.BoxName(dir, "1"),
 		release:  make(chan struct{}),
 	}
 
-	dir := tempLogDir(t)
 	f := testFactory(t, dir, gate)
 	s := settle.NewFake()
 
@@ -2809,8 +2809,8 @@ func TestRunContinuous_AbortBeforeContainerCreated_StopsBoxAndReleasesIssue(t *t
 			resultCh <- RunContinuous(c, session, fc, fc, f, s, fake, fresh)
 		}()
 
-		if got := waitOn(t, gate.killed, "Kill was never called after abort"); got != "agent-issue-1" {
-			t.Fatalf("Kill: got %q, want agent-issue-1", got)
+		if got := waitOn(t, gate.killed, "Kill was never called after abort"); got != dispatch.BoxName(dir, "1") {
+			t.Fatalf("Kill: got %q, want %s", got, dispatch.BoxName(dir, "1"))
 		}
 		close(gate.release)
 
@@ -2827,8 +2827,8 @@ func TestRunContinuous_AbortBeforeContainerCreated_StopsBoxAndReleasesIssue(t *t
 	if len(fr.RunCalls) != 0 {
 		t.Fatalf("RunCalls: got %v, want none (the abort landed before any container existed)", fr.RunCalls)
 	}
-	if len(gate.Fake.KillCalls) != 1 || gate.Fake.KillCalls[0] != "agent-issue-1" {
-		t.Fatalf("KillCalls: got %v, want exactly [agent-issue-1]", gate.Fake.KillCalls)
+	if len(gate.Fake.KillCalls) != 1 || gate.Fake.KillCalls[0] != dispatch.BoxName(dir, "1") {
+		t.Fatalf("KillCalls: got %v, want exactly [%s]", gate.Fake.KillCalls, dispatch.BoxName(dir, "1"))
 	}
 	assertReclaimedToDispatchable(t, fc, "1")
 	if len(failed) != 0 {

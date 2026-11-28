@@ -35,14 +35,17 @@ import (
 type Dispatch struct {
 	// number is this Dispatch's log/lock/cache/BoxName key: always
 	// subject.key.String(), set once by Factory.newDispatch (issue #3954).
-	number   string
-	pwd      string
-	runner   runner.Runner
-	driver   driver.Driver
-	clock    Clock
-	cfg      Config
-	cacheDir string
-	cache    *cache
+	number string
+	pwd    string
+	// boxNamespace is the Factory's BoxNamespace, so Kill and this Dispatch
+	// name the same Box.
+	boxNamespace string
+	runner       runner.Runner
+	driver       driver.Driver
+	clock        Clock
+	cfg          Config
+	cacheDir     string
+	cache        *cache
 
 	// warnings accumulates RecordWarnings batches across the initial run and
 	// its fix passes.
@@ -220,12 +223,12 @@ func (d *Dispatch) Run() Disposition {
 	logPath := d.logPath()
 	return d.dispatchWithRetry(logPath, func(resumeAfterHold bool) error {
 		d.announce(report.PhaseInitial, logPath)
-		if !resumeAfterHold && !d.runner.IsRunning(BoxName(d.number)) {
+		if !resumeAfterHold && !d.runner.IsRunning(BoxNameIn(d.boxNamespace, d.number)) {
 			// First attempt only, under the same guard as
 			// quarantinePriorRunLogs so a live run's log dir gets neither a
 			// rename nor a marker. An existing marker is no reason to skip: a
 			// fresh Run() makes any marker on disk stale.
-			if err := quarantinePriorRunLogs(d.pwd, d.number, d.runner); err != nil {
+			if err := quarantinePriorRunLogs(d.pwd, d.boxNamespace, d.number, d.runner); err != nil {
 				return preDispatchErr{err: fmt.Errorf("quarantine prior-run logs: %w", err)}
 			}
 			if err := markRunLineage(d.pwd, d.number); err != nil {
@@ -413,7 +416,7 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 	if d.isKilled() {
 		return errKilled
 	}
-	name := BoxName(d.number)
+	name := BoxNameIn(d.boxNamespace, d.number)
 	if d.runner.IsRunning(name) {
 		return runner.ErrAlreadyRunning
 	}
@@ -770,9 +773,9 @@ func (e preDispatchErr) Unwrap() error { return e.err }
 // comment and budget gate (issue #2575). Skipped under the same IsRunning
 // guard as runOnce, though IsRunning cannot see a run paused between attempts
 // (issue #562).
-func quarantinePriorRunLogs(pwd, number string, r runner.Runner) error {
+func quarantinePriorRunLogs(pwd, boxNamespace, number string, r runner.Runner) error {
 	// A nil runner comes only from a test double; treat it as nothing running.
-	if r != nil && r.IsRunning(BoxName(number)) {
+	if r != nil && r.IsRunning(BoxNameIn(boxNamespace, number)) {
 		return nil
 	}
 	for _, pl := range AllAttemptLogPaths(pwd, number) {
@@ -841,7 +844,7 @@ func (d *Dispatch) EnsureRunLineage() error {
 	if fileExists(runLineageMarkerPath(d.pwd, d.number)) {
 		return nil
 	}
-	if err := quarantinePriorRunLogs(d.pwd, d.number, d.runner); err != nil {
+	if err := quarantinePriorRunLogs(d.pwd, d.boxNamespace, d.number, d.runner); err != nil {
 		return fmt.Errorf("quarantine prior-run logs: %w", err)
 	}
 	return markRunLineage(d.pwd, d.number)

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
@@ -281,8 +282,8 @@ func TestDispatch_AbortClosedWithBoxInFlight_ReclaimsNeitherFailsNorSettles(t *t
 
 	waitOn(t, started1, "issue #1 was never dispatched")
 	close(abort)
-	if got := waitOn(t, kr.killed, "Kill was never called after abort"); got != "agent-issue-1" {
-		t.Fatalf("Kill: got %q, want agent-issue-1", got)
+	if got := waitOn(t, kr.killed, "Kill was never called after abort"); got != dispatch.BoxName(dir, "1") {
+		t.Fatalf("Kill: got %q, want %s", got, dispatch.BoxName(dir, "1"))
 	}
 	close(release1)
 
@@ -348,8 +349,8 @@ func TestDispatch_AbortClosedWithBoxInFlight_NilSession_ReclaimsNeitherFailsNorS
 
 	waitOn(t, started1, "issue #1 was never dispatched")
 	close(abort)
-	if got := waitOn(t, kr.killed, "Kill was never called after abort"); got != "agent-issue-1" {
-		t.Fatalf("Kill: got %q, want agent-issue-1", got)
+	if got := waitOn(t, kr.killed, "Kill was never called after abort"); got != dispatch.BoxName(dir, "1") {
+		t.Fatalf("Kill: got %q, want %s", got, dispatch.BoxName(dir, "1"))
 	}
 	close(release1)
 

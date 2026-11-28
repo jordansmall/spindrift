@@ -35,8 +35,8 @@ func TestRun_CallsRunnerWithCorrectBox(t *testing.T) {
 	if box.Issue != "42" {
 		t.Errorf("Box.Issue: got %q, want %q", box.Issue, "42")
 	}
-	if box.Name != "agent-issue-42" {
-		t.Errorf("Box.Name: got %q, want %q", box.Name, "agent-issue-42")
+	if box.Name != BoxName(dir, "42") {
+		t.Errorf("Box.Name: got %q, want %q", box.Name, BoxName(dir, "42"))
 	}
 	if box.Env["ISSUE_NUMBER"] != "42" {
 		t.Errorf("Box.Env[ISSUE_NUMBER]: got %q, want %q", box.Env["ISSUE_NUMBER"], "42")

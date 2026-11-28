@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/exitcode"
 	"spindrift.dev/launcher/internal/forge"
@@ -455,8 +456,8 @@ func TestSelectiveListDispatch_ResearchAbort_ReclaimsOntoResearchFamily(t *testi
 
 	waitOn(t, started, "issue #1 was never dispatched")
 	close(abortCh)
-	if got := waitOn(t, kr.killed, "Kill was never called after abort"); got != "agent-issue-1" {
-		t.Fatalf("Kill: got %q, want agent-issue-1", got)
+	if got := waitOn(t, kr.killed, "Kill was never called after abort"); got != dispatch.BoxName(dir, "1") {
+		t.Fatalf("Kill: got %q, want %s", got, dispatch.BoxName(dir, "1"))
 	}
 	close(release)
 
