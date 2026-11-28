@@ -261,12 +261,17 @@ func TestFloodFixtureStaysOverTheOutputCap(t *testing.T) {
 }
 
 // failsClosedOn drives the hostile line through a fresh filter and checks it
-// fails with want, then stays failed on every later Write and Flush.
-func failsClosedOn(t *testing.T, line string, want error) {
+// fails with want, then stays failed on every later Write and Flush. A non-nil
+// limit applies only once the filter exists, so the handshake, describe, and
+// newStreamFilter calls never run under it.
+func failsClosedOn(t *testing.T, line string, want error, limit func() (restore func())) {
 	t.Helper()
 	s := strategy(t, "driver.wasm")
 	var buf bytes.Buffer
 	f := s.NewStreamFilter(&buf)
+	if limit != nil {
+		t.Cleanup(limit())
+	}
 	_, err := f.Write([]byte(line))
 	if !errors.Is(err, connectorhost.ErrCall) || !errors.Is(err, want) {
 		t.Fatalf("Write err = %v, want ErrCall and %v", err, want)
@@ -283,12 +288,13 @@ func failsClosedOn(t *testing.T, line string, want error) {
 }
 
 func TestDriverStreamFilterFailsClosedOnAnExhaustedBudget(t *testing.T) {
-	useShortCallBudget(t)
-	failsClosedOn(t, "filter-spin\n", connectorhost.ErrBudget)
+	failsClosedOn(t, "filter-spin\n", connectorhost.ErrBudget, func() func() {
+		return connectorhost.SetCallBudget(connectorhost.ShortCallBudget)
+	})
 }
 
 func TestDriverStreamFilterFailsClosedOnTheMemoryCap(t *testing.T) {
-	failsClosedOn(t, "filter-hog\n", connectorhost.ErrMemoryCap)
+	failsClosedOn(t, "filter-hog\n", connectorhost.ErrMemoryCap, nil)
 }
 
 func TestDriverStreamFilterBornFailedWhenTheConnectorIsClosed(t *testing.T) {
