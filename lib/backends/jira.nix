@@ -23,7 +23,7 @@
   # The knob holding the Tracker scope (ADR 0075 decision 3); a row without one
   # scopes by REPO_SLUG.
   trackerScopeKnob = "jiraProjectKey";
-  doctorSlugHint = "JIRA_BASE_URL / JIRA_PROJECT_KEY";
+  doctorSlugHint = "--jira-base-url / issues.jira.baseURL and --jira-project-key / issues.jira.projectKey";
   # The Box has no Jira client and JIRA_TOKEN is host-only, so the research
   # verdict (issue #5245) and a work run's IF BLOCKED comment (issue #5263)
   # relay through the host; its linked-issue reads in prompts key off this too

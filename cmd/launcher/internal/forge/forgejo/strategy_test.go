@@ -33,9 +33,9 @@ func TestStrategyShape(t *testing.T) {
 func TestStrategyValidateTrackerNamesBlankBaseURL(t *testing.T) {
 	t.Parallel()
 	err := forgejo.Strategy.ValidateTracker(backendkit.Shared{}, mapLookup(map[string]string{"FORGEJO_BASE_URL": ""}))
-	if err == nil || !strings.Contains(err.Error(), "FORGEJO_BASE_URL") ||
+	if err == nil || !strings.Contains(err.Error(), "--forgejo-base-url") ||
 		!strings.Contains(err.Error(), "ISSUE_TRACKER=forgejo") {
-		t.Errorf("err = %v, want one naming FORGEJO_BASE_URL and ISSUE_TRACKER=forgejo", err)
+		t.Errorf("err = %v, want one naming --forgejo-base-url and ISSUE_TRACKER=forgejo", err)
 	}
 }
 
@@ -129,8 +129,8 @@ func TestStrategyValidateRejectsBlankBaseURL(t *testing.T) {
 		"CODE_FORGE":    forgejo.Strategy.ValidateCodeForge,
 	} {
 		err := validate(backendkit.Shared{RepoSlug: "o/r"}, l)
-		if err == nil || !strings.Contains(err.Error(), "FORGEJO_BASE_URL") || !strings.Contains(err.Error(), axis+"=forgejo") {
-			t.Errorf("%s: err = %v, want one naming FORGEJO_BASE_URL and %s=forgejo", axis, err, axis)
+		if err == nil || !strings.Contains(err.Error(), "--forgejo-base-url") || !strings.Contains(err.Error(), axis+"=forgejo") {
+			t.Errorf("%s: err = %v, want one naming --forgejo-base-url and %s=forgejo", axis, err, axis)
 		}
 	}
 }

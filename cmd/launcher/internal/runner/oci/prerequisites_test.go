@@ -125,7 +125,7 @@ func TestPrerequisites_BelowThresholdErrorsWithArithmeticAndRemedyNamesAllThreeF
 			t.Errorf("Probe() error = %q, want it to contain %q", err.Error(), want)
 		}
 	}
-	for _, want := range []string{"MAX_PARALLEL", "podman machine set --memory 10752", "MEMORY_LIMIT"} {
+	for _, want := range []string{"--max-parallel", "podman machine set --memory 10752", "--memory-limit"} {
 		if !strings.Contains(p.Remedy, want) {
 			t.Errorf("Remedy = %q, want it to contain %q", p.Remedy, want)
 		}
@@ -178,7 +178,7 @@ func TestPrerequisites_DegradedRowIsNotBlocking(t *testing.T) {
 }
 
 // assertInvalidRemedy asserts the fallback an invalid memoryLimit must
-// produce: the fix is MEMORY_LIMIT itself, so "lower MEMORY_LIMIT" (wrong
+// produce: the fix is --memory-limit itself, so "lower --memory-limit" (wrong
 // advice for "0") must not appear. It asserts the absence of "podman machine
 // set --memory" because that phrase is a strict prefix of the parsed branch's
 // own command, so only the negative form discriminates the two branches.
@@ -187,11 +187,11 @@ func assertInvalidRemedy(t *testing.T, remedy string) {
 	if strings.Contains(remedy, "podman machine set --memory") {
 		t.Errorf("Remedy = %q, want no podman machine set --memory command when the limit is invalid", remedy)
 	}
-	if !strings.Contains(remedy, "MEMORY_LIMIT") {
-		t.Errorf("Remedy = %q, want it to contain %q", remedy, "MEMORY_LIMIT")
+	if !strings.Contains(remedy, "--memory-limit") {
+		t.Errorf("Remedy = %q, want it to contain %q", remedy, "--memory-limit")
 	}
-	if strings.Contains(remedy, "lower MEMORY_LIMIT") {
-		t.Errorf("Remedy = %q, want no %q advice: the value itself is invalid", remedy, "lower MEMORY_LIMIT")
+	if strings.Contains(remedy, "lower --memory-limit") {
+		t.Errorf("Remedy = %q, want no %q advice: the value itself is invalid", remedy, "lower --memory-limit")
 	}
 }
 

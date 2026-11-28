@@ -61,7 +61,7 @@ func TestRegisteredStrategiesShape(t *testing.T) {
 			validAsTracker:     true,
 			validAsCodeForge:   true,
 			tokenEnvVar:        backend.Forgejo.TokenEnvVar,
-			doctorSlugHint:     "FORGEJO_BASE_URL",
+			doctorSlugHint:     "--forgejo-base-url / issues.forgejo.baseURL",
 			outboxRelayCapable: true,
 
 			hasValidateTracker:   true,
@@ -74,7 +74,7 @@ func TestRegisteredStrategiesShape(t *testing.T) {
 			validAsTracker:   true,
 			validAsCodeForge: false,
 			tokenEnvVar:      "JIRA_TOKEN",
-			doctorSlugHint:   "JIRA_BASE_URL / JIRA_PROJECT_KEY",
+			doctorSlugHint:   "--jira-base-url / issues.jira.baseURL and --jira-project-key / issues.jira.projectKey",
 
 			hasValidateTracker: true,
 			hasNewIssueTracker: true,
@@ -234,7 +234,7 @@ func TestBlankInputDocumentKnobs_ForgejoRejectedLocalRedefaults(t *testing.T) {
 		"ISSUE_TRACKER": fj.ValidateTracker,
 		"CODE_FORGE":    fj.ValidateCodeForge,
 	} {
-		want := "set FORGEJO_BASE_URL (Forgejo instance base URL) when " + axis + "=forgejo"
+		want := "pass --forgejo-base-url (Forgejo instance base URL) or set issues.forgejo.baseURL when " + axis + "=forgejo"
 		if err := fn(backendShared(c), c.knobLookup); err == nil || err.Error() != want {
 			t.Errorf("forgejo %s: err = %v, want %q", axis, err, want)
 		}

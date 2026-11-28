@@ -2407,8 +2407,8 @@ func TestValidate_ForgejoRequiresBaseURLAndToken(t *testing.T) {
 	if err == nil {
 		t.Fatalf("validate() must require FORGEJO_BASE_URL when ISSUE_TRACKER=forgejo")
 	}
-	if !strings.Contains(err.Error(), "FORGEJO_BASE_URL") || !strings.Contains(err.Error(), "ISSUE_TRACKER=forgejo") {
-		t.Errorf("validate() error = %q, want it to name FORGEJO_BASE_URL and ISSUE_TRACKER=forgejo", err.Error())
+	if !strings.Contains(err.Error(), "--forgejo-base-url") || !strings.Contains(err.Error(), "ISSUE_TRACKER=forgejo") {
+		t.Errorf("validate() error = %q, want it to name --forgejo-base-url and ISSUE_TRACKER=forgejo", err.Error())
 	}
 }
 
@@ -2439,9 +2439,9 @@ func TestValidate_ForgejoCodeForge(t *testing.T) {
 	if err == nil {
 		t.Fatalf("validate() must require FORGEJO_BASE_URL when CODE_FORGE=forgejo")
 	}
-	if !strings.Contains(err.Error(), "FORGEJO_BASE_URL") || !strings.Contains(err.Error(), "CODE_FORGE=forgejo") ||
+	if !strings.Contains(err.Error(), "--forgejo-base-url") || !strings.Contains(err.Error(), "CODE_FORGE=forgejo") ||
 		strings.Contains(err.Error(), "ISSUE_TRACKER") {
-		t.Errorf("validate() error = %q, want it to name FORGEJO_BASE_URL and CODE_FORGE=forgejo, not ISSUE_TRACKER", err.Error())
+		t.Errorf("validate() error = %q, want it to name --forgejo-base-url and CODE_FORGE=forgejo, not ISSUE_TRACKER", err.Error())
 	}
 }
 
@@ -2654,7 +2654,7 @@ func TestValidateCodeForge_RejectsUnknown_ExactMessage(t *testing.T) {
 		t.Fatal("validate() should reject unrecognised CODE_FORGE")
 	}
 	want := "CODE_FORGE=\"gitlab\" is not valid; must be github, forgejo, local, or git" +
-		"\n  remedy: set CODE_FORGE to a supported value and fill in any forge-specific fields it requires"
+		"\n  remedy: pass --forge-backend or set forge.backend to a supported value and fill in any forge-specific fields it requires"
 	if err.Error() != want {
 		t.Errorf("validate() error = %q, want %q", err.Error(), want)
 	}
@@ -2724,8 +2724,8 @@ func TestValidateCodeForge_Git_RequiresRemoteURL(t *testing.T) {
 	if err == nil {
 		t.Fatal("validate() should require CODE_FORGE_REMOTE_URL when CODE_FORGE=git")
 	}
-	if !strings.Contains(err.Error(), "CODE_FORGE_REMOTE_URL") {
-		t.Errorf("error should mention CODE_FORGE_REMOTE_URL, got: %v", err)
+	if !strings.Contains(err.Error(), "--remote-url") {
+		t.Errorf("error should mention --remote-url, got: %v", err)
 	}
 }
 
@@ -4496,7 +4496,7 @@ func TestDoctor_AuthFailure_Forgejo(t *testing.T) {
 	}
 }
 
-// The repo-not-found remediation text names FORGEJO_BASE_URL, not REPO_SLUG,
+// The repo-not-found remediation text names --forgejo-base-url, not REPO_SLUG,
 // when the issue tracker is forgejo.
 func TestDoctor_RepoNotFound_Forgejo(t *testing.T) {
 	f := forge.NewFake()
@@ -4509,8 +4509,8 @@ func TestDoctor_RepoNotFound_Forgejo(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "FORGEJO_BASE_URL") {
-		t.Errorf("want error to mention FORGEJO_BASE_URL, got: %v", err)
+	if !strings.Contains(err.Error(), "--forgejo-base-url") {
+		t.Errorf("want error to mention --forgejo-base-url, got: %v", err)
 	}
 	if strings.Contains(err.Error(), "REPO_SLUG") {
 		t.Errorf("want error to not mention REPO_SLUG, got: %v", err)

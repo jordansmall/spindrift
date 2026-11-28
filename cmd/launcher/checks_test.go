@@ -877,8 +877,8 @@ func TestLauncherChecks_BlankRepoSlugKeepsForgejoBaseURLError(t *testing.T) {
 		if ch.Name != "issue-tracker-config" {
 			continue
 		}
-		if _, err := ch.Probe(); err == nil || !strings.Contains(err.Error(), "FORGEJO_BASE_URL") {
-			t.Errorf("issue-tracker-config Probe() = %v, want an error naming FORGEJO_BASE_URL", err)
+		if _, err := ch.Probe(); err == nil || !strings.Contains(err.Error(), "--forgejo-base-url") {
+			t.Errorf("issue-tracker-config Probe() = %v, want an error naming --forgejo-base-url", err)
 		}
 		return
 	}

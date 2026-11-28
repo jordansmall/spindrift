@@ -22,7 +22,7 @@ var Strategy = backendkit.Strategy{
 			return err
 		}
 		if k.CodeForgeRemoteURL == "" {
-			return fmt.Errorf("set CODE_FORGE_REMOTE_URL (the plain git remote to clone from and push to) when CODE_FORGE=git")
+			return fmt.Errorf("pass --remote-url (the plain git remote to clone from and push to) or set forge.remoteURL when CODE_FORGE=git")
 		}
 		return nil
 	},

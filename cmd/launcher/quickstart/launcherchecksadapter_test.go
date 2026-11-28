@@ -303,7 +303,7 @@ func TestQuickstartCheckDeps_ForgejoBindsValidator(t *testing.T) {
 		{name: "blank base URL", mutate: func(a *answers) {
 			a.tracker = backendChoice{name: "forgejo", knobs: map[string]string{"FORGEJO_BASE_URL": ""}}
 			a.forge = a.tracker
-		}, wantErr: "FORGEJO_BASE_URL"},
+		}, wantErr: "--forgejo-base-url"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := forgejoAnswers()

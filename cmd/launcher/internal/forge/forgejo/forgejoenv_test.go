@@ -22,9 +22,9 @@ func TestValidateForgejoEnv_RequiresBaseURL(t *testing.T) {
 			}
 			want := knob + "=forgejo"
 			if err := forgejo.ValidateForgejoEnv(knob, ""); err == nil ||
-				!strings.Contains(err.Error(), "FORGEJO_BASE_URL") || !strings.Contains(err.Error(), want) ||
+				!strings.Contains(err.Error(), "--forgejo-base-url") || !strings.Contains(err.Error(), want) ||
 				strings.Contains(err.Error(), other) {
-				t.Errorf("ValidateForgejoEnv should require FORGEJO_BASE_URL when %s, not %s, got: %v", want, other, err)
+				t.Errorf("ValidateForgejoEnv should require --forgejo-base-url when %s, not %s, got: %v", want, other, err)
 			}
 		})
 	}

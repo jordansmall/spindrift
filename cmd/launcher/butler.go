@@ -171,8 +171,10 @@ func butlerPreflight(cfg config, choreName string, filerEnabled bool, hostFiler 
 	if hostFiler == nil {
 		return nil, fmt.Errorf("butler: ISSUE_TRACKER=%q has no host-side issue filing, so the Filer's relayed findings would be lost", cfg.IssueTracker)
 	}
+	// No flag is named: the Filer model is image-time (rebuild), and the
+	// FILER_MODEL row / --filer-model / models.filer path is DEPRECATED.
 	if !filerEnabled {
-		return nil, fmt.Errorf("butler: needs a provisioned Filer to relay findings (set FILER_MODEL)")
+		return nil, fmt.Errorf("butler: needs a provisioned Filer to relay findings (give it a model with agents.drivers.<name>.models.byName.filer.model, then rebuild)")
 	}
 	if err := butlerBudgets(cfg).Validate(); err != nil {
 		return nil, err

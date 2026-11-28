@@ -33,5 +33,5 @@ func ValidateForgejoEnv(knob, baseURL string) error {
 
 // errBaseURLRequired is the missing-FORGEJO_BASE_URL error for the axis knob.
 func errBaseURLRequired(knob string) error {
-	return fmt.Errorf("set FORGEJO_BASE_URL (Forgejo instance base URL) when %s=forgejo", knob)
+	return fmt.Errorf("pass --forgejo-base-url (Forgejo instance base URL) or set issues.forgejo.baseURL when %s=forgejo", knob)
 }
