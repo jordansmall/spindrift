@@ -76,7 +76,7 @@ jobs:
 
       - name: Install Nix
         if: steps.diff.outputs.nix == 'true'
-        uses: DeterminateSystems/nix-installer-action@v16
+        uses: DeterminateSystems/nix-installer-action@v23
 
       - name: Classify the diff against the PR base
         id: classify
@@ -113,7 +113,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v16
+        uses: DeterminateSystems/nix-installer-action@v23
 
       # Fork-friendly binary cache: /nix rides the GitHub Actions cache, so no
       # external service or credentials. PRs (including from forks) restore
@@ -259,7 +259,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v16
+        uses: DeterminateSystems/nix-installer-action@v23
 
       # Restore-only: the Actions cache sits near its 10 GB cap (issue
       # #7524), so image-only inputs missing from main's store come from the
@@ -301,7 +301,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v16
+        uses: DeterminateSystems/nix-installer-action@v23
 
       # Separate cache from the Linux job: primary-key already keys on
       # runner.os, so macOS and Linux never share or evict each other. Only
@@ -354,7 +354,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v16
+        uses: DeterminateSystems/nix-installer-action@v23
 
       - name: Restore the nix store
         uses: nix-community/cache-nix-action@v7
@@ -386,7 +386,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v16
+        uses: DeterminateSystems/nix-installer-action@v23
 
       - name: Restore the nix store
         uses: nix-community/cache-nix-action@v7
@@ -433,7 +433,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v16
+        uses: DeterminateSystems/nix-installer-action@v23
 
       - name: Restore the nix store
         uses: nix-community/cache-nix-action@v7

@@ -165,7 +165,7 @@ runs:
           "${remove_args[@]}"
 
     - name: Install Nix
-      uses: DeterminateSystems/nix-installer-action@v16
+      uses: DeterminateSystems/nix-installer-action@v23
 
     # Restore-only: piggyback on the /nix store that ci.yml
     # (nix-community/cache-nix-action) already saves on every push to main.
