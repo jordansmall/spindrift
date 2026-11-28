@@ -58,14 +58,12 @@ var routedReads = []struct {
 }
 
 // routedLogHarness is harnessWithRow over a routed row, run in a scratch
-// directory so the Connector record files land there. GH_HOST names the scripted
-// backend, as it names the web host on a real host.
+// directory so the Connector record files land there.
 func routedLogHarness(t *testing.T, useRow func(*testing.T, string)) (h *connectorHarness, c *execClient, calls func() int, logDir string) {
 	t.Helper()
 	dir := t.TempDir()
 	t.Chdir(dir)
 	h, c, calls = harnessWithRow(t, useRow)
-	t.Setenv("GH_HOST", h.backend.host)
 	return h, c, calls, hostpaths.LogDir(dir)
 }
 

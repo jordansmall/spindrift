@@ -74,6 +74,9 @@ func (e *execClient) forgeWrite(row backendrows.Row, verb string, fn func(forge.
 // the clone URL Compose validated.
 func (e *execClient) forgeGit(row backendrows.Row, verb string, fn func(forge.CodeForge, forge.Capabilities, *coreGit) error) error {
 	return e.connectorOp(row, connectorforge.ErrNotForge, verb, func(routed backendrows.Row, spec connectorruntime.SessionSpec) error {
+		if _, err := requireRemoteOnGHHost(routed); err != nil {
+			return err
+		}
 		// The composed forge reads the token at each use; an unset one fails here
 		// by name instead.
 		if _, err := e.connectors.GitCredential(routed).Get(); err != nil {

@@ -28,6 +28,9 @@ func harnessWithRow(t *testing.T, useRow func(t *testing.T, host string)) (h *co
 	t.Helper()
 	h = newComposedHarness(t)
 	useRow(t, h.backend.host)
+	// The row's gitRemote is the loopback host, which a routed call requires to
+	// be GH_HOST's; a test of the refusal overrides this after the harness.
+	t.Setenv("GH_HOST", h.backend.host)
 	old := connectorOptions
 	connectorOptions = backendrows.Options{Client: h.backend.Client(), PublicForTest: connectorhost.LoopbackForTest}
 	t.Cleanup(func() { connectorOptions = old })
