@@ -68,8 +68,8 @@ func TestConnectorTrackerFailsWithTheLoadError(t *testing.T) {
 
 func TestNoJiraRowIsAnActionableErrorNotANativeFallback(t *testing.T) {
 	_, err := newJiraTracker(t, backendrows.NewSet())
-	if err == nil || !strings.Contains(err.Error(), "spindrift.connectorData") || !strings.Contains(err.Error(), "JIRA_BASE_URL") {
-		t.Fatalf("err = %v, want one naming the Connector's spindrift.connectorData and a JIRA_BASE_URL", err)
+	if err == nil || !strings.Contains(err.Error(), "spindrift.connectorData") || !strings.Contains(err.Error(), "--jira-base-url") {
+		t.Fatalf("err = %v, want one naming the Connector's spindrift.connectorData and a --jira-base-url", err)
 	}
 }
 

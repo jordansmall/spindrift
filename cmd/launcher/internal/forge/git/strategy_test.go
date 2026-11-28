@@ -28,8 +28,8 @@ func TestStrategyShape(t *testing.T) {
 
 func TestStrategyValidateCodeForge(t *testing.T) {
 	err := Strategy.ValidateCodeForge(backendkit.Shared{}, mapLookup(nil))
-	if err == nil || !strings.Contains(err.Error(), "CODE_FORGE_REMOTE_URL") {
-		t.Fatalf("err = %v, want one naming CODE_FORGE_REMOTE_URL", err)
+	if err == nil || !strings.Contains(err.Error(), "--remote-url") {
+		t.Fatalf("err = %v, want one naming --remote-url", err)
 	}
 	l := mapLookup(map[string]string{"CODE_FORGE_REMOTE_URL": "https://x/y.git"})
 	if err := Strategy.ValidateCodeForge(backendkit.Shared{}, l); err != nil {

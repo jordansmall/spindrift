@@ -234,7 +234,7 @@ func TestBlankInputDocumentKnobs_ForgejoRejectedLocalRedefaults(t *testing.T) {
 		"ISSUE_TRACKER": fj.ValidateTracker,
 		"CODE_FORGE":    fj.ValidateCodeForge,
 	} {
-		want := "set FORGEJO_BASE_URL (Forgejo instance base URL) when " + axis + "=forgejo"
+		want := "pass --forgejo-base-url (Forgejo instance base URL) or set issues.forgejo.baseURL when " + axis + "=forgejo"
 		if err := fn(backendShared(c), c.knobLookup); err == nil || err.Error() != want {
 			t.Errorf("forgejo %s: err = %v, want %q", axis, err, want)
 		}

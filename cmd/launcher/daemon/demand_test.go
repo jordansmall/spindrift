@@ -707,7 +707,7 @@ func TestWarnUnprobedKinds_OneStderrLineAndEventPerKindNoSecret(t *testing.T) {
 	}
 	work, research := daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Research)
 	for i, kind := range []daemon.Kind{work, research} {
-		for _, want := range []string{"kind " + string(kind) + " has no Demand source: ", "JIRA_BASE_URL", "child exits"} {
+		for _, want := range []string{"kind " + string(kind) + " has no Demand source: ", "--jira-base-url", "child exits"} {
 			if !strings.Contains(lines[i], want) {
 				t.Errorf("line %d = %q, want it to contain %q", i, lines[i], want)
 			}
@@ -722,8 +722,8 @@ func TestWarnUnprobedKinds_OneStderrLineAndEventPerKindNoSecret(t *testing.T) {
 		if err := json.Unmarshal([]byte(events[i]), &ev); err != nil {
 			t.Fatal(err)
 		}
-		if ev.Event != "demand_source_missing" || ev.Kind != kind || !strings.Contains(ev.Reason, "JIRA_BASE_URL") {
-			t.Errorf("event %d = %+v, want demand_source_missing for %s naming JIRA_BASE_URL", i, ev, kind)
+		if ev.Event != "demand_source_missing" || ev.Kind != kind || !strings.Contains(ev.Reason, "--jira-base-url") {
+			t.Errorf("event %d = %+v, want demand_source_missing for %s naming --jira-base-url", i, ev, kind)
 		}
 	}
 	if strings.Contains(stdout.String()+stderr.String(), secret) {

@@ -15,7 +15,7 @@ import (
 // is the only implementation, and backendrows.Decode also drops a row whose
 // JIRA_BASE_URL resolveBase rejects.
 var errNoConnectorRow = errors.New("ISSUE_TRACKER=jira needs the jira Connector: register its connectorData " +
-	"in the Consumer's spindrift.connectorData and set JIRA_BASE_URL to a base its row accepts " +
+	"in the Consumer's spindrift.connectorData and point --jira-base-url or issues.jira.baseURL at a base its row accepts " +
 	"(docs/reference.md, Running jira through its Connector)")
 
 // Strategy is the jira backend's Go half (ADR 0068).

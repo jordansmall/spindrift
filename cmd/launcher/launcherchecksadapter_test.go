@@ -28,8 +28,8 @@ func TestLauncherCheckDeps_BackendBindsValidatorToConfig(t *testing.T) {
 		t.Fatal("launcherCheckDeps(c).Backend(\"forgejo\").ValidateTracker = nil, want a bound closure")
 	}
 	err := b.ValidateTracker()
-	if err == nil || !strings.Contains(err.Error(), "FORGEJO") {
-		t.Errorf("ValidateTracker() = %v, want an error mentioning FORGEJO", err)
+	if err == nil || !strings.Contains(err.Error(), "--forgejo-base-url") {
+		t.Errorf("ValidateTracker() = %v, want an error naming --forgejo-base-url", err)
 	}
 
 	// The real row-building path must fail the same way, not just the

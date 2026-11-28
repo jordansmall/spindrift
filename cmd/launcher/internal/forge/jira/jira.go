@@ -183,10 +183,10 @@ func CheckLifecycle(lifecycle string, mapping map[forge.DispatchState]StatusTarg
 // returning an error for the first unmet requirement.
 func ValidateJiraEnv(baseURL, projectKey, statusMapping, lifecycle string) error {
 	if baseURL == "" {
-		return fmt.Errorf("set JIRA_BASE_URL (Jira site base URL) when ISSUE_TRACKER=jira")
+		return fmt.Errorf("pass --jira-base-url (Jira site base URL) or set issues.jira.baseURL when ISSUE_TRACKER=jira")
 	}
 	if projectKey == "" {
-		return fmt.Errorf("set JIRA_PROJECT_KEY when ISSUE_TRACKER=jira")
+		return fmt.Errorf("pass --jira-project-key or set issues.jira.projectKey when ISSUE_TRACKER=jira")
 	}
 	mapping, err := ParseStatusMapping(statusMapping)
 	if err != nil {

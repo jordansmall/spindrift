@@ -13,11 +13,11 @@ func TestValidateJiraEnv_RequiresBaseURLAndProjectKey(t *testing.T) {
 	if err := jira.ValidateJiraEnv("https://example.atlassian.net", "PROJ", "", "hybrid"); err != nil {
 		t.Fatalf("fully configured jira env should validate: %v", err)
 	}
-	if err := jira.ValidateJiraEnv("", "PROJ", "", "hybrid"); err == nil || !strings.Contains(err.Error(), "JIRA_BASE_URL") {
-		t.Errorf("ValidateJiraEnv should require JIRA_BASE_URL, got: %v", err)
+	if err := jira.ValidateJiraEnv("", "PROJ", "", "hybrid"); err == nil || !strings.Contains(err.Error(), "--jira-base-url") {
+		t.Errorf("ValidateJiraEnv should require --jira-base-url, got: %v", err)
 	}
-	if err := jira.ValidateJiraEnv("https://example.atlassian.net", "", "", "hybrid"); err == nil || !strings.Contains(err.Error(), "JIRA_PROJECT_KEY") {
-		t.Errorf("ValidateJiraEnv should require JIRA_PROJECT_KEY, got: %v", err)
+	if err := jira.ValidateJiraEnv("https://example.atlassian.net", "", "", "hybrid"); err == nil || !strings.Contains(err.Error(), "--jira-project-key") {
+		t.Errorf("ValidateJiraEnv should require --jira-project-key, got: %v", err)
 	}
 }
 
