@@ -555,6 +555,7 @@ func TestPostIssueRefusesAnUnusableURLAsFiledWithoutRetry(t *testing.T) {
 		"http scheme":    "http://tracker.example/o/r/issues/7",
 		"other host":     "https://evil.example/o/r/issues/7",
 		"host suffix":    "https://tracker.example.evil.example/o/r/issues/7",
+		"other port":     "https://tracker.example:8443/o/r/issues/7",
 		"userinfo":       "https://u:p@tracker.example/o/r/issues/7",
 		"no issue id":    "https://tracker.example/o/r/issues",
 		"non-numeric id": "https://tracker.example/o/r/issues/new",
@@ -587,6 +588,49 @@ func TestPostIssueAcceptsTheWebHostCaseInsensitively(t *testing.T) {
 	filer, _ := forge.As[forge.HostPostedIssueFiler](tr)
 	if url, err := filer.PostIssue("t", "b", nil); err != nil || url != "https://Tracker.Example/o/r/issues/7" {
 		t.Errorf("url, err = %q, %v", url, err)
+	}
+}
+
+// https and its default port 443 name one origin, so a filed URL that spells
+// the port out (or leaves it off) is on the tracker's web host either way. Any
+// other port must match exactly.
+func TestPostIssueTreatsTheDefaultHTTPSPortAsImplied(t *testing.T) {
+	for name, tc := range map[string]struct {
+		webHost, url string
+		refused      bool
+	}{
+		"port only on the filed url":                {"tracker.example", "https://tracker.example:443/o/r/issues/7", false},
+		"port only on the web host":                 {"tracker.example:443", "https://tracker.example/o/r/issues/7", false},
+		"port on both":                              {"tracker.example:443", "https://Tracker.Example:443/o/r/issues/7", false},
+		"non-default port on both":                  {"tracker.example:8443", "https://tracker.example:8443/o/r/issues/7", false},
+		"web host from a base url":                  {HostOf("https://tracker.example:443"), "https://tracker.example/o/r/issues/7", false},
+		"non-default filed port, default host":      {"tracker.example:443", "https://tracker.example:8443/o/r/issues/7", true},
+		"non-default filed port, implied host":      {"tracker.example", "https://tracker.example:8443/o/r/issues/7", true},
+		"no filed port, non-default web host":       {"tracker.example:8443", "https://tracker.example/o/r/issues/7", true},
+		"default filed port, non-default host":      {"tracker.example:8443", "https://tracker.example:443/o/r/issues/7", true},
+		"empty web host refuses every url":          {"", "https://tracker.example/o/r/issues/7", true},
+		"empty web host, empty filed host":          {"", "https:///o/r/issues/7", true},
+		"web host set, filed host is a bare port":   {"tracker.example", "https://:443/o/r/issues/7", true},
+		"empty web host, filed host is a bare port": {"", "https://:443/o/r/issues/7", true},
+		"empty web host, filed host is a colon":     {"", "https://:/o/r/issues/7", true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			g := &writeGuest{fileURL: fmt.Sprintf(`{"url":%q}`, tc.url)}
+			lc := lifecycle(false)
+			lc.WebHost = tc.webHost
+			tr := writeTracker(t, g, lc, postCaps(CapFileIssue))
+			filer, _ := forge.As[forge.HostPostedIssueFiler](tr)
+			url, err := filer.PostIssue("t", "b", nil)
+			if tc.refused {
+				if !errors.Is(err, forge.ErrFiledUnusableURL) {
+					t.Errorf("err = %v, want ErrFiledUnusableURL", err)
+				}
+				return
+			}
+			if err != nil || url != tc.url {
+				t.Errorf("url, err = %q, %v; want %q", url, err, tc.url)
+			}
+		})
 	}
 }
 

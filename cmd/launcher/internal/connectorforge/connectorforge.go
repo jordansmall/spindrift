@@ -115,9 +115,10 @@ type reads struct {
 // NewReader composes c's forge for a host that reads through the Connector
 // alone: Compose's PR and branch reads with no git under it.
 // Call only those reads: Rebase fails with ErrNoGit, and the writes would
-// reach the Connector. Every PR URL must name webHost (host[:port]) exactly,
-// case-insensitively, with the port as written ("github.com:443" does not
-// match "github.com"). PR URLs sit at the host root.
+// reach the Connector. Every PR URL must name webHost (host[:port]),
+// case-insensitively; the default https port is implied ("github.com:443"
+// matches "github.com"), any other port must match exactly. PR URLs sit at
+// the host root.
 func NewReader(c *connectorhost.Connector, target Target, webHost string) (forge.CodeForge, error) {
 	return NewReaderCalling(c, c.Call, c, target, webHost)
 }
@@ -146,7 +147,7 @@ func isPRNumber(s string) bool {
 // onWebHost reports whether u is a plain https URL on the target's web host:
 // no userinfo, opaque part, query or fragment.
 func (t *reads) onWebHost(u *url.URL) bool {
-	return u.Scheme == "https" && strings.EqualFold(u.Host, t.webHost) && u.User == nil && u.Opaque == "" &&
+	return u.Scheme == "https" && forge.SameHTTPSHost(u.Host, t.webHost) && u.User == nil && u.Opaque == "" &&
 		u.RawQuery == "" && !u.ForceQuery && u.Fragment == ""
 }
 

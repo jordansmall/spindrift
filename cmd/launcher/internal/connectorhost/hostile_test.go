@@ -48,29 +48,32 @@ type guardCase struct {
 func (c guardCase) caseName() string { return c.name }
 func (c guardCase) wantErr() error   { return c.want }
 
+// roomyCallBudget is the call budget for the cases that must not exhaust it:
+// for them it is only a hang guard, and a starved aarch64 runner has pushed a
+// Go-built fixture's legitimate work past the 5 s production budget (#7561).
+const roomyCallBudget = time.Minute
+
 // runCasesPerEngine runs every case under every engine, in two serial groups
 // so no case sees a budget it did not ask for. "budget" holds the cases that
 // expect ErrBudget: it lowers the call budget to ShortCallBudget, and its
 // engines and cases run in parallel so the kills overlap instead of queueing.
-// "production" holds the rest under the production budget, which leaves their
-// legitimate work room on a loaded runner. They touch no process-global state,
-// so they run in parallel too unless overlapProduction is false: cases whose
-// legitimate work is heavy, like a Go-built fixture filling its memory cap in
-// the interpreter, starve one another past that budget when they overlap.
+// "roomy" holds the rest under roomyCallBudget, so a loaded runner cannot push
+// their legitimate work past the launcher-side budget. They touch no other
+// process-global state, so they run in parallel too unless overlapRoomy is
+// false: cases whose legitimate work is heavy, like a Go-built fixture filling
+// its memory cap in the interpreter, starve one another when they overlap.
 //
-// The budget is written only on the budget group's own goroutine. Go resumes a
+// The budget is written only on each group's own goroutine. Go resumes a
 // group's parallel children after its body returns, and a serial t.Run returns
 // only once those children and the group's Cleanup (the restore) are done, so
-// "production" starts after "budget" has fully ended.
-func runCasesPerEngine[C engineCase](t *testing.T, cases []C, overlapProduction bool, run func(t *testing.T, ld loader, c C, budget time.Duration)) {
+// "roomy" starts after "budget" has fully ended.
+func runCasesPerEngine[C engineCase](t *testing.T, cases []C, overlapRoomy bool, run func(t *testing.T, ld loader, c C, budget time.Duration)) {
 	t.Helper()
 	loaders := loadersFor(t)
 	runGroup := func(label string, budget time.Duration, exhausts bool) {
-		overlap := exhausts || overlapProduction
+		overlap := exhausts || overlapRoomy
 		t.Run(label, func(t *testing.T) {
-			if exhausts {
-				useShortCallBudget(t)
-			}
+			t.Cleanup(connectorhost.SetCallBudget(budget))
 			for engine, ld := range loaders {
 				t.Run(engine, func(t *testing.T) {
 					if overlap {
@@ -92,7 +95,7 @@ func runCasesPerEngine[C engineCase](t *testing.T, cases []C, overlapProduction 
 		})
 	}
 	runGroup("budget", connectorhost.ShortCallBudget, true)
-	runGroup("production", connectorhost.CallBudget, false)
+	runGroup("roomy", roomyCallBudget, false)
 }
 
 // The hostile fixtures are real Go-built Connectors whose connector_call

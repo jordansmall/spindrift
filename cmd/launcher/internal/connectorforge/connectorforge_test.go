@@ -135,7 +135,7 @@ func TestBranchReadsFailClosedOnAnyBadPR(t *testing.T) {
 		"foreign repo":      `{"number":"7","url":"https://github.com/x/y/pull/7","state":"open","merged":false}`,
 		"foreign host":      `{"number":"7","url":"https://attacker.example/o/r/pull/7","state":"open","merged":false}`,
 		"userinfo":          `{"number":"7","url":"https://github.com@attacker.example/o/r/pull/7","state":"open","merged":false}`,
-		"port":              `{"number":"7","url":"https://github.com:443/o/r/pull/7","state":"open","merged":false}`,
+		"port":              `{"number":"7","url":"https://github.com:8443/o/r/pull/7","state":"open","merged":false}`,
 		"trailing dot host": `{"number":"7","url":"https://github.com./o/r/pull/7","state":"open","merged":false}`,
 		"http url":          `{"number":"7","url":"http://github.com/o/r/pull/7","state":"open","merged":false}`,
 		"unknown state":     `{"number":"7","url":"https://github.com/o/r/pull/7","state":"draft","merged":false}`,
@@ -201,7 +201,7 @@ func TestPRStateFailsClosed(t *testing.T) {
 		"foreign repo":      "https://github.com/x/y/pull/7",
 		"foreign host":      "https://attacker.example/o/r/pull/7",
 		"userinfo":          "https://github.com@attacker.example/o/r/pull/7",
-		"port":              "https://github.com:443/o/r/pull/7",
+		"port":              "https://github.com:8443/o/r/pull/7",
 		"trailing dot host": "https://github.com./o/r/pull/7",
 		"issue path":        "https://github.com/o/r/issues/7",
 		"zero":              "https://github.com/o/r/pull/0",
@@ -225,6 +225,21 @@ func TestPRStateFailsClosed(t *testing.T) {
 	})
 	if got, err := f.PRState("https://github.com/O/r/pull/7"); err != nil || got != forge.PROpen {
 		t.Errorf("mixed case: got %q, %v; want OPEN", got, err)
+	}
+}
+
+func TestPRStateTreatsTheDefaultHTTPSPortAsImplied(t *testing.T) {
+	t.Parallel()
+	for name, webHost := range map[string]string{"web host without port": "github.com", "web host with port": "github.com:443"} {
+		t.Run(name, func(t *testing.T) {
+			f, _ := newTestForge(t, map[string]string{
+				"forge.pr": `{"number":"7","url":"https://github.com/o/r/pull/7","state":"open","merged":false}`,
+			})
+			f.webHost = webHost
+			if got, err := f.PRState("https://github.com:443/o/r/pull/7"); err != nil || got != forge.PROpen {
+				t.Errorf("got %q, %v; want OPEN", got, err)
+			}
+		})
 	}
 }
 
