@@ -74,7 +74,11 @@ sandbox](#connector-sandbox)); the sweep never changes its verdict.
   source because the scoped git credential belongs to it; a tracker probe
   may echo the configured name, and Jira has no slug. Skipped for push-only
   forges (`CODE_FORGE=git`, `local`), whose probe answers no repo slug
-  (issue #7467).
+  (issue #7467). On Forgejo a rename or transfer instead fails as a
+  connectivity error, not this row, because Forgejo's API answers every call
+  for the old path with a redirect (read from its source; not yet confirmed
+  against a live instance): the `issue-tracker` row names `REPO_SLUG` and the
+  `code-forge` row names the new slug.
 - `recover kind`, always ok: reports whether the daemon's recover kind is on
   (`CODE_FORGE` github or forgejo with a read-only Box, which relays the
   outbox bundle) or off, and when off, the `CODE_FORGE` and
