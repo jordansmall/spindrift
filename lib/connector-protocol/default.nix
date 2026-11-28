@@ -51,6 +51,7 @@ let
         (entry "forge.prs" "Serves the PR primitives: forge.behind, forge.prFiles, forge.setDraft, forge.comment and forge.merge.")
         (entry "forge.autoMerge" "Serves forge.autoMergeAllowed and forge.enqueueAutoMerge.")
         (entry "forge.ciRun" "Serves forge.ciRun: a PR's CI run link.")
+        (entry "forge.ciRerun" "Serves forge.rerunFailedCI (0.4.0, additive): re-runs the failed CI jobs of a PR's head commit.")
         (entry "forge.branchProtection" "Serves forge.branchProtected: whether the base branch is protected.")
         (entry "forge.probe" "Serves forge.probe: one cheap authenticated read of the repository.")
         (entry "forge.draftPRs" "Serves forge.openPR, which lets core host-mediate a read-only Box's hand-off.")

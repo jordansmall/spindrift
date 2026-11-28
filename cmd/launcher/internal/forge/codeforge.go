@@ -78,6 +78,13 @@ type CIRunReporter interface {
 	CheckRun(url string) (RollupState, string, error)
 }
 
+// CIRerunner is the optional interface for a PRForge that can re-run the
+// failed CI jobs behind a PR's head commit (the optional `forge.ciRerun` capability, issue #6730).
+type CIRerunner interface {
+	// RerunFailedCI re-runs the failed jobs of the PR's head-commit CI runs.
+	RerunFailedCI(url string) error
+}
+
 // PRForge is the optional PR, CI-rollup, and auto-merge interface. Only adapters
 // that open pull requests and watch CI implement it (github, forgejo); the
 // push-only git adapter does not. Callers discover it with a type assertion.

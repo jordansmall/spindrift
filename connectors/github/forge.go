@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"net/url"
+	"path"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -228,6 +230,28 @@ func checks(t forge.Target, number string) (forge.Rollup, error) {
 // path.
 var runURLRE = regexp.MustCompile(`^https://([^/]+)/([^/]+/[^/]+)(/actions/runs/\d+)(?:/job/\d+)?/?$`)
 
+// runMatch is the runURLRE match for a CheckRun of the target repo on the PR's
+// own host, nil for any other context: a third-party App's check, a run of
+// another repo, or one on another host.
+func runMatch(c rawContext, host, repo string) []string {
+	if c.Typename != "CheckRun" {
+		return nil
+	}
+	m := runURLRE.FindStringSubmatch(deref(c.DetailsURL))
+	if m == nil || !strings.EqualFold(m[1], host) || !strings.EqualFold(m[2], repo) {
+		return nil
+	}
+	return m
+}
+
+// hostOf is the host of a PR URL, or "" when it does not parse.
+func hostOf(prURL string) string {
+	if p, err := url.Parse(prURL); err == nil {
+		return p.Host
+	}
+	return ""
+}
+
 // ciRun is the URL of the head commit's Actions run: the first run with a
 // CheckRun still not COMPLETED, else the first run, so the link follows live
 // work rather than a finished sibling workflow. Only runs of the target repo on
@@ -239,17 +263,11 @@ func ciRun(t forge.Target, number string) (string, error) {
 	if err != nil || roll == nil {
 		return "", err
 	}
-	var host string
-	if p, err := url.Parse(prURL); err == nil {
-		host = p.Host
-	}
+	host := hostOf(prURL)
 	var first string
 	for _, c := range roll.Contexts.Nodes {
-		if c.Typename != "CheckRun" {
-			continue
-		}
-		m := runURLRE.FindStringSubmatch(deref(c.DetailsURL))
-		if m == nil || !strings.EqualFold(m[1], host) || !strings.EqualFold(m[2], t.Repo) {
+		m := runMatch(c, host, t.Repo)
+		if m == nil {
 			continue
 		}
 		run := "https://" + m[1] + "/" + m[2] + m[3]
@@ -261,6 +279,55 @@ func ciRun(t forge.Target, number string) (string, error) {
 		}
 	}
 	return first, nil
+}
+
+// rerunConclusions are the CheckRun conclusions a re-run can cure.
+// ACTION_REQUIRED is left out: it waits on an approval a re-run does not give.
+var rerunConclusions = map[string]bool{
+	"FAILURE": true, "TIMED_OUT": true, "CANCELLED": true, "STARTUP_FAILURE": true,
+}
+
+// rerunFailedCI re-runs the failed jobs of every Actions run behind a failed
+// CheckRun on the head commit, once per run however many of its jobs failed.
+// With no such run it errors, so core treats the attempt as not made. A failed
+// POST does not stop the rest, and any one that succeeds counts as a re-run:
+// it errors on a POST only when none succeeded, returning the first failure.
+func rerunFailedCI(t forge.Target, number string) error {
+	roll, prURL, err := readRollup(t, number)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	if roll != nil {
+		host := hostOf(prURL)
+		for _, c := range roll.Contexts.Nodes {
+			m := runMatch(c, host, t.Repo)
+			if m == nil || !rerunConclusions[c.Conclusion] {
+				continue
+			}
+			if id := path.Base(m[3]); !slices.Contains(ids, id) {
+				ids = append(ids, id)
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return fmt.Errorf("no failed Actions run to re-run on the head commit of %s#%s", t.Repo, number)
+	}
+	var first error
+	posted := false
+	for _, id := range ids {
+		if _, err := send("POST", t.API, forgePath(t, "/actions/runs/"+id+"/rerun-failed-jobs"), nil, nil); err != nil {
+			if first == nil {
+				first = err
+			}
+			continue
+		}
+		posted = true
+	}
+	if posted {
+		return nil
+	}
+	return first
 }
 
 // jobPathRE matches the path of a workflow job's web page, the detailsUrl of a

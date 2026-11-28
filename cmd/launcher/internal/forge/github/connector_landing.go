@@ -238,6 +238,18 @@ func checkRoutedMergeMethod(method string) error {
 	return nil
 }
 
+// rerunFailedCI re-runs the failed CI jobs of the PR's head commit; the
+// forge view lacks the optional re-runner when the Connector does not declare
+// forge.ciRerun.
+func (e *execClient) rerunFailedCI(row backendrows.Row, prURL string) error {
+	return e.forgeWrite(row, "re-run a PR's failed CI", func(_ forge.CodeForge, caps forge.Capabilities) error {
+		if caps.CIRerunner == nil {
+			return fmt.Errorf("%w: forge.ciRerun", errNoCapability)
+		}
+		return caps.CIRerunner.RerunFailedCI(prURL)
+	})
+}
+
 // merge merges the PR, then deletes its head branch as gh's
 // --delete-branch does. The delete is best effort: the PR has landed by then,
 // and failing the merge would turn it into a failed settle. A head already gone

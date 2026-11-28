@@ -155,6 +155,15 @@ func TestFake_DoesNotImplementCIRunReporter(t *testing.T) {
 	}
 }
 
+// RerunFake is a wrapper precisely so the plain Fake stays a forge with no
+// CIRerunner capability, like forgejo.
+func TestFake_DoesNotImplementCIRerunner(t *testing.T) {
+	f := forge.NewFake()
+	if _, ok := any(f).(forge.CIRerunner); ok {
+		t.Fatal("bare *Fake unexpectedly satisfies CIRerunner")
+	}
+}
+
 // The read-only issue-filing relay (issue #2018) is reachable only through
 // the AsIssueFiler wrapper, matching createDraftPR's AsGithub-only
 // restriction.

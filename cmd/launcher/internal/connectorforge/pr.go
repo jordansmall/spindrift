@@ -39,6 +39,9 @@ func composePR(p *pushOnly, caps []string, webHost, webPath string) forge.CodeFo
 		autoMerge: slices.Contains(caps, capAutoMerge),
 	}
 	var cf forge.CodeForge = f
+	if slices.Contains(caps, capCIRerun) {
+		cf = ciRerunLayer{cf, f}
+	}
 	if slices.Contains(caps, capCIRun) {
 		cf = ciRunLayer{cf, f}
 	}
@@ -58,6 +61,10 @@ func composePR(p *pushOnly, caps []string, webHost, webPath string) forge.CodeFo
 // type assertion.
 type (
 	ciRunLayer struct {
+		forge.CodeForge
+		f *prForge
+	}
+	ciRerunLayer struct {
 		forge.CodeForge
 		f *prForge
 	}
@@ -82,6 +89,7 @@ type (
 )
 
 func (l ciRunLayer) UnwrapCodeForge() forge.CodeForge      { return l.CodeForge }
+func (l ciRerunLayer) UnwrapCodeForge() forge.CodeForge    { return l.CodeForge }
 func (l protectionLayer) UnwrapCodeForge() forge.CodeForge { return l.CodeForge }
 func (l draftPRLayer) UnwrapCodeForge() forge.CodeForge    { return l.CodeForge }
 func (l relayLayer) UnwrapCodeForge() forge.CodeForge      { return l.CodeForge }
@@ -96,6 +104,10 @@ func (l relayLayer) CommitSubjects(outboxDir, base, ref string) ([]string, error
 
 func (l ciRunLayer) CheckRun(prURL string) (forge.RollupState, string, error) {
 	return l.f.checkRun(prURL)
+}
+
+func (l ciRerunLayer) RerunFailedCI(prURL string) error {
+	return l.f.numbered("forge.rerunFailedCI", prURL, nil)
 }
 
 func (l protectionLayer) BranchProtected(branch string) (bool, error) {

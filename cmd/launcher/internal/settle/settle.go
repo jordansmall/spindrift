@@ -146,6 +146,8 @@ type Settle struct {
 	landingPass forge.LandingPassRecorder
 	// ciRun is nil for forges that cannot report a CI run URL.
 	ciRun forge.CIRunReporter
+	// ciRerun is nil for forges that cannot re-run failed CI jobs.
+	ciRerun forge.CIRerunner
 	// Every CI-watch, fix-pass and merge-gate checkpoint checks term, so a
 	// Reclaim mid-settle (ADR 0024, issue #649) abandons the settle instead of
 	// corrupting state it already reclaimed. Written once in New, so readers
@@ -195,6 +197,7 @@ func New(cfg Config, it forge.IssueTracker, cf forge.CodeForge) *Settle {
 	landing := cfg.Capabilities.LandingRecorder
 	landingPass := cfg.Capabilities.LandingPassRecorder
 	ciRun := cfg.Capabilities.CIRunReporter
+	ciRerun := cfg.Capabilities.CIRerunner
 	cfForNum := cfg.CodeForgeForIssue
 	if cfForNum == nil {
 		cfForNum = func(string) forge.CodeForge { return cf }
@@ -206,7 +209,7 @@ func New(cfg Config, it forge.IssueTracker, cf forge.CodeForge) *Settle {
 	if clock.Sleep == nil {
 		clock = dispatch.RealClock()
 	}
-	s := &Settle{cfg: cfg, it: it, cf: cf, pr: pr, landing: landing, landingPass: landingPass, ciRun: ciRun, cfForNum: cfForNum, clock: clock, term: terminate.NewRegistry()}
+	s := &Settle{cfg: cfg, it: it, cf: cf, pr: pr, landing: landing, landingPass: landingPass, ciRun: ciRun, ciRerun: ciRerun, cfForNum: cfForNum, clock: clock, term: terminate.NewRegistry()}
 	if pr != nil {
 		s.lander = prLander{s}
 	} else {

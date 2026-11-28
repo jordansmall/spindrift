@@ -33,6 +33,7 @@ const (
 	StatusAlreadyInFlight          Status = "already-in-flight"
 	StatusFixFailed                Status = "fix-failed"
 	StatusFixNoOp                  Status = "fix-no-op"
+	StatusCIRerun                  Status = "ci-rerun"
 	StatusRelayFailed              Status = "relay-failed"
 	StatusFixRelayFailed           Status = "fix-relay-failed"
 	StatusFixExhausted             Status = "fix-exhausted"

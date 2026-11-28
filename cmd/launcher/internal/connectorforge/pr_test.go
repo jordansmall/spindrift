@@ -277,7 +277,7 @@ func TestClassifyDoesNotRetryNonIdempotentWrites(t *testing.T) {
 		}
 	}
 	for method, wantCalls := range map[string]int{
-		"forge.merge": 1, "forge.openPR": 1, "forge.comment": 1, "forge.pr": connectorcall.Attempts, "forge.setDraft": connectorcall.Attempts,
+		"forge.merge": 1, "forge.rerunFailedCI": 1, "forge.openPR": 1, "forge.comment": 1, "forge.pr": connectorcall.Attempts, "forge.setDraft": connectorcall.Attempts,
 	} {
 		calls := 0
 		call := connectorcall.Classify(func(context.Context, string, any, any) error {
@@ -317,18 +317,38 @@ func TestCanAutoMergeNeedsTheCapability(t *testing.T) {
 	}
 }
 
+func TestRerunFailedCIIssuesTheNumberedCallAndPassesTheErrorThrough(t *testing.T) {
+	t.Parallel()
+	h := newPRHarness(t, []string{capCIRerun}, map[string]any{"forge.rerunFailedCI": `{}`})
+	if err := h.caps.CIRerunner.RerunFailedCI(prURL7); err != nil {
+		t.Fatalf("RerunFailedCI: %v", err)
+	}
+	if !slices.Equal(h.calls, []string{"forge.rerunFailedCI"}) {
+		t.Errorf("calls = %v, want one forge.rerunFailedCI", h.calls)
+	}
+
+	h = newPRHarness(t, []string{capCIRerun}, map[string]any{"forge.rerunFailedCI": classed(connectorhost.Transient)})
+	err := h.caps.CIRerunner.RerunFailedCI(prURL7)
+	if connectorhost.ErrorClass(err) != connectorhost.Transient {
+		t.Errorf("RerunFailedCI = %v, want the transient error unchanged", err)
+	}
+}
+
 func TestOptionalSurfacesFollowTheCapabilities(t *testing.T) {
 	t.Parallel()
 	h := newPRHarness(t, nil, nil)
 	if h.caps.PRForge == nil || h.caps.BranchDeleter == nil || h.caps.MergeCommitReader == nil {
 		t.Errorf("base capabilities missing: %+v", h.caps)
 	}
-	if h.caps.CIRunReporter != nil || h.caps.BranchProtectionForge != nil || h.caps.DraftPRCreator != nil || h.caps.BranchPusher != nil {
+	if h.caps.CIRunReporter != nil || h.caps.CIRerunner != nil || h.caps.BranchProtectionForge != nil || h.caps.DraftPRCreator != nil || h.caps.BranchPusher != nil {
 		t.Errorf("undeclared surfaces present: %+v", h.caps)
 	}
 
 	if h := newPRHarness(t, []string{capCIRun}, nil); h.caps.CIRunReporter == nil || h.caps.BranchProtectionForge != nil {
 		t.Errorf("forge.ciRun alone resolved %+v", h.caps)
+	}
+	if h := newPRHarness(t, []string{capCIRerun}, nil); h.caps.CIRerunner == nil || h.caps.CIRunReporter != nil {
+		t.Errorf("forge.ciRerun alone resolved %+v", h.caps)
 	}
 	if h := newPRHarness(t, []string{capBranchProtection}, nil); h.caps.CIRunReporter != nil || h.caps.BranchProtectionForge == nil {
 		t.Errorf("forge.branchProtection alone resolved %+v", h.caps)

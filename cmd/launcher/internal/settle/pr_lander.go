@@ -108,8 +108,11 @@ func (s prLander) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr
 	// the failure comment; non-zero also tells gateRedRetry that this red
 	// follows such a fix pass.
 	forcePushFixes := 0
+	// rerunHead is the head whose failed CI jobs were re-run, so one head draws
+	// one re-run; justRerun marks the gate that follows it.
+	rerunHead, justRerun := "", false
 	for attempt := 0; ; attempt++ {
-		obs, gateReason := s.gateToGreen(num, gen, pr, requireRegistration && attempt == 0)
+		obs, gateReason := s.gateToGreen(num, gen, pr, gateOpts{requireRegistration: requireRegistration && attempt == 0, afterRerun: justRerun})
 		// A Reclaim mark already released num back to Dispatchable, so no
 		// arm past this point may commit tracker state or dispatch further
 		// work for num (issue #3523).
@@ -162,9 +165,11 @@ func (s prLander) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr
 						return landingFailed, "", errAbandoned
 					}
 					s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusPostForcePushRed})
-					if fs := s.fixPass(d, num, gen, pr, attempt); fs.stop {
+					fs := s.fixPass(d, num, gen, pr, attempt, rerunHead)
+					if fs.stop {
 						return fs.landing, fs.note, fs.err
 					}
+					rerunHead, justRerun = fs.nextRerunState(rerunHead)
 					forcePushFixes++
 					continue
 				}
@@ -230,9 +235,11 @@ func (s prLander) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr
 				s.transitionState(num, ForReason(exhaustedReason), reason)
 				return landingFailed, reason, nil
 			}
-			if fs := s.fixPass(d, num, gen, pr, attempt); fs.stop {
+			fs := s.fixPass(d, num, gen, pr, attempt, rerunHead)
+			if fs.stop {
 				return fs.landing, fs.note, fs.err
 			}
+			rerunHead, justRerun = fs.nextRerunState(rerunHead)
 			if forcePushFixes > 0 {
 				forcePushFixes++
 			}
@@ -289,18 +296,31 @@ func (s prLander) fixBudgetNote(attempt, forcePushFixes int) string {
 
 // fixStop is fixPass's verdict: when stop is set, selfHealGate must return the
 // given landing, note and err (errAbandoned when a stop landed) instead of
-// re-polling.
+// re-polling. A non-empty rerunHead means the pass pushed nothing and CI's
+// failed jobs were re-run at that head instead of stopping.
 type fixStop struct {
-	landing landingResult
-	note    string
-	err     error
-	stop    bool
+	landing   landingResult
+	note      string
+	err       error
+	stop      bool
+	rerunHead string
+}
+
+// nextRerunState returns the next (rerunHead, justRerun) given the prior
+// rerunHead: this pass's head when it re-ran CI, else prev unchanged.
+func (f fixStop) nextRerunState(prev string) (head string, justRerun bool) {
+	if f.rerunHead != "" {
+		return f.rerunHead, true
+	}
+	return prev, false
 }
 
 // fixPass runs one red-CI fix pass for attempt (zero-based).
 // Both genuine red before a merge and genuine red after an immediate-mode
 // force-push (issue #5095) come through here, so they share one attempt counter.
-func (s prLander) fixPass(d dispatch.Dispatcher, num string, gen uint64, pr string, attempt int) fixStop {
+// rerunHead is the head a CI re-run already covered: a no-op at that head is
+// final, while a no-op at a new one earns one re-run before giving up.
+func (s prLander) fixPass(d dispatch.Dispatcher, num string, gen uint64, pr string, attempt int, rerunHead string) fixStop {
 	// The budget caps (issue #2001) stop a runaway token or cost run
 	// even while MaxFixAttempts would still allow more passes. Both
 	// knobs unset skips the check, so the no-cap path never pays
@@ -402,8 +422,25 @@ func (s prLander) fixPass(d dispatch.Dispatcher, num string, gen uint64, pr stri
 				if s.terminated(num, gen) {
 					return fixStop{landing: landingFailed, err: errAbandoned, stop: true}
 				}
-				s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusFixNoOp, Detail: fmt.Sprintf("!! fix pass %d produced no new commit — aborting self-heal", attempt+1)})
-				s.it.Comment(num, fmt.Sprintf("fix pass %d produced no new commit — aborting self-heal", attempt+1))
+				// A no-op fix pass on a red PR is often a CI infrastructure
+				// flake the Box cannot change, so re-run the failed jobs once
+				// per head before giving up. A forge that refuses (403/404)
+				// falls through to the abort, naming the error.
+				msg := fmt.Sprintf("fix pass %d produced no new commit", attempt+1)
+				if s.ciRerun != nil {
+					if rerunHead == headBefore {
+						msg += " after CI was already re-run once at this head"
+					} else if err := s.ciRerun.RerunFailedCI(pr); err != nil {
+						msg += fmt.Sprintf(" and re-running failed CI jobs failed: %v", err)
+					} else {
+						msg += "; re-running failed CI jobs once"
+						s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusCIRerun, Detail: "~~ " + msg})
+						s.it.Comment(num, msg)
+						return fixStop{rerunHead: headBefore}
+					}
+				}
+				s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusFixNoOp, Detail: "!! " + msg + " — aborting self-heal"})
+				s.it.Comment(num, msg+" — aborting self-heal")
 				note := fmt.Sprintf("fix-no-op: fix pass %d produced no new commit", attempt+1)
 				s.transitionState(num, ForReason(dispatchrecord.ReasonFixNoOp), note)
 				return fixStop{landing: landingFailed, note: note, stop: true}
@@ -413,19 +450,29 @@ func (s prLander) fixPass(d dispatch.Dispatcher, num string, gen uint64, pr stri
 	return fixStop{}
 }
 
+// gateOpts tunes how gateToGreen trusts its first reads.
+type gateOpts struct {
+	requireRegistration bool
+	afterRerun          bool
+}
+
 // gateToGreen polls CheckState until confirmed SUCCESS, terminal failure, or
 // MergePollTimeout, swapping no labels: it re-runs mid-landing, so the caller
-// owns agent-complete (issue #757). requireRegistration refuses a first-poll
-// SUCCESS inherited from an earlier attempt until a non-terminal state proves
-// this run's checks are alive (#1652), bounded by registrationWindow (#2475).
-func (s prLander) gateToGreen(num string, gen uint64, pr string, requireRegistration bool) (watchObservation, string) {
+// owns agent-complete (issue #757). opts.requireRegistration refuses a
+// first-poll SUCCESS inherited from an earlier attempt until a non-terminal
+// state proves this run's checks are alive (#1652), bounded by
+// registrationWindow (#2475). opts.afterRerun holds the same trust back from a
+// FAILURE instead, since a CI re-run keeps the head SHA and the rollup may not
+// have reset yet.
+func (s prLander) gateToGreen(num string, gen uint64, pr string, opts gateOpts) (watchObservation, string) {
 	key := s.keyFor(num)
 	report.CIWait(key, pr, "")
 	deadline := s.cfg.MergePollTimeout
 	w := watch{
 		pollInterval:        s.cfg.MergePollInterval,
 		deadline:            deadline,
-		requireRegistration: requireRegistration,
+		requireRegistration: opts.requireRegistration,
+		distrustRed:         opts.afterRerun,
 		clock:               s.clock,
 	}
 	checkState := func() (forge.RollupState, error) { return s.pr.CheckState(pr) }
@@ -465,7 +512,7 @@ func (s prLander) gateToGreen(num string, gen uint64, pr string, requireRegistra
 		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusCheckStateError, Detail: fmt.Sprintf("!! %v", obs.err)})
 		return obs, gateTerminalReason(obs.err, deadline)
 	}
-	if requireRegistration && !obs.sawNonTerminal {
+	if opts.requireRegistration && !obs.sawNonTerminal {
 		// The deadline passed with no genuine evidence for the
 		// requireRegistration guard, only registrationWindow's elapsed
 		// fallback, so name that reason separately from the generic
@@ -828,7 +875,7 @@ func (s prLander) resolveConflict(num string, gen uint64, pr string, d dispatch.
 // re-entered for it.
 func (s prLander) rewaitAfterForcePush(num string, gen uint64, pr string) error {
 	s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusPostForcePushWait})
-	obs, gReason := s.gateToGreen(num, gen, pr, false)
+	obs, gReason := s.gateToGreen(num, gen, pr, gateOpts{})
 	if errors.Is(obs.err, errAbandoned) {
 		return errAbandoned
 	}

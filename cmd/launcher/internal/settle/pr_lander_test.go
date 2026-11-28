@@ -104,6 +104,7 @@ type prCase struct {
 	wantDeclined   bool     // Recover returns its Settlement before Begin claims the issue
 	wantPRClosed   bool     // the settled reason leaves no open PR although nothing merged
 	wantFixes      int      // fix passes dispatched
+	wantReruns     int      // CI re-run calls on a rerun forge
 	wantResolves   int      // conflict-resolve Boxes dispatched
 	wantRebases    int      // Rebase calls on the forge
 	wantStderr     []string // substring each of stderr must hold; non-nil empty means silent; stderr uncaptured when nil
@@ -113,6 +114,8 @@ type prCase struct {
 	wantClosed     []string // MergeCloser's CloseMergedIssueCalls; unchecked when nil, non-nil empty means none
 	wantStepsLike  []Step   // steps by Key, Landing, Status and a Detail substring
 	runURLs        []string // the CI run URL each successive check poll reports; non-nil makes the forge a run URL reporter
+	rerun          bool     // makes the forge a CIRerunner
+	rerunErr       error    // what the re-run call returns
 	wantCIWaits    []string // RunURL of each ci_wait record, in order; the records are unobserved when nil
 }
 
@@ -361,6 +364,12 @@ func TestSettle_PRLander(t *testing.T) {
 			c.Progress = rec
 			fc := forge.NewFake(testDispatchLabels)
 			var runURLForge *forge.RunURLFake
+			var rerunForge *forge.RerunFake
+			if tc.rerun {
+				rerunForge = forge.NewRerunFake(testDispatchLabels)
+				rerunForge.SetRerunErr(tc.rerunErr)
+				fc = rerunForge.Fake
+			}
 			if tc.runURLs != nil {
 				runURLForge = forge.NewRunURLFake(testDispatchLabels)
 				fc = runURLForge.Fake
@@ -404,6 +413,9 @@ func TestSettle_PRLander(t *testing.T) {
 			tracker, cf := tc.shape.build(fc)
 			if runURLForge != nil {
 				cf = roRunURL{runURLForge}
+			}
+			if rerunForge != nil {
+				cf = roRerun{rerunForge}
 			}
 			if tc.pinned != nil {
 				tc.pinned.Fake = fc
@@ -484,6 +496,9 @@ func TestSettle_PRLander(t *testing.T) {
 			}
 			if len(d.FixCalls) != tc.wantFixes {
 				t.Errorf("fix passes = %+v, want %d", d.FixCalls, tc.wantFixes)
+			}
+			if rerunForge != nil && len(rerunForge.Reruns()) != tc.wantReruns {
+				t.Errorf("CI re-runs = %v, want %d", rerunForge.Reruns(), tc.wantReruns)
 			}
 			if len(d.ResolveConflictCalls) != tc.wantResolves {
 				t.Errorf("conflict-resolves = %+v, want %d", d.ResolveConflictCalls, tc.wantResolves)

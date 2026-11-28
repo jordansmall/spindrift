@@ -75,7 +75,7 @@ func TestInternalSeam_Registry_StableHandleIsWhatCheckpointsRead(t *testing.T) {
 	}
 	s.Registry().Mark("1")
 
-	got, _ := prLander{s}.gateToGreen("1", 0, testPR, false)
+	got, _ := prLander{s}.gateToGreen("1", 0, testPR, gateOpts{})
 
 	if !errors.Is(got.err, errAbandoned) {
 		t.Errorf("gateToGreen = %v (err %v), want errAbandoned", got.outcome, got.err)

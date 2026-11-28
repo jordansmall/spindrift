@@ -1491,6 +1491,28 @@
         "type": "object"
       }
     },
+    "forge.rerunFailedCI": {
+      "capability": "forge.ciRerun",
+      "params": {
+        "additionalProperties": false,
+        "properties": {
+          "number": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/$defs/target"
+          }
+        },
+        "required": [
+          "number",
+          "target"
+        ],
+        "type": "object"
+      },
+      "result": {
+        "type": "object"
+      }
+    },
     "forge.setDraft": {
       "capability": "forge.prs",
       "params": {

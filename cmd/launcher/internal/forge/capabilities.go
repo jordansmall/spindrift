@@ -16,6 +16,7 @@ type Capabilities struct {
 	LandingContainmentQuery LandingContainmentQuery
 	PRForge                 PRForge
 	CIRunReporter           CIRunReporter
+	CIRerunner              CIRerunner
 	DraftPRCreator          DraftPRCreator
 	BranchPusher            BranchPusher
 	BranchDeleter           BranchDeleter
@@ -71,6 +72,7 @@ func ResolveCodeForge(cf CodeForge) Capabilities {
 	c.LandingContainmentQuery, _ = AsCodeForge[LandingContainmentQuery](cf)
 	c.PRForge, _ = AsCodeForge[PRForge](cf)
 	c.CIRunReporter, _ = AsCodeForge[CIRunReporter](cf)
+	c.CIRerunner, _ = AsCodeForge[CIRerunner](cf)
 	c.DraftPRCreator, _ = AsCodeForge[DraftPRCreator](cf)
 	c.BranchPusher, _ = AsCodeForge[BranchPusher](cf)
 	c.BranchDeleter, _ = AsCodeForge[BranchDeleter](cf)

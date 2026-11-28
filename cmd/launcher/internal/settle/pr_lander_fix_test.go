@@ -65,6 +65,8 @@ func fixCases() []prCase {
 		fc.RelayBundleErrs = []error{nil}
 	}
 	unmoved := []string{"sha-1", "sha-1", "sha-1", "sha-1"}
+	conflicted := []string{"MarkReady:" + testPR, "Merge:" + testPR, "MarkDraft:" + testPR}
+	afterForcePush := slices.Concat(conflicted, []string{"MarkReady:" + testPR, "Merge:" + testPR})
 	fixFailed := settledAs(dispatchrecord.ReasonFixFailed, "fix-failed: fix pass 1 exited non-zero")
 	failedComment := []string{"fix pass 1 exited non-zero — aborting self-heal"}
 	noOpComment := []string{"fix pass 1 produced no new commit — aborting self-heal"}
@@ -224,6 +226,109 @@ func fixCases() []prCase {
 					t.Errorf("clock sleeps = %v, want %v (no-op-confirm pause must sleep through the clock)", *sleeps, want)
 				}
 			},
+		},
+		// The cases below run on a forge that can re-run failed CI jobs; the
+		// plain-Fake no-op case above is the forge without that capability.
+		{
+			name: "a no-op fix pass re-runs failed CI once and merges when the re-run goes green", maxFix: 3, rerun: true,
+			// The second red is the pre-re-run rollup, which the post-re-run gate must not trust.
+			checks:       []forge.RollupState{red, red, forge.StatePending, green, green},
+			wantStatuses: []Status{detailOnly, detailOnly, StatusCIRerun, StatusVerifiedMerged},
+			setup:        func(_ *testing.T, fc *forge.Fake, _ *Config) { fc.SetHeadCommitSHAs(testPR, unmoved[:3]) },
+			want:         merged, wantLabels: complete, wantMerged: testPR, wantCalls: flipThenMerge, wantFixes: 1, wantReruns: 1,
+			wantSteps:    []Step{stepAt(testPR, StatusCIRerun, "~~ fix pass 1 produced no new commit; re-running failed CI jobs once")},
+			wantComments: []string{"fix pass 1 produced no new commit; re-running failed CI jobs once"},
+		},
+		{
+			name: "a re-run does not draw on the fix budget", maxFix: 1, rerun: true,
+			checks:       []forge.RollupState{red, forge.StatePending, green, green},
+			wantStatuses: []Status{detailOnly, detailOnly, StatusCIRerun, StatusVerifiedMerged},
+			setup:        func(_ *testing.T, fc *forge.Fake, _ *Config) { fc.SetHeadCommitSHAs(testPR, unmoved[:3]) },
+			want:         merged, wantLabels: complete, wantMerged: testPR, wantCalls: flipThenMerge, wantFixes: 1, wantReruns: 1,
+			wantComments: []string{"re-running failed CI jobs once"},
+		},
+		{
+			// Pass 1 (no-op) plus its re-run cost one slot, leaving pass 2 the last.
+			name: "a re-run costs no fix slot beyond its own no-op pass", maxFix: 2, rerun: true,
+			checks:       []forge.RollupState{red, forge.StatePending, red, green, green},
+			wantStatuses: []Status{detailOnly, detailOnly, StatusCIRerun, detailOnly, StatusVerifiedMerged},
+			setup: func(_ *testing.T, fc *forge.Fake, _ *Config) {
+				fc.SetHeadCommitSHAs(testPR, []string{"sha-1", "sha-1", "sha-1", "sha-1", "sha-2"})
+			},
+			want: merged, wantLabels: complete, wantMerged: testPR, wantCalls: flipThenMerge, wantFixes: 2, wantReruns: 1,
+			wantComments: []string{"re-running failed CI jobs once"},
+		},
+		{
+			name: "a red after the re-run draws a real fix pass", maxFix: 3, rerun: true,
+			checks:       []forge.RollupState{red, forge.StatePending, red, green, green},
+			wantStatuses: []Status{detailOnly, detailOnly, StatusCIRerun, detailOnly, StatusVerifiedMerged},
+			setup: func(_ *testing.T, fc *forge.Fake, _ *Config) {
+				fc.SetHeadCommitSHAs(testPR, []string{"sha-1", "sha-1", "sha-1", "sha-1", "sha-2"})
+			},
+			want: merged, wantLabels: complete, wantMerged: testPR, wantCalls: flipThenMerge, wantFixes: 2, wantReruns: 1,
+			wantComments: []string{"re-running failed CI jobs once"},
+		},
+		{
+			name: "a second no-op at the re-run head ends fix-no-op without another re-run", maxFix: 3, rerun: true,
+			checks:       []forge.RollupState{red, forge.StatePending, red, red},
+			wantStatuses: []Status{detailOnly, detailOnly, StatusCIRerun, detailOnly, StatusFixNoOp, StatusFailed},
+			setup: func(_ *testing.T, fc *forge.Fake, _ *Config) {
+				fc.SetHeadCommitSHAs(testPR, slices.Repeat([]string{"sha-1"}, 6))
+			},
+			want:         settledAs(dispatchrecord.ReasonFixNoOp, "fix-no-op: fix pass 2 produced no new commit"),
+			wantPRClosed: true, wantLabels: failed, wantNoLabels: complete, wantFixes: 2, wantReruns: 1,
+			wantComments: []string{
+				"re-running failed CI jobs once",
+				"fix pass 2 produced no new commit after CI was already re-run once at this head — aborting self-heal",
+			},
+		},
+		{
+			name: "a re-run the forge refuses ends fix-no-op naming the error", maxFix: 3, rerun: true, rerunErr: errors.New("HTTP 403"),
+			checks:       reds,
+			wantStatuses: []Status{detailOnly, detailOnly, StatusFixNoOp, StatusFailed},
+			setup:        func(_ *testing.T, fc *forge.Fake, _ *Config) { fc.SetHeadCommitSHAs(testPR, unmoved[:3]) },
+			want:         fixNoOp, wantPRClosed: true, wantLabels: failed, wantNoLabels: complete, wantFixes: 1, wantReruns: 1,
+			wantSteps:    []Step{stepAt(testPR, StatusFixNoOp, "!! fix pass 1 produced no new commit and re-running failed CI jobs failed: HTTP 403 — aborting self-heal")},
+			wantComments: []string{"fix pass 1 produced no new commit and re-running failed CI jobs failed: HTTP 403 — aborting self-heal"},
+		},
+		{
+			// The force-pushed head's first fix pass pushes nothing: the re-run's
+			// gate must not take the stale red that read first as a verdict.
+			name:         "a no-op fix pass on a red force-pushed head re-runs CI and merges when it goes green",
+			wantStatuses: []Status{detailOnly, StatusRebaseRetry, StatusPostForcePushWait, StatusPostForcePushRed, detailOnly, StatusCIRerun, StatusVerifiedMerged},
+			maxRebase:    3, maxFix: 2, rerun: true, mergeErrs: []error{forge.ErrMergeConflict},
+			checks: []forge.RollupState{green, green, red, red, forge.StatePending, green, green},
+			setup:  func(_ *testing.T, fc *forge.Fake, _ *Config) { fc.SetHeadCommitSHAs(testPR, unmoved[:3]) },
+			want:   merged, wantLabels: complete, wantNoLabels: failed, wantMerged: testPR, wantCalls: afterForcePush,
+			wantComments: []string{"fix pass 1 produced no new commit; re-running failed CI jobs once"},
+			wantFixes:    1, wantRebases: 1, wantReruns: 1,
+		},
+		{
+			name:         "a second no-op on the re-run force-pushed head ends fix-no-op without another re-run",
+			wantStatuses: []Status{detailOnly, StatusRebaseRetry, StatusPostForcePushWait, StatusPostForcePushRed, detailOnly, StatusCIRerun, detailOnly, StatusFixNoOp, StatusFailed},
+			maxRebase:    3, maxFix: 3, rerun: true, mergeErrs: []error{forge.ErrMergeConflict},
+			checks: []forge.RollupState{green, green, red, red, forge.StatePending, red},
+			setup: func(_ *testing.T, fc *forge.Fake, _ *Config) {
+				fc.SetHeadCommitSHAs(testPR, slices.Repeat([]string{"sha-1"}, 6))
+			},
+			want:         settledAs(dispatchrecord.ReasonFixNoOp, "fix-no-op: fix pass 2 produced no new commit"),
+			wantPRClosed: true, wantLabels: failed, wantNoLabels: complete, wantCalls: conflicted,
+			wantComments: []string{
+				"re-running failed CI jobs once",
+				"fix pass 2 produced no new commit after CI was already re-run once at this head — aborting self-heal",
+			},
+			wantFixes: 2, wantRebases: 1, wantReruns: 1,
+		},
+		{
+			name:         "a force-pushed head still red after its re-run reports the fix budget spent",
+			wantStatuses: []Status{detailOnly, StatusRebaseRetry, StatusPostForcePushWait, StatusPostForcePushRed, detailOnly, StatusCIRerun, StatusLandingFailed, StatusFailed},
+			maxRebase:    3, maxFix: 1, rerun: true, mergeErrs: []error{forge.ErrMergeConflict},
+			checks:       []forge.RollupState{green, green, red, red, forge.StatePending, red},
+			setup:        func(_ *testing.T, fc *forge.Fake, _ *Config) { fc.SetHeadCommitSHAs(testPR, unmoved[:3]) },
+			want:         settledAs(dispatchrecord.ReasonLandingFailed, "settle: force-pushed head never went green: CI went red after force-push on "+testPR),
+			wantPRClosed: true, wantLabels: failed, wantNoLabels: complete, wantCalls: conflicted,
+			wantComments: []string{"re-running failed CI jobs once", "fix budget exhausted (1 of 1 fix pass(es) used, 1 on the force-pushed head) — no green PR"},
+			wantFixes:    1, wantRebases: 1, wantReruns: 1,
 		},
 		{
 			name: "a stale head read right after the fix is confirmed against a re-read", maxFix: 3, checks: redGreen,

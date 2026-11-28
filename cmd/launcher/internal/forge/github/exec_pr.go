@@ -106,6 +106,15 @@ func (e *execClient) CheckRun(url string) (forge.RollupState, string, error) {
 	return e.checkRun(row, url)
 }
 
+// RerunFailedCI implements forge.CIRerunner.
+func (e *execClient) RerunFailedCI(url string) error {
+	row, err := routeRow(e.connectors)
+	if err != nil {
+		return err
+	}
+	return e.rerunFailedCI(row, url)
+}
+
 // HeadCommitSHA returns the PR's current head commit SHA.
 func (e *execClient) HeadCommitSHA(url string) (string, error) {
 	row, err := routeRow(e.connectors)
@@ -391,4 +400,5 @@ var _ forge.MirrorSeeder = (*execClient)(nil)
 var _ forge.BranchDeleter = (*execClient)(nil)
 var _ forge.DraftPRCreator = (*execClient)(nil)
 var _ forge.CIRunReporter = (*execClient)(nil)
+var _ forge.CIRerunner = (*execClient)(nil)
 var _ forge.MergeCommitReader = (*execClient)(nil)

@@ -82,6 +82,12 @@ in
   {
     method = "POST";
     host = "api.github.com";
+    path = "/repos/{repo}/actions/runs/*/rerun-failed-jobs";
+    requestHeaders = apiVersion;
+  }
+  {
+    method = "POST";
+    host = "api.github.com";
     path = "/repos/{repo}/pulls";
     requestHeaders = apiVersion;
   }
