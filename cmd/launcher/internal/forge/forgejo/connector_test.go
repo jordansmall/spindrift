@@ -501,8 +501,8 @@ func testComposedCapabilities(t *testing.T, h *connectorHarness) {
 	if c.PRForge == nil || c.DraftPRCreator == nil || c.BranchPusher == nil || c.BranchProtectionForge == nil || c.MergeCommitReader == nil || c.BranchDeleter == nil {
 		t.Errorf("composed forge lacks a surface the Connector declares: %+v", c)
 	}
-	if c.CIRunReporter != nil {
-		t.Errorf("composed forge offers a CI run reader the Connector does not declare")
+	if c.CIRunReporter != nil || c.CIRerunner != nil {
+		t.Errorf("composed forge offers a CI run reader or re-runner the Connector does not declare")
 	}
 }
 

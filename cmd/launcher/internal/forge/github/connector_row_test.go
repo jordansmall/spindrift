@@ -564,3 +564,20 @@ func TestRecordRoutedSandboxTotals_WritesNothingWithoutARowOnTheRuntime(t *testi
 		t.Errorf("audit file = %q, want it untouched", b)
 	}
 }
+
+// A Connector without forge.ciRerun is an unsupported write, not a silent gh
+// re-run.
+func TestConnectorRow_RerunFailedCIWithoutTheCapabilityFailsWithoutGh(t *testing.T) {
+	withoutCapability(t, "forge.ciRerun")
+	h, c, calls, _ := routedLogHarness(t, withGithubRowAt)
+	prURL := h.SeedOpenPR("1")
+
+	err := c.RerunFailedCI(prURL)
+
+	if !errors.Is(err, backendkit.ErrUnsupported) {
+		t.Errorf("RerunFailedCI = %v, want ErrUnsupported", err)
+	}
+	if n := calls(); n != 0 {
+		t.Errorf("RerunFailedCI ran gh %d times", n)
+	}
+}

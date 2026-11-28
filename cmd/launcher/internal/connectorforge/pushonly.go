@@ -28,6 +28,7 @@ const (
 	CapPRs              = "forge.prs"
 	capAutoMerge        = "forge.autoMerge"
 	capCIRun            = "forge.ciRun"
+	capCIRerun          = "forge.ciRerun"
 	capBranchProtection = "forge.branchProtection"
 	capProbe            = "forge.probe"
 	capDraftPRs         = "forge.draftPRs"
