@@ -668,7 +668,8 @@ The forge axis is now final: `forge` (reads), `forge.branches` (`remote`,
 `prFiles`, `setDraft`, `comment`, `merge`), and the optional `forge.autoMerge`,
 `forge.ciRun`, `forge.branchProtection`, `forge.probe` and `forge.draftPRs`. A
 later forge surface is a new optional capability, an additive protocol bump,
-not a change to these.
+not a change to these. (Amended by issue #6730: an additive optional capability
+takes no version bump; `forge.ciRerun` joined within 0.4.0.)
 
 A read-only Box is host-mediated on a Connector forge declaring
 `forge.draftPRs`, and only there. Core's git pushes a branch it built,

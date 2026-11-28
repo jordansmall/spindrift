@@ -2808,10 +2808,12 @@ network Connector: it serves `tracker.listIssues`, `tracker.issue`,
 one GraphQL rollup query, through `http_request`;
 the host attaches the credential. It also serves the forge branch and PR
 primitives (open, merge, compare, comment, branch lookup and delete, branch
-protection), declared as protocol 0.4.x, through eight further write-half
+protection), declared as protocol 0.4.x, through nine further write-half
 routes, each pinned to `{repo}`: `POST` and `PUT /pulls`, `POST /issues`,
 `GET /compare`, `/git/matching-refs/heads`, `/branches` and `/rules/branches`,
-and `DELETE /git/refs/heads`. The tracker write primitives (add and remove a
+`DELETE /git/refs/heads`, and `POST /actions/runs/*/rerun-failed-jobs`, which
+serves `forge.rerunFailedCI` and is the Connector's only Actions write. The
+tracker write primitives (add and remove a
 label, post a comment, file an issue, close an issue, list and create the
 repository's labels) ride `POST /issues` (label add, comment, issue filing) and
 `POST /graphql` (label removal, as `gh issue edit --remove-label` does: REST
@@ -2953,7 +2955,8 @@ network Connector on protocol 0.4. Its forge half serves `forge.prsForBranch`,
 open, merge, compare, files, draft flip, comment, auto-merge, branch
 protection, and the repository probe). It advertises `forge.prs`,
 `forge.draftPRs`, `forge.autoMerge`, `forge.branchProtection` and
-`forge.probe`, and neither `forge.ciRun` nor `forge.tokenGrant`. A failing
+`forge.probe`, and none of `forge.ciRun`, `forge.ciRerun` or
+`forge.tokenGrant`. A failing
 job's log comes from the Actions API Forgejo 16 added, since web routes ignore
 API tokens: the status link's run number resolves to a run, its job index to a
 job, and then the job's log is read; an older instance answers 404 and the
@@ -3437,6 +3440,7 @@ token scoped to the one repository with these repository permissions:
 | Contents | read and write | the ready/draft flip: GitHub refuses `markPullRequestReadyForReview` and `convertPullRequestToDraft` to a fine-grained PAT without it, even with Pull requests write; branch deletes; also core's own git (push, relay, rebase, mirror seed, Ledger push) |
 | Checks | read | the CI state reads |
 | Commit statuses | read | the CI state reads |
+| Actions | read and write | optional: lets self-heal re-run failed CI jobs once when a fix pass pushed no commit. Without it the re-run is refused (403 or 404) and the settle ends `fix-no-op` with the error in the comment |
 
 A classic token needs the `repo` scope (`public_repo` for a public repository).
 
@@ -4503,7 +4507,7 @@ description and a regen.
   | `forge.comment` | `{target, number, body}` | `{}` |
   | `forge.merge` | `{target, number}` | `{}` |
 
-  Four more are optional, each declared by its own capability. Without one,
+  Five more are optional, each declared by its own capability. Without one,
   the composed forge lacks that surface, exactly as a native forge without the
   API does: no capability lookup or type probe finds it.
 
@@ -4512,6 +4516,7 @@ description and a regen.
   | `forge.autoMerge` | `forge.autoMergeAllowed` (`{target}` → `{allowed}`), `forge.enqueueAutoMerge` (`{target, number}` → `{}`) | auto-merge reads as disallowed |
   | `forge.ciRun` | `forge.ciRun` (`{target, number}` → `{url}`) | no CI run link |
   | `forge.branchProtection` | `forge.branchProtected` (`{target, branch}` → `{protected}`) | doctor's `branch-protection` row is not applicable |
+  | `forge.ciRerun` | `forge.rerunFailedCI` (`{target, number}` → `{}`; runs once, a write) | a fix pass that pushes no commit ends `fix-no-op` without re-running CI |
   | `forge.draftPRs` | `forge.openPR` (`{target, pr: {title, body, base, head, draft}}` → a PR) | no draft-PR creation, host-side branch push, bundle relay or commit subjects: the forge cannot host-mediate a read-only Box (see Host mediation) |
 
   Core pins every PR URL to the remote's web host, fails closed on an unknown
@@ -4562,13 +4567,15 @@ description and a regen.
   (`prsForBranch`, `pr`, `checks`, optional `jobLog`), `forge.branches`
   (`probe`, `branchExists`, `deleteBranch`), `forge.pushOnly` or `forge.prs`
   (`behind`, `prFiles`, `setDraft`, `comment`, `merge`), and the optional
-  `forge.autoMerge`, `forge.ciRun`, `forge.branchProtection`
+  `forge.autoMerge`, `forge.ciRun`, `forge.ciRerun`, `forge.branchProtection`
   and `forge.draftPRs`. A new forge surface would be a new optional
-  capability, an additive protocol bump.
+  capability, additive within its protocol version and so no bump, as
+  `forge.ciRerun` was within 0.4.0.
 
   Every forge Connector call core makes, the reads above included, retries a
   `transient` failure, three attempts with a 2-second linear backoff (see Error
-  class), except `forge.merge`, `forge.openPR` and `forge.comment`, which are
+  class), except `forge.merge`, `forge.openPR`, `forge.comment` and
+  `forge.rerunFailedCI`, which are
   not idempotent and run once. A `forge.deleteBranch` retry that answers
   `not-found` counts as done: the earlier attempt deleted the branch and only
   its answer was lost. A `rate-limited` failure maps onto core's
@@ -6820,6 +6827,15 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   has no initial batch, so the original run's file stays until a fix pass records
   warnings, whose first batch then replaces it. They are never appended to the Box
   log, which is re-scanned for outcome lines.
+- **A fix pass that changes nothing re-runs CI once.** When a fix pass pushes
+  no new commit and the forge declares `forge.ciRerun`, settle comments `fix
+  pass N produced no new commit; re-running failed CI jobs once`, re-runs the
+  head's failed CI jobs (progress status `ci-rerun`) and returns to the CI gate,
+  which distrusts a terminal failure until it sees a non-terminal state or the
+  check registration window elapses. The re-run costs no `MAX_FIX_ATTEMPTS`
+  slot and happens once per head SHA: a second no-op on that head, a forge
+  without the capability, or a failed re-run ends `fix-no-op` (the last names
+  the error in the comment).
 - **The fix box is told which checks failed, not left to guess.** At the
   moment genuine-red is declared, `selfHeal` fetches each failing check's name,
   its conclusion or state, its check-run summary or status description, and a
@@ -9024,6 +9040,7 @@ issues on the host.
 | Pull requests     | Read and write | open PRs (including drafts) + merge via rebase |
 | Issues            | Read and write | read the issue; write to swap the dispatch labels (`agent-in-progress`/`agent-complete`/`agent-failed`) and post the per-issue usage/cost comment |
 | Metadata          | Read           | mandatory baseline, auto-selected            |
+| Actions           | Read and write | **optional** — lets self-heal re-run failed CI jobs once when a fix pass pushed no commit; without it the re-run is refused and the run ends `fix-no-op` |
 | Workflows         | Read and write | **off by default** — grant only when an issue edits `.github/workflows/*`; agent branches run in-repo so `pull_request` events carry repository secrets; with this permission an injected agent can rewrite CI or exfiltrate those secrets |
 
 ### Read-only Box token
@@ -9049,7 +9066,8 @@ is a source-only swap at the mint step.
 
 Provision a **worker App** installed on **only the Target repository**, granting
 the same scopes the PAT table above lists (Contents RW, Pull requests RW, Issues
-RW, Workflows RW — off by default, Checks R, Commit statuses R, Metadata R), and
+RW, Workflows RW — off by default, Checks R, Commit statuses R, Metadata R, and
+optionally Actions RW for the self-heal CI re-run), and
 store its App ID as a repository variable and its private key as a
 repository secret:
 
