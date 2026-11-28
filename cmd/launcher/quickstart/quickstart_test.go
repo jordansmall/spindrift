@@ -2412,8 +2412,8 @@ func TestRender_PairingGoldens(t *testing.T) {
 			chosen := map[string]bool{p.tracker: true, p.forge: true}
 			for name, stanza := range consumerStanzas {
 				for _, s := range stanza.Settings {
-					// A row chosen only as the tracker omits its forge-group knobs.
-					want := chosen[name] && (name == p.forge || !strings.HasPrefix(s.Path, forgeOptionGroup))
+					want := (name == p.tracker && slices.Contains(s.Axes, axisTracker)) ||
+						(name == p.forge && slices.Contains(s.Axes, axisForge))
 					if has := strings.Contains(got["flake.nix"], s.Path); has != want {
 						t.Errorf("flake.nix mentions %s (backend %q) = %v, want %v", s.Path, name, has, want)
 					}
@@ -4419,4 +4419,42 @@ func runQuickstartOn(t *testing.T, rt *connectorruntime.Runtime, dir string, env
 		}
 	}
 	return runQuickstart(rt, dir, env, cmdRunner, forgeBuilder, w, stdin, interactive, force)
+}
+
+// A row chosen on only one axis keeps just the knobs that axis reads: a knob
+// whose axis another row serves configures nothing.
+func TestRender_MixedPairings_KeepOnlyChosenAxisKnobs(t *testing.T) {
+	cases := []struct {
+		name            string
+		tracker, forge  string
+		mustHave, never []string
+	}{
+		{"github tracker, local forge", "github", "local", []string{"forge.accumulationRepoDir"}, []string{"issues.localDir", "issues.localReference"}},
+		{"local tracker, git forge", "local", "git", []string{"issues.localDir"}, []string{"forge.accumulationRepoDir"}},
+		{"github tracker, forgejo forge", "github", "forgejo", []string{"issues.forgejo.baseURL"}, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			flake := flakeNixFor(t, mustRender(t, answers{
+				repoSlug:     "jordansmall/spindrift-consumer-example",
+				runtime:      "podman",
+				gitUserName:  "Ada Lovelace",
+				gitUserEmail: "ada@example.com",
+				tracker:      goldenChoice(c.tracker),
+				forge:        goldenChoice(c.forge),
+				tokens:       map[string]string{"github": "ghp_faketoken", "forgejo": "forgejo-faketoken"},
+				credentials:  []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}},
+			}))
+			for _, p := range c.mustHave {
+				if !strings.Contains(flake, p) {
+					t.Errorf("flake.nix lacks %s", p)
+				}
+			}
+			for _, p := range c.never {
+				if strings.Contains(flake, p) {
+					t.Errorf("flake.nix mentions %s, which no chosen row's axis reads", p)
+				}
+			}
+		})
+	}
 }
