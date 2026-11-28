@@ -1,5 +1,57 @@
 # Changelog
 
+## [0.6.0](https://github.com/jordansmall/spindrift/compare/github-v0.5.0...github-v0.6.0) (2026-11-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **connectors:** Connector flakes no longer export flakeModules.default and core.lib.connectorModule is gone; register a Connector by adding its connectorData output to spindrift.connectorData.
+* **protocol:** core refuses a forge or Driver Connector built against protocol 0.3; rebuild it against the 0.4 SDK.
+* **forge:** sdk/forge's Probe moved from PRs to Branches and is required there. A forge Connector without forge.probe no longer composes.
+* **protocol:** forge.remote is no longer part of the protocol and sdk/forge's Branches has no Remote field. An out-of-tree forge Connector must drop it.
+* **github:** SPINDRIFT_GITHUB_CONNECTOR_TOKEN is no longer read; set GH_TOKEN instead.
+
+### Features
+
+* **connector/github:** send only fixed GraphQL documents and declare them ([4d4e108](https://github.com/jordansmall/spindrift/commit/4d4e108f5ab96bc35ae7988406c02301df3c99cc)), closes [#7566](https://github.com/jordansmall/spindrift/issues/7566)
+* **connectors:** declare the headers github and forgejo send and read ([d1ef6e6](https://github.com/jordansmall/spindrift/commit/d1ef6e637e7f2c3109a2f1c8c9a23d75006ca3b7)), closes [#7565](https://github.com/jordansmall/spindrift/issues/7565)
+* **connectors:** register the fixture and github Connectors as data ([5d86d44](https://github.com/jordansmall/spindrift/commit/5d86d4433d509c6e150a24ac6add834ff6c38427)), closes [#7557](https://github.com/jordansmall/spindrift/issues/7557)
+* **forge:** probe a forge's liveness through forge.probe ([1c588aa](https://github.com/jordansmall/spindrift/commit/1c588aa53cbed60d6a2cb3e9d371c95bdda115ce)), closes [#7510](https://github.com/jordansmall/spindrift/issues/7510)
+* **github:** name GH_TOKEN as the github Connector's credential ([5008018](https://github.com/jordansmall/spindrift/commit/5008018db4540c7bc5fa62bf46ef089018a485e5)), closes [#7499](https://github.com/jordansmall/spindrift/issues/7499)
+* **nix:** declare each forge Connector's Git remote on its row ([1ac9d03](https://github.com/jordansmall/spindrift/commit/1ac9d03953f885f10f497c545a9ebe9f11ae52b8)), closes [#7508](https://github.com/jordansmall/spindrift/issues/7508)
+* **protocol:** remove forge.remote from the Connector protocol ([5f48d7a](https://github.com/jordansmall/spindrift/commit/5f48d7a9d72f646410fde99d56fc343c97868bb0)), closes [#7510](https://github.com/jordansmall/spindrift/issues/7510)
+* **protocol:** speak Connector protocol 0.4.0 ([217fa22](https://github.com/jordansmall/spindrift/commit/217fa22ba34d238b87a1a79e491f42960c0478d7)), closes [#7510](https://github.com/jordansmall/spindrift/issues/7510)
+
+
+### Bug Fixes
+
+* **connector/github:** class a failed send transient, via SendJSON ([921433b](https://github.com/jordansmall/spindrift/commit/921433b1630f706f6abe085d2899f4d6717c9d7f)), closes [#7572](https://github.com/jordansmall/spindrift/issues/7572)
+* **connector/github:** escape branch segments with PathSegment ([e46eb78](https://github.com/jordansmall/spindrift/commit/e46eb78422a5af4c1756b53efd3f98d23ec733f2)), closes [#7572](https://github.com/jordansmall/spindrift/issues/7572)
+
+
+### Security
+
+* **connectorhost:** address-check the redirect hop, audit its 3xx ([6575cdd](https://github.com/jordansmall/spindrift/commit/6575cdd3fe9f18b286609b0d74dff6e171009005)), closes [#7567](https://github.com/jordansmall/spindrift/issues/7567) [#6926](https://github.com/jordansmall/spindrift/issues/6926)
+* **connectors:** narrow the job-log Routes to a job's log ([62821a4](https://github.com/jordansmall/spindrift/commit/62821a458aa9918493da52eaf641312a805f7995)), closes [#6926](https://github.com/jordansmall/spindrift/issues/6926)
+
+
+### Code Refactoring
+
+* **connector/github:** drop the send seam, test on the fake host ([b1ab788](https://github.com/jordansmall/spindrift/commit/b1ab7887a0742f42fbe2daaf627a3af5ce0c90ac)), closes [#7572](https://github.com/jordansmall/spindrift/issues/7572)
+* **connector/github:** page REST listings through connector.Pages ([31696c1](https://github.com/jordansmall/spindrift/commit/31696c15ed5ed1010e807b25f75e6aa2bd6224c8)), closes [#7572](https://github.com/jordansmall/spindrift/issues/7572)
+* **connectors:** drop the flake-module registration path ([cc88d2e](https://github.com/jordansmall/spindrift/commit/cc88d2e506394742c94394806726e4ea351843ff)), closes [#7562](https://github.com/jordansmall/spindrift/issues/7562)
+
+
+### Tests
+
+* **connector/github:** run native tests through the SDK fake host ([ed78eae](https://github.com/jordansmall/spindrift/commit/ed78eaeedee12096087870639182eecc963a0c24)), closes [#7573](https://github.com/jordansmall/spindrift/issues/7573)
+* **github:** run the hostile corpus and the capability check ([3db1836](https://github.com/jordansmall/spindrift/commit/3db1836514eaaa50d351f39b2176c92adb017b20)), closes [#7574](https://github.com/jordansmall/spindrift/issues/7574)
+
+
+### Miscellaneous Chores
+
+* **connectors/github:** drop the committed build binary ([107eb25](https://github.com/jordansmall/spindrift/commit/107eb2521026634d901a19cb7ea8746e868c9cf2)), closes [#7510](https://github.com/jordansmall/spindrift/issues/7510)
+
 ## [0.5.0](https://github.com/jordansmall/spindrift/compare/github-v0.4.0...github-v0.5.0) (2026-11-24)
 
 
