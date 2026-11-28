@@ -16,3 +16,7 @@ func ConnectorClientForTest(c *http.Client) (restore func()) {
 	connectorClock = retry.NoSleepClock()
 	return func() { connectorClient, connectorClock = old, oldClock }
 }
+
+// IssueURLForTest is the tracker's issue-URL template for base, so a test
+// harness in another package shares the production shape.
+func IssueURLForTest(base string) string { return issueURL(base) }

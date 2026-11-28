@@ -90,7 +90,7 @@ func issueJSON(status string, labels ...string) string {
 
 var (
 	writeCaps  = []string{CapTransition, CapEditLabels}
-	hybridLC   = Lifecycle{Labels: forge.DispatchLabels{Dispatchable: "ready", InProgress: "wip", Complete: "done", Failed: "bad", Ambiguous: "amb"}, WebHost: "tracker.example"}
+	hybridLC   = Lifecycle{Labels: forge.DispatchLabels{Dispatchable: "ready", InProgress: "wip", Complete: "done", Failed: "bad", Ambiguous: "amb"}, IssueURL: "https://tracker.example/{repo}/issues/{n}"}
 	verdictLC  = forge.NewVerdictLabels(forge.VerdictLabel{Verdict: "recommend", Label: "rec"})
 	statusMap  = map[forge.DispatchState]string{forge.InProgress: "In Progress", forge.Complete: "Done", forge.Failed: "Blocked"}
 	resolution = map[forge.DispatchState]string{forge.Complete: "Fixed"}
@@ -551,17 +551,26 @@ func TestPostIssueNilLabelsSendEmptyList(t *testing.T) {
 
 func TestPostIssueRefusesAnUnusableURLAsFiledWithoutRetry(t *testing.T) {
 	for name, url := range map[string]string{
-		"empty":          "",
-		"http scheme":    "http://tracker.example/o/r/issues/7",
-		"other host":     "https://evil.example/o/r/issues/7",
-		"host suffix":    "https://tracker.example.evil.example/o/r/issues/7",
-		"userinfo":       "https://u:p@tracker.example/o/r/issues/7",
-		"no issue id":    "https://tracker.example/o/r/issues",
-		"non-numeric id": "https://tracker.example/o/r/issues/new",
-		"not a url":      "://",
-		"relative":       "/o/r/issues/7",
-		"zero id":        "https://tracker.example/o/r/issues/0",
-		"no path":        "https://tracker.example",
+		"empty":           "",
+		"http scheme":     "http://tracker.example/o/r/issues/7",
+		"other host":      "https://evil.example/o/r/issues/7",
+		"host suffix":     "https://tracker.example.evil.example/o/r/issues/7",
+		"userinfo":        "https://u:p@tracker.example/o/r/issues/7",
+		"no issue id":     "https://tracker.example/o/r/issues",
+		"non-numeric id":  "https://tracker.example/o/r/issues/new",
+		"not a url":       "://",
+		"relative":        "/o/r/issues/7",
+		"zero id":         "https://tracker.example/o/r/issues/0",
+		"no path":         "https://tracker.example",
+		"other repo":      "https://tracker.example/other/repo/issues/7",
+		"pull":            "https://tracker.example/o/r/pull/7",
+		"pulls":           "https://tracker.example/o/r/pulls/7",
+		"extra segment":   "https://tracker.example/o/r/issues/7/x",
+		"missing segment": "https://tracker.example/o/issues/7",
+		"query":           "https://tracker.example/o/r/issues/7?x=1",
+		"empty query":     "https://tracker.example/o/r/issues/7?",
+		"fragment":        "https://tracker.example/o/r/issues/7#c",
+		"trailing slash":  "https://tracker.example/o/r/issues/7/",
 	} {
 		t.Run(name, func(t *testing.T) {
 			g := &writeGuest{fileURL: fmt.Sprintf(`{"url":%q}`, url)}
@@ -581,12 +590,66 @@ func TestPostIssueRefusesAnUnusableURLAsFiledWithoutRetry(t *testing.T) {
 	}
 }
 
-func TestPostIssueAcceptsTheWebHostCaseInsensitively(t *testing.T) {
-	g := &writeGuest{fileURL: `{"url":"https://Tracker.Example/o/r/issues/7"}`}
-	tr := writeTracker(t, g, lifecycle(false), postCaps(CapFileIssue))
+// postIssueURL files one issue against a tracker with the given issue-URL
+// template, whose guest answers url, and returns PostIssue's result.
+func postIssueURL(t *testing.T, template, repo, ids, url string) (string, error) {
+	t.Helper()
+	lc := lifecycle(false)
+	lc.IssueURL = template
+	caps := postCaps(CapFileIssue)
+	if ids != "" {
+		caps = append(caps, ids)
+	}
+	g := &writeGuest{fileURL: fmt.Sprintf(`{"url":%q}`, url)}
+	tr := mustTracker(t, g.call, lc, Target{API: "https://api.example", Repo: repo}, caps, true)
 	filer, _ := forge.As[forge.HostPostedIssueFiler](tr)
-	if url, err := filer.PostIssue("t", "b", nil); err != nil || url != "https://Tracker.Example/o/r/issues/7" {
-		t.Errorf("url, err = %q, %v", url, err)
+	return filer.PostIssue("t", "b", nil)
+}
+
+func TestPostIssueMatchesTheTrackersIssueURLShape(t *testing.T) {
+	const plain = "https://tracker.example/{repo}/issues/{n}"
+	const browse = "https://tracker.example/browse/{repo}-{n}"
+	for name, c := range map[string]struct {
+		template, repo, ids, url string
+		ok                       bool
+	}{
+		"plain":           {plain, "o/r", "", "https://tracker.example/o/r/issues/7", true},
+		"path any case":   {plain, "o/r", "", "https://Tracker.Example/O/R/Issues/7", true},
+		"subpath":         {"https://tracker.example/sub/{repo}/issues/{n}", "o/r", "", "https://tracker.example/sub/o/r/issues/7", true},
+		"subpath dropped": {"https://tracker.example/sub/{repo}/issues/{n}", "o/r", "", "https://tracker.example/o/r/issues/7", false},
+		"project key":     {browse, "ENG", CapProjectKeyIDs, "https://tracker.example/browse/ENG-7", true},
+		"other project":   {browse, "ENG", CapProjectKeyIDs, "https://tracker.example/browse/OPS-7", false},
+		"prefix of a key": {browse, "ENG", CapProjectKeyIDs, "https://tracker.example/browse/XENG-7", false},
+		"empty shape":     {"", "o/r", "", "https://tracker.example/o/r/issues/7", false},
+		"n holds a slash": {plain, "o/r", "", "https://tracker.example/o/r/issues/1/7", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := postIssueURL(t, c.template, c.repo, c.ids, c.url)
+			if c.ok && (err != nil || got != c.url) {
+				t.Errorf("url, err = %q, %v; want accepted", got, err)
+			}
+			if !c.ok && !errors.Is(err, forge.ErrFiledUnusableURL) {
+				t.Errorf("url, err = %q, %v; want ErrFiledUnusableURL", got, err)
+			}
+		})
+	}
+}
+
+func TestNewRejectsAMalformedIssueURLTemplate(t *testing.T) {
+	for name, c := range map[string]struct{ template, want string }{
+		"unparseable":   {"https://tracker.example/%zz/{n}", "does not parse"},
+		"no host":       {"/{repo}/issues/{n}", "has no host"},
+		"no trailing n": {"https://tracker.example/{repo}/issues", "does not end in {n}"},
+		"n not last":    {"https://tracker.example/{n}/{repo}", "does not end in {n}"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			lc := lifecycle(false)
+			lc.IssueURL = c.template
+			_, err := newTracker((&writeGuest{}).call, lc, testTarget, postCaps(CapFileIssue), true)
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Errorf("err = %v, want one containing %q", err, c.want)
+			}
+		})
 	}
 }
 

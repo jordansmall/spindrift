@@ -118,7 +118,7 @@ func (e *execClient) trackerView(row backendrows.Row, spec connectorruntime.Sess
 	return memo(&e.mu, &e.tracker, func() bool { return e.tracker != nil }, func() (forge.IssueTracker, error) {
 		return e.connectors.Tracker(row, connectorruntime.TrackerSpec{
 			SessionSpec: spec,
-			Lifecycle:   connectortracker.Lifecycle{Labels: e.labels, VerdictLabels: e.verdictLabels, Route: e.route, WebHost: Host()},
+			Lifecycle:   connectortracker.Lifecycle{Labels: e.labels, VerdictLabels: e.verdictLabels, Route: e.route, IssueURL: issueURL(Host())},
 		})
 	})
 }
@@ -474,3 +474,6 @@ func (e *execClient) listIssuesWithLabels(row backendrows.Row, state forge.Issue
 func (e *execClient) comments(row backendrows.Row, num string) ([]forge.Comment, error) {
 	return viaTrackerCap(e, row, connectortracker.CapComments, "read an issue's comments", func(cl forge.CommentLister) ([]forge.Comment, error) { return cl.Comments(num) })
 }
+
+// issueURL is the Lifecycle.IssueURL template for a GitHub web host.
+func issueURL(host string) string { return "https://" + host + "/{repo}/issues/{n}" }

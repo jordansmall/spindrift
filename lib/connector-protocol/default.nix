@@ -332,7 +332,7 @@ let
       countInterval = "connectortracker's body refuses seconds outside 1 to maxCountInterval (24 hours).";
       transitionOutcome = "connectortracker's body refuses an outcome other than moved, unavailable and unmapped.";
       labelNames = "connectortracker's body refuses an empty or control-character label name (checkLabels).";
-      filedURL = "connectortracker's body refuses a url that is empty, not https, carrying userinfo, off the tracker's web host (Lifecycle.WebHost) or not ending in an issue id (unusableFiledURL); the issue was filed, so the error says so and core must not refile.";
+      filedURL = "connectortracker's body refuses a url that is empty, not https, carrying userinfo, carrying an opaque part, query or fragment, or not matching the tracker's issue URL shape (Lifecycle.IssueURL; unusableFiledURL); the issue was filed, so the error says so and core must not refile.";
     };
 
     # Shared JSON types, rendered as the schema's $defs. A result field is

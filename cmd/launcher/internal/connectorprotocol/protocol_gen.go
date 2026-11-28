@@ -325,7 +325,7 @@ const (
 	CheckDecode = "decode"
 	// CheckDescribe: connectorhost.DriverStrategy refuses an unknown pattern reason, totals or result name.
 	CheckDescribe = "describe"
-	// CheckFiledURL: connectortracker's body refuses a url that is empty, not https, carrying userinfo, off the tracker's web host (Lifecycle.WebHost) or not ending in an issue id (unusableFiledURL); the issue was filed, so the error says so and core must not refile.
+	// CheckFiledURL: connectortracker's body refuses a url that is empty, not https, carrying userinfo, carrying an opaque part, query or fragment, or not matching the tracker's issue URL shape (Lifecycle.IssueURL; unusableFiledURL); the issue was filed, so the error says so and core must not refile.
 	CheckFiledURL = "filedURL"
 	// CheckGuestEvents: connectorhost.guestEvents decodes strictly: an unknown field, an unknown kind or a host_op rejects the answer.
 	CheckGuestEvents = "guestEvents"
