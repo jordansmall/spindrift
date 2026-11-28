@@ -3,6 +3,7 @@ package github
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -86,6 +87,22 @@ func (e *execClient) sessionSpec(row backendrows.Row) (backendrows.Row, connecto
 	}, nil
 }
 
+// requireRemoteOnGHHost returns the host of the row's gitRemote, failing closed
+// when that host is not GH_HOST's. Core derives the clone URL and PR web host
+// from the remote, but the row's Routes and gate see only GH_HOST, so a remote
+// elsewhere would send git and the GH_TOKEN credential where the reads do not
+// look; this runs before any credential read.
+func requireRemoteOnGHHost(row backendrows.Row) (string, error) {
+	u, err := url.Parse(row.GitRemote)
+	if err != nil || u.Host == "" {
+		return "", fmt.Errorf("%w: the %s backend row's gitRemote %q does not parse to a host", ErrNoRoute, row.Name, row.GitRemote)
+	}
+	if want := Host(); !strings.EqualFold(u.Host, want) {
+		return "", fmt.Errorf("%w: the %s backend row's gitRemote %q is on host %q, not GH_HOST %q", ErrNoRoute, row.Name, row.GitRemote, u.Host, want)
+	}
+	return u.Host, nil
+}
+
 // routeTarget is row narrowed to repo's routes, and the Target on its first.
 func routeTarget(row backendrows.Row, repo string) (backendrows.Row, connectortracker.Target, error) {
 	if len(row.Routes) == 0 {
@@ -125,10 +142,14 @@ func (e *execClient) trackerView(row backendrows.Row, spec connectorruntime.Sess
 
 // readerView is the read-only PR forge view over the session, with its
 // optional interfaces resolved. Its web host is the one the PR URLs carry
-// (GH_HOST, else github.com).
+// (the row's Git remote host, the one writes use).
 func (e *execClient) readerView(row backendrows.Row, spec connectorruntime.SessionSpec) (forge.CodeForge, forge.Capabilities, error) {
 	r, err := memo(&e.mu, &e.reader, func() bool { return e.reader.cf != nil }, func() (readerForge, error) {
-		cf, err := e.connectors.ForgeReader(row, spec, Host())
+		host, err := requireRemoteOnGHHost(row)
+		if err != nil {
+			return readerForge{}, err
+		}
+		cf, err := e.connectors.ForgeReader(row, spec, host)
 		if err != nil {
 			return readerForge{}, err
 		}
