@@ -19,7 +19,8 @@ type watchObservation struct {
 	// never from the window-elapsed fallback.
 	sawNonTerminal bool
 	// windowElapsed is true only when the registration-window-elapsed fallback
-	// established registration, which requires requireRegistration.
+	// ended the registration window's withheld trust (requireRegistration or
+	// distrustRed).
 	windowElapsed bool
 	// elapsed is poll-count * actualIv, in the same seconds unit as the deadline.
 	elapsed int
@@ -31,7 +32,14 @@ type watch struct {
 	pollInterval        int
 	deadline            int
 	requireRegistration bool
-	clock               dispatch.Clock
+	// distrustRed withholds trust in a terminal FAILURE or ERROR until a
+	// non-terminal state or the registration window shows otherwise. A CI re-run
+	// keeps the head SHA, so the first red read after it may still be the
+	// pre-re-run rollup. A SUCCESS stays trusted: the rollup was red before. A
+	// FAILURE on its confirm read returns gateRedRetry without redTrusted, since
+	// a red after a green read is new.
+	distrustRed bool
+	clock       dispatch.Clock
 }
 
 // registrationWindowPolls bounds how many poll intervals watch.poll withholds
@@ -76,9 +84,14 @@ type pollState struct {
 }
 
 // registered reports whether this run's own checks count as registered on the
-// head commit.
+// head commit, which a SUCCESS needs under requireRegistration.
 func (w watch) registered(s pollState) bool {
 	return !w.requireRegistration || s.sawNonTerminal || s.windowElapsed
+}
+
+// redTrusted reports whether a terminal FAILURE or ERROR may be believed.
+func (w watch) redTrusted(s pollState) bool {
+	return !w.distrustRed || s.sawNonTerminal || s.windowElapsed
 }
 
 // observation builds the watchObservation for this state. Every return path in
@@ -115,9 +128,9 @@ func (w watch) poll(terminated func() bool, checkState func() (forge.RollupState
 		if state != forge.StateSuccess && state != forge.StateFailure && state != forge.StateError {
 			st.sawNonTerminal = true
 		}
-		if !w.registered(st) && st.elapsed >= registrationWindow {
-			// The window ran out with only terminal states observed
-			// (SUCCESS in practice, since FAILURE and ERROR return below),
+		if !(w.registered(st) && w.redTrusted(st)) && st.elapsed >= registrationWindow {
+			// The window ran out with only terminal states observed (SUCCESS
+			// under requireRegistration, FAILURE and ERROR under distrustRed),
 			// so CI already finished rather than being mid-registration (#2475).
 			st.windowElapsed = true
 		}
@@ -145,6 +158,9 @@ func (w watch) poll(terminated func() bool, checkState func() (forge.RollupState
 			}
 			return st.observation(gateGreen, nil)
 		case forge.StateFailure, forge.StateError:
+			if !w.redTrusted(st) {
+				break
+			}
 			return st.observation(gateRedRetry, nil)
 		}
 

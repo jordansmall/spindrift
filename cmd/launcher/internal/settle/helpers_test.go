@@ -126,3 +126,18 @@ func (r roRunURL) CreateDraftPR(title, body, base, head string) (string, bool, e
 func (r roRunURL) CommitSubjects(outboxDir, base, ref string) ([]string, error) {
 	return roFake{r.Fake}.CommitSubjects(outboxDir, base, ref)
 }
+
+// roRerun keeps host mediation on a RerunFake, like roRunURL.
+type roRerun struct{ *forge.RerunFake }
+
+func (r roRerun) RelayBundle(outboxDir, ref string) error {
+	return roFake{r.Fake}.RelayBundle(outboxDir, ref)
+}
+
+func (r roRerun) CreateDraftPR(title, body, base, head string) (string, bool, error) {
+	return roFake{r.Fake}.CreateDraftPR(title, body, base, head)
+}
+
+func (r roRerun) CommitSubjects(outboxDir, base, ref string) ([]string, error) {
+	return roFake{r.Fake}.CommitSubjects(outboxDir, base, ref)
+}

@@ -61,6 +61,7 @@ type watchPollCase struct {
 	pollInterval        int
 	deadline            int
 	requireRegistration bool
+	distrustRed         bool
 
 	states []forge.RollupState
 	errAt  map[int]error
@@ -198,6 +199,48 @@ func TestInternalSeam_WatchPoll(t *testing.T) {
 			wantWindowElapsed:   false,
 		},
 		{
+			// A CI re-run keeps the head SHA, so a FAILURE read before any
+			// non-terminal state may be the pre-re-run rollup.
+			name:               "distrusted red waits for a non-terminal state",
+			pollInterval:       1,
+			deadline:           10,
+			distrustRed:        true,
+			states:             []forge.RollupState{forge.StateFailure, forge.StatePending, forge.StateFailure},
+			wantOutcome:        gateRedRetry,
+			wantSawNonTerminal: true,
+			wantWindowElapsed:  false,
+			checkElapsed:       true,
+			wantElapsed:        2,
+		},
+		{
+			// A re-run that registers nothing within the window leaves a red that
+			// is genuine, so it is accepted once the window elapses.
+			name:               "distrusted red is accepted once the registration window elapses",
+			pollInterval:       1,
+			deadline:           10,
+			distrustRed:        true,
+			states:             []forge.RollupState{forge.StateFailure},
+			wantOutcome:        gateRedRetry,
+			wantSawNonTerminal: false,
+			wantWindowElapsed:  true,
+			checkElapsed:       true,
+			wantElapsed:        registrationWindowPolls,
+		},
+		{
+			// The rollup was red before the re-run, so a SUCCESS cannot be the
+			// stale one: it needs no registration evidence.
+			name:               "distrusted red trusts a first SUCCESS at once",
+			pollInterval:       1,
+			deadline:           10,
+			distrustRed:        true,
+			states:             []forge.RollupState{forge.StateSuccess, forge.StateSuccess},
+			wantOutcome:        gateGreen,
+			wantSawNonTerminal: false,
+			wantWindowElapsed:  false,
+			checkElapsed:       true,
+			wantElapsed:        0,
+		},
+		{
 			// Abandonment must return the evidence the earlier polls gathered
 			// (sawNonTerminal true, elapsed 2), not a zero-value observation.
 			name:               "abandonment after prior polls preserves accumulated evidence",
@@ -224,6 +267,7 @@ func TestInternalSeam_WatchPoll(t *testing.T) {
 				pollInterval:        tc.pollInterval,
 				deadline:            tc.deadline,
 				requireRegistration: tc.requireRegistration,
+				distrustRed:         tc.distrustRed,
 				clock:               clock,
 			}
 
