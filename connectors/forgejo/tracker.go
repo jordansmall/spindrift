@@ -21,6 +21,8 @@ type rawIssue struct {
 	Labels   []struct {
 		Name string `json:"name"`
 	} `json:"labels"`
+	// A pointer, not json.RawMessage: a plain issue carries "pull_request": null.
+	PullRequest *struct{} `json:"pull_request"`
 }
 
 // key is the pagination identity pageUntilEmpty compares across pages.
@@ -62,6 +64,10 @@ func issue(t tracker.Target, number string) (tracker.Issue, error) {
 	var raw rawIssue
 	if err := send("GET", t.API, path, nil, &raw); err != nil {
 		return tracker.Issue{}, err
+	}
+	// Forgejo serves pull requests under /issues/{n} too.
+	if raw.PullRequest != nil {
+		return tracker.Issue{}, fmt.Errorf("#%s is a pull request, not an issue", number)
 	}
 	return raw.issue(), nil
 }
