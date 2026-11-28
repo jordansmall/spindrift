@@ -1,5 +1,30 @@
 # Migration Guide
 
+## A Box is named per checkout, so two Consumers on one host no longer collide (issue #7378)
+
+**A Box's name changes from `agent-issue-<n>` to `agent-<hash>-issue-<n>`,
+where `<hash>` is the first 12 hex digits of the SHA-256 of the launcher's
+resolved working directory.** That name is the container name on Docker and
+Podman and the `spindrift-<name>` cgroup on bwrap. Two checkouts dispatching
+the same issue number on one host used to share a name and could stop each
+other's Box.
+
+- **A Box started before the upgrade is invisible to the upgraded launcher.**
+  Its `IsRunning`, `Kill` (so `Reclaim` on abort) and reconcile liveness look
+  only for the new name and miss the old one. Drain in-flight Boxes first: let
+  running dispatches finish, or stop them, then upgrade.
+- **Remove leftovers by hand** if one slips through: `docker ps --filter
+  name=agent-issue-` then `docker rm -f` (the same with `podman`); on bwrap the
+  leftover is a `spindrift-agent-issue-<n>` cgroup.
+- Anything outside spindrift that matches `docker ps` output against
+  `agent-issue-<n>` must match the new form.
+- **Two checkouts of the same repository no longer block each other's Box.**
+  The old shared name made a second dispatch of the same issue fail with
+  `ErrAlreadyRunning`; now only the tracker claim keeps them apart. Start a
+  launcher for one Consumer from one directory, too: a different working
+  directory (a subdirectory, another worktree) gets a different `<hash>` and
+  cannot find that Consumer's orphan Boxes.
+
 ## The Network host dials only a public address for a Connector-declared host (issue #7567)
 
 **The host now resolves each destination itself and dials only a public
