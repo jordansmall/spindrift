@@ -31,6 +31,7 @@ func githubAnswer(v string) func(connector.Request) (connector.Response, error) 
 			return `{"repository":{"pullRequest":{"url":"https://github.com/o/r/pull/1","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":` + q(v) + `,"contexts":{"nodes":[` +
 				`{"__typename":"CheckRun","name":` + q(v) + `,"conclusion":"SUCCESS","status":"IN_PROGRESS","summary":` + q(v) + `,"detailsUrl":"https://github.com/o/r/actions/runs/3/job/5"},` +
 				`{"__typename":"CheckRun","name":"b","conclusion":"","status":"COMPLETED","detailsUrl":` + q(v) + `},` +
+				`{"__typename":"CheckRun","name":"c","conclusion":"FAILURE","status":"COMPLETED","detailsUrl":"https://github.com/o/r/actions/runs/4/job/6"},` +
 				`{"__typename":"StatusContext","context":` + q(v) + `,"state":"SUCCESS","description":` + q(v) + `}]}}}}]}}}}`
 		case documents["comments"]:
 			return `{"repository":{"issue":{"comments":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[{"author":{"login":` + q(v) + `},"createdAt":"t","body":` + q(v) + `,"isMinimized":false,"authorAssociation":` + q(v) + `}]}}}}`
@@ -116,6 +117,7 @@ func TestHostileInputs(t *testing.T) {
 		{"forge.pr", func(in string) error { _, err := pr(ftgt, in); return err }},
 		{"forge.checks", func(in string) error { _, err := checks(ftgt, in); return err }},
 		{"forge.ciRun", func(in string) error { _, err := ciRun(ftgt, in); return err }},
+		{"forge.rerunFailedCI", func(in string) error { return rerunFailedCI(ftgt, in) }},
 		{"forge.jobLog", func(in string) error { _, err := jobLog(ftgt, in); return err }},
 		{"forge.branchExists", func(in string) error { _, err := branchExists(ftgt, in); return err }},
 		{"forge.deleteBranch", func(in string) error { return deleteBranch(ftgt, in) }},
@@ -242,6 +244,7 @@ func TestDeclaredCapabilitiesAnswer(t *testing.T) {
 		"forge.enqueueAutoMerge": {Params: obj{"target": ft, "number": "1"}, Answer: answer},
 		"forge.branchProtected":  {Params: obj{"target": ft, "branch": "feat"}, Answer: answer},
 		"forge.ciRun":            {Params: obj{"target": ft, "number": "1"}, Answer: answer},
+		"forge.rerunFailedCI":    {Params: obj{"target": ft, "number": "1"}, Answer: answer},
 		"forge.tokenGrant":       {Params: obj{"target": ft, "tokenPrefix": "ghp_"}, Answer: answer},
 
 		"tracker.issue":         {Params: obj{"target": tt, "number": "1"}, Answer: answer},

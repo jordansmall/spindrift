@@ -88,3 +88,27 @@ func TestGraphQLRouteDeclaresExactlyTheDocumentsSent(t *testing.T) {
 		t.Error("the Route table has no POST /graphql route")
 	}
 }
+
+// TestRerunRouteIsOnlyTheFailedJobsEndpoint pins the one admitted Actions write
+// to its endpoint: a whole-run re-run, a cancel, or a bare run path is refused.
+func TestRerunRouteIsOnlyTheFailedJobsEndpoint(t *testing.T) {
+	req := func(method, path string) connector.Request {
+		return connector.Request{Method: method, URL: tgt.API + path, Headers: map[string]string{"X-GitHub-Api-Version": "2022-11-28"}}
+	}
+	if err := host.Admit(req("POST", "/repos/o/r/actions/runs/1/rerun-failed-jobs")); err != nil {
+		t.Fatalf("rerun-failed-jobs refused: %v", err)
+	}
+	for _, p := range []string{
+		"/repos/o/r/actions/runs/1/rerun",
+		"/repos/o/r/actions/runs/1/cancel",
+		"/repos/o/r/actions/runs/1",
+		"/repos/o/other/actions/runs/1/rerun-failed-jobs",
+	} {
+		if err := host.Admit(req("POST", p)); err == nil {
+			t.Errorf("POST %s admitted", p)
+		}
+	}
+	if err := host.Admit(req("GET", "/repos/o/r/actions/runs/1/rerun-failed-jobs")); err == nil {
+		t.Error("GET rerun-failed-jobs admitted")
+	}
+}

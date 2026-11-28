@@ -65,6 +65,7 @@ func init() {
 		EnqueueAutoMerge: enqueueAutoMerge,
 		BranchProtected:  branchProtected,
 		CIRun:            ciRun,
+		RerunFailedCI:    rerunFailedCI,
 		TokenGrant:       tokenGrant,
 	})
 }

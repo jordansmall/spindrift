@@ -397,3 +397,87 @@ func TestRawPRCrossRepo(t *testing.T) {
 		})
 	}
 }
+
+func rerunStub(t *testing.T, nodes string, post connector.Response) *[]connector.Request {
+	t.Helper()
+	resp := map[string]connector.Response{
+		graphqlURL: ok(`{"data":{"repository":{"pullRequest":{"url":"https://github.com/o/r/pull/7","commits":{"nodes":[{"commit":{"statusCheckRollup":{
+			"state":"FAILURE","contexts":{"nodes":[` + nodes + `]}}}}]}}}}}`),
+	}
+	for _, id := range []string{"1", "2", "3"} {
+		resp["https://api.github.com/repos/o/r/actions/runs/"+id+"/rerun-failed-jobs"] = post
+	}
+	return stub(t, resp)
+}
+
+func rerunPosts(reqs *[]connector.Request) []string {
+	var got []string
+	for _, r := range *reqs {
+		if r.Method == "POST" && strings.Contains(r.URL, "/rerun-failed-jobs") {
+			got = append(got, r.URL)
+		}
+	}
+	return got
+}
+
+func TestRerunFailedCIPostsEachFailedRunOnce(t *testing.T) {
+	reqs := rerunStub(t, `
+		{"__typename":"CheckRun","conclusion":"FAILURE","detailsUrl":"https://github.com/o/r/actions/runs/2/job/20"},
+		{"__typename":"CheckRun","conclusion":"SUCCESS","detailsUrl":"https://github.com/o/r/actions/runs/1/job/10"},
+		{"__typename":"CheckRun","conclusion":"TIMED_OUT","detailsUrl":"https://github.com/o/r/actions/runs/2/job/21"},
+		{"__typename":"CheckRun","conclusion":"CANCELLED","detailsUrl":"https://github.com/o/r/actions/runs/3/job/30"},
+		{"__typename":"CheckRun","conclusion":"FAILURE","detailsUrl":"https://github.com/other/r/actions/runs/9/job/90"},
+		{"__typename":"CheckRun","conclusion":"FAILURE","detailsUrl":"https://evil.example/o/r/actions/runs/8"},
+		{"__typename":"StatusContext","context":"ci","state":"FAILURE"}`,
+		connector.Response{Status: 201})
+	if err := rerunFailedCI(ftgt, "7"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"https://api.github.com/repos/o/r/actions/runs/2/rerun-failed-jobs",
+		"https://api.github.com/repos/o/r/actions/runs/3/rerun-failed-jobs",
+	}
+	if got := rerunPosts(reqs); !reflect.DeepEqual(got, want) {
+		t.Fatalf("POSTs = %v, want %v", got, want)
+	}
+}
+
+func TestRerunFailedCIErrorsWhenNothingFailed(t *testing.T) {
+	reqs := rerunStub(t, `
+		{"__typename":"CheckRun","conclusion":"SUCCESS","detailsUrl":"https://github.com/o/r/actions/runs/1/job/10"},
+		{"__typename":"CheckRun","conclusion":"FAILURE","detailsUrl":"https://github.com/other/r/actions/runs/2/job/20"}`,
+		connector.Response{Status: 201})
+	err := rerunFailedCI(ftgt, "7")
+	if err == nil || !strings.Contains(err.Error(), "no failed Actions run") {
+		t.Fatalf("err = %v", err)
+	}
+	if got := rerunPosts(reqs); len(got) != 0 {
+		t.Fatalf("POSTs = %v, want none", got)
+	}
+}
+
+func TestRerunFailedCIPassesAForbiddenThrough(t *testing.T) {
+	rerunStub(t, `
+		{"__typename":"CheckRun","conclusion":"FAILURE","detailsUrl":"https://github.com/o/r/actions/runs/1/job/10"}`,
+		connector.Response{Status: 403, Body: []byte(`{"message":"Resource not accessible"}`)})
+	if err := rerunFailedCI(ftgt, "7"); err == nil || !strings.Contains(err.Error(), "403") {
+		t.Fatalf("err = %v, want a 403", err)
+	}
+}
+
+func TestRerunFailedCICountsAPartialSuccess(t *testing.T) {
+	reqs := stub(t, map[string]connector.Response{
+		graphqlURL: ok(`{"data":{"repository":{"pullRequest":{"url":"https://github.com/o/r/pull/7","commits":{"nodes":[{"commit":{"statusCheckRollup":{
+			"state":"FAILURE","contexts":{"nodes":[
+		{"__typename":"CheckRun","conclusion":"FAILURE","detailsUrl":"https://github.com/o/r/actions/runs/1/job/10"},
+		{"__typename":"CheckRun","conclusion":"FAILURE","detailsUrl":"https://github.com/o/r/actions/runs/2/job/20"}]}}}}]}}}}}`),
+		"https://api.github.com/repos/o/r/actions/runs/1/rerun-failed-jobs": {Status: 403, Body: []byte(`{"message":"Resource not accessible"}`)},
+		"https://api.github.com/repos/o/r/actions/runs/2/rerun-failed-jobs": {Status: 201},
+	})
+	if err := rerunFailedCI(ftgt, "7"); err != nil {
+		t.Fatalf("err = %v, want nil: run 2 was re-run", err)
+	}
+	if got := rerunPosts(reqs); len(got) != 2 {
+		t.Fatalf("POSTs = %v, want both runs attempted", got)
+	}
+}

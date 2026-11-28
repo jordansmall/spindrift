@@ -185,6 +185,9 @@ func (b *restBackend) serveWrite(w http.ResponseWriter, r *http.Request, reject 
 			}
 		}
 		writeJSON(w, wireIssue(i)["labels"])
+	case r.Method == http.MethodPost && strings.HasPrefix(path, repo+"/actions/runs/") && strings.HasSuffix(path, "/rerun-failed-jobs"):
+		b.reruns = append(b.reruns, strings.TrimSuffix(strings.TrimPrefix(path, repo+"/actions/runs/"), "/rerun-failed-jobs"))
+		writeJSONStatus(w, http.StatusCreated, map[string]any{})
 	case r.Method == http.MethodGet && path == repo+"/labels":
 		all := make([]any, len(b.labels))
 		for n, l := range b.labels {
@@ -519,7 +522,7 @@ func (h *connectorHarness) comments(url string) []string { return h.prView(url).
 // declaredForgeCaps is exactly the forge capabilities the github Connector's
 // handshake declares: no push-only mode.
 var declaredForgeCaps = []string{
-	"forge", "forge.branches", "forge.prs", "forge.draftPRs", "forge.autoMerge", "forge.branchProtection", "forge.ciRun", "forge.probe", "forge.tokenGrant",
+	"forge", "forge.branches", "forge.prs", "forge.draftPRs", "forge.autoMerge", "forge.branchProtection", "forge.ciRun", "forge.ciRerun", "forge.probe", "forge.tokenGrant",
 }
 
 func testComposedCapabilities(t *testing.T, h *connectorHarness) {
@@ -534,7 +537,7 @@ func testComposedCapabilities(t *testing.T, h *connectorHarness) {
 		t.Errorf("handshake forge capabilities = %v, want %v", got, want)
 	}
 	c := h.caps
-	if c.PRForge == nil || c.DraftPRCreator == nil || c.BranchPusher == nil || c.BranchProtectionForge == nil || c.CIRunReporter == nil || c.MergeCommitReader == nil || c.BranchDeleter == nil {
+	if c.PRForge == nil || c.DraftPRCreator == nil || c.BranchPusher == nil || c.BranchProtectionForge == nil || c.CIRunReporter == nil || c.CIRerunner == nil || c.MergeCommitReader == nil || c.BranchDeleter == nil {
 		t.Errorf("composed forge lacks a surface the Connector declares: %+v", c)
 	}
 }
@@ -809,4 +812,23 @@ func (b *restBackend) removeLabels(w http.ResponseWriter, raw []byte, reject fun
 		i.labels = slices.DeleteFunc(i.labels, func(l string) bool { return l == name })
 	}
 	writeJSON(w, map[string]any{"data": map[string]any{"removeLabelsFromLabelable": map[string]any{"clientMutationId": nil}}})
+}
+
+// A failed Actions run is re-run through the one rerun-failed-jobs Route, once
+// however many of its jobs failed; with nothing failed the call is an error.
+func testRerunFailedCI(t *testing.T, h *connectorHarness) {
+	url := h.SeedOpenPR("409")
+	if err := h.caps.CIRerunner.RerunFailedCI(url); err == nil {
+		t.Fatal("RerunFailedCI with no failed run succeeded")
+	}
+	h.SeedJobLogFailure(url, "unit", "9001", "log")
+	h.SeedJobLogFailure(url, "lint", "9002", "log")
+	if err := h.caps.CIRerunner.RerunFailedCI(url); err != nil {
+		t.Fatal(err)
+	}
+	h.backend.mu.Lock()
+	defer h.backend.mu.Unlock()
+	if want := []string{"900"}; !slices.Equal(h.backend.reruns, want) {
+		t.Errorf("re-run runs = %q, want %q", h.backend.reruns, want)
+	}
 }

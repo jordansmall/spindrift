@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -576,6 +577,27 @@ func TestConnectorRow_RerunFailedCIWithoutTheCapabilityFailsWithoutGh(t *testing
 
 	if !errors.Is(err, backendkit.ErrUnsupported) {
 		t.Errorf("RerunFailedCI = %v, want ErrUnsupported", err)
+	}
+	if n := calls(); n != 0 {
+		t.Errorf("RerunFailedCI ran gh %d times", n)
+	}
+}
+
+// Under a routed row a re-run is the Connector's rerun-failed-jobs write, never gh.
+func TestConnectorRow_RerunFailedCIComesFromTheConnector(t *testing.T) {
+	h, c, calls, _ := routedLogHarness(t, withGithubRowAt)
+	prURL := h.SeedOpenPR("1")
+	h.SeedJobLogFailure(prURL, "unit", "7001", "log")
+
+	if err := c.RerunFailedCI(prURL); err != nil {
+		t.Fatalf("RerunFailedCI: %v", err)
+	}
+
+	h.backend.mu.Lock()
+	reruns := slices.Clone(h.backend.reruns)
+	h.backend.mu.Unlock()
+	if want := []string{"900"}; !slices.Equal(reruns, want) {
+		t.Errorf("re-run runs = %q, want %q", reruns, want)
 	}
 	if n := calls(); n != 0 {
 		t.Errorf("RerunFailedCI ran gh %d times", n)

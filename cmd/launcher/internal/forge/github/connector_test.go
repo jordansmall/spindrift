@@ -134,6 +134,8 @@ type restBackend struct {
 	mergeStatuses []int
 	// deletedRefs is every ref a git/refs DELETE request named, accepted or not.
 	deletedRefs []string
+	// reruns is the id of every Actions run a rerun-failed-jobs request named.
+	reruns []string
 	// labels is the repository's label registry; hits counts every request the
 	// server received, accepted or not; tokens are extra Authorization values
 	// it accepts beside connectorToken's, and auths the Authorization of each
@@ -890,6 +892,7 @@ func TestConnector_Contracts(t *testing.T) {
 			{"TokenGrant", testTokenGrant},
 			{"BaseMovedOn", testBaseMovedOn},
 			{"MergeTransientAndPermanent", testMergeTransientAndPermanent},
+			{"RerunFailedCI", testRerunFailedCI},
 		} {
 			t.Run(c.name, func(t *testing.T) { c.run(t, h) })
 		}
