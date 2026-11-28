@@ -854,15 +854,16 @@ folder; `jira` has its own read signal and reads its own `jira` folder. A
 folder's files may ship from a Connector
 (`spindrift.connectors.<name>.fragments`): evaluation fails, naming the path and
 the Connector, on a declared file for a folder not of its row's axis or on a
-missing, stray or duplicate file. A Connector's declared file wins over a
-file at the same path in a custom fragments directory. mkHarness ships the
-batteries flake's forgejo fragments for each path the Consumer's own entries
-do not declare. A folder
-with no such file renders an empty step, unless the row is `shared`, in which
-case the root-level `fragments/<fragment>` is read next: one body for every
-backend, naming the active one through `${FORGE_DISPLAY_NAME}`, which is the
-`displayName` of the backend's row in `lib/backends/`. A backend folder's own
-file still wins over the shared one. A fragment variable retired from the
+missing, stray or duplicate file. In the baked image a Connector's declared file
+is what ships at its path; a `SPINDRIFT_PROMPT_DIR` override replaces the whole
+prompts tree, Connector folders included, with no fallback to the baked files.
+mkHarness ships the batteries flake's forgejo fragments for each path the
+Consumer's own entries do not declare. A folder with no such file renders an
+empty step, unless the row is `shared`, in which case the root-level
+`fragments/<fragment>` is read next: one body for every backend, naming the
+active one through `${FORGE_DISPLAY_NAME}`, which is the `displayName` of the
+backend's row in `lib/backends/`. A backend folder's own file still wins over
+the shared one. A fragment variable retired from the
 registry is listed in `lib/removed-fragment-vars.nix`, with a
 `severity` of `removed` (the default; a prompt still using it fails the build
 and prompt assembly) or `deprecated` (it still renders, and warns naming its
@@ -3005,11 +3006,15 @@ forge accepted `http`.
 
 The Connector also ships the forgejo fragment folder,
 `connectors/forgejo/fragments/forgejo/` (`filer-dedup.md` and `fix-ci-read.md`),
-through
-`spindrift.connectors.forgejo.fragments`. The Box reads each at
-`prompts/fragments/forgejo/<name>.md`, as before. Because a Connector's
-declared file wins over a custom fragments directory, a `forgejo/<name>.md` in
-a `SPINDRIFT_PROMPT_DIR` is ignored (see [`MIGRATING.md`](../MIGRATING.md)).
+through `spindrift.connectors.forgejo.fragments`. The Box reads each at
+`prompts/fragments/forgejo/<name>.md`, as before. A `forgejo/<name>.md` in a
+`SPINDRIFT_PROMPT_DIR` still takes effect, but an override directory gets no
+fallback to the baked files, so it must carry each Connector-owned file it
+needs, copied from `connectors/<connector>/fragments/<connector>/` in the
+spindrift repository. A copy of `templates/default/prompts` lacks them, and
+under the fragment-folder rules in [Subagent roster](#subagent-roster) a
+missing forgejo file renders its step empty with no warning (see
+[`MIGRATING.md`](../MIGRATING.md)).
 
 The forgejo Code Forge and tracker are always the Connector's, in every launcher process
 that builds them (dispatch, research, the daemon, reconcile, recover and doctor;

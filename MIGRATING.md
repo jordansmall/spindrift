@@ -576,12 +576,18 @@ Consumer registers its own.
 
 What changed for a Consumer:
 
-- **A custom `forgejo/<name>.md` is now silently ignored.** A Connector's
-  declared file wins over a file at the same path in a custom fragments
-  directory (`SPINDRIFT_PROMPT_DIR`), so an override of one of these files
-  no longer takes effect, and nothing reports it. Fork the Connector's
-  fragment directory to change one of these steps, declaring only the files
-  you change, and register the forgejo Connector's data with the fork as its
+- **An override directory must carry the Connector-owned files.** A custom
+  `forgejo/<name>.md` in a `SPINDRIFT_PROMPT_DIR` still takes effect, but a
+  directory freshly copied from `templates/default/prompts` lacks `forgejo/`
+  (and `jira/issue-blocked-comment-relay.md`). Copy them from
+  `connectors/<connector>/fragments/<connector>/` in the spindrift
+  repository. Without them the two forgejo steps
+  (`filer-dedup.md`, `fix-ci-read.md`) render empty with no warning, while a
+  missing `jira/issue-blocked-comment-relay.md` quietly falls back to the
+  shared IF BLOCKED step, which names a forge token.
+- **To change one of these steps in a baked build** (no override directory),
+  fork the Connector's fragment directory, declaring only the files you
+  change, and register the forgejo Connector's data with the fork as its
   `fragments`: `forgejoData // { fragments = { name = "forgejo"; dir = ./fork;
   shipped."fix-ci-read.md" = [ "forgejo" ]; }; }` in `spindrift.connectorData`.
   Each `<folder>/<fragment>` path the fork declares replaces the batteries
