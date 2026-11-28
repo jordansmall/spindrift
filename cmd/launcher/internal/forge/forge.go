@@ -72,6 +72,11 @@ var ErrAuthFailure = errors.New("forge auth failure")
 // reached or does not exist under the authenticated account.
 var ErrRepoNotFound = errors.New("forge repo not found")
 
+// ErrRepoMoved marks an ErrRepoNotFound whose probe answered a redirect, so the
+// repository was likely renamed or transferred. Errors carrying it also wrap
+// ErrRepoNotFound.
+var ErrRepoMoved = errors.New("forge repo moved")
+
 // ErrUnknownIssueType is returned by IssueTypeChecker.CheckIssueType when the
 // configured issue type is not one the tracker's project offers.
 var ErrUnknownIssueType = errors.New("issue type not offered by the project")

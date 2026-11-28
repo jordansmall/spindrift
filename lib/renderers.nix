@@ -1260,6 +1260,7 @@ rec {
         (optional "connectorOnly" "ConnectorOnly" false)
         (optional "tokenEnvVar" "TokenEnvVar" "")
         (optional "doctorSlugHint" "DoctorSlugHint" "")
+        (optional "trackerScopeKnob" "TrackerScopeKnob" "")
         (optional "hostMediatedRemote" "HostMediatedRemote" false)
         (optional "hostSeededMirror" "HostSeededMirror" false)
         (optional "inBoxUnreachableTracker" "InBoxUnreachableTracker" false)
@@ -1282,12 +1283,10 @@ rec {
       # goVar names the generated var and is not a Descriptor field; knobs are
       # folded into the env schema by lib/row-knobs.nix, validateKnobs is read
       # by lib/mkHarness.nix, core, goTestRepoFiles and goTestBuildsOn are read
-      # by nix/checks/go.nix, and trackerScopeKnob and bareRefClosesIssues by
-      # lib/mkHarness.nix, and identityEnvVar by lib/connector-names.nix, not
-      # rendered here.
+      # by nix/checks/go.nix, and bareRefClosesIssues by lib/mkHarness.nix, and
+      # identityEnvVar by lib/connector-names.nix, not rendered here.
       knownFields = [
         "goVar"
-        "trackerScopeKnob"
         "bareRefClosesIssues"
         "knobs"
         "validateKnobs"

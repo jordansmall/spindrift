@@ -82,7 +82,8 @@
 # trackerScopeKnob (optional string) names the schema key whose value is the
 # Tracker scope (ADR 0075 decision 3), as the Jira row names jiraProjectKey. An
 # omitted field scopes by the repo slug. lib/mkHarness.nix reads it, and the
-# generated Descriptor ignores it.
+# generated Descriptor carries it as TrackerScopeKnob (doctor names REPO_SLUG
+# in its rename remedy only for a slug-scoped tracker).
 
 # bareRefClosesIssues (optional bool) marks a tracker that is the repo's own
 # issue list, so a bare `Closes #N` in a PR closes its issue #N. mkHarness

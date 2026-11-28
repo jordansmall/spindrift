@@ -200,6 +200,7 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, rep *doctor.
 	if err := doctor.Run(it, cf, doctor.Config{
 		IssueTracker:     c.IssueTracker,
 		NoLabelRegistry:  !row.LabelRegistry,
+		NoRepoSlugScope:  row.TrackerScopeKnob != "",
 		RequiredLabels:   requiredLabels,
 		ResearchVerdicts: doctorResearchVerdicts(c),
 		TokenHint:        row.TokenEnvVar,

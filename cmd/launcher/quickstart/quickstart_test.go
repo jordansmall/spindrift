@@ -2683,16 +2683,22 @@ func TestOfferedOn_PerAxisRules(t *testing.T) {
 // backend.Registry makes doctorHints("gitlab") return its hints with no
 // quickstart-side change.
 func TestDoctorHints_RegistryDriven(t *testing.T) {
-	if gotToken, gotSlug, _ := doctorHints("github"); gotToken != "GH_TOKEN" || gotSlug != "" {
+	if gotToken, gotSlug, _, _ := doctorHints("github"); gotToken != "GH_TOKEN" || gotSlug != "" {
 		t.Errorf(`doctorHints("github") = (%q, %q), want ("GH_TOKEN", "")`, gotToken, gotSlug)
 	}
-	if gotToken, gotSlug, _ := doctorHints("forgejo"); gotToken != "FORGEJO_TOKEN" || gotSlug != "FORGEJO_BASE_URL" {
+	if gotToken, gotSlug, _, _ := doctorHints("forgejo"); gotToken != "FORGEJO_TOKEN" || gotSlug != "FORGEJO_BASE_URL" {
 		t.Errorf(`doctorHints("forgejo") = (%q, %q), want ("FORGEJO_TOKEN", "FORGEJO_BASE_URL")`, gotToken, gotSlug)
 	}
 	// Issue #5460: a tracker with no label registry skips doctor's label check.
 	for tracker, want := range map[string]bool{"github": false, "forgejo": false, "jira": true, "local": true, "nope": false} {
-		if _, _, got := doctorHints(tracker); got != want {
+		if _, _, got, _ := doctorHints(tracker); got != want {
 			t.Errorf("doctorHints(%q) noLabelRegistry = %v, want %v", tracker, got, want)
+		}
+	}
+
+	for tracker, want := range map[string]bool{"jira": true, "forgejo": false} {
+		if _, _, _, got := doctorHints(tracker); got != want {
+			t.Errorf("doctorHints(%q) noRepoSlugScope = %v, want %v", tracker, got, want)
 		}
 	}
 
@@ -2707,7 +2713,7 @@ func TestDoctorHints_RegistryDriven(t *testing.T) {
 	})
 	defer func() { backend.Registry = original }()
 
-	if gotToken, gotSlug, _ := doctorHints("gitlab"); gotToken != "GITLAB_TOKEN" || gotSlug != "GITLAB_BASE_URL" {
+	if gotToken, gotSlug, _, _ := doctorHints("gitlab"); gotToken != "GITLAB_TOKEN" || gotSlug != "GITLAB_BASE_URL" {
 		t.Errorf(`doctorHints("gitlab") = (%q, %q), want ("GITLAB_TOKEN", "GITLAB_BASE_URL")`, gotToken, gotSlug)
 	}
 }

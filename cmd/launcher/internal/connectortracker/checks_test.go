@@ -65,6 +65,11 @@ func TestProbeStatusMapping(t *testing.T) {
 		{name: "403", reply: `{"status":403}`, wantErr: forge.ErrAuthFailure},
 		{name: "404", reply: `{"status":404}`, wantErr: forge.ErrRepoNotFound},
 		{name: "500", reply: `{"status":500}`, wantErr: forge.ErrRepoNotFound},
+		{name: "300", reply: `{"status":300}`, wantErr: forge.ErrRepoMoved},
+		{name: "301", reply: `{"status":301}`, wantErr: forge.ErrRepoMoved},
+		{name: "307", reply: `{"status":307}`, wantErr: forge.ErrRepoMoved},
+		{name: "399", reply: `{"status":399}`, wantErr: forge.ErrRepoMoved},
+		{name: "400", reply: `{"status":400}`, wantErr: forge.ErrRepoNotFound},
 		{name: "transport", err: errors.New("boom"), wantErr: forge.ErrRepoNotFound},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -87,6 +92,12 @@ func TestProbeStatusMapping(t *testing.T) {
 			}
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("err = %v, want %v", err, tc.wantErr)
+			}
+			if tc.wantErr == forge.ErrRepoMoved && !errors.Is(err, forge.ErrRepoNotFound) {
+				t.Errorf("err = %v does not also wrap ErrRepoNotFound", err)
+			}
+			if tc.wantErr != forge.ErrRepoMoved && errors.Is(err, forge.ErrRepoMoved) {
+				t.Errorf("err = %v wraps ErrRepoMoved for a non-redirect", err)
 			}
 			if tc.wantErr == forge.ErrRepoNotFound && errors.Is(err, forge.ErrAuthFailure) {
 				t.Errorf("err = %v also wraps ErrAuthFailure", err)

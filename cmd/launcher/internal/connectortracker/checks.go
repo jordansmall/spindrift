@@ -89,6 +89,8 @@ func trackerChecks(t *reads) connectorcall.Checks {
 				return nil
 			case r.Status == 401 || r.Status == 403:
 				return probeStatusError{fmt.Errorf("%w: probe of %s answered %d", forge.ErrAuthFailure, p.Target.Repo, r.Status)}
+			case r.Status >= 300 && r.Status < 400:
+				return probeStatusError{fmt.Errorf("%w: %w: probe of %s answered %d", forge.ErrRepoNotFound, forge.ErrRepoMoved, p.Target.Repo, r.Status)}
 			default:
 				return probeStatusError{fmt.Errorf("%w: probe of %s answered %d", forge.ErrRepoNotFound, p.Target.Repo, r.Status)}
 			}
