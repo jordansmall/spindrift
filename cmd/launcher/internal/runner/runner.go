@@ -35,7 +35,7 @@ type AgentGeneration struct {
 // Box describes a single disposable agent sandbox.
 type Box struct {
 	Issue  string            // issue number, e.g. "42"
-	Name   string            // container/sandbox name, e.g. "agent-issue-42"
+	Name   string            // container/sandbox name, e.g. "agent-<checkout hash>-issue-42"
 	Env    map[string]string // env vars to forward into the box
 	Output io.Writer         // where stdout+stderr go; nil discards them
 
