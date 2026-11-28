@@ -59,7 +59,8 @@ type Lifecycle struct {
 	// the createMeta check measures the project against.
 	IssueType string
 	// WebHost is the tracker's web host (host[:port]) a filed issue's URL must
-	// be on; GitHub's differs from its API host. Empty refuses every filed URL.
+	// be on, the default https port implied; GitHub's differs from its API host.
+	// Empty refuses every filed URL.
 	WebHost string
 	// VerdictLabels names the label each research verdict lands as.
 	VerdictLabels forge.VerdictLabels

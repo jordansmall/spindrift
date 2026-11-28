@@ -274,7 +274,11 @@ func (t *reads) unusableFiledURL(raw string) string {
 		return "scheme is not https"
 	case u.User != nil:
 		return "url carries userinfo"
-	case !strings.EqualFold(u.Host, t.lifecycle.WebHost):
+	case t.lifecycle.WebHost == "":
+		return "no tracker web host"
+	case u.Hostname() == "":
+		return "url has no host"
+	case !forge.SameHTTPSHost(u.Host, t.lifecycle.WebHost):
 		return fmt.Sprintf("host is not %q", t.lifecycle.WebHost)
 	case !t.ids.valid(path.Base(strings.TrimRight(u.Path, "/"))):
 		return "path does not end in an issue id"
