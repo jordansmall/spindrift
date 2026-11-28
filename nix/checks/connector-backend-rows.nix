@@ -14,12 +14,32 @@ let
   inherit (pkgs.lib) assertMsg;
   routes = import ../../lib/connector-routes.nix;
   names = import ../../lib/connector-names.nix;
+  # Each row declaring axes ships the fragments serving them (issue #7647); a
+  # row without a fixture folder is left to its own check.
+  fragmentsFor =
+    rows:
+    map
+      (
+        n:
+        import ../fixtures/connector-fragments-rows.nix {
+          name = n;
+          axes = rows.${n}.axes;
+        }
+      )
+      (
+        builtins.filter (
+          n:
+          (rows.${n}.axes or [ ]) != [ ]
+          && builtins.pathExists (../fixtures/connector-fragments-rows + "/${n}")
+        ) (builtins.attrNames rows)
+      );
   mkHarness =
     extra:
     import ../../lib/mkHarness.nix (
       {
         inherit nixpkgs system;
         packages = p: [ p.hello ];
+        connectorFragments = fragmentsFor (extra.backendRows or { });
       }
       // extra
     );
@@ -1867,12 +1887,15 @@ in
       "added Git remote https://fixture.test"
       "added axis tracker"
     ]) "a Routes-only entry has no grant, so every declared part is added";
-    assert assertMsg (mentions (live // {
-      axes = [
-        "tracker"
-        "forge"
-      ];
-    }) [ "added axis forge" ]) "an axis the accepted grant lacks must be listed as added";
+    assert assertMsg (mentions (
+      live
+      // {
+        axes = [
+          "tracker"
+          "forge"
+        ];
+      }
+    ) [ "added axis forge" ]) "an axis the accepted grant lacks must be listed as added";
     assert assertMsg (
       !(pkgs.lib.hasInfix "added axis tracker" (
         refusal (
@@ -2059,11 +2082,14 @@ in
       messages schemeWidened
     )) "the refusal must name the widened authorization scheme";
     assert assertMsg (bothRun axisWithin) "control: a row inside its accepted axes must run";
-    assert assertMsg (!(eitherRuns axisWidened)) "an axis beyond the accepted baseline must refuse the CLI and the daemon";
+    assert assertMsg (
+      !(eitherRuns axisWidened)
+    ) "an axis beyond the accepted baseline must refuse the CLI and the daemon";
     assert assertMsg (
       accepts axisWidened && evaluates axisWidened
     ) "connectors accept and the input document must still evaluate for an axis-refused Connector";
-    assert assertMsg (pkgs.lib.hasInfix "added axis forge" (messages axisWidened)
+    assert assertMsg (
+      pkgs.lib.hasInfix "added axis forge" (messages axisWidened)
       && !(pkgs.lib.hasInfix "added axis tracker" (messages axisWidened))
     ) "the refusal must name the added axis alone";
     assert assertMsg (

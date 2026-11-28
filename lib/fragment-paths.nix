@@ -82,9 +82,13 @@ let
   # A path a Connector declares is looked up in that Connector's dir.
   pathsIn =
     connectors: fragmentsDir: row:
-    pathsFor (builtins.filter (
-      f: builtins.pathExists (fileOf connectors fragmentsDir "${f}/${row.fragment}")
-    ) (axisFolders row.axis)) row;
+    pathsFor (builtins.filter
+      (f: builtins.pathExists (fileOf connectors fragmentsDir "${f}/${row.fragment}"))
+      (
+        axisFolders row.axis
+        ++ map (c: c.name) (builtins.filter (c: ownFolder c row.axis c.name) connectors)
+      )
+    ) row;
 
   # A Connector contributes fragment files (issue #6857) as
   # `{ name; dir; shipped }`: `dir` is laid out `<folder>/<fragment>` like the
@@ -172,6 +176,36 @@ let
     ) (builtins.filter (k: !builtins.any (r: r.fragment == k) axisRows) (builtins.attrNames shipped));
   shippedProblemsIn = problemsWith shipped;
 
+  # A third-party Connector's own folder, named after it, serves the axes its
+  # backend row declares (issue #7647); mkHarness joins `axes` onto its
+  # contribution. A first-party contribution has none and keeps core's folders.
+  ownFolder =
+    c: axis: f:
+    f == c.name && builtins.elem axis (c.axes or [ ]);
+
+  # Declaring an axis means serving it (issue #7647): a row of that axis with no
+  # shared root fallback renders empty for the Connector unless it ships one.
+  # Also run for a row that contributes no fragments (`shipped = { }`).
+  unservedProblems =
+    {
+      name,
+      axes,
+      shipped,
+    }:
+    builtins.concatMap (
+      axis:
+      map
+        (
+          r:
+          "${name}/${r.fragment}: the ${name} Connector declares axis ${axis}, but ships no ${r.fragment}, which has no shared root fallback"
+        )
+        (
+          builtins.filter (
+            r: r.axis == axis && !(r.shared or false) && !builtins.elem name (shipped.${r.fragment} or [ ])
+          ) axisRows
+        )
+    ) axes;
+
   # Every way a Connector's declaration disagrees with the axes, the core
   # `shipped` table, the other Connectors, or its own dir; each names the path
   # and the Connector. A folder or fragment that is not a plain path component
@@ -206,7 +240,7 @@ let
                 in
                 if !plain f then
                   [ "${path}: ${by}, but ${f} is not a plain folder name" ]
-                else if !builtins.elem f (axisFolders axis) then
+                else if !builtins.elem f (axisFolders axis) && !ownFolder c axis f then
                   [ "${path}: ${by}, but ${f} is not a folder of axis ${axis}" ]
                 else if !builtins.pathExists (c.dir + "/${path}") then
                   [ "${path}: ${by} but missing under ${c.dir}" ]
@@ -235,6 +269,10 @@ let
           ) own;
         in
         builtins.concatMap forFragment (builtins.attrNames c.shipped)
+        ++ unservedProblems {
+          inherit (c) name shipped;
+          axes = c.axes or [ ];
+        }
         ++ builtins.concatMap strays (
           builtins.filter (n: dirEntries.${n} == "directory") (builtins.attrNames dirEntries)
         )
@@ -306,6 +344,7 @@ api [ ]
   inherit
     problemsWith
     connectorProblemsWith
+    unservedProblems
     shipped
     declaredBy
     pathOf

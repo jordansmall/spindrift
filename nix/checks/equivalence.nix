@@ -2375,6 +2375,7 @@ in
         "runInputDocumentFile"
         "backendBundleDirs"
         "backendFirstParty"
+        "effectiveConnectorFragments"
         "baselineRefusals"
         "roster"
         "launcherCurrencyFileset"

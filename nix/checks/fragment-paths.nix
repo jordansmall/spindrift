@@ -163,6 +163,100 @@ let
     fragments = forgejoFork;
   };
   inherit (fixtures) fails hasAll;
+
+  # A third-party Connector's own folder (issue #7647): named after the
+  # Connector, served on each axis its backend row declares.
+  thirdPartyDir =
+    (import ../fixtures/connector-fragments-rows.nix {
+      name = "acme";
+      axes = [
+        "tracker"
+        "forge"
+      ];
+    }).dir;
+  trackerOwn = [
+    "filer-dedup.md"
+    "pr-body-issue-ref.md"
+    "pr-body-no-issue-ref.md"
+  ];
+  ownShipped =
+    frags:
+    builtins.listToAttrs (
+      map (f: {
+        name = f;
+        value = [ "acme" ];
+      }) frags
+    );
+  thirdParty = axes: frags: {
+    name = "acme";
+    dir = thirdPartyDir;
+    inherit axes;
+    shipped = ownShipped frags;
+  };
+  tpProblems = c: fragmentPaths.connectorProblemsWith shipped [ c ];
+  tpOk = tpProblems (thirdParty [ "tracker" "forge" ] (trackerOwn ++ [ "fix-ci-read.md" ]));
+  tpUndeclared =
+    filter
+      (hasInfix "acme/pr-body-issue-ref.md: declared by the acme Connector, but acme is not a folder of axis tracker")
+      (tpProblems (thirdParty [ "forge" ] (trackerOwn ++ [ "fix-ci-read.md" ])));
+  tpMissing =
+    filter
+      (hasInfix "acme/pr-body-no-issue-ref.md: the acme Connector declares axis tracker, but ships no pr-body-no-issue-ref.md")
+      (
+        tpProblems (
+          thirdParty [ "tracker" "forge" ] [ "filer-dedup.md" "pr-body-issue-ref.md" "fix-ci-read.md" ]
+        )
+      );
+  # The pure rule on its own: a row shipping nothing is named once per missing
+  # non-shared fragment of the axis.
+  tpUnserved = fragmentPaths.unservedProblems {
+    name = "acme";
+    axes = [ "tracker" ];
+    shipped = { };
+  };
+  tpUnservedNamed = builtins.all (
+    f: builtins.any (hasInfix "acme/${f}: the acme Connector declares axis tracker") tpUnserved
+  ) trackerOwn;
+  # The same two through mkHarness, which joins the row's axes onto the
+  # Connector's contribution.
+  tpRow = axes: {
+    module = p: "${fixtures.connectorWasm}/network.wasm";
+    routes = [
+      {
+        method = "GET";
+        host = "api.fixture.test";
+        path = "/repos";
+      }
+    ];
+    inherit axes;
+    displayName = "Acme";
+  };
+  tpHarness =
+    axes: frags:
+    import ../../lib/mkHarness.nix {
+      inherit nixpkgs system;
+      packages = p: [ p.hello ];
+      backendRows.acme = tpRow axes;
+      connectorFragments = [
+        (removeAttrs (thirdParty [ ] frags) [ "axes" ])
+      ];
+    };
+  allOwn = trackerOwn ++ [ "fix-ci-read.md" ];
+  # Forced through the prompt dir, which every Box's fragments go through.
+  tpHarnessFails =
+    axes: frags:
+    throws (tpHarness axes frags).internals.promptDir.drvPath
+    || throws (tpHarness axes frags).internals.effectiveConnectorFragments;
+  # A third-party row that registers no fragments at all is never a
+  # contribution, so mkHarness checks it separately.
+  tpUnregisteredFails =
+    axes:
+    throws
+      (import ../../lib/mkHarness.nix {
+        inherit nixpkgs system;
+        packages = p: [ p.hello ];
+        backendRows.acme = tpRow axes;
+      }).internals.effectiveConnectorFragments;
 in
 {
   fragment-paths =
@@ -226,6 +320,27 @@ in
     assert assertMsg (
       !throws (withFixture.pathsOf scoutRow)
     ) "fragment-paths: pathsOf over a well-formed Connector must evaluate";
+    assert assertMsg (tpOk == [ ])
+      "fragment-paths: a third-party Connector's own folder on its declared axes must yield no problems, got: ${builtins.toJSON tpOk}";
+    assert assertMsg (builtins.length tpUndeclared == 1)
+      "fragment-paths: a third-party Connector's own folder on an undeclared axis must be refused, got: ${builtins.toJSON tpUndeclared}";
+    assert assertMsg (builtins.length tpMissing == 1)
+      "fragment-paths: a declared axis's missing non-shared fragment must be refused naming Connector and fragment, got: ${builtins.toJSON tpMissing}";
+    assert assertMsg (
+      !tpHarnessFails [ "tracker" "forge" ] allOwn
+    ) "fragment-paths: mkHarness must accept a third-party Connector's own folder on its declared axes";
+    assert assertMsg (tpHarnessFails [ "forge" ] allOwn)
+      "fragment-paths: mkHarness must refuse a third-party Connector's fragment on an axis its row does not declare";
+    assert assertMsg (tpHarnessFails
+      [ "tracker" "forge" ]
+      [ "filer-dedup.md" "pr-body-issue-ref.md" "fix-ci-read.md" ]
+    ) "fragment-paths: mkHarness must refuse a declared axis's missing required fragment";
+    assert assertMsg (builtins.length tpUnserved == 3 && tpUnservedNamed)
+      "fragment-paths: unservedProblems must name the Connector and each missing tracker fragment, got: ${builtins.toJSON tpUnserved}";
+    assert assertMsg (tpUnregisteredFails [ "tracker" ])
+      "fragment-paths: mkHarness must refuse a third-party row declaring an axis while contributing no fragments";
+    assert assertMsg (!tpUnregisteredFails [ ])
+      "fragment-paths: effectiveConnectorFragments must not refuse a third-party row that declares no axis and contributes no fragments";
     pkgs.runCommand "fragment-paths" { } "touch $out";
 
   # A harness registering no Connector module must still ship forgejo's

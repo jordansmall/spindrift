@@ -24,7 +24,22 @@ let
     boxEnv = false;
   };
   fixtureRow = (import ../fixtures/connector/data.nix { inherit core; }).driver;
-  jiraFragments = import ../../connectors/jira/fragments.nix;
+  # A third-party Connector serves the axes it declares from its own folder (issue #7647).
+  ownFragments = {
+    dir = ../fixtures/connector-fragments-datafixture;
+    shipped = builtins.listToAttrs (
+      map
+        (f: {
+          name = f;
+          value = [ "datafixture" ];
+        })
+        [
+          "filer-dedup.md"
+          "pr-body-issue-ref.md"
+          "pr-body-no-issue-ref.md"
+        ]
+    );
+  };
   routes = [
     {
       method = "GET";
@@ -46,7 +61,7 @@ let
     };
     fragments = {
       name = "datafixture";
-      inherit (jiraFragments) dir shipped;
+      inherit (ownFragments) dir shipped;
     };
     driver = fixtureRow // {
       name = "datafixture";
@@ -256,6 +271,7 @@ let
       module = _: wasm;
       axes = [ "tracker" ];
       displayName = "Corederived";
+      fragments = import ../fixtures/connector-fragments-rows.nix { name = "corederived"; };
       inherit routes;
       driver =
         lib:
@@ -305,7 +321,7 @@ in
   connector-data-registers-row =
     assert assertMsg (row.knobs == good.knobs) "a data Connector's knobs must reach its row unchanged";
     assert assertMsg (
-      row.fragments.name == "datafixture" && row.fragments.shipped == jiraFragments.shipped
+      row.fragments.name == "datafixture" && row.fragments.shipped == ownFragments.shipped
     ) "a data Connector's fragments must reach its row";
     assert assertMsg (row.driver.name == "datafixture") "a data Connector's driver must reach its row";
     assert assertMsg (

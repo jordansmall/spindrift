@@ -68,6 +68,16 @@
   # fixtureToken).
   module = pkgs: "${import ./package.nix { inherit pkgs core; }}/network.wasm";
   axes = [ "tracker" ];
+  # Declaring an axis means serving it (issue #7647).
+  fragments = {
+    name = "fixture";
+    dir = ./fragments;
+    shipped = {
+      "filer-dedup.md" = [ "fixture" ];
+      "pr-body-issue-ref.md" = [ "fixture" ];
+      "pr-body-no-issue-ref.md" = [ "fixture" ];
+    };
+  };
   displayName = "Fixture";
   routes = [
     {

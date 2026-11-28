@@ -302,7 +302,13 @@ let
   effectiveConnectorFragments =
     let
       # Imported directly: `fragmentPaths` depends on this very binding.
-      inherit (import ./fragment-paths.nix) declaredBy pathOf;
+      inherit (import ./fragment-paths.nix)
+        declaredBy
+        pathOf
+        connectorProblemsWith
+        unservedProblems
+        shipped
+        ;
       taken = lib.concatMap (f: declaredBy f.shipped) connectorFragments;
       # A Consumer forking a fallback Connector's fragment, under any name,
       # takes over the paths it declares: drop them from the fallback, from
@@ -327,14 +333,48 @@ let
               filter = p: _: !lib.elem (lib.removePrefix "${toString f.dir}/" p) dropped;
             };
           };
+      # A third-party Connector's own folder serves the axes its backend row
+      # declares (issue #7647); a first-party one keeps core's axis folders.
+      withAxes =
+        f:
+        if backendRows ? ${f.name} && !backendFirstParty.${f.name} then
+          f // { axes = backendRows.${f.name}.axes or [ ]; }
+        else
+          f;
       isFallback = f: lib.elem f.name fragmentFallbackConnectors;
       fallback = lib.filter (f: f.shipped != { }) (
         map (f: (withoutTaken f) // { name = "${f.name} (batteries fallback)"; }) (
           lib.filter isFallback (import ../nix/connector-fragments.nix)
         )
       );
+      contributions = lib.sort (a: b: a.name < b.name) (map withAxes connectorFragments ++ fallback);
+      # The one gate every consumer of the contributions (scans, the image's
+      # fragments install) passes through, so a Consumer's bad Connector
+      # fragments fail here rather than at a Box's first prompt read.
+      # A third-party row contributing no fragments is held to the same rule.
+      # A row on a first-party backend's name is skipped: checkBackendRow
+      # refuses it by name, and its fragments would only mask that refusal.
+      unregistered = lib.filter (
+        n:
+        !backendFirstParty.${n}
+        && !batteriesBackendRows ? ${n}
+        && !lib.any (f: f.name == n) connectorFragments
+      ) (lib.attrNames backendRows);
+      problems =
+        connectorProblemsWith shipped contributions
+        ++ lib.concatMap (
+          n:
+          unservedProblems {
+            name = n;
+            axes = backendRows.${n}.axes or [ ];
+            shipped = { };
+          }
+        ) unregistered;
     in
-    lib.sort (a: b: a.name < b.name) (connectorFragments ++ fallback);
+    if problems != [ ] then
+      throw "mkHarness: a Connector's fragment dir disagrees with the axes its backend row declares or the fragments it ships:\n  ${lib.concatStringsSep "\n  " problems}"
+    else
+      contributions;
   # folderOf and mayBeAbsent are connector-independent; the rest resolve over
   # the Connectors' contributions.
   fragmentPaths =
@@ -2116,6 +2156,7 @@ else
         runInputDocumentFile
         backendBundleDirs
         backendFirstParty
+        effectiveConnectorFragments
         baselineRefusals
         ;
       driverExecBin = imageDriver.driverExecBin;
