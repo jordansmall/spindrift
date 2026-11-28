@@ -62,8 +62,8 @@ func TestReclaim_ReapsTransitionsAndComments(t *testing.T) {
 		t.Fatalf("Reclaim: %v", err)
 	}
 
-	if len(fr.KillCalls) != 1 || fr.KillCalls[0] != "agent-issue-42" {
-		t.Errorf("KillCalls: want [agent-issue-42], got %v", fr.KillCalls)
+	if len(fr.KillCalls) != 1 || fr.KillCalls[0] != dispatch.BoxName(dir, "42") {
+		t.Errorf("KillCalls: want [%s], got %v", dispatch.BoxName(dir, "42"), fr.KillCalls)
 	}
 
 	// Both "from" labels are cleared, in that order: InProgress for a running

@@ -21,12 +21,15 @@ func RealClock() Clock { return retry.RealClock() }
 // selective `dispatch <nums>` path, or recover) and holds what every issue in
 // that invocation shares, including the driver-cache root.
 type Factory struct {
-	cfg    Config
-	pwd    string
-	runner runner.Runner
-	driver driver.Driver
-	clock  Clock
-	cache  *cache
+	cfg Config
+	pwd string
+	// boxNamespace is BoxNamespace(pwd), resolved once so every Box name this
+	// Factory and its Dispatches derive agrees for the process lifetime.
+	boxNamespace string
+	runner       runner.Runner
+	driver       driver.Driver
+	clock        Clock
+	cache        *cache
 
 	// genMu guards agentGeneration: a store-closure staleness hot-swap (issue
 	// #2682) can land concurrently with New() and an in-flight Run().
@@ -49,14 +52,14 @@ type Factory struct {
 // error is diagnostic only and the Factory is still usable.
 func NewFactory(cfg Config, pwd string, r runner.Runner, drv driver.Driver, clock Clock) (*Factory, error) {
 	if cfg.DriverSessionCacheDir == "" {
-		return &Factory{cfg: cfg, pwd: pwd, runner: r, driver: drv, clock: clock, cache: nil}, nil
+		return &Factory{cfg: cfg, pwd: pwd, boxNamespace: BoxNamespace(pwd), runner: r, driver: drv, clock: clock, cache: nil}, nil
 	}
 	remove := os.RemoveAll
 	if r != nil {
 		remove = r.RemoveHostTree
 	}
 	c, err := newCache(remove)
-	return &Factory{cfg: cfg, pwd: pwd, runner: r, driver: drv, clock: clock, cache: c}, err
+	return &Factory{cfg: cfg, pwd: pwd, boxNamespace: BoxNamespace(pwd), runner: r, driver: drv, clock: clock, cache: c}, err
 }
 
 // New constructs a Dispatch for one issue, claiming its per-issue driver-cache
@@ -76,6 +79,7 @@ func (f *Factory) newDispatch(subj subject) *Dispatch {
 	return &Dispatch{
 		number:          key,
 		pwd:             f.pwd,
+		boxNamespace:    f.boxNamespace,
 		runner:          f.runner,
 		driver:          f.driver,
 		clock:           f.clock,

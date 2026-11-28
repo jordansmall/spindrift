@@ -18,13 +18,15 @@ const staleAfter = 3 * time.Hour
 // staleness from pwd and container presence from r.
 type FSProbe struct {
 	pwd string
-	r   runner.Runner
-	now func() time.Time
+	// boxNamespace is resolved once at construction, matching the Factory's.
+	boxNamespace string
+	r            runner.Runner
+	now          func() time.Time
 }
 
 // NewFSProbe returns an FSProbe probing pwd's Box logs and r's containers.
 func NewFSProbe(pwd string, r runner.Runner) *FSProbe {
-	return &FSProbe{pwd: pwd, r: r, now: time.Now}
+	return &FSProbe{pwd: pwd, boxNamespace: dispatch.BoxNamespace(pwd), r: r, now: time.Now}
 }
 
 // LogStale reports whether num's most recent Box log has gone unwritten beyond
@@ -43,14 +45,14 @@ func (p *FSProbe) LogStale(num string) bool {
 }
 
 // ContainerLive reports whether num's Box container is running, using the same
-// dispatch.BoxName scheme Kill uses. A ListRunning failure reports
+// dispatch.BoxNameIn scheme Kill uses. A ListRunning failure reports
 // (false, false): no evidence either way, not a confirmed absence.
 func (p *FSProbe) ContainerLive(num string) (live, reachable bool) {
 	names, err := p.r.ListRunning()
 	if err != nil {
 		return false, false
 	}
-	return slices.Contains(names, dispatch.BoxName(num)), true
+	return slices.Contains(names, dispatch.BoxNameIn(p.boxNamespace, num)), true
 }
 
 var _ LivenessProbe = (*FSProbe)(nil)
