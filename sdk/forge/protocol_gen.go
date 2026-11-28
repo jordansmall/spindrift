@@ -16,6 +16,8 @@ const (
 	CapAutoMerge = "forge.autoMerge"
 	// CapCIRun: Serves forge.ciRun: a PR's CI run link.
 	CapCIRun = "forge.ciRun"
+	// CapCIRerun: Serves forge.rerunFailedCI (0.4.0, additive): re-runs the failed CI jobs of a PR's head commit.
+	CapCIRerun = "forge.ciRerun"
 	// CapBranchProtection: Serves forge.branchProtected: whether the base branch is protected.
 	CapBranchProtection = "forge.branchProtection"
 	// CapProbe: Serves forge.probe: one cheap authenticated read of the repository.
@@ -56,6 +58,8 @@ const (
 	methodEnqueueAutoMerge = "forge.enqueueAutoMerge"
 	// methodCiRun: The URL of the CI run for the PR's head commit, empty when there is none yet.
 	methodCiRun = "forge.ciRun"
+	// methodRerunFailedCI: Re-runs the failed CI jobs of the PR's head commit.
+	methodRerunFailedCI = "forge.rerunFailedCI"
 	// methodBranchProtected: Whether `branch` carries protection, a classic rule or a ruleset.
 	methodBranchProtected = "forge.branchProtected"
 	// methodProbe: The repository's canonical owner/name, proving the forge answers with the Connector's credential.

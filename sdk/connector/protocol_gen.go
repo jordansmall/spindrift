@@ -65,6 +65,7 @@ var capabilityMethods = map[string][]string{
 	"forge.prs":              {"forge.behind", "forge.comment", "forge.merge", "forge.prFiles", "forge.setDraft"},
 	"forge.autoMerge":        {"forge.autoMergeAllowed", "forge.enqueueAutoMerge"},
 	"forge.ciRun":            {"forge.ciRun"},
+	"forge.ciRerun":          {"forge.rerunFailedCI"},
 	"forge.branchProtection": {"forge.branchProtected"},
 	"forge.probe":            {"forge.probe"},
 	"forge.draftPRs":         {"forge.openPR"},

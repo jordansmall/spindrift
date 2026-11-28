@@ -39,7 +39,7 @@ func sampleParams(method, api, number string) (any, bool) {
 		return with(forgeTarget, map[string]any{"branch": branch}), true
 	case connectorprotocol.MethodForgePr, connectorprotocol.MethodForgeChecks, connectorprotocol.MethodForgeBehind,
 		connectorprotocol.MethodForgePrFiles, connectorprotocol.MethodForgeMerge,
-		connectorprotocol.MethodForgeEnqueueAutoMerge, connectorprotocol.MethodForgeCiRun:
+		connectorprotocol.MethodForgeEnqueueAutoMerge, connectorprotocol.MethodForgeCiRun, connectorprotocol.MethodForgeRerunFailedCI:
 		return with(forgeTarget, map[string]any{"number": number}), true
 	case connectorprotocol.MethodForgeJobLog:
 		return with(forgeTarget, map[string]any{"jobId": "1", "tail": 1024, "errorLines": 256}), true

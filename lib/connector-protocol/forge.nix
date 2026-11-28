@@ -105,6 +105,9 @@ in
   (method "forge.ciRun" "forge.ciRun" numbered (t.open { url = t.string; }) retryable "runLink"
     "The URL of the CI run for the PR's head commit, empty when there is none yet."
   )
+  (method "forge.rerunFailedCI" "forge.ciRerun" numbered done once "decode"
+    "Re-runs the failed CI jobs of the PR's head commit."
+  )
   (method "forge.branchProtected" "forge.branchProtection" branched (t.open {
     protected = t.boolean;
   }) retryable "decode" "Whether `branch` carries protection, a classic rule or a ruleset.")

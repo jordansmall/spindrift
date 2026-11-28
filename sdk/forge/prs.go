@@ -51,6 +51,10 @@ type PRs struct {
 	// run for the PR's head commit, "" when there is none yet.
 	CIRun func(t Target, number string) (string, error)
 
+	// RerunFailedCI is optional and declares CapCIRerun. It re-runs the failed
+	// CI jobs of the PR's head commit; a write, so core never retries it.
+	RerunFailedCI func(t Target, number string) error
+
 	// BranchProtected is optional and declares CapBranchProtection. It
 	// reports whether branch has protection rules.
 	BranchProtected func(t Target, branch string) (bool, error)
@@ -211,6 +215,16 @@ func prHandlers(p PRs) ([]string, map[string]method) {
 			}{url}, nil
 		}
 		caps = append(caps, CapCIRun)
+	}
+	if p.RerunFailedCI != nil {
+		m[methodRerunFailedCI] = func(params json.RawMessage) (any, error) {
+			t, n, err := numbered(params)
+			if err != nil {
+				return nil, err
+			}
+			return done(p.RerunFailedCI(t, n))
+		}
+		caps = append(caps, CapCIRerun)
 	}
 	if p.BranchProtected != nil {
 		m[methodBranchProtected] = func(params json.RawMessage) (any, error) {

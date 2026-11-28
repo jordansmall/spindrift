@@ -221,6 +221,7 @@ in
     "forge.prs" = "CapPRs";
     "forge.autoMerge" = "CapAutoMerge";
     "forge.ciRun" = "CapCIRun";
+    "forge.ciRerun" = "CapCIRerun";
     "forge.branchProtection" = "CapBranchProtection";
     "forge.probe" = "CapProbe";
     "forge.draftPRs" = "CapDraftPRs";

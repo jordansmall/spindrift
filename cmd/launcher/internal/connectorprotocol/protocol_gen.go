@@ -70,6 +70,8 @@ const (
 	CapForgeAutoMerge = "forge.autoMerge"
 	// CapForgeCiRun: Serves forge.ciRun: a PR's CI run link.
 	CapForgeCiRun = "forge.ciRun"
+	// CapForgeCiRerun: Serves forge.rerunFailedCI (0.4.0, additive): re-runs the failed CI jobs of a PR's head commit.
+	CapForgeCiRerun = "forge.ciRerun"
 	// CapForgeBranchProtection: Serves forge.branchProtected: whether the base branch is protected.
 	CapForgeBranchProtection = "forge.branchProtection"
 	// CapForgeProbe: Serves forge.probe: one cheap authenticated read of the repository.
@@ -123,6 +125,7 @@ var Capabilities = map[string]Axis{
 	CapForgePrs:              AxisForge,
 	CapForgeAutoMerge:        AxisForge,
 	CapForgeCiRun:            AxisForge,
+	CapForgeCiRerun:          AxisForge,
 	CapForgeBranchProtection: AxisForge,
 	CapForgeProbe:            AxisForge,
 	CapForgeDraftPRs:         AxisForge,
@@ -423,6 +426,8 @@ const (
 	MethodForgeEnqueueAutoMerge = "forge.enqueueAutoMerge"
 	// MethodForgeCiRun: The URL of the CI run for the PR's head commit, empty when there is none yet.
 	MethodForgeCiRun = "forge.ciRun"
+	// MethodForgeRerunFailedCI: Re-runs the failed CI jobs of the PR's head commit.
+	MethodForgeRerunFailedCI = "forge.rerunFailedCI"
 	// MethodForgeBranchProtected: Whether `branch` carries protection, a classic rule or a ruleset.
 	MethodForgeBranchProtected = "forge.branchProtected"
 	// MethodForgeProbe: The repository's canonical owner/name, proving the forge answers with the Connector's credential.
@@ -528,6 +533,7 @@ var Methods = map[string]Method{
 	MethodForgeAutoMergeAllowed:  {Name: MethodForgeAutoMergeAllowed, Axis: AxisForge, Capability: CapForgeAutoMerge, Retry: Retry{Safe: true}, ResultCheck: CheckDecode},
 	MethodForgeEnqueueAutoMerge:  {Name: MethodForgeEnqueueAutoMerge, Axis: AxisForge, Capability: CapForgeAutoMerge, Retry: Retry{Safe: true}, ResultCheck: CheckDecode},
 	MethodForgeCiRun:             {Name: MethodForgeCiRun, Axis: AxisForge, Capability: CapForgeCiRun, Retry: Retry{Safe: true}, ResultCheck: CheckRunLink},
+	MethodForgeRerunFailedCI:     {Name: MethodForgeRerunFailedCI, Axis: AxisForge, Capability: CapForgeCiRerun, ResultCheck: CheckDecode},
 	MethodForgeBranchProtected:   {Name: MethodForgeBranchProtected, Axis: AxisForge, Capability: CapForgeBranchProtection, Retry: Retry{Safe: true}, ResultCheck: CheckDecode},
 	MethodForgeProbe:             {Name: MethodForgeProbe, Axis: AxisForge, Capability: CapForgeProbe, Retry: Retry{Safe: true}, ResultCheck: CheckProbeRepo},
 	MethodForgeOpenPR:            {Name: MethodForgeOpenPR, Axis: AxisForge, Capability: CapForgeDraftPRs, ResultCheck: CheckPrShape},
@@ -595,6 +601,7 @@ var WireFields = map[string][]string{
 	"forge.prFiles.params":           []string{"number", "target"},
 	"forge.probe.params":             []string{"target"},
 	"forge.prsForBranch.params":      []string{"branch", "target"},
+	"forge.rerunFailedCI.params":     []string{"number", "target"},
 	"forge.setDraft.params":          []string{"draft", "number", "target"},
 	"forge.tokenGrant.params":        []string{"target", "tokenPrefix"},
 	"grant":                          []string{"introspectable", "reason", "scopes", "writeCapable"},
