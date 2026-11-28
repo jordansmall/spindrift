@@ -1,5 +1,45 @@
 # Migration Guide
 
+## A third-party backend Connector declares its axes and display name (issue #7647)
+
+**A third-party Connector's backend row must now set `axes` and
+`displayName`, and its fragment folder must ship every fragment its declared
+axes owe.** A row missing either field fails evaluation, naming the Connector
+and the field. A first-party row (github, forgejo, jira) that sets either also
+fails, and so does a third-party row named after one of them.
+
+- **Add `axes` and `displayName` to the row.** `axes` is a non-empty list
+  drawn from `tracker` and `forge`; `displayName` is a non-empty string.
+- **Ship the owed fragments in the row's own folder** (named after the row).
+  A `tracker` axis owes `filer-dedup.md`, `pr-body-issue-ref.md` and
+  `pr-body-no-issue-ref.md`; a `forge` axis owes `fix-ci-read.md`. Core ships
+  these for its own backends only, so a missing one fails evaluation naming
+  the Connector and the fragment. The copies in `templates/connector-tracker`
+  and `templates/connector-forge` are a starting point.
+- **Re-run `spindrift connectors accept`.** The declared axes are now part of
+  the row's Route baseline entry, so a baseline accepted before this change
+  records no `axes` and the row's axes read as a widening: evaluation fails
+  until `spindrift connectors accept` is re-run.
+- **Rename a third-party row named `github`, `forgejo` or `jira`.** A
+  first-party name always means the first-party Connector.
+
+```nix
+# before
+{
+  name = "acme";
+  module = pkgs: ...;
+  routes = import ./routes.nix;
+}
+# after
+{
+  name = "acme";
+  module = pkgs: ...;
+  routes = import ./routes.nix;
+  axes = [ "tracker" ];
+  displayName = "Acme";
+}
+```
+
 ## A Box is named per checkout, so two Consumers on one host no longer collide (issue #7378)
 
 **A Box's name changes from `agent-issue-<n>` to `agent-<hash>-issue-<n>`,

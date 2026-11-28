@@ -31,7 +31,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift stats [--json] [--reingest] [--root <dir>]... [--since <time>] [--kind <kind>] [--include-inferred=false] [--by <dimension>[,<dimension>...]]` | per-role Dispatch cost summary read from the logs under `.spindrift` (notional API-equivalent USD), optionally grouped by revision, model, driver, agent (subagent), prompt hash, or knob; `--json` emits one Record per line — see [Stats](#stats) |
 | `spindrift shadow-replay --driver <name> [--connector <driver.wasm>] [<log-dir>]` | replay archived Pass logs through one Driver's Connector beside its native Strategy, writing each log's comparison to a `.shadow-replay.jsonl` sidecar — see [Replaying archived Pass logs](#replaying-archived-pass-logs) |
 | `spindrift registry discover <repo-dir> <routes-file>` | write a registry routes file (ADR 0045) by scanning the Target repo's own committed registry config, setup-time only, by the operator — see [Registry route discovery](#registry-route-discovery) |
-| `spindrift connectors accept [<baseline-file>]` | write every Connector's current grant (Routes, credential, scheme, base, Git remote) into the Route baseline file, default `./spindrift-connector-routes.json` (ADR 0073) |
+| `spindrift connectors accept [<baseline-file>]` | write every Connector's current grant (Routes, credential, scheme, base, Git remote, axes) into the Route baseline file, default `./spindrift-connector-routes.json` (ADR 0073) |
 | `spindrift --help`               | concise usage: subcommands, common flags, and pointers to the full reference    |
 | `spindrift --help --all`         | the full flag reference, grouped by category (the terminal form of `man spindrift`) |
 | `man spindrift`                  | the manual page (installed alongside the binary on your PATH)                    |
@@ -854,9 +854,12 @@ folder; `jira` has its own read signal and reads its own `jira` folder. A
 folder's files may ship from a Connector
 (`spindrift.connectors.<name>.fragments`): evaluation fails, naming the path and
 the Connector, on a declared file for a folder not of its row's axis or on a
-missing, stray or duplicate file. In the baked image a Connector's declared file
-is what ships at its path; a `SPINDRIFT_PROMPT_DIR` override replaces the whole
-prompts tree, Connector folders included, with no fallback to the baked files.
+missing, stray or duplicate file. A third-party Connector's own folder, named
+after its row, counts as a folder of each axis the row declares and of no
+other ([Authoring a Connector](#authoring-a-connector)). In the baked image a
+Connector's declared file is what ships at its path; a `SPINDRIFT_PROMPT_DIR`
+override replaces the whole prompts tree, Connector folders included, with no
+fallback to the baked files.
 mkHarness ships the batteries flake's forgejo fragments for each path the
 Consumer's own entries do not declare. A folder with no such file renders an
 empty step, unless the row is `shared`, in which case the root-level
@@ -2655,8 +2658,9 @@ One exception to the own-knobs rule: a first-party row names its own backend's
 `mkHarness` renders each row into the Launcher input document's `backends`
 section as `{name, module, routes, acceptedRoutes, acceptedGrant, credentialEnv,
 credentialKnob, credentialScheme, identityEnv, baseEnv, gitRemote,
-gitRemoteEnv}` (`acceptedGrant` and the last five optional); `credentialKnob` is the Consumer knob
-that names `credentialEnv`, and doctor shows it. The launcher and the daemon
+gitRemoteEnv, axes}` (`acceptedGrant`, the five fields after `credentialKnob`
+and `axes` optional; only a third-party row carries `axes`); `credentialKnob`
+is the Consumer knob that names `credentialEnv`, and doctor shows it. The launcher and the daemon
 decode the rows once (the `backendrows` package: `Decode` validates the rows
 whole and exits `config-invalid` on a bad one) and hand the resulting `Set` to
 the runtime. `Set.Lookup` finds a row and
@@ -2704,8 +2708,9 @@ with one `+ METHOD host path` line per added route (only when routes were
 added), then one `<part>: <declared> (accepted: <accepted>)` line per differing
 part the row declares that the baseline lacks or holds differently: the
 credential variable, the authorization scheme, the base and the Git remote. A
-part the row declares absent is skipped, so a narrowing is silent, as it is for
-routes. Its remedy reads `review the widened grant, then run "spindrift
+third-party row's `axes` are a grant part too: each declared axis the baseline
+lacks shows as `axis: <axis> (accepted: none)`. A part the row declares absent
+is skipped, so a narrowing is silent, as it is for routes. Its remedy reads `review the widened grant, then run "spindrift
 connectors accept" in the Consumer flake's root and commit the
 spindrift-connector-routes.json diff (ADR 0073)`. For a first-party Connector
 it is a report only: it never makes `validateConfig` exit 2. A third-party
@@ -2724,6 +2729,7 @@ an object recording the whole grant:
     "credentialScheme": "bearer",
     "baseEnv": "FIXTURE_BASE_URL",
     "gitRemote": "https://fixture.test",
+    "axes": ["tracker"],
     "routes": [
       { "method": "GET", "host": "api.fixture.test", "path": "/repos" }
     ]
@@ -2738,14 +2744,17 @@ an object recording the whole grant:
 | `baseEnv` | the variable the `{base}` route host resolves from; omit for a fixed-host row |
 | `gitRemote` | the fixed Git remote URL; omit when the row has none |
 | `gitRemoteEnv` | the variable the Git remote URL is read from; omit when the row has none |
+| `axes` | a third-party row's axes, a list drawn from `tracker` and `forge`; omit for a first-party row |
 | `routes` | the Route table, one `{method, host, path}` per route, `followRedirect`, `documents`, `requestHeaders` and `responseHeaders` where set |
 
-Every key is a string except `routes`. A part the entry omits is accepted as
-absent, so a row that declares it shows the part as widened. The older shape,
+Every key is a string except `axes`, a list of strings, and `routes`. A part
+the entry omits is accepted as absent, so a row that declares it shows the part
+as widened; an axis the entry's `axes` lacks is an added axis. The older shape,
 a bare list of routes, still loads and is read as Routes only: doctor compares
 the routes and none of the other parts until the entry is regenerated. An
-unknown key, a non-string value, a `credentialScheme` other than `bearer` or
-`basic`, or both `gitRemote` and `gitRemoteEnv` fails evaluation.
+unknown key, a non-string value, an `axes` that is no list of `tracker` and
+`forge`, a `credentialScheme` other than `bearer` or `basic`, or both
+`gitRemote` and `gitRemoteEnv` fails evaluation.
 
 For a first-party Connector, a missing file or key accepts nothing, so every
 route shows as added. That is how a first-party Connector newly arriving, or an
@@ -2786,8 +2795,8 @@ To accept a widening, review the doctor lines, then run `spindrift connectors
 accept [<baseline-file>]` in the Consumer flake's root and commit the diff. The
 verb writes every backend row of the Launcher input document into the file
 (default `./spindrift-connector-routes.json`) from the Route table and credential
-wiring the rows declare now (and a third-party row's `axes`), with the scheme always written. It replaces the
-whole file, so a hand-added entry or a stale one is dropped, and it prints
+wiring the rows declare now, and a third-party row's `axes`, with the scheme
+always written. It replaces the whole file, so a hand-added entry or a stale one is dropped, and it prints
 `wrote <file>; review its diff, then commit it`. Doctor then reports `within
 the accepted baseline`, and a refused third-party Connector evaluates again.
 The CLI itself will not evaluate while a Connector is refused, so the same
@@ -3773,6 +3782,8 @@ semantics). The fields:
 | `name`       | string, required                | the row's name in `spindrift.connectors` |
 | `module`     | function of pkgs                | the wasm's path; declares a [backend row](#backend-rows-on-a-connector) |
 | `routes`     | list, with `module`             | the Route table, the Connector's whole network authority |
+| `axes`       | list, third-party backend row   | the axes the row serves, a non-empty subset of `tracker` and `forge`; refused on a first-party row |
+| `displayName`| string, third-party backend row | the name prompts and messages show for the backend; refused on a first-party row |
 | `credential` | string, with `module`           | a first-party row's token knob; a third-party row names none |
 | `scheme`     | string                          | how the token authorizes: `bearer` (default) or `basic` |
 | `identity`   | string or null                  | the knob for the account name a `basic` scheme sends |
@@ -3782,9 +3793,9 @@ semantics). The fields:
 | `fragments`  | attribute set or null           | the prompt fragments, by axis |
 | `driver`     | row, function of `lib`, or null | a Driver row, or a function of nixpkgs `lib` returning one |
 
-`routes` is required once `module` is set, and `credential`, `scheme`,
-`identity`, `base` and `gitRemote` belong to the backend row, so they need
-`module`. `driver` takes a function when the row builds on core's
+`routes` is required once `module` is set, and `axes`, `displayName`,
+`credential`, `scheme`, `identity`, `base` and `gitRemote` belong to the
+backend row, so they need `module`. `driver` takes a function when the row builds on core's
 (`lib: (core.lib.driverEntries { inherit lib; }).<name> // { module = …; }`).
 A tracker's `data.nix`:
 
@@ -3794,6 +3805,8 @@ A tracker's `data.nix`:
   name = "<name>";
   module = pkgs: "${import ./package.nix { inherit pkgs core; }}/<name>.wasm";
   routes = import ./routes.nix;
+  axes = [ "tracker" ];
+  displayName = "<Name>";
   scheme = "bearer";
   base = "<name>ConnectorBaseURL";
   knobs = {
@@ -3826,6 +3839,8 @@ its clone origin; its `knobs` and `fragments` are the same shape:
   name = "<name>";
   module = pkgs: "${import ./package.nix { inherit pkgs core; }}/<name>.wasm";
   routes = import ./routes.nix;
+  axes = [ "forge" ];
+  displayName = "<Name>";
   base = "<name>ConnectorBaseURL";
   gitRemote = "<name>ConnectorBaseURL";
   knobs = { /* the token and base URL knobs, as for a tracker */ };
@@ -3836,6 +3851,33 @@ its clone origin; its `knobs` and `fragments` are the same shape:
 A third-party row names no `credential`: core derives its credential variable,
 `<NAME>_TOKEN` with `-` mapped to `_`, from the row name (issue #7560), and the
 template's `<name>ConnectorToken` knob carries that env.
+
+**Axes and display name.** A third-party backend row declares `axes` and
+`displayName` and nothing else about what it is: the rule is that core gives
+every third-party row one fixed, host-mediated descriptor, the same for all of
+them, with its signal derived from the row name as the credential variable is
+(core wires that descriptor in later tickets). The capability facts are core's
+to set, so the data holds none (ADR 0073, issue #7647). Both
+fields are required on a third-party row. `mkHarness` fails evaluation naming
+the row on a missing or empty one, on an `axes` that is no list or names an
+axis other than `tracker` and `forge`, and on a `displayName` that is no
+string. A first-party row (github, forgejo, jira) takes both from core's
+backend row facts, so one that sets either is refused. A third-party row may
+not take a first-party name either: `github`, `forgejo` and `jira` always mean
+the first-party Connector. The declared `axes` are part of the accepted
+baseline ([Reviewing a widened grant](#reviewing-a-widened-grant)), so adding
+an axis is a widening the Operator accepts, as adding a Route is.
+
+**Fragments.** The Connector's own fragment folder, `fragments/<name>/`, is
+accepted on each axis the row declares and refused on any other. Declaring an
+axis also means shipping every fragment of that axis that has no shared root
+fallback, so the prompt never renders an empty step for it: `filer-dedup.md`,
+`pr-body-issue-ref.md` and `pr-body-no-issue-ref.md` for `tracker`, and
+`fix-ci-read.md` for `forge`. That holds for a Connector that registers no
+fragments at all. `mkHarness` checks each Connector's fragment contribution
+and fails evaluation naming the Connector and the fragment, such as `acme/fix-ci-read.md:
+the acme Connector declares axis forge, but ships no fix-ci-read.md, which has
+no shared root fallback`.
 
 **Check.** `nix flake check -L` in the generated repository runs
 `core.lib.connectorChecks`: Go fmt, wasip1 vet and unit tests, and
