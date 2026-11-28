@@ -50,7 +50,7 @@ func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (for
 			Labels:        s.Labels,
 			Route:         s.Route,
 			VerdictLabels: s.VerdictLabels,
-			WebHost:       connectortracker.HostOf(k.ForgejoBaseURL),
+			IssueURL:      strings.TrimRight(k.ForgejoBaseURL, "/") + "/{repo}/issues/{n}",
 		},
 	})
 }

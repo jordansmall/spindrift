@@ -20,7 +20,7 @@ import (
 
 var testLabels = forge.DispatchLabels{Dispatchable: "ready-for-agent"}
 
-var testLifecycle = Lifecycle{Labels: testLabels, WebHost: "tracker.example"}
+var testLifecycle = Lifecycle{Labels: testLabels, IssueURL: "https://tracker.example/{repo}/issues/{n}"}
 
 var testTarget = Target{API: "https://api.example", Repo: "o/r"}
 

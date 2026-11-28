@@ -62,7 +62,7 @@ func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (for
 			Labels:        s.Labels,
 			VerdictLabels: s.VerdictLabels,
 			IssueType:     k.JiraIssueType,
-			WebHost:       connectortracker.HostOf(k.JiraBaseURL),
+			IssueURL:      issueURL(k.JiraBaseURL),
 			Statuses:      wl.Statuses,
 			Resolutions:   wl.Resolutions,
 			StatusOnly:    wl.StatusOnly,
@@ -75,3 +75,6 @@ func newConnectorTracker(row backendrows.Row, s backendkit.Shared, k Knobs) (for
 	}
 	return connectorTracker{it}, nil
 }
+
+// issueURL is the Lifecycle.IssueURL template for a Jira base URL.
+func issueURL(base string) string { return strings.TrimRight(base, "/") + "/browse/{repo}-{n}" }

@@ -99,8 +99,8 @@ func newConnectorHarnessWith(t *testing.T, cloud bool, lc connectortracker.Lifec
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = conn.Close(context.Background()) })
-	if lc.WebHost == "" {
-		lc.WebHost = u.Host
+	if lc.IssueURL == "" {
+		lc.IssueURL = jira.IssueURLForTest("https://" + u.Host)
 	}
 	h.tr, err = connectortracker.New(conn, lc,
 		connectortracker.Target{API: h.srv.URL, Repo: connectorProject, Dialect: dialect}, retry.NoSleepClock())

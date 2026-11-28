@@ -718,8 +718,8 @@ func newHarnessWith(t *testing.T, targetRepo string, lc connectortracker.Lifecyc
 	conn, routes := loadGithubConnectorAs(t, b.host, connectorRepo, b.Client(), h.audit, authorize)
 	h.conn, h.routes = conn, routes
 	var err error
-	if lc.WebHost == "" {
-		lc.WebHost = b.host
+	if lc.IssueURL == "" {
+		lc.IssueURL = issueURL(b.host)
 	}
 	h.tr, err = connectortracker.New(conn, lc, connectortracker.Target{API: b.URL, Repo: connectorRepo}, retry.NoSleepClock())
 	if err != nil {

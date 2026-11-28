@@ -262,7 +262,10 @@ func (l filerLayer) PostIssue(title, body string, labels []string) (string, erro
 }
 
 // unusableFiledURL names why raw cannot be a filed issue's URL, "" when it can:
-// https, no userinfo, on the tracker's own web host, ending in an issue id.
+// an https URL with no userinfo, opaque part, query or fragment whose path is
+// exactly the tracker's Lifecycle.IssueURL shape. Filing and the butler turn
+// the trailing id into a branch name and PR target, so a same-host URL for
+// another repo, a pull request or a deeper path must not pass.
 func (t *reads) unusableFiledURL(raw string) string {
 	u, err := url.Parse(raw)
 	switch {
@@ -274,12 +277,50 @@ func (t *reads) unusableFiledURL(raw string) string {
 		return "scheme is not https"
 	case u.User != nil:
 		return "url carries userinfo"
-	case !strings.EqualFold(u.Host, t.lifecycle.WebHost):
-		return fmt.Sprintf("host is not %q", t.lifecycle.WebHost)
-	case !t.ids.valid(path.Base(strings.TrimRight(u.Path, "/"))):
-		return "path does not end in an issue id"
+	case u.Opaque != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "":
+		return "url carries an opaque part, query or fragment"
+	}
+	if t.issueHost == "" {
+		return "tracker has no issue url shape"
+	}
+	if !strings.EqualFold(u.Host, t.issueHost) {
+		return fmt.Sprintf("host is not %q", t.issueHost)
+	}
+	rest, ok := cutPrefixFold(u.Path, t.issuePrefix)
+	if !ok || rest == "" || strings.Contains(rest, "/") || !t.ids.valid(path.Base(u.Path)) {
+		return "path is not an issue of this tracker"
 	}
 	return ""
+}
+
+// parseIssueURL splits an IssueURL template, with {repo} filled in, into its
+// host and the path before the trailing {n}. An empty template yields empty
+// values: it is allowed, and refuses every filed URL.
+func parseIssueURL(template, repo string) (host, prefix string, err error) {
+	if template == "" {
+		return "", "", nil
+	}
+	u, err := url.Parse(strings.ReplaceAll(template, "{repo}", repo))
+	if err != nil {
+		return "", "", fmt.Errorf("issue url template %q does not parse: %w", template, err)
+	}
+	if u.Host == "" {
+		return "", "", fmt.Errorf("issue url template %q has no host", template)
+	}
+	prefix, ok := strings.CutSuffix(u.Path, "{n}")
+	if !ok {
+		return "", "", fmt.Errorf("issue url template %q does not end in {n}", template)
+	}
+	return u.Host, prefix, nil
+}
+
+// cutPrefixFold is strings.CutPrefix ignoring case, as trackers answer URLs in
+// a different case than the template (a repo path, a host).
+func cutPrefixFold(s, prefix string) (string, bool) {
+	if len(s) < len(prefix) || !strings.EqualFold(s[:len(prefix)], prefix) {
+		return "", false
+	}
+	return s[len(prefix):], true
 }
 
 // closerLayer closes a merged issue through the Connector. It exists only when

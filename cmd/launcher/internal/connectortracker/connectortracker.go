@@ -14,7 +14,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"regexp"
 	"slices"
 	"sort"
@@ -58,9 +57,13 @@ type Lifecycle struct {
 	// IssueType is the issue type core files issues as (JIRA_ISSUE_TYPE), which
 	// the createMeta check measures the project against.
 	IssueType string
-	// WebHost is the tracker's web host (host[:port]) a filed issue's URL must
-	// be on; GitHub's differs from its API host. Empty refuses every filed URL.
-	WebHost string
+	// IssueURL is the URL template a filed issue's URL must match: {repo} stands
+	// for Target.Repo and {n} for the trailing issue id, last. Its host and path
+	// are matched (GitHub's web host differs from its API host, and a base
+	// subpath counts); its scheme is not, as a filed URL must be https
+	// regardless. Empty refuses every filed URL; New rejects a non-empty
+	// template with no host or no trailing {n}.
+	IssueURL string
 	// VerdictLabels names the label each research verdict lands as.
 	VerdictLabels forge.VerdictLabels
 	// Resolutions is the resolution a transition into a mapped state sets; a
@@ -329,6 +332,9 @@ type reads struct {
 	// route is lifecycle.Route in wire form; omitempty keeps an unrouted
 	// payload unchanged.
 	route []Selector
+	// issueHost and issuePrefix are lifecycle.IssueURL parsed once: the host and
+	// the path before the trailing {n}. Both are empty when IssueURL is.
+	issueHost, issuePrefix string
 }
 
 // routeParam is the route to send, refused for a Connector not advertising
@@ -845,7 +851,11 @@ func newTracker(call guestCall, lifecycle Lifecycle, target Target, caps []strin
 	if slices.Contains(caps, CapProjectKeyIDs) {
 		ids = projectKeyIDs
 	}
-	r := &reads{lifecycle: lifecycle, target: target, ids: ids, v02: v02, routes: slices.Contains(caps, CapRoute), route: wireRoute(lifecycle.Route)}
+	issueHost, issuePrefix, err := parseIssueURL(lifecycle.IssueURL, target.Repo)
+	if err != nil {
+		return nil, err
+	}
+	r := &reads{lifecycle: lifecycle, target: target, ids: ids, v02: v02, routes: slices.Contains(caps, CapRoute), route: wireRoute(lifecycle.Route), issueHost: issueHost, issuePrefix: issuePrefix}
 	r.call = connectorcall.Checked(call, trackerChecks(r))
 	var it forge.IssueTracker = r
 	if slices.Contains(caps, CapComments) {
@@ -1069,14 +1079,4 @@ func checkLabels(labels []string) error {
 		}
 	}
 	return nil
-}
-
-// HostOf is the host[:port] of a tracker's base URL, for Lifecycle.WebHost;
-// "" when the URL does not parse, which refuses every filed URL.
-func HostOf(baseURL string) string {
-	u, err := url.Parse(baseURL)
-	if err != nil {
-		return ""
-	}
-	return u.Host
 }
